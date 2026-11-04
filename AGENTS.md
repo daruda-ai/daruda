@@ -76,7 +76,8 @@ package names. See [project structure](CONTRIBUTING.md#project-structure),
 ### Language and Documentation
 
 - Code, identifiers, comments, and Markdown documents are English only.
-  Discuss work in the user's language.
+  Translated READMEs (`README.<lang>.md`) are the exception; keep them in
+  step with `README.md`. Discuss work in the user's language.
 - Comments explain non-obvious reasons in 2-3 lines, describe current logic,
   and omit history or restatements of the code.
 - In-progress notes, plans, ADRs, and handoffs belong in a personal document
