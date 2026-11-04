@@ -7,11 +7,13 @@ on:
     paths-ignore:
       - "**.md"
       - "LICENSE"
+      - ".github/readme/**"
   pull_request:
     branches: [main]
     paths-ignore:
       - "**.md"
       - "LICENSE"
+      - ".github/readme/**"
 
 concurrency:
   group: ci-${{ github.ref }}
