@@ -8,6 +8,7 @@
 
 pub(in crate::workspace) mod agent_chat_host;
 pub(in crate::workspace) mod bottom_dock;
+pub(in crate::workspace) mod clipboard_paste_ops;
 pub(in crate::workspace) mod context;
 pub(in crate::workspace) mod file_pane_ops;
 pub(in crate::workspace) mod file_save_ops;
@@ -36,7 +37,6 @@ use gpui::{
 };
 
 use crate::workspace::path_drag::PathDrag;
-use daruda_core::shell::quote::{Shell, format_paths_for_drop, quote_path};
 
 use self::file_view_pane::render::render_pane_file_viewer;
 use self::pane::Pane;
@@ -325,6 +325,7 @@ pub(in crate::workspace) fn render_layout(
                 self::pane::PaneContent::Terminal(t) => {
                     let view_for_path_drag = t.view.clone();
                     let view_for_external = t.view.clone();
+                    let view_for_paste = t.view.clone();
                     // Inactive-pane dim goes through `TerminalView::set_dim_amount`
                     // on the terminal's own colors, not a black overlay, so a
                     // transparent background survives.
@@ -339,15 +340,17 @@ pub(in crate::workspace) fn render_layout(
                         .drag_over::<ExternalPaths>(|style, _, _, cx| {
                             style.bg(theme::current(cx).terminal_drop_target_bg)
                         })
+                        // Capture: the workspace decides terminal pastes
+                        // (copied files, agent image paste) before the view.
+                        .capture_action(cx.listener(
+                            move |ws, _: &daruda_terminal::view::Paste, _window, cx| {
+                                ws.paste_clipboard_to_terminal(id, &view_for_paste, cx)
+                            },
+                        ))
                         .on_drop::<PathDrag>(cx.listener(
                             move |this, drag: &PathDrag, _window, cx| {
-                                let shell = this
-                                    .mirrors
-                                    .shell_program
-                                    .as_deref()
-                                    .map(Shell::detect_from_program)
-                                    .unwrap_or_default();
-                                let quoted = quote_path(&drag.path, shell);
+                                let quoted =
+                                    this.shell_quoted_paths(std::slice::from_ref(&drag.path));
                                 view_for_path_drag.update(cx, |view, _| {
                                     view.send_input(quoted.as_bytes());
                                 });
@@ -358,13 +361,7 @@ pub(in crate::workspace) fn render_layout(
                                 if paths.paths().is_empty() {
                                     return;
                                 }
-                                let shell = this
-                                    .mirrors
-                                    .shell_program
-                                    .as_deref()
-                                    .map(Shell::detect_from_program)
-                                    .unwrap_or_default();
-                                let formatted = format_paths_for_drop(paths.paths(), shell);
+                                let formatted = this.shell_quoted_paths(paths.paths());
                                 view_for_external.update(cx, |view, _| {
                                     view.send_input(formatted.as_bytes());
                                 });

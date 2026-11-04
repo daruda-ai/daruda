@@ -19,6 +19,7 @@ pub(in crate::workspace) mod agent_chat_event_ops;
 pub(in crate::workspace) mod agent_chat_ops;
 pub(super) mod agent_chat_queue_ops;
 mod agent_default_writer;
+mod attachment_load;
 mod attachment_ops;
 mod host_event_ops;
 pub(in crate::workspace) mod lane_status;

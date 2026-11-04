@@ -8,8 +8,10 @@
 //! the pure [`to_terminal_bytes`] helper, agent submit in the existing
 //! `send_agent_task_prompt_text` shim. The funnel only matches and delegates.
 
+use daruda_core::shell::quote::Shell;
 use daruda_store::tasks::ExecutionRef;
 use gpui::{Context, SharedString, Window};
+use std::path::PathBuf;
 
 use super::pane_tree::PaneId;
 use crate::workspace::Workspace;
@@ -57,6 +59,22 @@ fn to_terminal_bytes(body: &str, submit: bool) -> Vec<u8> {
 }
 
 impl Workspace {
+    /// The shell whose quoting inserted paths follow. Without a configured
+    /// `[shell] program` this is Posix, right for the `$SHELL` a PTY inherits
+    /// on macOS (zsh / bash / sh).
+    pub(in crate::workspace) fn quoting_shell(&self) -> Shell {
+        self.mirrors
+            .shell_program
+            .as_deref()
+            .map(Shell::detect_from_program)
+            .unwrap_or_default()
+    }
+
+    /// Paths quoted for the configured shell, joined as a drop inserts them.
+    pub(in crate::workspace) fn shell_quoted_paths(&self, paths: &[PathBuf]) -> String {
+        daruda_core::shell::quote::format_paths_for_drop(paths, self.quoting_shell())
+    }
+
     /// Deliver `input` to the pane identified by `pane_id`, branching on
     /// the pane's content kind. Returns `true` when the text was accepted,
     /// `false` when the pane is gone or its kind cannot receive text.

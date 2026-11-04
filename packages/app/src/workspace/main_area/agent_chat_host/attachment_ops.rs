@@ -1,20 +1,12 @@
 //! Acquire path references and bounded clipboard images, bound to their pane.
 
 use super::super::pane_tree::PaneId;
+use super::attachment_load::{IMAGE_SOURCE_LIMIT, Source, load_sources};
 use crate::{surface::strings as s, workspace::Workspace};
-use base64::Engine as _;
-use daruda_acp::{AttachmentContent, PromptAttachment};
 use daruda_chat::view::{AgentChatView, PromptDispatch};
 use daruda_store::observability::{error_report::ErrorReport, log_writer::LogWriter};
 use gpui::{ClipboardEntry, Context, WeakEntity, Window};
 use std::path::PathBuf;
-
-const FILE_LIMIT: usize = 8 * 1024 * 1024;
-
-enum Source {
-    Path(PathBuf),
-    Image(Vec<u8>),
-}
 
 impl Workspace {
     fn composer_attachments_changed(&mut self, cx: &mut Context<Self>) {
@@ -83,20 +75,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let quoted = self.composer_paths_text(paths);
+        let quoted = self.shell_quoted_paths(paths);
         self.input_dock
             .input
             .update(cx, |state, cx| state.insert(quoted, window, cx));
-    }
-
-    fn composer_paths_text(&self, paths: &[PathBuf]) -> String {
-        let shell = self
-            .mirrors
-            .shell_program
-            .as_deref()
-            .map(daruda_core::shell::quote::Shell::detect_from_program)
-            .unwrap_or_default();
-        daruda_core::shell::quote::format_paths_for_drop(paths, shell)
     }
 
     pub(in crate::workspace) fn pick_composer_attachments(&mut self, cx: &mut Context<Self>) {
@@ -153,27 +135,21 @@ impl Workspace {
         let Some(item) = cx.read_from_clipboard() else {
             return false;
         };
-        let entries: Vec<_> = item.into_entries().collect();
-        let paths: Vec<_> = entries
-            .iter()
-            .filter_map(|entry| match entry {
-                ClipboardEntry::ExternalPaths(paths) => Some(paths.paths()),
-                _ => None,
-            })
-            .flatten()
-            .cloned()
-            .map(Source::Path)
-            .collect();
+        let paths: Vec<_> =
+            crate::workspace::main_area::clipboard_paste_ops::clipboard_paths(&item)
+                .into_iter()
+                .map(Source::Path)
+                .collect();
         // File copies can include an image preview; the original paths take precedence.
         if !paths.is_empty() {
             self.load_attachments(pane, view.downgrade(), paths, cx);
             return true;
         }
         let mut sources = Vec::new();
-        for entry in entries {
+        for entry in item.into_entries() {
             if let ClipboardEntry::Image(image) = entry {
-                if image.bytes().len() > FILE_LIMIT {
-                    self.attachment_error(daruda_chat::labels::attachment_limit().to_string(), cx);
+                if image.bytes().len() > IMAGE_SOURCE_LIMIT {
+                    self.attachment_error(s::agent_chat::attachment_image_too_large(), cx);
                     return true;
                 }
                 sources.push(Source::Image(image.bytes().to_vec()));
@@ -218,7 +194,7 @@ impl Workspace {
                             ws.insert_composer_paths(&fallback_paths, window, cx);
                         } else {
                             // Preserve the original pane's draft if focus changed during loading.
-                            let text = ws.composer_paths_text(&fallback_paths);
+                            let text = ws.shell_quoted_paths(&fallback_paths);
                             let draft = ws.input_dock.drafts.entry(pane).or_default();
                             if !draft.is_empty() {
                                 draft.push(' ');
@@ -302,87 +278,5 @@ impl Workspace {
                 .build(),
             cx,
         );
-    }
-}
-
-fn load_sources(sources: Vec<Source>) -> anyhow::Result<Vec<PromptAttachment>> {
-    anyhow::ensure!(
-        sources.len() <= 8,
-        "{}",
-        daruda_chat::labels::attachment_limit()
-    );
-    sources.into_iter().map(load).collect()
-}
-
-fn load(source: Source) -> anyhow::Result<PromptAttachment> {
-    match source {
-        Source::Image(bytes) => image_attachment(
-            s::agent_chat::attachment_clipboard_name().to_string(),
-            &bytes,
-        ),
-        Source::Path(path) => {
-            let uri = daruda_core::file_url::from_local_path(&path)
-                .ok_or_else(|| anyhow::anyhow!("Attachment path must be absolute"))?;
-            let name = path
-                .file_name()
-                .unwrap_or(path.as_os_str())
-                .to_string_lossy()
-                .into_owned();
-            Ok(PromptAttachment {
-                name,
-                content: AttachmentContent::ResourceLink { uri },
-            })
-        }
-    }
-}
-
-fn image_attachment(name: String, bytes: &[u8]) -> anyhow::Result<PromptAttachment> {
-    use image::ImageEncoder as _;
-    anyhow::ensure!(bytes.len() <= FILE_LIMIT, "Image exceeds 8 MiB");
-    let mut raster = daruda_content::visual::decode_image_bounded(bytes, 4096, 64 * 1024 * 1024)?;
-    for pixel in raster.bgra.as_chunks_mut::<4>().0 {
-        pixel.swap(0, 2);
-    }
-    let mut png = Vec::new();
-    image::codecs::png::PngEncoder::new(&mut png).write_image(
-        &raster.bgra,
-        raster.width,
-        raster.height,
-        image::ExtendedColorType::Rgba8,
-    )?;
-    anyhow::ensure!(png.len() <= FILE_LIMIT, "Encoded image exceeds 8 MiB");
-    Ok(PromptAttachment {
-        name,
-        content: AttachmentContent::Image {
-            data: base64::engine::general_purpose::STANDARD.encode(png),
-            mime_type: "image/png".into(),
-        },
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn local_paths_are_references_without_reading_file_contents() {
-        let dir = tempfile::tempdir().unwrap();
-        let folder = dir.path().join("folder with spaces");
-        std::fs::create_dir(&folder).unwrap();
-        let file = dir.path().join("binary.dat");
-        std::fs::File::create(&file)
-            .unwrap()
-            .set_len((FILE_LIMIT + 1) as u64)
-            .unwrap();
-        let missing = dir.path().join("missing.txt");
-        for path in [folder, file, missing, dir.path().to_path_buf()] {
-            let attachment = load(Source::Path(path.clone())).unwrap();
-            assert_eq!(
-                attachment.content,
-                AttachmentContent::ResourceLink {
-                    uri: daruda_core::file_url::from_local_path(&path).unwrap(),
-                }
-            );
-        }
     }
 }

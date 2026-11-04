@@ -180,7 +180,7 @@ impl TerminalView {
     /// protocol sends do not need, and it skips the `pending_refresh` /
     /// `notify` those add — a raw keystroke's repaint is driven by the PTY
     /// echo round-trip, not an immediate refresh.
-    fn send_key_bytes(&mut self, parts: &[&[u8]], cx: &mut Context<Self>) {
+    pub(super) fn send_key_bytes(&mut self, parts: &[&[u8]], cx: &mut Context<Self>) {
         self.flush_hangul(cx);
         self.snap_to_bottom_on_pty_input();
         if let Some(input) = self.input.as_ref() {

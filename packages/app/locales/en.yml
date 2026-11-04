@@ -574,6 +574,7 @@ agent_chat:
   attachment_remove: "Remove %{name}"
   attachment_clipboard_name: "Clipboard image"
   attachment_failed: "Could not attach the file or clipboard contents."
+  attachment_image_too_large: "This image is too large to attach."
   queue_full: "That chat already has too many prompts waiting. Wait for it to catch up."
   # Heading for an inline permission card.
   # Toast title for a non-fatal session advisory (`AcpEvent::Notice`): the

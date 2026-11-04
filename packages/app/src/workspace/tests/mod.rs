@@ -60,6 +60,7 @@ mod tab_names;
 mod tab_status;
 mod tasks;
 mod terminal_exit;
+mod terminal_paste;
 
 use super::*;
 use gpui::{AppContext, TestAppContext};

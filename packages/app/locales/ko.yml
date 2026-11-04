@@ -485,6 +485,7 @@ agent_chat:
   attachment_remove: "%{name} 제거"
   attachment_clipboard_name: "클립보드 이미지"
   attachment_failed: "파일 또는 클립보드 내용을 첨부하지 못했습니다."
+  attachment_image_too_large: "이미지가 너무 커서 첨부할 수 없습니다."
   queue_full: "그 대화에 이미 대기 중인 프롬프트가 너무 많습니다. 처리될 때까지 기다려 주세요."
   session_notice: "세션은 계속되지만 설정대로는 아닙니다"
   legacy_delegation_notice: "이 에이전트는 네이티브 서브에이전트 세션 없이 위임했기 때문에, 서브에이전트 자신의 도구 호출은 표시되지 않습니다. 어댑터가 이 기능을 지원하지 않거나, 설정 → 에이전트 및 채팅의 환경 변수를 읽지 못하는 것일 수 있습니다."

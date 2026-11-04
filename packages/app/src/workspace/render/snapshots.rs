@@ -230,16 +230,7 @@ impl Workspace {
             .and_then(|id| self.panels.tabs.iter().find(|t| &t.id == id))
             .map(|t| t.widgets.clone())
             .unwrap_or_default();
-        // `shell_program` is None when neither the user nor project
-        // config sets `[shell] program` — drag-drop quoting falls back
-        // to Posix, which is right for daruda's macOS target where the
-        // PTY inherits `$SHELL` (zsh / bash / sh).
-        let shell = self
-            .mirrors
-            .shell_program
-            .as_deref()
-            .map(daruda_core::shell::quote::Shell::detect_from_program)
-            .unwrap_or_default();
+        let shell = self.quoting_shell();
         let bottom_dock_size = self.bottom_dock_display_size(cx);
         // When the focused pane is an Agent chat pane that is busy (a turn in
         // flight OR a background subagent still running), the bottom-input

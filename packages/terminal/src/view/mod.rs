@@ -323,6 +323,16 @@ impl TerminalView {
         self.paste_text(text, cx);
     }
 
+    /// Send [`crate::ansi::PASTE_IMAGE_KEY`] for an image-only paste. Only a
+    /// host that knows an agent TUI runs here should call it: a shell reads
+    /// the byte as quoted-insert. The search query takes text only.
+    pub fn send_paste_image_key(&mut self, cx: &mut Context<Self>) {
+        if self.state.search_overlay {
+            return;
+        }
+        self.send_key_bytes(&[crate::ansi::PASTE_IMAGE_KEY], cx);
+    }
+
     pub(super) fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
         // Commit any in-flight Hangul composition before the paste hits the
         // PTY, matching the keyboard Paste action.

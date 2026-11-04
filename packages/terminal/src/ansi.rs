@@ -17,6 +17,10 @@ pub const ESC: u8 = 0x1b;
 /// `BEL` — terminates an OSC string (7-bit form).
 pub const BEL: u8 = 0x07;
 pub const INTERRUPT: u8 = 0x03;
+/// `Ctrl-V` (SYN) for an image-only paste into an agent TUI. Claude Code
+/// and Codex bind it to "attach the clipboard image" and read the OS
+/// clipboard themselves, as iTerm2's "Paste or send ^V" relies on.
+pub const PASTE_IMAGE_KEY: &[u8] = b"\x16";
 /// Final byte of the ST 2-byte terminator (`ESC \`). See [`ST`] for the
 /// full 2-byte slice when emitting.
 pub const ST_FINAL: u8 = b'\\';
