@@ -185,11 +185,14 @@ agent_chat:
   # Metadata chip inside a subagent's always-visible instructions block naming
   # its type, e.g. "Type: general-purpose".
   subagent_type_chip: "Type: %{kind}"
+  permission_record_description: "%{title} — %{choice}"
+  permission_copy_summary: "Copy request summary"
   permission_title: "Permission required"
-  # Prefix shown on a resolved permission card before the chosen option.
-  permission_resolved_prefix: "Selected:"
-  # Shown on a permission card whose turn was cancelled before the user
-  # decided, in place of the chosen-option line.
+  permission_waiting: "Awaiting approval"
+  permission_allowed: "Allowed"
+  permission_denied: "Denied"
+  permission_resolved: "Resolved"
+  # A request cancelled before the user decided.
   permission_cancelled: "Cancelled."
   # Header of a question the agent asked mid-turn; `agent` is its name.
   question_asked_by: "%{agent} asks"

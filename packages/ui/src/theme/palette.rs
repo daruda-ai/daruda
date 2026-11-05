@@ -67,6 +67,10 @@ pub const TRANSPARENT: Hsla = hsla(0.0, 0.0, 0.0, 0.0);
 // high-chroma variant for gauges, incident pills, and running indicators.
 pub const SUCCESS: Hsla = hsla(147.3, 0.406, 0.488, 1.0); // #4aaf78
 pub const WARNING: Hsla = hsla(39.5, 0.600, 0.578, 1.0); // #d4a853
+/// Pending permission labels sit on terminal-derived surfaces, independently
+/// of the window's UI preset. Keep amber readable in both pane directions.
+pub const PANE_PERMISSION_WARNING_DARK: Hsla = with_lightness(WARNING, 0.63);
+pub const PANE_PERMISSION_WARNING_LIGHT: Hsla = with_lightness(WARNING, 0.30);
 pub const ERROR: Hsla = hsla(0.0, 0.674, 0.627, 1.0); // #e06060
 pub const SIGNAL_GREEN: Hsla = hsla(135.0, 0.59, 0.49, 1.0);
 pub const SIGNAL_YELLOW: Hsla = hsla(50.0, 1.0, 0.52, 1.0);

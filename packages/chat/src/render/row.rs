@@ -314,7 +314,12 @@ fn render_item(
             cx,
         )
         .into_any_element(),
-        ChatItem::Permission(card) => permission_card(ix, card, t, cx).into_any_element(),
+        ChatItem::Permission(card) => {
+            let key = FoldKey::Permission(ix);
+            let expanded =
+                fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary, live_units));
+            permission_card(ix, card, expanded, dim, window, cx)
+        }
         ChatItem::Failure(failure) => {
             // Only the newest stop: one further down has been answered since.
             let can_continue = ix + 1 == items.len() && offers_continue;

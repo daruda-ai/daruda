@@ -5,10 +5,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use daruda_acp::CommandExit;
-use daruda_acp::{
-    ChatItem, PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution,
-    ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView,
-};
+use daruda_acp::{ChatItem, ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView};
 use gpui::{
     AnyElement, App, ElementId, Hsla, IntoElement, MouseButton, Pixels, SharedString, Window, div,
     prelude::*, px,

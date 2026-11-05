@@ -80,6 +80,9 @@ pub(crate) fn collect_foldable_keys(items: &[ChatItem]) -> Vec<FoldKey> {
                     keys.push(FoldKey::ToolRawInput(tc.id.clone()));
                 }
             }
+            ChatItem::Permission(card) if card.resolved.is_some() => {
+                keys.push(FoldKey::Permission(ix))
+            }
             ChatItem::UserText(_)
             | ChatItem::Compaction(_)
             | ChatItem::Permission(_)

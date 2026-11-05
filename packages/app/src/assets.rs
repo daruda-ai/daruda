@@ -155,6 +155,7 @@ impl AssetSource for DarudaAssets {
             "icons/ui/width-wide.svg" => icon!("ui/width-wide.svg"),
 
             // ── Lucide ───────────────────────────────────────────────────
+            "icons/lucide/shield-alert.svg" => icon!("lucide/shield-alert.svg"),
             "icons/lucide/list-checks.svg" => icon!("lucide/list-checks.svg"),
             "icons/lucide/workflow.svg" => icon!("lucide/workflow.svg"),
             "icons/lucide/folder.svg" => icon!("lucide/folder.svg"),
@@ -425,6 +426,7 @@ mod tests {
             DIFFERENCE,
             UNFOLD_LESS,
             CHECK_CIRCLE,
+            SHIELD_ALERT,
             KEEP_AWAKE,
             TASKS,
             FLOWS,
@@ -445,11 +447,22 @@ mod tests {
     /// beside the rest of the row.
     #[test]
     fn lucide_glyphs_share_one_stroke() {
-        use crate::ui::icons::{FLOWS, FOLDER, FOLDER_OPEN, SERVER, SESSION, SKILL, TASKS};
+        use crate::ui::icons::{
+            FLOWS, FOLDER, FOLDER_OPEN, SERVER, SESSION, SHIELD_ALERT, SKILL, TASKS,
+        };
         // Lucide ships at stroke 2; dock rows read at this lighter weight.
         const LUCIDE_STROKE: &str = r#"stroke-width="1.65""#;
 
-        for path in [TASKS, FLOWS, FOLDER, FOLDER_OPEN, SESSION, SKILL, SERVER] {
+        for path in [
+            TASKS,
+            FLOWS,
+            FOLDER,
+            FOLDER_OPEN,
+            SESSION,
+            SKILL,
+            SERVER,
+            SHIELD_ALERT,
+        ] {
             let bytes = DarudaAssets.load(path).unwrap().unwrap();
             let svg = std::str::from_utf8(&bytes).unwrap();
             assert!(svg.contains(LUCIDE_STROKE), "{path}");

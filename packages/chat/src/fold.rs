@@ -17,6 +17,8 @@ pub enum FoldKey {
     Thinking(usize),
     /// Retained context is disclosed independently of response fold rules.
     Compaction(usize),
+    /// Settled permission details, independent of transcript fold presets.
+    Permission(usize),
     Tool(String),
     Diff(String),
     ToolRawInput(String),
@@ -53,6 +55,7 @@ impl FoldKey {
             FoldKey::ThinkingGroup(_) => Some(FoldBlock::ThinkingGroup),
             FoldKey::Response(_) => Some(FoldBlock::Response),
             FoldKey::Tail(_)
+            | FoldKey::Permission(_)
             | FoldKey::Compaction(_)
             | FoldKey::ToolGroupTail(_)
             | FoldKey::SubagentTail(_)

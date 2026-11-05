@@ -147,7 +147,8 @@ impl AgentChatView {
                 _ => None,
             },
             FoldKey::Tool(id) | FoldKey::Subagent(id) => Some(ReconcileScope::Tool(id.clone())),
-            FoldKey::Assistant(_)
+            FoldKey::Permission(_)
+            | FoldKey::Assistant(_)
             | FoldKey::Thinking(_)
             | FoldKey::Response(_)
             | FoldKey::ToolGroup(_)
