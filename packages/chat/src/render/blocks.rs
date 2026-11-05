@@ -74,7 +74,8 @@ pub(super) fn user_bubble(
         .text_size(px(theme::agent_chat_font_size(cx)))
         .line_height(theme::agent_chat_line_height(cx))
         .full_width(false);
-    let inner = div()
+    let chrome = div()
+        .debug_selector(move || format!("agent-chat-user-bubble-{ix}"))
         .max_w(relative(0.85))
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
         .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
@@ -90,43 +91,63 @@ pub(super) fn user_bubble(
             dim,
         ))
         .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
-        .text_size(px(theme::agent_chat_font_size(cx)))
-        .child(body);
-    let bubble = div()
-        .flex()
-        .flex_row()
-        .justify_end()
-        .items_end()
-        .gap(px(theme::AGENT_CHAT_TRAILING_GAP))
-        .child(copy)
-        .child(inner);
-    let PromptFold::Long { expanded } = fold else {
-        return bubble;
+        .text_size(px(theme::agent_chat_font_size(cx)));
+    // The prompt's controls live inside its bubble so they read as the
+    // message's own; outside it they floated loose in the pane. A short prompt
+    // trails copy after its text, a long one gets a footer under a hairline.
+    let chrome = match fold {
+        PromptFold::Short => chrome
+            .flex()
+            .flex_row()
+            .items_end()
+            .gap(px(theme::AGENT_CHAT_TRAILING_GAP))
+            // Without `min_w_0` the text keeps its one-line width and pushes
+            // copy past the bubble's 85% cap instead of wrapping.
+            .child(div().min_w_0().child(body))
+            .child(copy),
+        PromptFold::Long { expanded } => chrome
+            .flex()
+            .flex_col()
+            .gap(px(theme::AGENT_CHAT_MSG_GAP))
+            .child(body)
+            .child(prompt_footer(ix, expanded, dim, copy, cx)),
     };
+    div().flex().flex_row().justify_end().child(chrome)
+}
+
+/// A long prompt's footer: the fold toggle leading, copy trailing, under the
+/// same hairline the bubble is edged with.
+fn prompt_footer(
+    ix: usize,
+    expanded: bool,
+    dim: f32,
+    copy: AnyElement,
+    cx: &mut Context<AgentChatView>,
+) -> impl IntoElement + use<> {
     let label = if expanded {
         s::agent_chat::prompt_show_less()
     } else {
         s::agent_chat::prompt_show_full()
     };
-    let toggle = pane_quiet_button(("agent-chat-user-fold", ix), label, cx).on_click(cx.listener(
-        move |this, _ev, window, cx| this.toggle_fold(FoldKey::UserPrompt(ix), window, cx),
-    ));
-    // The column stretches the bubble row to the pane, as it is without a
-    // toggle; shrink-wrapping it made the bubble's 85% cap measure against its
-    // own text, so the prompt spilled past its edge.
+    let toggle = super::fold_header::prompt_fold_toggle(ix, expanded, label, dim, cx);
     div()
         .flex()
-        .flex_col()
-        .gap(px(theme::AGENT_CHAT_MSG_GAP))
-        .child(bubble)
+        .flex_row()
+        .items_center()
+        .justify_between()
+        .gap(px(theme::AGENT_CHAT_TRAILING_GAP))
+        .pt(px(theme::AGENT_CHAT_MSG_GAP))
+        .border_t_1()
+        .border_color(theme::dim_toward_gray(
+            theme::agent_chat_border_tint(cx),
+            dim,
+        ))
         .child(
             div()
                 .debug_selector(move || format!("agent-chat-user-fold-{ix}"))
-                .flex()
-                .flex_row()
-                .justify_end()
                 .child(toggle),
         )
+        .child(copy)
 }
 
 /// Whether a prompt is long enough to fold, and if so which way it is shown.

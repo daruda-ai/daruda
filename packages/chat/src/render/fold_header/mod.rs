@@ -235,7 +235,9 @@ fn summary_element(
 mod boundary;
 mod row;
 mod scaffold;
-pub(in crate::render) use boundary::{interrupted_row, rollup_glyph, window_boundary_row};
+pub(in crate::render) use boundary::{
+    interrupted_row, prompt_fold_toggle, rollup_glyph, window_boundary_row,
+};
 pub(in crate::render) use row::{FoldRow, FoldToggle};
 #[cfg(test)]
 mod tests;

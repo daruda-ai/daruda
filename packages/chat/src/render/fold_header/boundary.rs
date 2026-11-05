@@ -1,4 +1,5 @@
-//! Transcript range boundaries and response outcome marks.
+//! Transcript range boundaries, the long-prompt fold toggle, and response
+//! outcome marks.
 
 use super::*;
 
@@ -50,6 +51,27 @@ pub(in crate::render) fn window_boundary_row(
         .child(rule())
         .child(label)
         .child(rule())
+        .into_any_element()
+}
+
+/// A long prompt's fold toggle, leading its bubble's footer. Like the window
+/// boundary it is not a [`FoldRow`]: the prompt stays visible either way and
+/// only its length changes. The label names what clicking does; the
+/// [`DisclosureAxis::Vertical`] chevron shows which way the bubble moves.
+pub(in crate::render) fn prompt_fold_toggle(
+    ix: usize,
+    expanded: bool,
+    label: String,
+    dim: f32,
+    cx: &mut Context<AgentChatView>,
+) -> AnyElement {
+    let chevron: Disclosure = disclosure(("agent-chat-user-fold-chevron", ix), expanded)
+        .axis(DisclosureAxis::Vertical)
+        .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim));
+    let toggle = FoldToggle::from(FoldKey::UserPrompt(ix)).into_fn();
+    crate::render::blocks::pane_quiet_button(("agent-chat-user-fold", ix), label, cx)
+        .child(chevron)
+        .on_click(cx.listener(move |this, _ev, window, cx| toggle(this, window, cx)))
         .into_any_element()
 }
 

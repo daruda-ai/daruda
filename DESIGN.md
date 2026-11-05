@@ -800,8 +800,11 @@ user-set size can leave in either direction.
 - **A long prompt** (over 500 characters or 12 lines) stays whole while its
   turn runs and folds to its first 6 lines once that turn settles — the edge
   where every row is remeasured, so it never changes height mid-turn. A quiet
-  pane-toned `Show full prompt` / `Show less` under the bubble toggles it; the
+  pane-toned `Show full prompt` / `Show less` with a vertical chevron leads a
+  footer inside the bubble, under a hairline, with copy trailing it; the
   choice is the user's from then on, and copy always takes the whole prompt.
+  A short prompt has no footer: its hover-revealed copy trails the text inside
+  the bubble. A prompt's controls never sit outside its bubble.
 - Visible items uses hierarchical checkboxes, one section per axis with a
   hairline between, two columns for nested facets and a tri-state parent whose
   row also carries a `checked / total` count and its own disclosure (open by
