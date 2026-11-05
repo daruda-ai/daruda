@@ -74,7 +74,8 @@ impl PaneSurfaceTokens {
         }
     }
 
-    fn from_background_and_foreground(background: gpui::Hsla, foreground: gpui::Hsla) -> Self {
+    /// Resolve pane-local controls against an explicit host surface.
+    pub fn from_background_and_foreground(background: gpui::Hsla, foreground: gpui::Hsla) -> Self {
         let overlay = neutral_overlay_for(background);
         // Darkening a near-white surface buys less contrast than lightening a
         // near-black one, so the control edge takes its alpha per direction.
@@ -207,7 +208,7 @@ pub fn file_viewer_pane_link_color(cx: &App) -> gpui::Hsla {
 }
 
 /// Keep a link's hue, resolve its lightness against the surface it sits on.
-fn link_on(background: gpui::Hsla, mut link: gpui::Hsla) -> gpui::Hsla {
+pub(crate) fn link_on(background: gpui::Hsla, mut link: gpui::Hsla) -> gpui::Hsla {
     link.l = if background.l < 0.5 {
         link.l.max(p::PANE_LINK_MIN_L_ON_DARK)
     } else {

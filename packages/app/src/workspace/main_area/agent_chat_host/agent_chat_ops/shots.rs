@@ -3,6 +3,8 @@
 
 #[cfg(feature = "screenshot")]
 mod links;
+#[cfg(feature = "screenshot")]
+mod theme;
 
 use crate::workspace::Workspace;
 #[cfg(feature = "screenshot")]

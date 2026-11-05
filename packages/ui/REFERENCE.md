@@ -291,7 +291,7 @@ The patches this package's wrappers depend on:
 
 | Patch | Used by |
 |---|---|
-| `ButtonCustomVariant::{selected_foreground, border}` | `button_group` (`choice_variant`), `button_group_on_surface` |
+| `ButtonCustomVariant::{selected_foreground, disabled_foreground, border}` | `button_group` (`choice_variant`), `button_group_on_surface` |
 | `Checkbox::indeterminate` | `checkbox` callers with a partial selection (the transcript's display filter) |
 | `PopupMenu::{small, chrome, max_h_in_window, pin_head, pin_foot}`, `PopupMenuItem::tooltip` | `menu` (`menu_builder`, `stacked_menu_builder`) and the app's status-bar menus |
 | `PopoverState::trigger_bounds` | popover panels sized against the room below their trigger (transcript editors) |
@@ -306,6 +306,15 @@ The patches this package's wrappers depend on:
 
 The manifests allow every upstream lint (vendored code is outside daruda's
 lint scope). Upstream modules are kept whole for reproducible re-vendoring.
+
+Pane-local Markdown and copy actions may build `PaneSurfaceTokens` through
+`from_background_and_foreground(background, foreground)`. This keeps host
+surfaces independent of global UI appearance; table refinements retain their
+geometry while adapting fill, link color, and checkbox appearance. Fenced code
+uses the host appearance and selected syntax palette through the vendor
+registry-aware shared highlighter cache. Surface-aware
+button factories also install the disabled foreground, leaving ordinary custom
+buttons on their existing UI fallback.
 
 ## Surface presentation sizes
 

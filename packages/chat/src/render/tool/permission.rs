@@ -8,7 +8,6 @@ pub(in crate::render) fn permission_card(
     ix: usize,
     card: &PermissionItem,
     t: &theme::DarudaTheme,
-    dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> impl IntoElement + use<> {
     let title: SharedString = card
@@ -25,7 +24,7 @@ pub(in crate::render) fn permission_card(
         .px(px(theme::AGENT_CHAT_INPUT_INNER_PAD_X))
         .py(px(theme::AGENT_CHAT_INPUT_INNER_PAD_Y))
         .rounded(px(theme::AGENT_CHAT_INPUT_RADIUS))
-        .bg(t.banner_warning_bg)
+        .bg(t.button_widget_bg.blend(t.banner_warning_bg))
         .child(
             div()
                 .text_color(t.banner_warning_text)
@@ -34,11 +33,11 @@ pub(in crate::render) fn permission_card(
         )
         .child(
             div()
-                .text_color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+                .text_color(t.banner_warning_text)
                 .text_size(px(theme::agent_chat_font_size(cx)))
                 .child(
                     daruda_ui::selectable_text(("agent-chat-perm-title", ix), title)
-                        .color(theme::dim_toward_gray(theme::agent_chat_fg(cx), dim))
+                        .color(t.banner_warning_text)
                         .text_size(px(theme::agent_chat_font_size(cx))),
                 ),
         );
@@ -55,7 +54,7 @@ pub(in crate::render) fn permission_card(
                 .unwrap_or_else(|| option_id.clone());
             root = root.child(
                 div()
-                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                    .text_color(t.banner_warning_text)
                     .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(format!(
                         "{} {}",
@@ -69,7 +68,7 @@ pub(in crate::render) fn permission_card(
             // buttons and surface that the request was cancelled.
             root = root.child(
                 div()
-                    .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                    .text_color(t.banner_warning_text)
                     .text_size(px(theme::agent_chat_font_size(cx)))
                     .child(SharedString::from(s::agent_chat::permission_cancelled())),
             );

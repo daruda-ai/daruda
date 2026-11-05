@@ -246,6 +246,7 @@ fn icon_target(id: impl Into<ElementId>) -> Button {
 pub(crate) fn surface_button_variant(surface: &PaneSurfaceTokens, cx: &App) -> ButtonCustomVariant {
     ButtonCustomVariant::new(cx)
         .foreground(surface.foreground_muted)
+        .disabled_foreground(surface.foreground_subtle)
         .hover(surface.tint)
         .active(surface.active_tint)
 }

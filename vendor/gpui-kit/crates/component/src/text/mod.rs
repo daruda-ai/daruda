@@ -148,7 +148,8 @@ pub(crate) fn component_code_block_highlighter(
 
 /// The type [`shared_code_block_highlighter`] returns.
 #[cfg(any(feature = "tree-sitter", feature = "syntect"))]
-pub(crate) type SharedCodeBlockHighlighter = dyn Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
+/// daruda patch: shared callback type for hosts with a local syntax palette.
+pub type SharedCodeBlockHighlighter = dyn Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
     + Send
     + Sync;
 
@@ -165,7 +166,8 @@ pub(crate) type SharedCodeBlockHighlighter = dyn Fn(&gpui_base::text::CodeBlock)
 /// a language drops them, so the next frame gets a new highlighter and code
 /// blocks painted before the language existed are highlighted again.
 #[cfg(any(feature = "tree-sitter", feature = "syntect"))]
-pub(crate) fn shared_code_block_highlighter(
+// daruda patch: hosts may reuse the registry-aware cache for their own surface.
+pub fn shared_code_block_highlighter(
     highlight_theme: &std::sync::Arc<crate::highlighter::HighlightTheme>,
 ) -> std::sync::Arc<SharedCodeBlockHighlighter> {
     // Syntect's languages are fixed at build time, so its entries never go stale.

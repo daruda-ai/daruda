@@ -358,6 +358,10 @@ fn library_skills_has_a_cli_name() {
 
 #[test]
 fn link_scenarios_have_distinct_cli_names() {
+    assert_eq!(
+        ScreenshotScenario::from_cli_name("agent-chat-theme"),
+        Some(ScreenshotScenario::AgentChatTheme)
+    );
     let links = ScreenshotScenario::from_cli_name("agent-chat-links");
     let menu = ScreenshotScenario::from_cli_name("agent-chat-link-menu");
     assert!(links.is_some());

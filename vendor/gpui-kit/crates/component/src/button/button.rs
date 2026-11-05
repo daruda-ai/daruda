@@ -49,6 +49,8 @@ pub struct ButtonCustomVariant {
     /// daruda patch: the label colour of a selected segment, whose fill needs
     /// a different contrast pair than the resting surface.
     selected_foreground: Option<Hsla>,
+    // daruda patch: pane-local controls keep their foreground when disabled.
+    disabled_foreground: Option<Hsla>,
 }
 
 pub trait ButtonVariants: Sized {
@@ -115,6 +117,7 @@ impl ButtonCustomVariant {
             shadow: false,
             border: None,
             selected_foreground: None,
+            disabled_foreground: None,
         }
     }
 
@@ -127,6 +130,12 @@ impl ButtonCustomVariant {
     /// daruda patch: set the label colour while selected.
     pub fn selected_foreground(mut self, color: Hsla) -> Self {
         self.selected_foreground = Some(color);
+        self
+    }
+
+    /// daruda patch: override the disabled label without changing other states.
+    pub fn disabled_foreground(mut self, color: Hsla) -> Self {
+        self.disabled_foreground = Some(color);
         self
     }
 
@@ -1406,7 +1415,11 @@ impl ButtonVariant {
             Self::Secondary => cx.theme().tokens.button_secondary.background.opacity(1.5),
             Self::Custom(style) => style.color.opacity(0.15).into(),
         };
-        let fg = cx.theme().muted_foreground.opacity(0.5);
+        let fg = match self {
+            Self::Custom(style) => style.disabled_foreground,
+            _ => None,
+        }
+        .unwrap_or_else(|| cx.theme().muted_foreground.opacity(0.5));
         let (bg, border) = if outline {
             (
                 self.outline_background(ButtonStyleState::Normal, cx)
@@ -2116,6 +2129,38 @@ mod tests {
             assert_ne!(
                 ButtonVariant::Danger.disabled(true, cx).bg,
                 cx.theme().tokens.button_danger.background.opacity(0.15)
+            );
+        });
+    }
+}
+
+#[cfg(test)]
+mod surface_tests {
+    use super::*;
+
+    #[gpui::test]
+    fn custom_disabled_foreground_is_opt_in(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        cx.update(|cx| {
+            let explicit = gpui::rgb(0xaabbcc).into();
+            let default = ButtonCustomVariant::new(cx);
+            let fallback = cx.theme().muted_foreground.opacity(0.5);
+            assert_eq!(
+                ButtonVariant::Custom(default).disabled(false, cx).fg,
+                fallback
+            );
+            let custom = default.disabled_foreground(explicit);
+            assert_eq!(
+                ButtonVariant::Custom(custom).disabled(false, cx).fg,
+                explicit
+            );
+            assert_eq!(
+                ButtonVariant::Custom(custom).disabled(true, cx).fg,
+                explicit
+            );
+            assert_eq!(
+                ButtonVariant::Custom(custom).disabled(false, cx).bg,
+                ButtonVariant::Custom(default).disabled(false, cx).bg
             );
         });
     }

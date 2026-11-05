@@ -265,6 +265,8 @@ pub(crate) enum ScreenshotScenario {
     /// question only a capture answers.
     AgentChatSoleReply,
     AgentChatLinks,
+    /// Markdown and permission surfaces under independently selected themes.
+    AgentChatTheme,
     AgentChatLinkMenu,
     /// A tool card whose call is still running, its group open. The badge's
     /// live state is the one a settled seed cannot reach, and it is the only
@@ -935,6 +937,9 @@ pub(crate) fn drive(
                     cx,
                 )
             });
+        }
+        ScreenshotScenario::AgentChatTheme => {
+            workspace.update(cx, |ws, cx| ws.open_agent_chat_theme_for_shot(window, cx));
         }
         ScreenshotScenario::AgentChatSoleReply => {
             workspace.update(cx, |ws, cx| {

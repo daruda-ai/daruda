@@ -14,6 +14,7 @@ pub use sizing::UiMetrics;
 
 mod config_mirror;
 mod pane_surface;
+pub(crate) use pane_surface::link_on;
 
 pub use config_mirror::{
     active_syntax_palette, agent_chat_compact_options_w, agent_chat_embed_row_height,

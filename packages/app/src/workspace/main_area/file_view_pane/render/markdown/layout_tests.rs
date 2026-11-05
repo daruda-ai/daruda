@@ -156,6 +156,8 @@ impl Render for Probe {
                         .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
                         .child(
                             crate::ui::markdown("conformance", self.md.clone())
+                                .surface(theme::agent_chat_bg(cx))
+                                .color(theme::agent_chat_fg(cx))
                                 .debug_inline_bounds(move |bounds| {
                                     let mut first = first_inline_bounds.lock().unwrap();
                                     if first.is_none() {
@@ -553,6 +555,47 @@ fn both_engines_render_task_markers_as_checkboxes(cx: &mut TestAppContext) {
             "{} painted a checkbox for a plain item",
             engine.label()
         );
+    }
+}
+
+#[gpui::test]
+fn both_engines_keep_tables_on_the_pane_surface(cx: &mut TestAppContext) {
+    crate::test_support::init_gpui_component(cx);
+    for ui in ["daruda_light", "daruda_dark"] {
+        for (bg, fg) in [
+            ((30, 30, 30), (208, 214, 224)),
+            ((249, 250, 251), (26, 29, 36)),
+        ] {
+            cx.update(|cx| {
+                theme::apply_ui_theme(ui, cx);
+                theme::set_agent_chat_bg(cx, bg.0, bg.1, bg.2);
+                theme::set_agent_chat_fg(cx, fg.0, fg.1, fg.2);
+            });
+            for engine in Engine::ALL {
+                let window = cx.update(|cx| {
+                    cx.open_window(WindowOptions::default(), |_, cx| {
+                        cx.new(|_| Probe {
+                            md: "| **Name** | Link |\n| --- | --- |\n| Body | [Open](https://example.invalid) |".into(),
+                            engine,
+                            first_inline_bounds: Arc::new(Mutex::new(None)),
+                        })
+                    }).unwrap()
+                });
+                let mut vcx = VisualTestContext::from_window(window.into(), cx);
+                vcx.run_until_parked();
+                vcx.update(|window, cx| {
+                    let tint = theme::PaneSurfaceTokens::agent_chat(cx).tint;
+                    assert!(
+                        window.painted_quads().iter().any(|quad| {
+                            quad.background.as_solid() == Some(tint)
+                                && quad.bounds.size.width > gpui::ScaledPixels(100.)
+                        }),
+                        "{} table lost its pane fill under {ui}",
+                        engine.label()
+                    );
+                });
+            }
+        }
     }
 }
 

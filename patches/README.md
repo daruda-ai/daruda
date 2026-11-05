@@ -365,6 +365,7 @@ against DESIGN.md's 3–4 budget.
 | Delta | Detail |
 |---|---|
 | `selected_foreground: Option<Hsla>` + builder | `ButtonVariant::selected` reads `colors.selected_foreground.unwrap_or(colors.foreground)` for `Custom`. `None` is upstream behaviour. |
+| `disabled_foreground: Option<Hsla>` + builder | Custom disabled buttons may retain a host-surface foreground. `None` preserves the UI muted fallback; background, border, and event blocking stay unchanged. |
 | `border: Option<Hsla>` + builder | `ButtonVariant::border_color` returns it for `Custom` in every state; `None` keeps upstream's edge derived from `color`. The segment strips draw their hairline through it. |
 | Caller text size wins | `RenderOnce::render` applies the size tier's `button_text_size` only when the instance style sets no font size, so a label can follow a size the caller set on the button. |
 | Caller justification reaches the label row | The label row is a `size_full` child that centers its content, so a `justify_*` the caller set on the button (the dock's left-aligned page links) is copied onto that row. Unset keeps upstream's centering. |
@@ -907,3 +908,12 @@ rendered Input receives the same font separately. Existing inputs keep their
 rendering and measurement behavior. The regression test
 `test_explicit_font_metrics_refit_wrapped_rows_without_editing` checks that
 wrapping and row counts follow the font while value, selection and focus stay.
+
+## Markdown host syntax palettes
+
+`vendor/gpui-kit/crates/component/src/text/mod.rs` exposes the existing
+`SharedCodeBlockHighlighter` type and `shared_code_block_highlighter` cache
+accessor so `daruda_ui::markdown` can select syntax appearance against its own
+surface. This changes visibility only: registry-generation invalidation and
+bounded callback reuse remain vendor-owned. Re-vendor by retaining the public
+visibility and the host-palette regression in `ui/src/markdown/highlight.rs`.

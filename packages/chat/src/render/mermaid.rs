@@ -95,6 +95,7 @@ pub(super) fn mermaid_diagram_card(
             group,
             source: SharedString::from(source.to_owned()),
             image: image.clone(),
+            surface: theme::PaneSurfaceTokens::agent_chat(cx).dimmed(dim),
         })
         .into_any_element()
 }
@@ -110,6 +111,7 @@ struct DiagramActions {
     group: SharedString,
     source: SharedString,
     image: CachedImage,
+    surface: theme::PaneSurfaceTokens,
 }
 
 impl RenderOnce for DiagramActions {
@@ -129,7 +131,7 @@ impl RenderOnce for DiagramActions {
                 daruda_ui::button_icon_on_surface(
                     SharedString::from(format!("mermaid-zoom-{key}")),
                     icons::EXPAND,
-                    &theme::PaneSurfaceTokens::agent_chat(cx),
+                    &self.surface,
                     cx,
                 )
                 .tooltip(s::agent_chat::diagram_zoom())
@@ -147,14 +149,18 @@ impl RenderOnce for DiagramActions {
             )
             // `copy_button` already stops propagation for the same reason, and
             // adds the ✓ feedback every other daruda copy affordance has.
-            .child(copy_button(
-                ElementId::from(SharedString::from(format!("mermaid-copy-{key}"))),
-                self.source,
-                icons::icon(icons::COPY),
-                SharedString::from(s::agent_chat::diagram_copy()),
-                icons::icon(icons::CHECK),
-                SharedString::from(s::agent_chat::diagram_copied()),
-                window,
+            .child(daruda_ui::button_with_surface(
+                copy_button(
+                    ElementId::from(SharedString::from(format!("mermaid-copy-{key}"))),
+                    self.source,
+                    icons::icon(icons::COPY),
+                    SharedString::from(s::agent_chat::diagram_copy()),
+                    icons::icon(icons::CHECK),
+                    SharedString::from(s::agent_chat::diagram_copied()),
+                    window,
+                    cx,
+                ),
+                &self.surface,
                 cx,
             ))
     }

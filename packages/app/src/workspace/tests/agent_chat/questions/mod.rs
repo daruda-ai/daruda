@@ -4,6 +4,7 @@
 mod composer;
 mod keys;
 mod notify;
+mod theme;
 mod timeout;
 
 use gpui::{AppContext as _, TestAppContext};

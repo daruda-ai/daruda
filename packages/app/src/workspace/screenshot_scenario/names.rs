@@ -115,6 +115,7 @@ const NAME_INPUT_DOCK_EXPANDED: &str = "input-dock-expanded";
 /// CLI token for a transcript of prose-only replies and their own folds.
 const NAME_AGENT_CHAT_SOLE_REPLY: &str = "agent-chat-sole-reply";
 const NAME_AGENT_CHAT_LINKS: &str = "agent-chat-links";
+const NAME_AGENT_CHAT_THEME: &str = "agent-chat-theme";
 const NAME_AGENT_CHAT_LINK_MENU: &str = "agent-chat-link-menu";
 const NAME_AGENT_CHAT_PLAN: &str = "agent-chat-plan";
 const NAME_AGENT_CHAT_RUNNING_TOOL: &str = "agent-chat-running-tool";
@@ -352,6 +353,7 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_QUEUE_ARMED => Some(Self::AgentChatQueueArmed),
             NAME_AGENT_CHAT_SOLE_REPLY => Some(Self::AgentChatSoleReply),
             NAME_AGENT_CHAT_LINKS => Some(Self::AgentChatLinks),
+            NAME_AGENT_CHAT_THEME => Some(Self::AgentChatTheme),
             NAME_AGENT_CHAT_LINK_MENU => Some(Self::AgentChatLinkMenu),
             NAME_INPUT_DOCK_SHRUNK => Some(Self::InputDockShrunk {
                 with_queue: false,

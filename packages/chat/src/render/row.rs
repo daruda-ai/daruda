@@ -314,7 +314,7 @@ fn render_item(
             cx,
         )
         .into_any_element(),
-        ChatItem::Permission(card) => permission_card(ix, card, t, dim, cx).into_any_element(),
+        ChatItem::Permission(card) => permission_card(ix, card, t, cx).into_any_element(),
         ChatItem::Failure(failure) => {
             // Only the newest stop: one further down has been answered since.
             let can_continue = ix + 1 == items.len() && offers_continue;

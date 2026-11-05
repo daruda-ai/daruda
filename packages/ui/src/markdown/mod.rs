@@ -10,14 +10,16 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, ElementId, HighlightStyle, Hsla, IntoElement, ParentElement as _, Pixels,
-    Refineable as _, RenderOnce, SharedString, StyleRefinement, Styled as _, Window, div, relative,
-    rems,
+    AnyElement, App, ElementId, Hsla, IntoElement, ParentElement as _, Pixels, RenderOnce,
+    SharedString, Styled as _, Window, div, relative,
 };
 use gpui_base::TextView;
 use gpui_component::ActiveTheme as _;
 
 use crate::{icons, theme};
+
+mod highlight;
+mod style;
 
 /// Optional code-block override hook kept domain-free for this UI wrapper.
 type CodeBlockRender =
@@ -149,61 +151,15 @@ impl RenderOnce for Markdown {
         // on, not the UI canvas: the agent-chat pane mirrors the terminal
         // palette, independent of the UI preset (DESIGN.md §AgentChatPane).
         let surface = self.surface.unwrap_or_else(|| cx.theme().background);
-        let line = theme::neutral_tint_over(surface, theme::MD_VIEW_STRUCTURAL_LINE_ALPHA);
-        let mut style = gpui_component::text::base_text_view_style(cx.theme())
-            .with_foreground(color)
-            // A blockquote is de-emphasised against the body colour, so it
-            // tracks the surface and any dimming the caller applied.
-            .with_muted_foreground(color.opacity(theme::MD_VIEW_MUTED_ALPHA))
-            .with_code_background(theme::neutral_tint_over(
-                surface,
-                theme::MD_VIEW_CODE_FILL_ALPHA,
-            ))
-            .with_border(line)
-            .with_inline_code(HighlightStyle {
-                background_color: Some(theme::neutral_tint_over(
-                    surface,
-                    theme::MD_VIEW_INLINE_CODE_TINT_ALPHA,
-                )),
-                ..Default::default()
-            })
-            .with_table_head(
-                StyleRefinement::default()
-                    .bg(theme::neutral_tint_over(
-                        surface,
-                        theme::MD_VIEW_TABLE_HEADER_FILL_ALPHA,
-                    ))
-                    .text_color(color),
-            );
-        // With a configured body size, the vertical rhythm follows it: the
-        // paragraph gap, the heading scale, and code rows on the prose pitch.
-        let line_height = self.line_height.unwrap_or(theme::MD_VIEW_LINE_HEIGHT);
-        if let Some(size) = self.text_size {
-            style = style.with_paragraph_gap(rems(
-                size * theme::MD_VIEW_PARAGRAPH_GAP / window.rem_size(),
-            ));
-            style = style.with_heading(move |level| {
-                let scale = theme::MD_VIEW_HEADING_SCALE[usize::from(level.clamp(1, 6)) - 1];
-                StyleRefinement::default()
-                    .text_size(size * scale)
-                    .line_height(relative(line_height))
-            });
-            let mut code_block = style.code_block().clone();
-            code_block.refine(
-                &StyleRefinement::default()
-                    .text_size(size)
-                    .line_height(relative(line_height)),
-            );
-            style = style.with_code_block(code_block);
-        }
-        if let Some(size) = self.heading_size {
-            style = style.with_heading(move |_| StyleRefinement::default().text_size(size));
-        }
+        let style = self.text_view_style(color, surface, window.rem_size(), cx);
         let base_id = self.id.clone();
         let mut view = TextView::markdown(self.id, self.text)
             .selectable(self.selectable)
             .style(style)
             .text_color(color);
+        if self.surface.is_some() {
+            view = view.shared_code_block_highlighter(highlight::for_surface(surface.l >= 0.5, cx));
+        }
         if let Some(family) = self.font_family {
             view = view.font_family(family);
         }
@@ -249,11 +205,14 @@ impl RenderOnce for Markdown {
         // button by the markdown id plus a content hash so its ✓ feedback state
         // stays stable across renders.
         let copy = self.copy_tooltips;
+        let copy_surface = self.surface.map(|background| {
+            theme::PaneSurfaceTokens::from_background_and_foreground(background, color)
+        });
         view = view.code_block_actions(move |cb, window, cx| {
             let mut hasher = DefaultHasher::new();
             cb.code().as_ref().hash(&mut hasher);
             let id = ElementId::Name(format!("{base_id}-codecopy-{}", hasher.finish()).into());
-            crate::copy_button(
+            let button = crate::copy_button(
                 id,
                 cb.code(),
                 icons::icon(icons::COPY),
@@ -262,7 +221,11 @@ impl RenderOnce for Markdown {
                 copy.copied.clone(),
                 window,
                 cx,
-            )
+            );
+            match &copy_surface {
+                Some(surface) => crate::button_with_surface(button, surface, cx),
+                None => button,
+            }
         });
         if !self.full_width {
             return view.into_any_element();

@@ -684,9 +684,8 @@ icon button (carries a glyph — expand all / collapse all / reading width / vie
 
   hover:     background pane-tint
   selected:  background pane-active-tint
-  disabled:  no hover, no press; glyph drops to `mute` at 50% (the vendored
-             button's own disabled tone — a UI-theme colour on a pane-mirrored
-             surface, see Known Gaps)
+  disabled:  no hover, no press; glyph uses pane-fg-subtle from the same
+             surface palette, including the inactive-pane dim
 ```
 
 - **A chip gets a border and a glyph does not.** The chips sit next to the
@@ -1596,7 +1595,6 @@ How to apply this doc when changing daruda's UI:
 - **Radius on floating surfaces splits by size, not by a stated rule.** Small attached overlays (popover, menu, tooltip, autocomplete) take `t.radius` = 4px; large ones (dialog, palette, toast) take `t.radius_lg` = 8px. Both come from global slots shared with non-floating widgets, so neither can move independently.
 - **The 3:1 component-edge floor is enforced on pane-local surfaces only.** App-chrome control edges ride the global `hairline` at ~1.2:1. AgentChatPane argues the distinction (an edge must clear 3:1 when it is the *only* thing marking a control apart from neighbouring text), but the distinction is applied by hand at each site, not by a token that makes the wrong choice hard.
 - **§Border Radius's `md` row is aspirational.** It assigns 6px to "Buttons, text inputs, tab pills"; every shipped button constant is `RADIUS_SM` (4px). New controls should match their neighbours at 4px until the table is reconciled.
-- **Disabled controls on pane-local surfaces take a UI-theme colour.** The vendored button's disabled tone is `mute` at 50% regardless of the surface, so a light terminal preset under a dark UI theme (or the reverse) gets an unverified pair. Every other state on those controls derives from the pane.
 - **Custom user palettes are out of scope.** The syntax palette is a curated set; there is no user-defined-palette format documented.
 
 ### Left dock presentation size
