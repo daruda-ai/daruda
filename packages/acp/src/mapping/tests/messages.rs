@@ -457,3 +457,53 @@ fn finalize_clears_streaming_flag() {
         }
     );
 }
+
+fn handoff_mark() -> crate::handoff::HandoffMark {
+    use crate::handoff::{HandoffMark, HandoffParty};
+    HandoffMark {
+        from: HandoffParty {
+            agent: "Claude Code".into(),
+            account: Some("work".into()),
+        },
+        to: HandoffParty {
+            agent: "Codex".into(),
+            account: None,
+        },
+    }
+}
+
+#[test]
+fn replayed_handoff_prompt_becomes_the_divider_and_the_typed_text() {
+    // After a restart, `session/load` replays the new session's first prompt
+    // as it went on the wire — recap block in front. The block is the switch
+    // divider, not something the person typed.
+    let recap = crate::handoff::recap(
+        &[ChatItem::UserText("fix the build".into())],
+        &handoff_mark(),
+    )
+    .unwrap();
+    let wire = format!("{recap}\n\n---\n\nnow run the tests");
+    let mut items = Vec::new();
+    apply_update(
+        &mut items,
+        &SessionUpdate::UserMessageChunk(text_chunk(&wire)),
+    );
+    assert_eq!(
+        items,
+        vec![
+            ChatItem::Handoff(handoff_mark()),
+            ChatItem::UserText("now run the tests".into()),
+        ]
+    );
+}
+
+#[test]
+fn text_merely_quoting_the_handoff_tag_stays_a_user_message() {
+    let text = "what is <conversation_handoff> for?";
+    let mut items = Vec::new();
+    apply_update(
+        &mut items,
+        &SessionUpdate::UserMessageChunk(text_chunk(text)),
+    );
+    assert_eq!(items, vec![ChatItem::UserText(text.into())]);
+}

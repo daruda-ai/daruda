@@ -51,95 +51,129 @@ fn seed_and_focus_agent_pane(
     id
 }
 
-/// Account switching handles the three local guard cases: a blank managed pane
-/// can return to the system default, re-selecting the current account is a
-/// no-op, and an idle pane with a transcript is protected until confirmation.
+/// Account switching handles the two local guard cases: a blank managed pane
+/// can return to the system default, and re-selecting the current account is
+/// a no-op.
 #[gpui::test]
-async fn switch_pane_account_handles_system_default_noop_and_conversation_guard(
-    cx: &mut TestAppContext,
-) {
+async fn switch_pane_account_handles_system_default_and_noop(cx: &mut TestAppContext) {
     let (window_handle, workspace) = build_workspace(cx);
     cx.run_until_parked();
 
     let revert_account = AccountId::new();
-    let guarded_account = AccountId::new();
-    let (revert_pane, guarded_pane, panes_before) = cx
+    let kept_account = AccountId::new();
+    let (revert_pane, kept_pane) = cx
         .update_window(window_handle.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
                 let revert =
                     seed_agent_pane(ws, AccountSelection::Managed(revert_account), window, cx);
-                let guarded =
-                    seed_agent_pane(ws, AccountSelection::Managed(guarded_account), window, cx);
-                agent_view(ws, guarded).update(cx, |v, cx| {
+                let kept = seed_agent_pane(ws, AccountSelection::Managed(kept_account), window, cx);
+                agent_view(ws, kept).update(cx, |v, cx| {
                     v.seed_items_for_test([ChatItem::UserText("a long investigation".into())], cx);
                 });
-                (revert, guarded, ws.active_runtime().panes.len())
+                (revert, kept)
             })
         })
         .unwrap();
     cx.run_until_parked();
 
-    workspace.read_with(cx, |ws, _| {
-        let pane = ws
-            .active_runtime()
-            .panes
-            .iter()
-            .find(|p| p.id == revert_pane)
-            .unwrap();
-        assert_eq!(
-            pane.account_selection(),
-            Some(AccountSelection::Managed(revert_account))
-        );
-    });
-
     cx.update_window(window_handle.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             ws.switch_pane_account(revert_pane, AccountSelection::SystemDefault, window, cx);
             ws.switch_pane_account(
-                guarded_pane,
-                AccountSelection::Managed(guarded_account),
+                kept_pane,
+                AccountSelection::Managed(kept_account),
                 window,
                 cx,
             );
-            ws.switch_pane_account(guarded_pane, AccountSelection::SystemDefault, window, cx);
         });
     })
     .unwrap();
     cx.run_until_parked();
 
     workspace.read_with(cx, |ws, cx| {
-        let reverted = ws
-            .active_runtime()
-            .panes
-            .iter()
-            .find(|p| p.id == revert_pane)
-            .unwrap();
+        let selection = |id| {
+            ws.active_runtime()
+                .panes
+                .iter()
+                .find(|p| p.id == id)
+                .and_then(|p| p.account_selection())
+        };
         assert_eq!(
-            reverted.account_selection(),
+            selection(revert_pane),
             Some(AccountSelection::SystemDefault),
             "switching to SystemDefault must revert the pane to the system default"
         );
-
         assert_eq!(
-            agent_view(ws, guarded_pane).read(cx).items().len(),
+            agent_view(ws, kept_pane).read(cx).items().len(),
             1,
-            "re-selecting or switching a guarded pane must not reset the session"
+            "re-selecting the current account must not touch the session"
         );
+    });
+}
+
+/// A conversation follows an account switch in the same pane: the transcript
+/// stays, a divider marks the switch, and a fresh session connects under the
+/// new account. No extra pane opens.
+#[gpui::test]
+async fn an_account_switch_continues_the_conversation_in_place(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let dir = tempfile::tempdir().unwrap();
+
+    let target = AccountId::new();
+    let (pane_id, panes_before) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(dir.path().to_path_buf())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                agent_view(ws, id).update(cx, |v, cx| {
+                    v.seed_items_for_test([ChatItem::UserText("a long investigation".into())], cx);
+                });
+                (id, ws.active_runtime().panes.len())
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.switch_pane_account(pane_id, AccountSelection::Managed(target), window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.active_runtime().panes.len(), panes_before, "no new pane");
         let pane = ws
             .active_runtime()
             .panes
             .iter()
-            .find(|p| p.id == guarded_pane)
+            .find(|p| p.id == pane_id)
             .unwrap();
         assert_eq!(
             pane.account_selection(),
-            Some(AccountSelection::Managed(guarded_account)),
-            "the source pane keeps its own account — the new one goes to the new pane"
+            Some(AccountSelection::Managed(target))
+        );
+        let view = agent_view(ws, pane_id).read(cx);
+        assert!(
+            matches!(view.items(), [ChatItem::UserText(_), ChatItem::Handoff(_)]),
+            "the conversation stays, with the switch marked: {:?}",
+            view.items()
         );
         assert_eq!(
-            ws.active_runtime().panes.len(),
-            panes_before,
-            "the new pane only opens once the user confirms the dialog"
+            view.session_id(),
+            Some(format!("test-session-{pane_id}").as_str()),
+            "a fresh session connected"
         );
     });
 }

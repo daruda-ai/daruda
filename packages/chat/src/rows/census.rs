@@ -119,6 +119,7 @@ fn kind_label(kind: &RowKind) -> &'static str {
     match kind {
         RowKind::User(_) => "User",
         RowKind::Interrupted(_) => "Interrupted",
+        RowKind::Handoff(_) => "Handoff",
         RowKind::ResponseHeader { .. } => "ResponseHeader",
         RowKind::AgentItem(_) => "AgentItem",
         RowKind::GroupThought(_) => "GroupThought",
@@ -136,6 +137,7 @@ fn row_reach(kind: &RowKind) -> Option<usize> {
     match kind {
         RowKind::User(i)
         | RowKind::Interrupted(i)
+        | RowKind::Handoff(i)
         | RowKind::AgentItem(i)
         | RowKind::GroupThought(i)
         | RowKind::ConclusionItem(i) => Some(*i),

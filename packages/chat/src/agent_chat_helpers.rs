@@ -199,12 +199,13 @@ impl Rollup {
                 }
                 ChatItem::Failure(_) => any_failed |= counts,
                 // A user message never belongs to a run; a permission card is
-                // neither an outcome nor progress. A stop marker ends the run
-                // rather than sitting in it (`agent_run`), so it reaches here
-                // only through a whole-conversation scan.
+                // neither an outcome nor progress. Stop and switch markers end
+                // the run rather than sitting in it (`agent_run`), so they reach
+                // here only through a whole-conversation scan.
                 ChatItem::UserText(_)
                 | ChatItem::Permission(_)
                 | ChatItem::Interrupted
+                | ChatItem::Handoff(_)
                 | ChatItem::Compaction(_) => {}
             }
         }
@@ -355,7 +356,8 @@ pub(super) fn chat_item_mermaid_texts(item: &daruda_acp::ChatItem) -> Vec<&str> 
             .collect(),
         daruda_acp::ChatItem::Permission(_)
         | daruda_acp::ChatItem::Failure(_)
-        | daruda_acp::ChatItem::Interrupted => Vec::new(),
+        | daruda_acp::ChatItem::Interrupted
+        | daruda_acp::ChatItem::Handoff(_) => Vec::new(),
     }
 }
 

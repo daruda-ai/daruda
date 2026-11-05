@@ -14,6 +14,15 @@ use super::super::reconcile::ReconcileScope;
 use super::super::session_config::SessionConfig;
 use super::super::session_config::model_select;
 use super::{ActivitySpan, AgentChatView, OverageNotice, Turn, TurnOutcome};
+
+/// What a session teardown does with the conversation on screen.
+#[derive(Clone, Copy)]
+enum TranscriptFate {
+    /// Clear it: the next session starts empty or replays it.
+    Discard,
+    /// Keep it: nothing will replay it, and the person is still reading it.
+    Keep,
+}
 use crate::strings as s;
 
 /// Who asked for a Stop; decides how its transcript marker reads.
@@ -380,18 +389,37 @@ impl AgentChatView {
         cx.notify();
     }
 
-    /// Shared teardown for a `/clear` reset and a post-`Error` retry: drop the
-    /// live handle and event pump, wipe the conversation model + every runtime
-    /// cache. Does NOT touch `session_id`/`replay`/`status` — the two
-    /// callers differ there (fresh conversation vs. resume via `session/load`).
-    fn teardown_transient_session_state(&mut self, cx: &mut Context<Self>) {
+    /// Shared teardown for a `/clear` reset, a post-`Error` retry and a
+    /// handoff: drop the live handle and event pump and every runtime cache,
+    /// and treat the conversation model as `fate` says. Does NOT touch
+    /// `session_id`/`replay`/`status` — the callers differ there.
+    fn teardown_transient_session_state(&mut self, fate: TranscriptFate, cx: &mut Context<Self>) {
         cancel_pending_permission(self, cx);
         // Before the handle goes: the open ones still owe the agent a cancel.
         self.reset_questions(cx);
         self.detach_handle();
         self._event_pump = None;
-        self.items.clear();
-        self.overage_stop_markers.clear();
+        match fate {
+            TranscriptFate::Discard => {
+                self.items.clear();
+                self.overage_stop_markers.clear();
+                // The records are keyed by item index with no session identity,
+                // so they must not outlive the transcript they index — `/clear`
+                // restarts at 0 and a reconnect replays the history, either of
+                // which would otherwise hang the previous conversation's numbers
+                // on the new rows.
+                self.activity.turn_records.clear();
+                self.assets.clear();
+                self.fold.clear_overrides();
+            }
+            TranscriptFate::Keep => {
+                // The failed connect this teardown answers says nothing about
+                // the conversation above it.
+                while matches!(self.items.last(), Some(ChatItem::Failure(_))) {
+                    self.items.pop();
+                }
+            }
+        }
         let dropped = self.queue.discard_all();
         self.report_dropped(dropped, super::PromptDropReason::SessionTornDown, cx);
         self.pending_permissions.clear();
@@ -402,15 +430,8 @@ impl AgentChatView {
         self.activity.tool_started_at.clear();
         self.activity.span = ActivitySpan::Idle;
         self.activity.pending_completion = None;
-        // The records are keyed by item index with no session identity, so they
-        // must not outlive the transcript they index — `/clear` restarts at 0
-        // and a reconnect replays the history, either of which would otherwise
-        // hang the previous conversation's numbers on the new rows.
-        self.activity.turn_records.clear();
         self.session_usage = None;
         self.overage_notice = None;
-        self.assets.clear();
-        self.fold.clear_overrides();
         self.session_config = SessionConfig::default();
         self.plan.clear();
         self.plan_collapsed = false;
@@ -426,7 +447,7 @@ impl AgentChatView {
         if self.is_read_only() {
             return;
         }
-        self.teardown_transient_session_state(cx);
+        self.teardown_transient_session_state(TranscriptFate::Discard, cx);
         // Clear the persisted id so a restart resumes the fresh session, not
         // the cleared conversation (Connected re-persists the new id).
         self.session_id = None;
@@ -438,14 +459,43 @@ impl AgentChatView {
     /// Reconnect after a terminal `Error` without losing the conversation:
     /// same teardown as [`Self::reset_for_new_session`] but keeps `session_id`,
     /// so the reconnect resumes via `session/load` and replays the history.
+    /// With nothing to resume — a handoff whose new session never connected —
+    /// nothing would replay it, so the conversation on screen stays.
     ///
     /// `resume` is the target the caller is about to reconnect with, passed in
     /// rather than re-derived from `session_id` — the gate and the request it
     /// gates are then decided in one place, by the caller that owns both.
     pub fn retry_for_reconnect(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
-        self.teardown_transient_session_state(cx);
+        let fate = if resume.is_some() {
+            TranscriptFate::Discard
+        } else {
+            TranscriptFate::Keep
+        };
+        self.teardown_transient_session_state(fate, cx);
         self.rebuild_rows();
         self.begin_connect(resume, cx);
+    }
+
+    /// Move this pane's conversation to a fresh session — another account or
+    /// agent — keeping the transcript on screen. The divider marks the switch,
+    /// and `briefing` (the recap, plus whatever else the host sends first)
+    /// goes once in front of the next prompt; see [`daruda_acp::handoff`].
+    /// The caller connects right after, as for [`Self::reset_for_new_session`].
+    pub fn begin_handoff(
+        &mut self,
+        mark: daruda_acp::handoff::HandoffMark,
+        briefing: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_read_only() {
+            return;
+        }
+        self.teardown_transient_session_state(TranscriptFate::Keep, cx);
+        self.session_id = None;
+        self.items.push(ChatItem::Handoff(mark));
+        self.briefing = briefing;
+        self.rebuild_rows();
+        self.begin_connect(None, cx);
     }
 
     /// Jump the conversation list to the bottom and re-engage `Tail` follow —

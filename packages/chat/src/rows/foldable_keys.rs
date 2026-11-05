@@ -53,6 +53,7 @@ pub(crate) fn collect_foldable_keys(items: &[ChatItem]) -> Vec<FoldKey> {
             RowKind::TailMore { .. } | RowKind::ToolGroupTailMore { .. } => {}
             RowKind::User(_)
             | RowKind::Interrupted(_)
+            | RowKind::Handoff(_)
             | RowKind::AgentItem(_)
             | RowKind::GroupThought(_)
             | RowKind::ConclusionItem(_)
@@ -87,7 +88,8 @@ pub(crate) fn collect_foldable_keys(items: &[ChatItem]) -> Vec<FoldKey> {
             | ChatItem::Compaction(_)
             | ChatItem::Permission(_)
             | ChatItem::Failure(_)
-            | ChatItem::Interrupted => {}
+            | ChatItem::Interrupted
+            | ChatItem::Handoff(_) => {}
         }
     }
     keys

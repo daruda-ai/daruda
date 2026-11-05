@@ -570,6 +570,13 @@ file_viewer:
 
 # Agent chat pane (ACP)
 agent_chat:
+  # The chat header's agent menu: continue this conversation in the same pane
+  # with another agent, or open a new chat.
+  continue_with: "Continue with"
+  # Why "Continue with" is unavailable while the pane is replying.
+  continue_busy: "Wait for the reply to finish"
+  # Why it is unavailable for a mirror or a task's chat.
+  continue_pinned: "This chat stays on its own session"
   attachment_add: "Attach files"
   attachment_remove: "Remove %{name}"
   attachment_clipboard_name: "Clipboard image"
@@ -1095,6 +1102,9 @@ settings:
   status_bar_manage_accounts: "Manage accounts…"
   # Status-bar account menu header; the active account's label sits right.
   status_bar_account_menu_title: "Account"
+  # Submenu offering the accounts again, each opening a new pane, when picking
+  # one directly would continue the focused pane's conversation in place.
+  status_bar_account_open_in_new_pane: "Open in new pane"
   # Status-bar Ports segment's dropdown trigger label — the count of
   # workspace-owned listening TCP ports found by the last scan.
   status_bar_ports_label: "Ports: %{count}"

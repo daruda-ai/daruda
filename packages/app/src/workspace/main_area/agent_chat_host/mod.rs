@@ -7,6 +7,8 @@
 //!   mode/config switching, and misc pane accessors.
 //! - [`agent_chat_connect_ops`] — the ACP connection lifecycle: lazy-connect,
 //!   manual retry, the background connect + event pump, and the `/clear` reset.
+//! - [`agent_chat_handoff_ops`] — continuing a conversation in the same pane
+//!   under another account or agent.
 //! - [`agent_chat_event_ops`] — folding one ACP event into a pane.
 //! - [`agent_chat_queue_ops`] — bottom-dock prompt send / queue / edit /
 //!   cancel routing.
@@ -16,6 +18,7 @@
 
 pub(super) mod agent_chat_connect_ops;
 pub(in crate::workspace) mod agent_chat_event_ops;
+pub(in crate::workspace) mod agent_chat_handoff_ops;
 pub(in crate::workspace) mod agent_chat_ops;
 pub(super) mod agent_chat_queue_ops;
 mod agent_default_writer;

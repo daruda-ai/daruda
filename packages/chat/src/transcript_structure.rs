@@ -33,7 +33,12 @@ pub(super) fn response_run(items: &[ChatItem], start: usize) -> Range<usize> {
     let end = items
         .iter()
         .skip(start)
-        .position(|item| matches!(item, ChatItem::UserText(_) | ChatItem::Interrupted))
+        .position(|item| {
+            matches!(
+                item,
+                ChatItem::UserText(_) | ChatItem::Interrupted | ChatItem::Handoff(_)
+            )
+        })
         .map_or(items.len(), |offset| start + offset);
     start.min(end)..end
 }
@@ -49,7 +54,8 @@ pub(super) fn is_active(item: &ChatItem) -> bool {
         | ChatItem::Permission(_)
         | ChatItem::Failure(_)
         | ChatItem::Compaction(_)
-        | ChatItem::Interrupted => false,
+        | ChatItem::Interrupted
+        | ChatItem::Handoff(_) => false,
     }
 }
 

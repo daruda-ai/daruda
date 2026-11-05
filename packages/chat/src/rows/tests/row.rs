@@ -584,3 +584,42 @@ fn item_row_finds_every_kind_that_renders_one_item() {
     assert_eq!(item_row(&rows, 3), Some(3));
     assert_eq!(item_row(&rows, 0), None, "a prompt owns no block fold");
 }
+
+/// A switch divider ends the response above it and is never folded into a
+/// run: the reply before it belongs to the earlier session.
+#[test]
+fn the_handoff_divider_is_a_top_level_row_between_responses() {
+    use daruda_acp::handoff::{HandoffMark, HandoffParty};
+    let party = |agent: &str| HandoffParty {
+        agent: agent.into(),
+        account: None,
+    };
+    let items = [
+        ChatItem::UserText("q".into()),
+        tool("a", ToolStatusView::Completed),
+        ChatItem::Handoff(HandoffMark {
+            from: party("Claude Code"),
+            to: party("Codex"),
+        }),
+        ChatItem::UserText("again".into()),
+    ];
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::of(&items),
+        StepWindow::uniform(TailWindow::All),
+        &DisplayFilter::default(),
+    );
+    let projected: Vec<_> = kinds(&rows).into_iter().map(|(k, _)| k).collect();
+    let divider = projected.iter().position(|k| *k == "handoff");
+    assert_eq!(
+        divider.map(|at| projected[at + 1]),
+        Some("user"),
+        "{projected:?}"
+    );
+    assert!(
+        rows.iter().any(|r| matches!(r.kind, RowKind::Handoff(2))),
+        "the divider names its own item: {projected:?}"
+    );
+}

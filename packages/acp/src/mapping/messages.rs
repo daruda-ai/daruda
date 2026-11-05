@@ -41,6 +41,21 @@ pub(super) fn append_user_chunk(items: &mut Vec<ChatItem>, text: &str) {
         }
         return;
     }
+    if let Some((mark, prompt)) = crate::handoff::split_handoff(text) {
+        // The recap travelled in front of the first prompt after a switch:
+        // the divider it stands for, then what the person typed.
+        if !matches!(items.last(), Some(ChatItem::Handoff(prev)) if *prev == mark) {
+            items.push(ChatItem::Handoff(mark));
+        }
+        if !prompt.trim().is_empty() {
+            push_user_text(items, prompt);
+        }
+        return;
+    }
+    push_user_text(items, text);
+}
+
+fn push_user_text(items: &mut Vec<ChatItem>, text: &str) {
     if matches!(items.last(), Some(ChatItem::UserText(prev)) if prev == text) {
         return;
     }

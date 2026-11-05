@@ -98,6 +98,8 @@ const NAME_AGENT_CHAT_NARROWED: &str = "agent-chat-narrowed";
 /// CLI token for the transcript with the custom fold editor open.
 const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
 const NAME_AGENT_CHAT_INTERRUPTED: &str = "agent-chat-interrupted";
+/// CLI token for the account-switch divider.
+const NAME_AGENT_CHAT_HANDOFF: &str = "agent-chat-handoff";
 /// CLI token for a turn stopped to avoid extra-usage billing, banner raised.
 const NAME_AGENT_CHAT_OVERAGE_STOPPED: &str = "agent-chat-overage-stopped";
 /// CLI tokens for a CLI task's read-only transcript, running and exited.
@@ -346,6 +348,7 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_NARROWED => Some(Self::AgentChatNarrowed),
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
             NAME_AGENT_CHAT_INTERRUPTED => Some(Self::AgentChatInterrupted),
+            NAME_AGENT_CHAT_HANDOFF => Some(Self::AgentChatHandoff),
             NAME_AGENT_CHAT_OVERAGE_STOPPED => Some(Self::AgentChatOverageStopped),
             NAME_AGENT_CHAT_CLI_RUNNING => Some(Self::AgentChatCliRunning),
             NAME_AGENT_CHAT_CLI_ENDED => Some(Self::AgentChatCliEnded),

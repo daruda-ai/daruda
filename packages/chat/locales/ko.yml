@@ -164,6 +164,7 @@ agent_chat:
   filter_chip: "필터: %{value}"
   interrupted: "사용자가 중단함"
   interrupted_overage: "초과 과금 방지로 중단됨"
+  handoff: "이어서 진행: %{to}"
   tail_more_show_one: "이전 단계 1개 펼치기"
   tail_more_show: "이전 단계 %{count}개 펼치기"
   tail_more_collapse_one: "최근 1개만 보기"

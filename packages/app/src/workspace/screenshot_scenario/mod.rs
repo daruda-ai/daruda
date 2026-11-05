@@ -236,6 +236,9 @@ pub(crate) enum ScreenshotScenario {
     /// it — and it is the one row whose whole job is to read as an edge rather
     /// than a message, which only a capture can confirm.
     AgentChatInterrupted,
+    /// A seeded transcript continued under another account: the divider the
+    /// switch pushes, which no settled seed reaches.
+    AgentChatHandoff,
     /// The interrupted transcript under the banner an overage stop raises —
     /// reached only by a live billed `usage_update` with the setting on.
     AgentChatOverageStopped,
@@ -896,6 +899,11 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChatInterrupted => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_interrupted_transcript_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatHandoff => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_handoff_transcript_for_shot(window, cx)
             });
         }
         ScreenshotScenario::AgentChatOverageStopped => {

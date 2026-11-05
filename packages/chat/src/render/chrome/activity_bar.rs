@@ -21,7 +21,7 @@ use super::super::tail_window::{TailChoices, tail_window_chip_label};
 use crate::pane_choice::PaneChoice;
 use crate::stamp;
 use crate::strings as s;
-use crate::view::{ActivityOptionsTab, AgentChatView, ChatContentWidth};
+use crate::view::{ActivityOptionsTab, AgentChatEvent, AgentChatView, ChatContentWidth};
 use daruda_store::project::PaneId;
 use daruda_transcript::display_filter::DisplayFilter;
 use daruda_transcript::editor::state::{FilterEditorState, FoldEditorState};
@@ -146,6 +146,12 @@ pub(in crate::render) fn activity_bar(
                 .flex_row()
                 .items_center()
                 .gap(px(theme::AGENT_CHAT_HEADER_ICON_GAP))
+                .cursor_pointer()
+                .on_click(cx.listener(|_, ev: &gpui::ClickEvent, _, cx| {
+                    cx.emit(AgentChatEvent::AgentMenuRequested {
+                        position: ev.position(),
+                    })
+                }))
                 .child(agent_icon(props.agent_icon, surface.foreground_muted))
                 .child(
                     div()

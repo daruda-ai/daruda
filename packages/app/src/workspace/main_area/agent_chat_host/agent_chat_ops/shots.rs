@@ -531,6 +531,28 @@ impl Workspace {
         );
     }
 
+    /// Open the seeded transcript with an account-switch divider before the
+    /// next prompt — pushed by the switch, never by the agent.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_handoff_transcript_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane_seeded(
+            None,
+            |v, window, cx| {
+                v.seed_transcript(
+                    daruda_chat::shot_transcript::handoff_transcript(),
+                    window,
+                    cx,
+                )
+            },
+            window,
+            cx,
+        );
+    }
+
     /// Open the interrupted transcript under the banner an overage stop
     /// leaves — set only by a live billed `usage_update`, so no seed reaches it.
     #[cfg(feature = "screenshot")]

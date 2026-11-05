@@ -18,7 +18,8 @@ use crate::agent::account::PreparedAccount;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
-use daruda_chat::view::AgentSessionStatus;
+use daruda_chat::view::{AgentChatView, AgentSessionStatus};
+use daruda_store::project::PaneCwd;
 
 struct AgentChatConnectionPlan {
     agent_id: String,
@@ -210,12 +211,29 @@ impl Workspace {
         let Some(cwd) = view.read(cx).cwd().cloned() else {
             return; // no cwd → never had a session
         };
+        self.restart_agent_chat_session(pane_id, cwd, |v, cx| v.reset_for_new_session(cx), cx);
+    }
+
+    /// Tear `pane_id`'s session down and start a fresh `session/new`, letting
+    /// `reset` decide what the view keeps — `/clear` wipes the conversation, a
+    /// handoff keeps it. The pane's resume state goes either way: the next
+    /// restart must resume the new session, not the one torn down.
+    pub(in crate::workspace) fn restart_agent_chat_session(
+        &mut self,
+        pane_id: PaneId,
+        cwd: PaneCwd,
+        reset: impl FnOnce(&mut AgentChatView, &mut Context<AgentChatView>),
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.agent_chat_view(pane_id).cloned() else {
+            return;
+        };
         crate::runs::RunsHost::release_execution(
             self.run_pane(pane_id),
             daruda_store::tasks::machine::UndeliveredReason::SessionTornDown,
             cx,
         );
-        view.update(cx, |v, cx| v.reset_for_new_session(cx));
+        view.update(cx, reset);
         if let Some(chat) = self
             .main_area
             .pane_mut(pane_id)

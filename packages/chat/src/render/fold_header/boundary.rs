@@ -77,7 +77,8 @@ pub(in crate::render) fn prompt_fold_toggle(
         .into_any_element()
 }
 
-/// The row marking where a Stop cut a run. Shares the boundary row's shape —
+/// The row marking where a Stop cut a run, or where the pane moved its
+/// conversation to another agent or account. Shares the boundary row's shape —
 /// label centred between two rules — because both say the same kind of thing:
 /// this is an edge in the transcript, not a message in it. It differs in
 /// carrying no chevron and no click: nothing is folded away here, so there is

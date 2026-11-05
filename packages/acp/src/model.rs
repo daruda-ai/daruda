@@ -83,6 +83,13 @@ pub enum ChatItem {
     /// folds into this variant after restore. ACP carries no `isMeta` flag to
     /// tell the two apart.
     Interrupted,
+    /// The pane moved its conversation to another agent or account here.
+    /// Structure, like [`Self::Interrupted`]: everything above it belongs to
+    /// the earlier session. Live, the host pushes it at the switch; on
+    /// `session/load` the new session's first prompt arrives with its recap
+    /// block in front, and [`crate::mapping`] folds that block back into this
+    /// variant. See [`crate::handoff`].
+    Handoff(crate::handoff::HandoffMark),
 }
 
 /// A tool call, updated in place as `ToolCallUpdate`s arrive.

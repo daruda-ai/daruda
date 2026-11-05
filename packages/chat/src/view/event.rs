@@ -39,6 +39,9 @@ pub enum AgentChatEvent {
         uri: String,
         mime: Option<String>,
     },
+    /// The header's agent name was clicked: the host offers the agents this
+    /// pane can continue with, as a menu at `position`.
+    AgentMenuRequested { position: Point<Pixels> },
     /// A task's prompt was just handed to the live session. Once per tagged
     /// prompt, whether it went out at once or drained from the queue; an
     /// untagged prompt reports nothing.

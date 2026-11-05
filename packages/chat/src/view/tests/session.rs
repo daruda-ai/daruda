@@ -708,3 +708,101 @@ fn permission_resolution_routes_by_id_reprojects_and_cancel_drains(cx: &mut gpui
         })
         .unwrap();
 }
+
+fn handoff_mark() -> daruda_acp::handoff::HandoffMark {
+    use daruda_acp::handoff::{HandoffMark, HandoffParty};
+    HandoffMark {
+        from: HandoffParty {
+            agent: "Claude Code".into(),
+            account: Some("work".into()),
+        },
+        to: HandoffParty {
+            agent: "Claude Code".into(),
+            account: Some("personal".into()),
+        },
+    }
+}
+
+/// A switch keeps the conversation on screen, marks where it happened, and
+/// sends the recap once in front of the next prompt only.
+#[gpui::test]
+fn begin_handoff_keeps_the_conversation_and_briefs_the_next_prompt(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::{ChatItem, PlanEntryView, PlanPriority, PlanStatus};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.session_id = Some("old".to_string());
+            view.items.push(ChatItem::UserText("hi".into()));
+            view.activity.turn_records.insert(
+                0,
+                crate::view::TurnRecord {
+                    worked_for: std::time::Duration::from_secs(3),
+                    finished_at: chrono::Local::now(),
+                    output_tokens: None,
+                },
+            );
+            view.plan.push(PlanEntryView {
+                content: "step".into(),
+                priority: PlanPriority::Medium,
+                status: PlanStatus::Pending,
+            });
+
+            view.begin_handoff(handoff_mark(), Some("RECAP".into()), cx);
+
+            assert_eq!(
+                view.items,
+                vec![
+                    ChatItem::UserText("hi".into()),
+                    ChatItem::Handoff(handoff_mark())
+                ]
+            );
+            assert!(
+                view.activity.turn_records.contains_key(&0),
+                "records index items that are still on screen"
+            );
+            assert_eq!(view.session_id, None, "the old session is not resumed");
+            assert!(view.plan.is_empty(), "the plan was the old session's");
+            assert_eq!(
+                view.status,
+                crate::view::AgentSessionStatus::Connecting,
+                "parked for the fresh session/new"
+            );
+            assert_eq!(view.wire_text_for_test("go on"), "RECAP\n\n---\n\ngo on");
+            assert_eq!(view.wire_text_for_test("again"), "again", "only once");
+        })
+        .unwrap();
+}
+
+/// Retrying a connect with nothing to resume (a switch whose new session
+/// failed) must not wipe the conversation: no replay would bring it back. The
+/// failure being retried goes; the recap is still owed to the next prompt.
+#[gpui::test]
+fn retry_without_a_resume_target_keeps_the_conversation(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::{AcpFailure, ChatItem};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items.push(ChatItem::UserText("hi".into()));
+            view.begin_handoff(handoff_mark(), Some("RECAP".into()), cx);
+            view.items.push(ChatItem::Failure(AcpFailure::unclassified(
+                "adapter exited",
+            )));
+
+            view.retry_for_reconnect(None, cx);
+
+            assert_eq!(
+                view.items,
+                vec![
+                    ChatItem::UserText("hi".into()),
+                    ChatItem::Handoff(handoff_mark())
+                ]
+            );
+            assert_eq!(view.wire_text_for_test("go"), "RECAP\n\n---\n\ngo");
+
+            view.retry_for_reconnect(Some("sess".into()), cx);
+            assert!(view.items.is_empty(), "a resume replays the history itself");
+        })
+        .unwrap();
+}

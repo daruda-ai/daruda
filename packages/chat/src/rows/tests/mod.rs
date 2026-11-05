@@ -62,6 +62,7 @@ fn kinds(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
             let k = match r.kind {
                 RowKind::User(_) => "user",
                 RowKind::Interrupted(_) => "interrupted",
+                RowKind::Handoff(_) => "handoff",
                 RowKind::ResponseHeader { .. } => "response",
                 RowKind::AgentItem(_) | RowKind::GroupThought(_) | RowKind::ConclusionItem(_) => {
                     "item"
@@ -268,6 +269,7 @@ fn marks(rows: &[RenderRow]) -> Vec<(&'static str, bool)> {
             let kind = match r.kind {
                 RowKind::User(_) => "user",
                 RowKind::Interrupted(_) => "interrupted",
+                RowKind::Handoff(_) => "handoff",
                 RowKind::ResponseHeader { .. } => "response",
                 RowKind::AgentItem(_) | RowKind::GroupThought(_) | RowKind::ConclusionItem(_) => {
                     "item"

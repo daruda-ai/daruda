@@ -4,12 +4,13 @@
 
 use crate::ui::theme;
 use crate::ui::{PopupMenu, PopupMenuItem, button_status_pill_bare, spinner};
+use crate::workspace::main_area::agent_chat_host::agent_chat_handoff_ops::ChatHold;
 use crate::workspace::main_area::pane::AccountDomain;
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{AddManagedAccount, OpenSettings, Workspace};
 use daruda_settings::labels::account_recipe_label;
 use daruda_store::accounts::{AccountRecipeId, AccountSelection, AccountsState, ManagedAccount};
-use gpui::{AnyElement, App, IntoElement, SharedString, WeakEntity, div, prelude::*, px};
+use gpui::{AnyElement, App, IntoElement, SharedString, WeakEntity, Window, div, prelude::*, px};
 
 const ACCOUNT_SLOT_MAX_WIDTH: f32 = 220.0;
 const ACCOUNT_SLOT_COMPACT_MAX_WIDTH: f32 = 150.0;
@@ -182,6 +183,7 @@ impl AccountSlot {
             login_pending,
         }
     }
+
 }
 
 /// Pure label formatter for an account's identity: `email (plan)`, else
@@ -272,8 +274,9 @@ pub(super) fn render(
                 )
                 .child(crate::ui::icons::icon(crate::ui::icons::EXPAND_MORE)),
         );
-    let builder =
-        crate::ui::menu_builder(move |menu, _window, _cx| build_account_menu(&slot, menu));
+    let builder = crate::ui::menu_builder(move |menu, window, cx| {
+        build_account_menu(&slot, menu, window, cx)
+    });
     super::menu::dropdown("status-account", trigger, builder, cx)
 }
 
@@ -290,7 +293,12 @@ fn agent_mark(recipe: AccountRecipeId, cx: &App) -> AnyElement {
 /// Header, the "System" choice (always there, so a pane can be reverted), one
 /// section per auth domain, then add-account rows — or the in-progress login
 /// and Cancel — and the "manage accounts" footer. Items are one-line dispatches.
-fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
+fn build_account_menu(
+    slot: &AccountSlot,
+    menu: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
     let menu = super::menu::with_header(
         menu,
         crate::surface::strings::settings::status_bar_account_menu_title(),
@@ -355,6 +363,11 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
             )
         })
     });
+    let menu = if offers_new_pane(slot, cx) {
+        new_pane_submenu(slot, menu.separator(), window, cx)
+    } else {
+        menu
+    };
     let menu = menu.separator();
     let menu = if slot.login_pending {
         menu.item(
@@ -413,6 +426,62 @@ fn build_account_menu(slot: &AccountSlot, menu: PopupMenu) -> PopupMenu {
                 Box::new(OpenSettings(daruda_config::BuiltinSection::Accounts)),
                 app,
             );
+        },
+    )
+}
+
+/// Whether a pick would continue the pane's conversation in place, so the menu
+/// also offers the accounts in a new pane. Asked as the menu opens, never while
+/// the status bar renders: reading the chat there would wake the workspace on
+/// every streamed token, Settings over it or not.
+fn offers_new_pane(slot: &AccountSlot, cx: &App) -> bool {
+    slot.workspace.upgrade().is_some_and(|ws| {
+        ws.read(cx).agent_chat_hold(slot.pane_id, cx) == Some(ChatHold::Conversation)
+    })
+}
+
+/// "Open in new pane ▸": the same choices, each opening a fresh pane and
+/// leaving this pane's conversation on its own session.
+fn new_pane_submenu(
+    slot: &AccountSlot,
+    menu: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let mut choices = vec![(
+        AccountSelection::SystemDefault,
+        SharedString::from(system_label(slot.domain)),
+    )];
+    choices.extend(slot.sections.iter().flat_map(|section| {
+        section.accounts.iter().map(|account| {
+            let name = account_label(account.email.as_deref(), None)
+                .unwrap_or_else(crate::surface::strings::settings::accounts_unknown_email);
+            (
+                AccountSelection::Managed(account.id),
+                SharedString::from(name),
+            )
+        })
+    }));
+    let workspace = slot.workspace.clone();
+    let pane_id = slot.pane_id;
+    menu.submenu(
+        crate::surface::strings::settings::status_bar_account_open_in_new_pane(),
+        window,
+        cx,
+        move |sub, _window, _cx| {
+            choices.iter().fold(sub, |m, (selection, name)| {
+                let workspace = workspace.clone();
+                let selection = *selection;
+                m.item(
+                    PopupMenuItem::new(name.clone()).on_click(move |_, window, app| {
+                        if let Some(ws) = workspace.upgrade() {
+                            ws.update(app, |ws, cx| {
+                                ws.open_pane_with_account(pane_id, selection, window, cx)
+                            });
+                        }
+                    }),
+                )
+            })
         },
     )
 }

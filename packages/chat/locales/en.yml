@@ -299,6 +299,9 @@ agent_chat:
   interrupted: "Stopped by user"
   # The same marker when `[usage] stop_on_overage` cut the run, not the user.
   interrupted_overage: "Stopped to avoid extra usage"
+  # The marker row where the pane moved its conversation to another agent or
+  # account. `to` is "Agent · account" or the agent alone.
+  handoff: "Continued with %{to}"
   tail_more_show_one: "Show 1 earlier step"
   tail_more_show: "Show %{count} earlier steps"
   tail_more_collapse_one: "Collapse to the last step"

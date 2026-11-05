@@ -481,6 +481,9 @@ file_viewer:
 
 # Agent chat pane (ACP)
 agent_chat:
+  continue_with: "이어서 대화할 에이전트"
+  continue_busy: "응답이 끝난 뒤에 바꿀 수 있습니다"
+  continue_pinned: "이 대화는 자기 세션에 고정되어 있습니다"
   attachment_add: "파일 첨부"
   attachment_remove: "%{name} 제거"
   attachment_clipboard_name: "클립보드 이미지"
@@ -805,6 +808,7 @@ settings:
   status_bar_add_account: "+ 계정 추가…"
   status_bar_manage_accounts: "계정 관리…"
   status_bar_account_menu_title: "계정"
+  status_bar_account_open_in_new_pane: "새 pane에서 열기"
   status_bar_ports_label: "포트: %{count}"
   status_bar_ports_summary: "워크스페이스 %{workspace} · 외부 %{external}"
   status_bar_ports_scanning: "포트 스캔 중..."

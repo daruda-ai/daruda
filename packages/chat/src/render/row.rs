@@ -48,6 +48,14 @@ pub(super) fn render_row(
         RowKind::Interrupted(ix) => {
             interrupted_row(this.stop_marker_label(*ix), this.dim_amount, cx)
         }
+        RowKind::Handoff(ix) => match this.items.get(*ix) {
+            Some(ChatItem::Handoff(mark)) => interrupted_row(
+                s::agent_chat::handoff(mark.to.label()),
+                this.dim_amount,
+                cx,
+            ),
+            _ => gpui::Empty.into_any_element(),
+        },
         RowKind::ResponseHeader {
             run_start,
             categories,
@@ -353,8 +361,8 @@ fn render_item(
                 cx,
             )
         }
-        // Owns a top-level row (`RowKind::Interrupted`), so it never reaches
-        // the per-item dispatch.
-        ChatItem::Interrupted => gpui::Empty.into_any_element(),
+        // Each owns a top-level row (`RowKind::Interrupted` / `Handoff`), so
+        // neither reaches the per-item dispatch.
+        ChatItem::Interrupted | ChatItem::Handoff(_) => gpui::Empty.into_any_element(),
     }
 }

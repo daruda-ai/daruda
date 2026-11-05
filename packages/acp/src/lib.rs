@@ -12,6 +12,7 @@
 pub mod adapter;
 pub mod connection;
 pub mod failure;
+pub mod handoff;
 mod launch_config;
 pub mod launch_env;
 pub mod login_method;

@@ -1,6 +1,5 @@
 //! Resolve and apply the launch inputs for one ACP connection plan.
 
-use super::super::agent_chat_ops::agent_name_for;
 use super::AgentChatConnectionPlan;
 use crate::agent::launch_resolve::{
     AgentLaunchSpec, ConnectCommandError, account_recipe_for_connect, resolve_launch,
@@ -8,7 +7,6 @@ use crate::agent::launch_resolve::{
 use crate::surface::strings as s;
 use crate::workspace::{Workspace, main_area::pane_tree::PaneId};
 use daruda_acp::NodeProgress;
-use daruda_chat::transcript_defaults::TranscriptDefaults;
 use daruda_chat::view::RuntimePrepPhase;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneSessionHost, PaneCwd};
@@ -48,23 +46,8 @@ impl Workspace {
         // launch the effective agent (a catalog entry, or the Claude id when the
         // catalog is somehow empty).
         let effective_id = self.open_agent_id(None);
-        let defaults = TranscriptDefaults::resolve(
-            self.mirrors.agents.iter().find(|a| a.id == effective_id),
-            self.mirrors.agent_reader_defaults,
-        );
-        if let Some(view) = self.agent_chat_view(pane_id).cloned() {
-            let id = effective_id.clone();
-            let name = agent_name_for(&self.mirrors.agents, &effective_id);
-            let question_timeout = self.question_timeout_for(&effective_id);
-            view.update(cx, |v, cx| {
-                v.switch_agent(
-                    super::super::agent_chat_ops::agent_identity(id, name),
-                    &defaults,
-                    cx,
-                );
-                v.set_question_timeout(question_timeout, cx);
-            });
-            self.update_agent_chat_agent_id(pane_id, effective_id.clone());
+        if self.agent_chat_view(pane_id).is_some() {
+            self.repoint_agent_chat(pane_id, effective_id.clone(), cx);
             self.mutate_durable(cx, |_, _| {});
         }
         Some(self.agent_launch_for(&effective_id).unwrap_or_else(|| {

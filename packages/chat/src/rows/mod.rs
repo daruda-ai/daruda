@@ -91,6 +91,9 @@ pub(crate) enum RowKind {
     /// edge between two turns, so collapsing the response it ended must not
     /// take it off screen.
     Interrupted(usize),
+    /// The marker where the pane moved its conversation to another agent or
+    /// account. Top-level for the same reason as [`RowKind::Interrupted`].
+    Handoff(usize),
     ResponseHeader {
         /// First item of the response this bar heads. Keyed off the run rather
         /// than the user turn: a restored pane can open with a run whose user
@@ -301,6 +304,7 @@ impl FilterMatchIndex {
 pub(super) enum RowSlot<'a> {
     User(usize),
     Interrupted(usize),
+    Handoff(usize),
     Response(usize),
     AgentItem(usize),
     GroupThought(usize),
@@ -321,6 +325,7 @@ impl RowKind {
         match self {
             RowKind::User(ix) => RowSlot::User(*ix),
             RowKind::Interrupted(ix) => RowSlot::Interrupted(*ix),
+            RowKind::Handoff(ix) => RowSlot::Handoff(*ix),
             RowKind::ResponseHeader { run_start, .. } => RowSlot::Response(*run_start),
             RowKind::AgentItem(ix) => RowSlot::AgentItem(*ix),
             RowKind::GroupThought(ix) => RowSlot::GroupThought(*ix),
@@ -414,6 +419,12 @@ pub(super) fn project_with_filter_index<'a>(
         // the run that follows it starts at the next item, not at this one.
         if matches!(&items[i], ChatItem::Interrupted) {
             rows.push(RenderRow::at(RowKind::Interrupted(i), false, 0));
+            i += 1;
+            tail_indent = 0;
+            continue;
+        }
+        if matches!(&items[i], ChatItem::Handoff(_)) {
+            rows.push(RenderRow::at(RowKind::Handoff(i), false, 0));
             i += 1;
             tail_indent = 0;
             continue;

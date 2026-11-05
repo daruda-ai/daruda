@@ -1,18 +1,16 @@
 //! Per-pane account switching. The invariant: **a switch never destroys
-//! work.** A pane holding something — a live turn or a conversation — keeps
-//! it, and the switch opens a fresh pane under the new account instead. Only
-//! a pane with nothing to lose reconnects in place.
+//! work.** A live turn keeps its pane, and the switch opens a fresh pane under
+//! the new account instead.
 //!
-//! **Agent chat** panes let [`switch_kind`] decide. In place reuses
-//! [`Workspace::reset_agent_chat_session`] (the same production path the
-//! `/clear` slash command already exercises — no new session-teardown
-//! machinery), which is safe precisely because there is no transcript to
-//! lose. A conversation can never follow the user to another account: the new
-//! account is a different `CLAUDE_CONFIG_DIR`, so it needs its own ACP session
-//! (neither `session/load` nor a resume crosses accounts) and the transcript
-//! stays readable only in the pane that owns it. Wanting the same pane back is
-//! spelled `/clear` first — that leaves nothing to protect, so the switch that
-//! follows is an in-place one.
+//! **Agent chat** panes let [`switch_kind`] decide. An empty pane reconnects
+//! in place through [`Workspace::reset_agent_chat_session`] (the `/clear`
+//! path). A conversation continues in the same pane: the new account is a
+//! different `CLAUDE_CONFIG_DIR`, so it needs its own ACP session (neither
+//! `session/load` nor a resume crosses accounts), and
+//! [`Workspace::continue_agent_chat_in_place`] keeps the transcript on screen
+//! and briefs that session with a recap. A conversation bound to its exact
+//! session — a mirror, a task's chat — still opens a new pane, and the account
+//! menu offers a new pane on purpose too.
 //!
 //! **Terminal** panes always open a new pane, without consulting
 //! [`switch_kind`]. There is no existing safe in-place PTY-respawn primitive
@@ -44,11 +42,12 @@ use crate::surface::strings as s;
 use crate::ui::ButtonVariant;
 use crate::ui::dialog::open_confirm_dialog;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::agent_chat_host::agent_chat_handoff_ops::{
+    ChatHold, HandoffTarget,
+};
 use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane::TabEntry;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
-use daruda_chat::agent_chat_helpers::has_conversation;
-use daruda_chat::view::AgentSessionStatus;
 
 /// What a pane would lose if the switch tore it down — so it doesn't. Also
 /// selects which pane constructor the new pane uses and which sentence the
@@ -70,22 +69,24 @@ pub(in crate::workspace) enum SwitchKind {
     /// Nothing to lose: tear down and reconnect the same pane under the new
     /// account.
     InPlace,
+    /// A conversation a fresh session can pick up: keep it on screen and
+    /// continue it under the new account in the same pane.
+    Continue,
     /// Something must survive: leave the pane alone and open a new one under
     /// the new account instead.
     NewPane(NewPaneCause),
 }
 
-/// Pure decision for an Agent chat pane. Busy work and a conversation are both
-/// things a switch must not destroy, so each keeps its pane; a pane with
-/// neither — choosing an account before the first prompt, the common case —
-/// reconnects in place.
-pub(in crate::workspace) fn switch_kind(pane_busy: bool, holds_conversation: bool) -> SwitchKind {
-    if pane_busy {
-        SwitchKind::NewPane(NewPaneCause::AgentChatBusy)
-    } else if holds_conversation {
-        SwitchKind::NewPane(NewPaneCause::AgentChatConversation)
-    } else {
-        SwitchKind::InPlace
+/// Pure decision for an Agent chat pane. Live work keeps its pane; so does a
+/// conversation bound to its exact session. Any other conversation continues
+/// in place, and an empty pane — choosing an account before the first prompt,
+/// the common case — simply reconnects.
+pub(in crate::workspace) fn switch_kind(hold: ChatHold) -> SwitchKind {
+    match hold {
+        ChatHold::Busy => SwitchKind::NewPane(NewPaneCause::AgentChatBusy),
+        ChatHold::Pinned => SwitchKind::NewPane(NewPaneCause::AgentChatConversation),
+        ChatHold::Conversation => SwitchKind::Continue,
+        ChatHold::Empty => SwitchKind::InPlace,
     }
 }
 
@@ -133,14 +134,15 @@ impl Workspace {
             return;
         }
 
-        let kind = if self.agent_chat_view(pane_id).is_some() {
-            self.agent_chat_switch_kind(pane_id, cx)
-        } else {
-            SwitchKind::NewPane(NewPaneCause::Terminal)
-        };
+        let kind = self
+            .agent_chat_hold(pane_id, cx)
+            .map_or(SwitchKind::NewPane(NewPaneCause::Terminal), switch_kind);
         match kind {
             SwitchKind::InPlace => {
                 self.switch_agent_chat_account_in_place(pane_id, selection, cx);
+            }
+            SwitchKind::Continue => {
+                self.continue_agent_chat_in_place(pane_id, HandoffTarget::Account(selection), cx);
             }
             SwitchKind::NewPane(cause) => {
                 self.confirm_open_pane_with_account(pane_id, cause, selection, window, cx);
@@ -148,27 +150,48 @@ impl Workspace {
         }
     }
 
-    /// [`switch_kind`] for an Agent chat pane, reading both of its inputs in
-    /// one borrow.
-    ///
-    /// Busy is [`AgentChatView::is_busy`] (the single activity-state source)
-    /// plus a connect handshake already in flight: that is connection
-    /// lifecycle rather than a turn, so `is_busy` doesn't cover it, but
-    /// re-triggering `connect_agent_chat` under one would race two connect
-    /// attempts.
-    fn agent_chat_switch_kind(&self, pane_id: PaneId, cx: &Context<Self>) -> SwitchKind {
-        let Some(view) = self.agent_chat_view(pane_id) else {
-            return SwitchKind::InPlace;
+    /// The account menu's explicit "open in a new pane": the person asked for
+    /// the extra pane, so no confirm, and `pane_id` keeps its own session.
+    pub(in crate::workspace) fn open_pane_with_account(
+        &mut self,
+        pane_id: PaneId,
+        selection: AccountSelection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let cause = if self.agent_chat_view(pane_id).is_some() {
+            NewPaneCause::AgentChatConversation
+        } else {
+            NewPaneCause::Terminal
         };
-        let v = view.read(cx);
-        let busy = v.is_busy()
-            || matches!(
-                v.status(),
-                AgentSessionStatus::PreparingRuntime(_)
-                    | AgentSessionStatus::Connecting
-                    | AgentSessionStatus::Handshaking(_)
-            );
-        switch_kind(busy, v.is_read_only() || has_conversation(v.items()))
+        self.open_new_pane_with_account(pane_id, cause, selection, window, cx);
+    }
+
+    /// Record `selection` as `pane_id`'s account in both wrapper caches; the
+    /// next connect resolves its `CLAUDE_CONFIG_DIR` from it
+    /// (`agent_chat_account_selection`).
+    pub(in crate::workspace) fn set_agent_chat_account(
+        &mut self,
+        pane_id: PaneId,
+        selection: AccountSelection,
+    ) {
+        if let Some(content) = self
+            .active_runtime_mut()
+            .panes
+            .iter_mut()
+            .find(|p| p.id == pane_id)
+            .and_then(|pane| pane.agent_chat_content_mut())
+        {
+            content.account = selection;
+        }
+        if let Some(chat) = self
+            .orchestrator
+            .chat
+            .as_mut()
+            .filter(|chat| chat.pane_id == pane_id)
+        {
+            chat.account = selection;
+        }
     }
 
     /// `SwitchKind::InPlace` for an Agent chat pane: set the pane's account
@@ -184,28 +207,7 @@ impl Workspace {
         selection: AccountSelection,
         cx: &mut Context<Self>,
     ) {
-        {
-            let Some(pane) = self
-                .active_runtime_mut()
-                .panes
-                .iter_mut()
-                .find(|p| p.id == pane_id)
-            else {
-                return;
-            };
-            let Some(content) = pane.agent_chat_content_mut() else {
-                return;
-            };
-            content.account = selection;
-        }
-        if let Some(chat) = self
-            .orchestrator
-            .chat
-            .as_mut()
-            .filter(|chat| chat.pane_id == pane_id)
-        {
-            chat.account = selection;
-        }
+        self.set_agent_chat_account(pane_id, selection);
         self.reset_agent_chat_session(pane_id, cx);
     }
 
@@ -433,42 +435,28 @@ mod tests {
 
     #[test]
     fn switch_kind_reconnects_in_place_only_with_nothing_to_lose() {
-        assert_eq!(switch_kind(false, false), SwitchKind::InPlace);
+        assert_eq!(switch_kind(ChatHold::Empty), SwitchKind::InPlace);
     }
 
     #[test]
-    fn switch_kind_protects_a_conversation_on_an_idle_pane() {
+    fn switch_kind_continues_a_conversation_on_an_idle_pane() {
+        assert_eq!(switch_kind(ChatHold::Conversation), SwitchKind::Continue);
+    }
+
+    #[test]
+    fn switch_kind_keeps_a_pinned_conversation_on_its_session() {
         assert_eq!(
-            switch_kind(false, true),
+            switch_kind(ChatHold::Pinned),
             SwitchKind::NewPane(NewPaneCause::AgentChatConversation)
         );
     }
 
     #[test]
-    fn switch_kind_protects_live_work_whatever_the_transcript_holds() {
-        for holds_conversation in [false, true] {
-            assert_eq!(
-                switch_kind(true, holds_conversation),
-                SwitchKind::NewPane(NewPaneCause::AgentChatBusy),
-                "a busy pane is never torn down mid-work"
-            );
-        }
-    }
-
-    /// Ties the exclusion to the decision it actually drives: an account switch on
-    /// a failure-only pane reuses the pane instead of opening a new one.
-    #[test]
-    fn a_failure_only_pane_switches_accounts_in_place() {
-        use daruda_acp::ChatItem;
-        use daruda_chat::agent_chat_helpers::has_conversation;
-
-        let items = [ChatItem::Failure(daruda_acp::AcpFailure::classify(
-            &agent_client_protocol::Error::new(-32000, "Authentication required"),
-        ))];
+    fn switch_kind_protects_live_work() {
         assert_eq!(
-            switch_kind(false, has_conversation(&items)),
-            SwitchKind::InPlace,
-            "an expired login leaves nothing to protect — reuse the pane"
+            switch_kind(ChatHold::Busy),
+            SwitchKind::NewPane(NewPaneCause::AgentChatBusy),
+            "a busy pane is never torn down mid-work"
         );
     }
 }

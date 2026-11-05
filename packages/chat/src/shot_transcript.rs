@@ -324,6 +324,31 @@ pub fn interrupted_transcript() -> Vec<ChatItem> {
     items
 }
 
+/// The seeded conversation moved to another account mid-way: the divider sits
+/// between the finished run and the next prompt, which the fresh session
+/// answers from a recap. A divider is pushed by the switch, never by the agent,
+/// so no settled seed reaches it.
+pub fn handoff_transcript() -> Vec<ChatItem> {
+    use daruda_acp::handoff::{HandoffMark, HandoffParty};
+    let mut items = sample_transcript();
+    items.push(ChatItem::Handoff(HandoffMark {
+        from: HandoffParty {
+            agent: "Claude Code".into(),
+            account: Some("work@example.com".into()),
+        },
+        to: HandoffParty {
+            agent: "Claude Code".into(),
+            account: Some("personal@example.com".into()),
+        },
+    }));
+    items.push(ChatItem::UserText(HANDOFF_PROMPT.to_string()));
+    items
+}
+
+/// The prompt after the switch — the usual reason is a spent session limit.
+const HANDOFF_PROMPT: &str =
+    "Hit the session limit on the work account — carry on from the lane lookup.";
+
 /// The prompt after the stop. Phrased as a correction, because that is what a
 /// user who just pressed Stop is doing.
 const REPROMPT: &str = "Stop there — just show me the lane lookup, not the whole module.";

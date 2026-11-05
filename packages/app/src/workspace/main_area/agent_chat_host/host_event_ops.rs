@@ -76,6 +76,9 @@ impl Workspace {
             AgentChatEvent::OpenFileExternally(path) => {
                 self.open_pane_file_externally(pane_id, path.clone(), cx);
             }
+            AgentChatEvent::AgentMenuRequested { position } => {
+                self.open_agent_menu(pane_id, *position, window, cx);
+            }
             AgentChatEvent::ResourceRightClicked {
                 position,
                 uri,

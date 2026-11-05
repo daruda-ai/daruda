@@ -621,7 +621,7 @@ after settle and forces a repaint before capture.
 | Status bar | `status-ports`, `status-flows`, `status-usage`, `status-account`, `keep-awake`, `keep-awake-failed` — each chip's popup open over seeded data |
 | Agent chat | `agent-chat`, `agent-chat-working`, `agent-chat-empty`, `agent-chat-failure`, `agent-chat-stopped`, `agent-chat-long-prompt` |
 | Orchestrator | `orchestrator-chip`, `orchestrator-tab`, `orchestrator-approval` (pending and settled host cards) |
-| Chat interaction | `agent-chat-fold`, `agent-chat-interrupted`, `agent-chat-overage-stopped`, `agent-chat-options[:<tab>]`, `agent-chat-queue-parked`, `agent-chat-queue-armed`, `input-dock-shrunk[-queue]`, `input-dock-expanded` (overflowing draft at the dock floor) |
+| Chat interaction | `agent-chat-fold`, `agent-chat-interrupted`, `agent-chat-handoff`, `agent-chat-overage-stopped`, `agent-chat-options[:<tab>]`, `agent-chat-queue-parked`, `agent-chat-queue-armed`, `input-dock-shrunk[-queue]`, `input-dock-expanded` (overflowing draft at the dock floor) |
 | Chat details | `agent-chat-running-tool`, `agent-chat-plan[-stopped]`, `agent-chat-question[-form\|-long\|-long-expanded]`, `agent-chat-thoughts[-working\|-only]`, `agent-chat-sole-reply`, `agent-chat-links`, `agent-chat-link-menu`, `agent-chat-theme` (Markdown and permission colors) |
 | Transcript boundaries | `agent-chat-tail[-open]`, `agent-chat-group-tail[-open]`, `agent-chat-subagent-tail[-open]` |
 | CLI transcript | `agent-chat-cli-running`, `agent-chat-cli-ended` |

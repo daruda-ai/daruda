@@ -665,3 +665,87 @@ async fn the_pulse_reaches_a_pane_that_settles_on_the_clock(cx: &mut TestAppCont
     })
     .expect("window is live");
 }
+
+/// Continuing with another agent keeps the conversation in the same pane:
+/// the pane is re-pointed (and that is what gets persisted), a divider marks
+/// the switch, a pinned account from the old agent's domain is dropped, and a
+/// fresh session connects.
+#[gpui::test]
+async fn continuing_with_another_agent_keeps_the_conversation_in_place(cx: &mut TestAppContext) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let dir = tempfile::tempdir().unwrap();
+
+    let (pane_id, panes_before) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.mirrors.agents = vec![
+                    daruda_config::AgentDefinition::claude_default(),
+                    codex_agent(),
+                ]
+                .into();
+                let pane = ws.create_agent_chat_pane(
+                    Some(PaneCwd::Local(dir.path().to_path_buf())),
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                ws.set_agent_chat_account(
+                    id,
+                    daruda_store::accounts::AccountSelection::Managed(
+                        daruda_store::accounts::AccountId::new(),
+                    ),
+                );
+                agent_view(ws, id).update(cx, |v, cx| {
+                    v.seed_items_for_test([daruda_acp::ChatItem::UserText("plan it".into())], cx);
+                });
+                (id, ws.active_runtime().panes.len())
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    workspace.update(cx, |ws, cx| {
+        ws.switch_pane_agent(pane_id, codex_agent().id, cx)
+    });
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.active_runtime().panes.len(), panes_before, "no new pane");
+        let pane = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == pane_id)
+            .unwrap();
+        let chat = pane.agent_chat_content().unwrap();
+        assert_eq!(chat.agent_id, codex_agent().id, "the persisted agent moved");
+        assert_eq!(
+            chat.account,
+            daruda_store::accounts::AccountSelection::SystemDefault
+        );
+        let view = agent_view(ws, pane_id).read(cx);
+        assert_eq!(view.agent_id(), codex_agent().id);
+        let [
+            daruda_acp::ChatItem::UserText(_),
+            daruda_acp::ChatItem::Handoff(mark),
+        ] = view.items()
+        else {
+            panic!(
+                "the conversation stays, with the switch marked: {:?}",
+                view.items()
+            );
+        };
+        assert_eq!(mark.to.agent, view.agent_name());
+        assert_eq!(mark.to.account, None);
+        assert_eq!(
+            view.session_id(),
+            Some(format!("test-session-{pane_id}").as_str())
+        );
+    });
+}
