@@ -48,30 +48,17 @@ pub(in crate::workspace) struct DockDrag {
     pub(super) expanded_size: f32,
 }
 
-/// Pure height formula for the bottom dock auto-grow path.
-///
-/// Given a display-row count (already clamped to `max_rows`) returns the
-/// desired dock height in pixels. The layout is stacked (`flex_col`):
-/// text area on top (full-width) + action row below (mode chip + Submit).
-///
-/// Formula: `TAB_BAR_HEIGHT + 2*PANEL_BODY_PAD_Y + DOCK_BOTTOM_INPUT_TEXT_PAD_H +
-///           rows * DOCK_BOTTOM_INPUT_EXTRA_LINE_H + DOCK_BOTTOM_INPUT_ACTION_ROW_H`
-///
-/// Each display row (soft-wrapped or hard-newline) contributes
-/// `DOCK_BOTTOM_INPUT_EXTRA_LINE_H` (20 px = `Rems(1.25) × 16 px`).
-/// The action row (`DOCK_BOTTOM_INPUT_ACTION_ROW_H`) is a fixed addend
-/// outside the per-row loop — it is not repeated with more lines.
-///
-/// Extracted as a free function so it can be unit-tested without a GPUI context.
-pub(in crate::workspace) fn bottom_dock_height_for_rows(rows: usize) -> f32 {
+/// Height of the stacked composer: fixed chrome plus configured display rows.
+/// The host passes the same pixel row height the input uses for layout.
+pub(in crate::workspace) fn bottom_dock_height_for_rows(rows: usize, row_height: f32) -> f32 {
     use crate::ui::theme::{
-        DOCK_BOTTOM_INPUT_ACTION_ROW_H, DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
-        DOCK_BOTTOM_INPUT_TEXT_PAD_H, PANEL_BODY_PAD_Y, TAB_BAR_HEIGHT,
+        DOCK_BOTTOM_INPUT_ACTION_ROW_H, DOCK_BOTTOM_INPUT_TEXT_PAD_H, PANEL_BODY_PAD_Y,
+        TAB_BAR_HEIGHT,
     };
     TAB_BAR_HEIGHT
         + 2.0 * PANEL_BODY_PAD_Y
         + DOCK_BOTTOM_INPUT_TEXT_PAD_H
-        + rows as f32 * DOCK_BOTTOM_INPUT_EXTRA_LINE_H
+        + rows as f32 * row_height
         + DOCK_BOTTOM_INPUT_ACTION_ROW_H
 }
 
@@ -112,38 +99,86 @@ impl Workspace {
         }
     }
 
-    /// The Input panel's content floors the displayed height without changing
-    /// the saved dock size: the draft's rows and action row, an attachment row,
-    /// and the queued-prompt strip's reserve. A drag cannot paint the composer
-    /// clipped, and once the draft shrinks the dock returns to the saved size.
-    pub(in crate::workspace) fn bottom_dock_display_size(&self, cx: &gpui::App) -> f32 {
+    /// One budget for the input viewport and displayed dock height. Strip
+    /// reservations match the renderers' height bounds, leaving actions visible.
+    pub(in crate::workspace) fn input_dock_layout(
+        &self,
+        cx: &gpui::App,
+    ) -> super::composer::ComposerLayout {
         use crate::ui::theme::{
             AGENT_QUESTION_STRIP_H, AGENT_QUESTION_STRIP_NARROW_H, AGENT_QUEUE_STRIP_OUTER_MAX_H,
             BUTTON_HEIGHT, GAP_SM,
         };
-
-        let dock = self.docks.bottom.read(cx);
-        if !self.input_dock.visible {
-            return dock.size;
-        }
-        let mut floor = bottom_dock_height_for_rows(self.input_dock.line_count.max(1));
+        let mut reserved = 0.0;
         if let Some(view) = self.agent_chat_view(self.active_runtime().focused_pane_id) {
             let view = view.read(cx);
             if !view.draft_attachments().is_empty() {
-                floor += BUTTON_HEIGHT + GAP_SM;
+                reserved += BUTTON_HEIGHT + GAP_SM;
             }
             if view.queue().in_strip_order().next().is_some() {
-                floor += AGENT_QUEUE_STRIP_OUTER_MAX_H;
+                reserved += AGENT_QUEUE_STRIP_OUTER_MAX_H;
             }
             if view.question_composer().is_some() {
-                floor += if self.question_strip_is_narrow(cx) {
+                reserved += if self.question_strip_is_narrow(cx) {
                     AGENT_QUESTION_STRIP_NARROW_H
                 } else {
                     AGENT_QUESTION_STRIP_H
                 };
             }
         }
-        dock.size.max(floor.min(dock.max_size))
+        let row_height = self.input_dock.font.row_height();
+        super::composer::ComposerLayout::new(
+            self.docks.bottom.read(cx).max_size,
+            bottom_dock_height_for_rows(0, row_height) + reserved,
+            row_height,
+            self.input_dock
+                .requested_max_rows(self.mirrors.agent.input_max_rows),
+        )
+    }
+
+    /// The input's transient floor leaves the user's saved dock size intact.
+    pub(in crate::workspace) fn bottom_dock_display_size(&self, cx: &gpui::App) -> f32 {
+        let dock = self.docks.bottom.read(cx);
+        if !self.input_dock.visible {
+            return dock.size;
+        }
+        dock.size.max(
+            self.input_dock_layout(cx)
+                .height(self.input_dock.line_count),
+        )
+    }
+
+    /// Reconcile only derived viewport geometry. The cap can change without a
+    /// text edit when strips appear or the question strip changes width.
+    pub(in crate::workspace) fn sync_input_dock_layout(&mut self, cx: &mut Context<Self>) -> bool {
+        let limit = self.input_dock_layout(cx).max_rows;
+        let cap_changed = self.input_dock.row_limit != limit;
+        if cap_changed {
+            self.input_dock.row_limit = limit;
+            self.input_dock
+                .input
+                .update(cx, |state, cx| state.set_auto_grow(1, limit, cx));
+        }
+        let rows = self
+            .input_dock
+            .input
+            .read(cx)
+            .display_rows()
+            .clamp(1, limit);
+        let changed = cap_changed || self.input_dock.line_count != rows;
+        self.input_dock.line_count = rows;
+        if changed {
+            self.main_area.pending_resize = true;
+            // A frame can discover this geometry while drawing. Immediate
+            // notifies raised there are lost, so invalidate after the frame.
+            let input = self.input_dock.input.entity_id();
+            let dock = self.docks.bottom.entity_id();
+            cx.defer(move |cx| {
+                gpui::App::notify(cx, input);
+                gpui::App::notify(cx, dock);
+            });
+        }
+        changed
     }
 
     pub(in crate::workspace) fn on_toggle_left_dock(
@@ -447,7 +482,7 @@ impl Workspace {
     /// single-row macro preset, so under the shared floor it paints clipped.
     pub(in crate::workspace) fn sync_bottom_dock_min_to_panel(&mut self, cx: &mut Context<Self>) {
         let min = if self.input_dock.visible {
-            bottom_dock_height_for_rows(1)
+            bottom_dock_height_for_rows(1, self.input_dock.font.row_height())
         } else {
             crate::ui::theme::DOCK_BOTTOM_MIN_H
         };
@@ -463,42 +498,17 @@ impl Workspace {
         }
     }
 
-    /// Track the shared bottom input's row count. Called from the
-    /// `InputEvent::Change` subscription in `bottom_dock/input_dock.rs` and
-    /// whenever the composer's row cap moves.
-    ///
-    /// The dock grows through [`Self::bottom_dock_display_size`], which floors
-    /// the displayed height at `bottom_dock_height_for_rows(line_count)`. The
-    /// saved size stays the user's drag, so a shorter draft — a send, or a
-    /// collapsed composer — hands the room back without undoing that drag.
-    ///
-    /// Redundant calls are guarded: typing within the same row count does not
-    /// re-lay out the panes.
+    /// Reconcile the composer's viewport and wrapped rows after an input event.
+    /// The displayed floor follows the shared budget without changing the
+    /// user's saved dock size. Stable geometry does not resize sibling panes.
     pub(in crate::workspace) fn adapt_dock_to_input_lines(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // `display_rows()` returns the soft-wrapped row count that the editor
-        // uses for its own layout (`update_auto_grow` → `text_wrapper.len()`),
-        // so the dock height stays in sync with the editor's actual height.
-        // Hard-newline count (`text().lines_len()`) would clip long soft-wrapped
-        // lines at the bottom.
-        // ⚠️ Do NOT call `window.line_height()` / `window.text_style()` here —
-        // this method runs in an event handler, outside the paint walk (AGENTS.md
-        // Pitfall #8). The per-row height constant lives in the palette instead.
-        let new_line_count = self.input_dock.input.read(cx).display_rows().max(1);
-
-        let clamped =
-            new_line_count.min(self.input_dock.max_rows(self.mirrors.agent.input_max_rows));
-        if clamped == self.input_dock.line_count {
+        if !self.sync_input_dock_layout(cx) {
             return;
         }
-        self.input_dock.line_count = clamped;
-
-        // Cached bottom dock — notify its entity (Pitfall #10); the panes take
-        // the height the new floor leaves them.
-        self.docks.bottom.update(cx, |_, cx| cx.notify());
         self.resize_all_tabs(window, cx);
         cx.notify();
     }
@@ -592,14 +602,14 @@ mod tests {
 
         // 1 row — fixed overhead + 1 line.
         assert_eq!(
-            bottom_dock_height_for_rows(1),
+            bottom_dock_height_for_rows(1, DOCK_BOTTOM_INPUT_EXTRA_LINE_H),
             fixed + DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
             "1 row should be fixed overhead + one line step"
         );
 
         // 2 rows — fixed overhead + 2 line steps.
         assert_eq!(
-            bottom_dock_height_for_rows(2),
+            bottom_dock_height_for_rows(2, DOCK_BOTTOM_INPUT_EXTRA_LINE_H),
             fixed + 2.0 * DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
             "2 rows should be fixed overhead + two line steps"
         );
@@ -607,14 +617,15 @@ mod tests {
         // At max cap (8 rows by default config) — fixed + 8 line steps.
         let max_rows = 8_usize;
         assert_eq!(
-            bottom_dock_height_for_rows(max_rows),
+            bottom_dock_height_for_rows(max_rows, DOCK_BOTTOM_INPUT_EXTRA_LINE_H),
             fixed + max_rows as f32 * DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
             "8 rows (max cap) should be fixed overhead + 8 line steps"
         );
 
         // Delta between adjacent row counts must equal exactly one extra-line step.
         assert_eq!(
-            bottom_dock_height_for_rows(3) - bottom_dock_height_for_rows(2),
+            bottom_dock_height_for_rows(3, DOCK_BOTTOM_INPUT_EXTRA_LINE_H)
+                - bottom_dock_height_for_rows(2, DOCK_BOTTOM_INPUT_EXTRA_LINE_H),
             DOCK_BOTTOM_INPUT_EXTRA_LINE_H,
             "each additional row adds exactly one extra-line step"
         );
@@ -631,11 +642,13 @@ mod tests {
         // in `adapt_dock_to_input_lines` correctly returns early when line
         // count drops.
         assert!(
-            bottom_dock_height_for_rows(1) < bottom_dock_height_for_rows(2),
+            bottom_dock_height_for_rows(1, DOCK_BOTTOM_INPUT_EXTRA_LINE_H)
+                < bottom_dock_height_for_rows(2, DOCK_BOTTOM_INPUT_EXTRA_LINE_H),
             "height must be strictly monotone: fewer rows → smaller desired"
         );
         assert!(
-            bottom_dock_height_for_rows(2) < bottom_dock_height_for_rows(3),
+            bottom_dock_height_for_rows(2, DOCK_BOTTOM_INPUT_EXTRA_LINE_H)
+                < bottom_dock_height_for_rows(3, DOCK_BOTTOM_INPUT_EXTRA_LINE_H),
             "height must be strictly monotone: fewer rows → smaller desired"
         );
     }

@@ -23,9 +23,10 @@ impl Workspace {
         self.open_agent_chat_transcript_for_shot(window, cx);
         // Leave spare editor space so attachment-induced collapse is visible.
         self.set_bottom_dock_row_preset(
-            crate::workspace::layout::ops::bottom_dock_height_for_rows(usize::from(
-                self.mirrors.agent.input_max_rows,
-            )),
+            crate::workspace::layout::ops::bottom_dock_height_for_rows(
+                usize::from(self.mirrors.agent.input_max_rows),
+                self.input_dock.font.row_height(),
+            ),
             window,
             cx,
         );

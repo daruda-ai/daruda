@@ -326,6 +326,7 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     /// checkmark without re-reading the dock entity during render.
     pub bottom_dock_size: f32,
     pub terminal_input: gpui::Entity<crate::ui::TextareaState>,
+    pub input_font: daruda_config::font::InputFontConfig,
     /// Set when the focused pane is an Agent chat pane with a turn in
     /// flight. Carries that pane's id so the bottom-input submit button
     /// renders "Stop" and routes its click to `cancel_agent_turn(pane)`

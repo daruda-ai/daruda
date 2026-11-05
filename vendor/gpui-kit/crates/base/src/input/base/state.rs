@@ -857,6 +857,22 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.display_map.ensure_text_prepared(&self.text, cx);
     }
 
+    // daruda patch: opt-in host typography updates must refit auto-grow rows.
+    /// Prepare wrapping and auto-grow rows for a host's explicit typography
+    /// change. The font must match the rendered input style; existing width,
+    /// value, selection and focus are retained.
+    pub fn set_font_metrics(
+        &mut self,
+        font: gpui::Font,
+        font_size: Pixels,
+        cx: &mut Context<Self>,
+    ) {
+        self.display_map.set_font(font, font_size, cx);
+        self.display_map.ensure_text_prepared(&self.text, cx);
+        self.mode.update_auto_grow(&self.display_map);
+        cx.notify();
+    }
+
     pub fn diagnostic_popover(&self) -> Option<Rc<crate::input::DiagnosticEntry>> {
         self.diagnostic_popover.clone()
     }
@@ -7530,6 +7546,40 @@ mod tests {
         cx.update(|_, cx| input.update(cx, |state, cx| state.set_auto_grow(1, 4, cx)));
         cx.run_until_parked();
         cx.update(|_, cx| input.read_with(cx, |state, _| assert_eq!(state.mode.rows(), 4)));
+    }
+
+    #[gpui::test]
+    fn test_explicit_font_metrics_refit_wrapped_rows_without_editing(cx: &mut TestAppContext) {
+        let mut input = None;
+        let window = cx.open_window(size(px(720.), px(400.)), |window, cx| {
+            cx.set_global(Theme::default());
+            super::super::init(cx);
+            let state = cx.new(|cx| crate::input::TextareaState::new(window, cx).auto_grow(1, 100));
+            input = Some(state.clone());
+            TestRoot(state)
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let input = input.unwrap();
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("draft ".repeat(60), window, cx);
+                state.focus(window, cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                let rows = state.display_map.wrap_row_count();
+                let value = state.value();
+                let selection = state.selected_range();
+                state.set_font_metrics(gpui::font("monospace"), px(40.), cx);
+                assert!(state.display_map.wrap_row_count() > rows);
+                assert_eq!(state.mode.rows(), state.display_map.wrap_row_count());
+                assert_eq!(state.value(), value);
+                assert_eq!(state.selected_range(), selection);
+                assert!(state.focus_handle.is_focused(window));
+            });
+        });
     }
 
     /// Regression test: `scroll_to` at end-of-buffer must produce a deferred

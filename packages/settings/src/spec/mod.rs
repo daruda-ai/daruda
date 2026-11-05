@@ -93,6 +93,14 @@ pub(super) const SELECT_SETTINGS: &[SelectSpec] = &[
         load: SelectLoad::Font,
     },
     SelectSpec {
+        setting: SelectSetting::InputFontFamily,
+        field: |w| &w.input_font_family_select,
+        read: |v| Some(SettingsPatch::InputFontFamily(v.to_owned())),
+        current: |c| SettingsPatch::InputFontFamily(c.font.input.family.clone()),
+        show: |c| c.font.input.family.clone().into(),
+        load: SelectLoad::Font,
+    },
+    SelectSpec {
         setting: SelectSetting::CursorStyle,
         field: |w| &w.cursor_style_select,
         read: |v| Some(SettingsPatch::CursorStyle(cursor_style_from_option(v))),

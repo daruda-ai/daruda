@@ -117,6 +117,14 @@ const FONT: &[Card] = &[
             t(T::AgentChatLineHeight),
         ],
     },
+    Card::Rows {
+        title: s::settings::font_domain_input,
+        rows: &[
+            sel(S::InputFontFamily),
+            t(T::InputFontSize),
+            t(T::InputLineHeight),
+        ],
+    },
 ];
 
 const TERMINAL: &[Card] = &[

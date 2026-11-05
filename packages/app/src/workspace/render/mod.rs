@@ -82,6 +82,15 @@ enum FrameBody {
 impl Workspace {
     /// Everything a frame has to settle before it is drawn.
     fn prepare_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) -> FramePrep {
+        if self.settings_view().is_none()
+            && self.workspace_page.is_none()
+            && self.input_dock.visible
+            && self.docks.bottom.read(cx).is_open
+        {
+            // SAFETY: reconcile only transient composer viewport geometry before
+            // frame construction; hidden surfaces are gated before entity reads.
+            self.sync_input_dock_layout(cx);
+        }
         if self.main_area.pending_resize {
             self.resize_all_tabs(window, cx);
         }

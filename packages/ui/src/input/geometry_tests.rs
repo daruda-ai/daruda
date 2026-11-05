@@ -2,7 +2,8 @@ use super::*;
 use crate::select::{self, SelectOption, SelectState};
 use crate::test_support::init_gpui_component;
 use gpui::{
-    AppContext as _, Bounds, Context, Pixels, Render, TestAppContext, VisualTestContext, Window,
+    AppContext as _, Bounds, Context, Focusable as _, Pixels, Render, TestAppContext,
+    VisualTestContext, Window,
 };
 
 #[derive(Clone, Copy)]
@@ -319,4 +320,95 @@ fn field_geometry_is_stable_in_dark_theme(cx: &mut TestAppContext) {
 #[gpui::test]
 fn field_geometry_is_stable_in_light_theme(cx: &mut TestAppContext) {
     verify_geometry(cx, true);
+}
+
+struct ComposerFontProbe {
+    bottom: Entity<TextareaState>,
+    shared: Entity<TextareaState>,
+    standard: Entity<InputState>,
+    font: daruda_config::font::InputFontConfig,
+}
+
+impl Render for ComposerFontProbe {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .w(px(500.))
+            .flex()
+            .flex_col()
+            .child(input_with_action_grow_font(
+                &self.bottom,
+                div(),
+                cx,
+                0,
+                InputGrowMode::AutoGrow,
+                &self.font,
+            ))
+            .child(input_with_action_grow(
+                &self.shared,
+                div(),
+                cx,
+                1,
+                InputGrowMode::AutoGrow,
+            ))
+            .child(input(&self.standard, cx, 2))
+    }
+}
+
+#[gpui::test]
+fn bottom_input_font_changes_leave_other_inputs_unchanged(cx: &mut TestAppContext) {
+    init_gpui_component(cx);
+    let mut probe_entity = None;
+    let window = cx.add_window(|window, cx| {
+        let probe = cx.new(|cx| {
+            let mut textarea = || {
+                cx.new(|cx| {
+                    let mut state = TextareaState::new(window, cx).auto_grow(1, 8);
+                    state.set_value("draft\nsecond", window, cx);
+                    state
+                })
+            };
+            let bottom = textarea();
+            let shared = textarea();
+            let standard = cx.new(|cx| InputState::new(window, cx));
+            ComposerFontProbe {
+                bottom,
+                shared,
+                standard,
+                font: daruda_config::font::InputFontConfig::default(),
+            }
+        });
+        probe_entity = Some(probe.clone());
+        gpui_component::Root::new(probe, window, cx)
+    });
+    let probe = probe_entity.unwrap();
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    vcx.run_until_parked();
+    let before = window
+        .update(&mut vcx, |_, window, cx| {
+            let bottom = probe.read(cx).bottom.clone();
+            bottom.update(cx, |state, cx| state.focus(window, cx));
+            let probe = probe.read(cx);
+            (
+                probe.shared.read(cx).line_height(),
+                probe.standard.read(cx).line_height(),
+            )
+        })
+        .unwrap();
+    probe.update(&mut vcx, |probe, cx| {
+        probe.font.size = 24.;
+        probe.font.line_height = 1.5;
+        probe.font.family = daruda_config::FontConfig::default().editor.family;
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    window
+        .update(&mut vcx, |_, window, cx| {
+            let probe = probe.read(cx);
+            assert_eq!(probe.bottom.read(cx).line_height(), Some(px(36.)));
+            assert_eq!(probe.shared.read(cx).line_height(), before.0);
+            assert_eq!(probe.standard.read(cx).line_height(), before.1);
+            assert_eq!(probe.bottom.read(cx).value().as_ref(), "draft\nsecond");
+            assert!(probe.bottom.read(cx).focus_handle(cx).is_focused(window));
+        })
+        .unwrap();
 }

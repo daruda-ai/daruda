@@ -15,6 +15,7 @@ impl Workspace {
             return;
         }
         self.input_dock.visible = true;
+        self.sync_input_dock_layout(cx);
         self.sync_bottom_dock_min_to_panel(cx);
         cx.notify();
     }
@@ -31,10 +32,6 @@ impl Workspace {
             return;
         }
         self.input_dock.expanded = expanded;
-        let max_rows = self.input_dock.max_rows(self.mirrors.agent.input_max_rows);
-        self.input_dock
-            .input
-            .update(cx, |state, cx| state.set_auto_grow(1, max_rows, cx));
         self.adapt_dock_to_input_lines(window, cx);
         cx.notify();
     }

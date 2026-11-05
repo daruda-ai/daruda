@@ -166,11 +166,22 @@ impl Workspace {
         config: &daruda_config::Config,
         cx: &mut Context<Self>,
     ) {
-        // Also baked in at construction. No `&mut Window` needed, so inline.
-        let new_max_rows = self.input_dock.max_rows(config.agent.input_max_rows);
-        self.input_dock
-            .input
-            .update(cx, |s, cx| s.set_auto_grow(1, new_max_rows, cx));
+        let font_changed = self.input_dock.font != config.font.input;
+        self.input_dock.font = config.font.input.clone();
+        if font_changed {
+            self.input_dock.input.update(cx, |s, cx| {
+                // WORKAROUND: input prepaint rewraps without refitting auto-grow
+                // rows - prepare only this composer's explicit font change.
+                s.set_font_metrics(
+                    gpui::font(config.font.input.family.clone()),
+                    gpui::px(config.font.input.size),
+                    cx,
+                );
+            });
+            self.sync_bottom_dock_min_to_panel(cx);
+            self.main_area.pending_resize = true;
+        }
+        self.sync_input_dock_layout(cx);
     }
 
     /// Resync the dock height after an auto-grow cap change (idempotent via

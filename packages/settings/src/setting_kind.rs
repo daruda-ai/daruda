@@ -10,6 +10,8 @@ pub(crate) enum TextSetting {
     EditorLineHeight,
     AgentChatFontSize,
     AgentChatLineHeight,
+    InputFontSize,
+    InputLineHeight,
     WindowOpacity,
     ScrollbackMaxRows,
     TerminalInsetX,
@@ -67,6 +69,7 @@ pub(crate) enum SelectSetting {
     TerminalFontFamily,
     EditorFontFamily,
     AgentChatFontFamily,
+    InputFontFamily,
     CursorStyle,
     RenderMaxFps,
     SyntaxTheme,
@@ -120,7 +123,7 @@ pub(crate) enum BoolSetting {
 // click of the new widget.
 impl TextSetting {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 34] = [
+    pub(crate) const ALL: [Self; 36] = [
         Self::TerminalFontSize,
         Self::TerminalLineHeight,
         Self::TerminalCellWidth,
@@ -128,6 +131,8 @@ impl TextSetting {
         Self::EditorLineHeight,
         Self::AgentChatFontSize,
         Self::AgentChatLineHeight,
+        Self::InputFontSize,
+        Self::InputLineHeight,
         Self::WindowOpacity,
         Self::ScrollbackMaxRows,
         Self::TerminalInsetX,
@@ -169,6 +174,8 @@ impl TextSetting {
             Self::EditorLineHeight => (),
             Self::AgentChatFontSize => (),
             Self::AgentChatLineHeight => (),
+            Self::InputFontSize => (),
+            Self::InputLineHeight => (),
             Self::WindowOpacity => (),
             Self::ScrollbackMaxRows => (),
             Self::TerminalInsetX => (),
@@ -202,13 +209,14 @@ impl TextSetting {
 
 impl SelectSetting {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 16] = [
+    pub(crate) const ALL: [Self; 17] = [
         Self::Language,
         Self::TerminalPreset,
         Self::UiPreset,
         Self::TerminalFontFamily,
         Self::EditorFontFamily,
         Self::AgentChatFontFamily,
+        Self::InputFontFamily,
         Self::CursorStyle,
         Self::RenderMaxFps,
         Self::SyntaxTheme,
@@ -232,6 +240,7 @@ impl SelectSetting {
             Self::TerminalFontFamily => (),
             Self::EditorFontFamily => (),
             Self::AgentChatFontFamily => (),
+            Self::InputFontFamily => (),
             Self::CursorStyle => (),
             Self::RenderMaxFps => (),
             Self::SyntaxTheme => (),

@@ -356,6 +356,7 @@ impl Workspace {
             grid_columns: self.mirrors.panels_grid_columns,
             bottom_dock_size,
             terminal_input: self.input_dock.input.clone(),
+            input_font: self.input_dock.font.clone(),
             agent_stop_pane,
             agent_mode,
             agent_config_options,

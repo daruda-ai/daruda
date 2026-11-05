@@ -5,6 +5,7 @@
 //! active at a time. Docks are independent from the center pane
 //! split tree — they resize via drag handles but do not split.
 
+pub(in crate::workspace) mod composer;
 pub(in crate::workspace) mod diff_policy;
 pub(in crate::workspace) mod docks;
 pub(in crate::workspace) mod ops;

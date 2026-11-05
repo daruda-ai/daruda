@@ -16,6 +16,9 @@ macro_rules! with_settings_fields {
             AgentChatFontFamily: font.agent_chat.family, "font.agent_chat.family", clone, |value: String| value;
             AgentChatFontSize: font.agent_chat.size, "font.agent_chat.size", copy, |value: f32| f64::from(value);
             AgentChatLineHeight: font.agent_chat.line_height, "font.agent_chat.line_height", copy, |value: f32| f64::from(value);
+            InputFontFamily: font.input.family, "font.input.family", clone, |value: String| value;
+            InputFontSize: font.input.size, "font.input.size", copy, |value: f32| f64::from(value);
+            InputLineHeight: font.input.line_height, "font.input.line_height", copy, |value: f32| f64::from(value);
             AgentUseModifierToSend: agent.use_modifier_to_send, "agent.use_modifier_to_send", copy, |value: bool| value;
             AgentUseReadingWidth: agent.use_reading_width, "agent.use_reading_width", copy, |value: bool| value;
             AgentToolSummaryLabels: agent.tool_summary_labels, "agent.tool_summary_labels", copy, |value: bool| value;

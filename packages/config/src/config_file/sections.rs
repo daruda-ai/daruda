@@ -102,6 +102,14 @@ pub(super) fn patch_font_config(doc: &mut toml_edit::DocumentMut, font: &FontCon
             toml_edit::value(f64::from(font.agent_chat.line_height)),
         );
     });
+    patch_font_domain(doc, "input", |table| {
+        table.insert("family", toml_edit::value(font.input.family.clone()));
+        table.insert("size", toml_edit::value(f64::from(font.input.size)));
+        table.insert(
+            "line_height",
+            toml_edit::value(f64::from(font.input.line_height)),
+        );
+    });
 }
 
 pub(super) fn font_key(

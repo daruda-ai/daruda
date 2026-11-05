@@ -440,6 +440,38 @@ pub fn input_with_action_grow<T: InputTabSpec>(
         // config reload via `set_auto_grow`).
         InputGrowMode::AutoGrow => composer_input(state, cx),
     };
+    input_with_action_layout(state, action, cx, tab, grow_mode, inner)
+}
+
+/// Opt-in typography for a host-owned composer. Other input factories retain
+/// their own metrics, including the shared `InputPanel` composer.
+pub fn input_with_action_grow_font<T: InputTabSpec>(
+    state: &impl TextState,
+    action: impl IntoElement,
+    cx: &App,
+    tab: T,
+    grow_mode: InputGrowMode,
+    font: &daruda_config::font::InputFontConfig,
+) -> AnyElement {
+    let inner = composer_input(state, cx)
+        .font_family(SharedString::from(font.family.clone()))
+        .text_size(px(font.size))
+        .line_height(px(font.row_height()));
+    let inner = match grow_mode {
+        InputGrowMode::Fill => inner.h_full(),
+        InputGrowMode::AutoGrow => inner,
+    };
+    input_with_action_layout(state, action, cx, tab, grow_mode, inner)
+}
+
+fn input_with_action_layout<T: InputTabSpec>(
+    state: &impl TextState,
+    action: impl IntoElement,
+    cx: &App,
+    tab: T,
+    grow_mode: InputGrowMode,
+    inner: Input,
+) -> AnyElement {
     let inner = tab.apply(state, cx, inner);
     let t = d::current(cx);
     // Focus-within accent border.

@@ -655,3 +655,32 @@ fn patch_config_file_clamps_out_of_range_values() {
     assert!(reloaded.font.terminal.size <= 72.0);
     assert!(reloaded.window.opacity <= 1.0);
 }
+
+#[test]
+fn bottom_input_font_saves_and_resets_without_changing_other_fonts() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let mut original = Config::default();
+    original.font.agent_chat.size = 17.0;
+    original.font.editor.size = 19.0;
+    patch_config_file_to(&original, &path).unwrap();
+    for patch in [
+        SettingsPatch::InputFontFamily("Iosevka".into()),
+        SettingsPatch::InputFontSize(24.0),
+        SettingsPatch::InputLineHeight(1.5),
+    ] {
+        apply_settings_patch_to(&patch, &path).unwrap();
+    }
+    let before = Config::load_from(&path);
+    assert_eq!(before.font.input.family, "Iosevka");
+    assert_eq!(before.font.input.row_height(), 36.0);
+    let default = SettingsPatch::InputFontSize(original.font.input.size);
+    let after = reset_settings_field_to_if_unchanged(&default, &before, &path).unwrap();
+    assert_eq!(after.font.input.size, original.font.input.size);
+    assert_eq!(after.font.input.family, "Iosevka");
+    assert_eq!(after.font.input.line_height, 1.5);
+    assert_eq!(after.font.agent_chat.size, 17.0);
+    assert_eq!(after.font.editor.size, 19.0);
+    patch_config_file_to(&before, &path).unwrap();
+    assert_eq!(Config::load_from(&path).font.input, before.font.input);
+}

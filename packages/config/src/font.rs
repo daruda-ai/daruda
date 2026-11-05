@@ -8,6 +8,8 @@ pub struct FontConfig {
     pub terminal: TerminalFontConfig,
     pub editor: EditorFontConfig,
     pub agent_chat: AgentChatFontConfig,
+    /// Typography for the shared bottom dock input only.
+    pub input: InputFontConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -47,6 +49,32 @@ pub struct AgentChatFontConfig {
     pub size: f32,
     /// Line-height multiplier.
     pub line_height: f32,
+}
+
+/// Font used only by the bottom dock composer, independent of form fields.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct InputFontConfig {
+    pub family: String,
+    pub size: f32,
+    pub line_height: f32,
+}
+
+impl Default for InputFontConfig {
+    fn default() -> Self {
+        Self {
+            family: SYSTEM_UI_FONT_FAMILY.to_string(),
+            size: 12.0,
+            line_height: 20.0 / 12.0,
+        }
+    }
+}
+
+impl InputFontConfig {
+    /// Whole logical pixels shared by editor layout and the dock height floor.
+    pub fn row_height(&self) -> f32 {
+        (self.size * self.line_height).ceil().max(1.0)
+    }
 }
 
 impl Default for TerminalFontConfig {
@@ -96,6 +124,8 @@ impl FontConfig {
         let e = &mut self.editor;
         e.size = clamp_or(e.size, 6.0, 72.0, d.editor.size);
         e.line_height = clamp_or(e.line_height, 0.5, 2.0, d.editor.line_height);
+        self.input.size = clamp_or(self.input.size, 6.0, 72.0, d.input.size);
+        self.input.line_height = clamp_or(self.input.line_height, 0.5, 2.0, d.input.line_height);
         let c = &mut self.agent_chat;
         c.size = clamp_or(c.size, 6.0, 72.0, d.agent_chat.size);
         c.line_height = clamp_or(c.line_height, 0.5, 2.0, d.agent_chat.line_height);
@@ -113,6 +143,7 @@ struct FontConfigInput {
     terminal: Option<TerminalFontConfigInput>,
     editor: Option<TextFontConfigInput>,
     agent_chat: Option<TextFontConfigInput>,
+    input: Option<InputFontConfig>,
     family: Option<String>,
     size: Option<f32>,
     editor_size: Option<f32>,
@@ -152,6 +183,7 @@ impl<'de> Deserialize<'de> for FontConfig {
         let agent_chat = input.agent_chat.unwrap_or_default();
 
         Ok(Self {
+            input: input.input.unwrap_or_default(),
             terminal: TerminalFontConfig {
                 family: terminal
                     .family

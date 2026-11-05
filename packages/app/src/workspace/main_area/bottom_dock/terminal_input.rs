@@ -66,6 +66,7 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
             }
         })),
     };
+    let submit = submit.debug_selector(|| "composer-submit".into());
     // When the focused pane is an Agent chat pane, selector chips sit to the
     // left of the Submit button (all in the input's right-hand action column):
     // the mode chip (permission mode), then one chip per Model / ThoughtLevel
@@ -186,12 +187,13 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
                 .flex_1()
                 .min_h_0()
                 .flex()
-                .child(crate::ui::input_with_action_grow(
+                .child(crate::ui::input_with_action_grow_font(
                     &state,
                     action,
                     cx,
                     0_isize,
                     crate::ui::InputGrowMode::AutoGrow,
+                    &snap.input_font,
                 )),
         );
     if let Some((pane, names)) = &snap.attachment_draft
@@ -247,6 +249,7 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     }
     let ws = snap.workspace.0.clone();
     super::bottom_panel_body()
+        .debug_selector(|| "bottom-input-body".into())
         .capture_action(move |_: &crate::ui::InputPaste, _, cx| {
             if let Some(ws) = ws_for_paste.upgrade() {
                 ws.update(cx, |ws, cx| ws.composer_paste_action(cx));

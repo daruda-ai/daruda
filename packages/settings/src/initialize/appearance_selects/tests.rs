@@ -8,6 +8,7 @@ fn off_list_fonts_are_selected_independently(cx: &mut gpui::TestAppContext) {
         config.font.terminal.family = "Daruda off-list terminal".into();
         config.font.editor.family = "Daruda off-list editor".into();
         config.font.agent_chat.family = daruda_config::SYSTEM_UI_FONT_FAMILY.into();
+        config.font.input.family = "Daruda off-list bottom input".into();
         let selects = AppearanceSelects::new(&config, window, cx);
         for (state, expected) in [
             (
@@ -21,6 +22,10 @@ fn off_list_fonts_are_selected_independently(cx: &mut gpui::TestAppContext) {
             (
                 &selects.agent_chat_font_family_select,
                 config.font.agent_chat.family.as_str(),
+            ),
+            (
+                &selects.input_font_family_select,
+                config.font.input.family.as_str(),
             ),
         ] {
             assert_eq!(

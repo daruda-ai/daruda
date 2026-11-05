@@ -1638,3 +1638,17 @@ catalog; Settings selects a stable namespaced ID. Missing packages fall back to
 Icons without changing the saved choice. Disconnected agent panes use a static
 gray plug, distinct from connected Idle speech bubbles. See the
 [status icon theme format](examples/status-icon-themes/README.md) for authoring and limits.
+
+### Bottom dock input typography
+
+Settings → Font → Bottom Dock Input controls `font.input.family`, `size`,
+and `line_height`. Only the shared bottom dock composer uses these values;
+chat transcript prose, form fields, search inputs, and the Git commit composer
+keep their own typography. Defaults preserve the system UI face, 12px text,
+and 20px rows. Live changes preserve the draft and focus and resize the dock's
+content floor using the same row height as the editor.
+
+The composer caps visible rows by the bottom dock's pixel budget after reserving
+its actions, attachments, queued prompts, and question strip. Larger fonts and
+expanded drafts scroll internally when they exceed that budget. Removing a
+strip restores the available rows without changing the draft or saved dock size.

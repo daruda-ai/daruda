@@ -242,8 +242,11 @@ pub struct SettingsView {
     editor_font_size_input: Entity<InputState>,
     editor_line_height_input: Entity<InputState>,
     agent_chat_font_family_select: Entity<SelectState>,
+    input_font_family_select: Entity<SelectState>,
     agent_chat_font_size_input: Entity<InputState>,
+    input_font_size_input: Entity<InputState>,
     agent_chat_line_height_input: Entity<InputState>,
+    input_line_height_input: Entity<InputState>,
     // Cursor
     cursor_style_select: Entity<SelectState>,
     keep_awake_mode_select: Entity<SelectState>,

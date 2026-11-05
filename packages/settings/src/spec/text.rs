@@ -143,6 +143,33 @@ pub(crate) const TEXT_SETTINGS: &[TextSpec] = &[
         },
     },
     TextSpec {
+        setting: TextSetting::InputFontSize,
+        placeholder: || s::settings::placeholder_example("12"),
+        field: |w| &w.input_font_size_input,
+        show: |c| c.font.input.size.to_string(),
+        current: |c| SettingsPatch::InputFontSize(c.font.input.size),
+        parse: |input, cx| {
+            bounded(
+                input,
+                6.0..=72.0,
+                || s::settings::err_input_font_size().into(),
+                cx,
+            )
+            .map(SettingsPatch::InputFontSize)
+        },
+    },
+    TextSpec {
+        setting: TextSetting::InputLineHeight,
+        placeholder: || s::settings::placeholder_example("1.67"),
+        field: |w| &w.input_line_height_input,
+        show: |c| c.font.input.line_height.to_string(),
+        current: |c| SettingsPatch::InputLineHeight(c.font.input.line_height),
+        parse: |input, cx| {
+            bounded(input, 0.5..=2.0, || s::settings::err_spacing().into(), cx)
+                .map(SettingsPatch::InputLineHeight)
+        },
+    },
+    TextSpec {
         setting: TextSetting::WindowOpacity,
         placeholder: || s::settings::placeholder_range("0.1", "1.0"),
         field: |w| &w.opacity_input,

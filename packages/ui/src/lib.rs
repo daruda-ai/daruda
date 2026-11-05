@@ -101,8 +101,8 @@ pub use input::{
     CompletionProvider, EditorState, FieldState, InputEnter, InputEscape, InputEvent,
     InputGrowMode, InputIndent, InputMoveDown, InputMoveUp, InputOutdent, InputPaste, InputState,
     Rope, RopeExt, TextDecoration, TextState, TextareaState, cursor_display_row, form_input, input,
-    input_on, input_with_action, input_with_action_grow, readonly_form_input, readonly_input,
-    search_input, search_input_on,
+    input_on, input_with_action, input_with_action_grow, input_with_action_grow_font,
+    readonly_form_input, readonly_input, search_input, search_input_on,
 };
 pub use input_panel::{
     InputPanel, InputPanelEvent, InputPanelLayout, PanelAction, PanelActionVariant,

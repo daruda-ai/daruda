@@ -134,7 +134,9 @@ owns authoring labels, stacked fields, validation and footer bands.
 owns viewport sizing; set `PanelLimits.chrome` to the actual outer insets.
 
 Composers go through `input_with_action_grow` or `InputPanel`, whose text
-metrics share one internal factory. Prose and code editors use the editor
+metrics share one internal factory. The bottom dock alone opts into
+`input_with_action_grow_font`, passing its `font.input` settings explicitly;
+standard fields and the Git commit `InputPanel` retain their own metrics. Prose and code editors use the editor
 factories and keep their configured font, line height and row/scroll behavior.
 `scripts/lint-input-factories.sh` prevents raw construction in other packages;
 it also covers raw Button/Select construction, including type aliases.
@@ -293,7 +295,7 @@ The patches this package's wrappers depend on:
 | `Checkbox::indeterminate` | `checkbox` callers with a partial selection (the transcript's display filter) |
 | `PopupMenu::{small, chrome, max_h_in_window, pin_head, pin_foot}`, `PopupMenuItem::tooltip` | `menu` (`menu_builder`, `stacked_menu_builder`) and the app's status-bar menus |
 | `PopoverState::trigger_bounds` | popover panels sized against the room below their trigger (transcript editors) |
-| `InputBaseState::{on_empty_text_input, has_marked_text}` and composition-finalizing `Change` | composer question shortcuts and IME-safe arrow navigation |
+| `InputBaseState::{on_empty_text_input, has_marked_text, set_font_metrics}` and composition-finalizing `Change` | composer question shortcuts and IME-safe arrow navigation |
 | `InputState::set_value` emits `InputEvent::Change`; `set_value_silently` keeps the silent write | every field whose derived state follows `Change` |
 | `Input::from_state` + public `TextInputState`; `Input::{input_padding, editor_background, show_scrollbar}` | `input`, `code_editor` (`TextState`, `FieldState`, `file_viewer_editor`, `embedded_code_viewer`) |
 | `LineDecoration`, `set_line_decorations`, `set_highlight_override`, `scroll_size`, `display_rows`, `move_cursor_to_end` | editor callers through `code_editor`'s re-exports: the diff and output embeds, the file viewer and its scrollbar, the composer |

@@ -18,11 +18,13 @@ pub(in crate::workspace) struct InputDock {
     /// `InputPanel` composite (the commit input still uses `InputPanel` for
     /// its dropdown + floating-bar layout).
     pub(in crate::workspace) input: gpui::Entity<crate::ui::TextareaState>,
+    pub(in crate::workspace) font: daruda_config::font::InputFontConfig,
+    /// Effective auto-grow limit after reserving dock chrome and strips.
+    pub(in crate::workspace) row_limit: usize,
     /// Keeps the input's subscription alive with the Workspace.
     _subscription: Subscription,
-    /// Cached line count of `input`. Updated on every `InputEvent::Change`
-    /// so `adapt_dock_to_input_lines` can guard against redundant resizes
-    /// without re-reading the entity on every render cycle.
+    /// Displayed rows after applying the viewport budget. Text changes and
+    /// visible frame preparation reconcile soft wrapping and strip changes.
     pub(in crate::workspace) line_count: usize,
     /// The user expanded the composer past `[agent] input_max_rows`; an
     /// emptied draft collapses it again.
@@ -60,7 +62,7 @@ pub(in crate::workspace) struct SlashMenu {
 impl InputDock {
     /// Rows the composer may grow to: the configured cap, or the setting's
     /// ceiling while the user has expanded it.
-    pub(in crate::workspace) fn max_rows(&self, configured: u8) -> usize {
+    pub(in crate::workspace) fn requested_max_rows(&self, configured: u8) -> usize {
         if self.expanded {
             usize::from(daruda_config::agent::INPUT_MAX_ROWS_MAX)
         } else {
@@ -117,6 +119,8 @@ impl InputDock {
         );
         Self {
             input: terminal_input,
+            font: config.font.input.clone(),
+            row_limit: usize::from(config.agent.input_max_rows),
             _subscription: terminal_input_sub,
             line_count: 1,
             expanded: false,

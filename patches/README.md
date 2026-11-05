@@ -874,3 +874,14 @@ The composer handles Escape in the bubble phase so input-owned cancellation
 `base/src/input/base/state.rs`, Escape returns after unmarking composition,
 preventing that same gesture from reaching host stop actions. Preserve this
 `daruda patch:` branch when re-vendoring. Composer Enter skips marked text.
+
+## Bottom dock explicit input font metrics
+
+`vendor/gpui-kit/crates/base/src/input/base/state.rs` retains the opt-in
+`set_font_metrics` method. Input prepaint changes wrapping fonts without
+refitting auto-grow rows. The bottom dock uses this method on a live
+`font.input` change to prepare wrapped rows before its height resync; the
+rendered Input receives the same font separately. Existing inputs keep their
+rendering and measurement behavior. The regression test
+`test_explicit_font_metrics_refit_wrapped_rows_without_editing` checks that
+wrapping and row counts follow the font while value, selection and focus stay.

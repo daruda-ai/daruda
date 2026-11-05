@@ -7,6 +7,7 @@ pub(super) struct AppearanceSelects {
     pub(super) terminal_font_family_select: Entity<SelectState>,
     pub(super) editor_font_family_select: Entity<SelectState>,
     pub(super) agent_chat_font_family_select: Entity<SelectState>,
+    pub(super) input_font_family_select: Entity<SelectState>,
 }
 
 impl AppearanceSelects {
@@ -60,6 +61,7 @@ impl AppearanceSelects {
         let terminal_font_options = font_select_options(cx, &[&config.font.terminal.family]);
         let editor_font_options = font_select_options(cx, &[&config.font.editor.family]);
         let agent_chat_font_options = font_select_options(cx, &[&config.font.agent_chat.family]);
+        let input_font_options = font_select_options(cx, &[&config.font.input.family]);
         let terminal_font_family = SharedString::from(config.font.terminal.family.clone());
         let terminal_font_family_select = cx.new(|cx| {
             select::state_with_options(
@@ -82,6 +84,10 @@ impl AppearanceSelects {
                 cx,
             )
         });
+        let input_font_family = SharedString::from(config.font.input.family.clone());
+        let input_font_family_select = cx.new(|cx| {
+            select::state_with_options(input_font_options, Some(&input_font_family), window, cx)
+        });
 
         Self {
             language_select,
@@ -90,6 +96,7 @@ impl AppearanceSelects {
             terminal_font_family_select,
             editor_font_family_select,
             agent_chat_font_family_select,
+            input_font_family_select,
         }
     }
 }

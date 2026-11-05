@@ -38,7 +38,17 @@ pub(super) fn text(setting: TextSetting) -> RowCopy {
             label: s::settings::label_font_size,
             hint: String::new,
         },
+
+        TextSetting::InputFontSize => RowCopy {
+            label: s::settings::label_font_size,
+            hint: String::new,
+        },
         TextSetting::AgentChatLineHeight => RowCopy {
+            label: s::settings::label_line_height,
+            hint: s::settings::hint_line_height,
+        },
+
+        TextSetting::InputLineHeight => RowCopy {
             label: s::settings::label_line_height,
             hint: s::settings::hint_line_height,
         },
@@ -176,6 +186,11 @@ pub(super) fn select(setting: SelectSetting) -> RowCopy {
             hint: String::new,
         },
         SelectSetting::AgentChatFontFamily => RowCopy {
+            label: s::settings::label_font_family,
+            hint: String::new,
+        },
+
+        SelectSetting::InputFontFamily => RowCopy {
             label: s::settings::label_font_family,
             hint: String::new,
         },

@@ -452,3 +452,54 @@ fn to_ansi_palette_maps_normal_to_0_7_and_bright_to_8_15() {
         ]
     );
 }
+
+#[test]
+fn bottom_input_font_round_trips_independently() {
+    let cfg: Config =
+        toml::from_str("[font.input]\nfamily = 'Iosevka'\nsize = 24.0\nline_height = 1.5\n")
+            .unwrap();
+    let value = toml::Value::try_from(&cfg).unwrap();
+    let input = value["font"]
+        .get("input")
+        .expect("bottom input font retained");
+    assert_eq!(input["family"].as_str(), Some("Iosevka"));
+    assert_eq!(input["size"].as_float(), Some(24.0));
+    assert_eq!(input["line_height"].as_float(), Some(1.5));
+    let defaults = Config::default();
+    assert_eq!(cfg.font.agent_chat.size, defaults.font.agent_chat.size);
+    assert_eq!(cfg.font.editor.size, defaults.font.editor.size);
+    assert_eq!(cfg.font.terminal.size, defaults.font.terminal.size);
+}
+
+#[test]
+fn bottom_input_font_defaults_and_clamping_are_independent() {
+    let mut cfg = Config::default();
+    assert_eq!(cfg.font.input.family, SYSTEM_UI_FONT_FAMILY);
+    assert_eq!(cfg.font.input.size, 12.0);
+    assert_eq!(cfg.font.input.row_height(), 20.0);
+    let chat_size = cfg.font.agent_chat.size;
+    cfg.font.input.size = 999.0;
+    cfg.font.input.line_height = f32::NAN;
+    cfg.font.clamp();
+    assert_eq!(cfg.font.input.size, 72.0);
+    assert_eq!(
+        cfg.font.input.line_height,
+        Config::default().font.input.line_height
+    );
+    assert_eq!(cfg.font.agent_chat.size, chat_size);
+}
+
+#[test]
+fn legacy_fonts_do_not_override_bottom_input_defaults() {
+    let cfg: Config =
+        toml::from_str("[font]\nfamily = 'Legacy Mono'\nsize = 24.0\nagent_chat_size = 28.0\n")
+            .unwrap();
+    assert_eq!(cfg.font.input, Config::default().font.input);
+    let partial: Config = toml::from_str("[font.input]\nsize = 18.0\n").unwrap();
+    assert_eq!(partial.font.input.size, 18.0);
+    assert_eq!(partial.font.input.family, SYSTEM_UI_FONT_FAMILY);
+    assert_eq!(
+        partial.font.input.line_height,
+        Config::default().font.input.line_height
+    );
+}

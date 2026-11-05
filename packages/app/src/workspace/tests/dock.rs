@@ -1,5 +1,6 @@
 use super::*;
 use daruda_store::project::{LeftDockView, RightDockView};
+use gpui::Focusable as _;
 
 // ---- Dock integration ----
 
@@ -60,7 +61,10 @@ fn dock_defaults_toggles_and_view_selection(cx: &mut TestAppContext) {
 fn input_panel_lifts_the_bottom_dock_floor_to_its_one_row_height(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |ws, cx| {
-        let one_row = layout::ops::bottom_dock_height_for_rows(1);
+        let one_row = layout::ops::bottom_dock_height_for_rows(
+            1,
+            daruda_config::font::InputFontConfig::default().row_height(),
+        );
         let macro_floor = crate::ui::theme::DOCK_BOTTOM_MIN_H;
         assert!(macro_floor < one_row);
 
@@ -83,15 +87,20 @@ fn input_panel_lifts_the_bottom_dock_floor_to_its_one_row_height(cx: &mut TestAp
 fn input_draft_rows_floor_the_displayed_bottom_dock(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     ws.update(cx, |ws, cx| {
-        let rows = layout::ops::bottom_dock_height_for_rows;
+        let rows = |rows| {
+            layout::ops::bottom_dock_height_for_rows(
+                rows,
+                daruda_config::font::InputFontConfig::default().row_height(),
+            )
+        };
         let tab_id = ws.panels.tabs[0].id.clone();
         ws.set_active_panel_tab(tab_id, cx);
         ws.activate_bottom_input(cx);
         ws.docks.bottom.update(cx, |d, _| d.resize(0.0));
         assert_eq!(ws.bottom_dock_display_size(cx), rows(1));
 
-        ws.input_dock.line_count = 4;
-        assert_eq!(ws.bottom_dock_display_size(cx), rows(4));
+        ws.input_dock.line_count = 3;
+        assert_eq!(ws.bottom_dock_display_size(cx), rows(3));
         assert_eq!(ws.docks.bottom.read(cx).size, rows(1));
 
         ws.input_dock.line_count = 1;
@@ -104,7 +113,12 @@ fn input_draft_rows_floor_the_displayed_bottom_dock(cx: &mut TestAppContext) {
 #[gpui::test]
 fn composer_expand_lifts_the_row_cap_and_an_emptied_draft_collapses_it(cx: &mut TestAppContext) {
     let (window_handle, ws) = build_workspace(cx);
-    let rows = layout::ops::bottom_dock_height_for_rows;
+    let rows = |rows| {
+        layout::ops::bottom_dock_height_for_rows(
+            rows,
+            daruda_config::font::InputFontConfig::default().row_height(),
+        )
+    };
     let configured = ws.read_with(cx, |ws, _| usize::from(ws.mirrors.agent.input_max_rows));
     let draft = vec!["line"; configured + 3].join("\n");
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -368,4 +382,171 @@ async fn left_dock_drag_snaps_without_losing_the_expanded_width(cx: &mut TestApp
         })
     })
     .unwrap();
+}
+
+#[gpui::test]
+fn bottom_input_font_reload_updates_only_its_snapshot_and_floor(cx: &mut TestAppContext) {
+    let (_wh, ws) = build_workspace(cx);
+    ws.update(cx, |ws, cx| {
+        ws.activate_bottom_input(cx);
+        ws.docks.bottom.update(cx, |dock, _| dock.resize(0.0));
+        let original_chat_font = ws.mirrors.shared_surface.agent_chat_font.clone();
+        let original_editor_font = ws.mirrors.shared_surface.editor_font.clone();
+        let before = ws.bottom_dock_display_size(cx);
+        let mut config = daruda_config::Config::default();
+        config.font.input.size = 24.0;
+        config.font.input.line_height = 1.5;
+        ws.apply_config(&config, cx);
+        let snapshot = ws.prepare_bottom_dock_snapshot(cx);
+        assert_eq!(snapshot.input_font, config.font.input);
+        assert_eq!(ws.input_dock.font.row_height(), 36.0);
+        assert_eq!(ws.bottom_dock_display_size(cx) - before, 16.0);
+        assert_eq!(
+            ws.mirrors.shared_surface.agent_chat_font,
+            original_chat_font
+        );
+        assert_eq!(ws.mirrors.shared_surface.editor_font, original_editor_font);
+    });
+}
+
+#[gpui::test]
+fn bottom_input_font_reload_refits_a_wrapped_draft(cx: &mut TestAppContext) {
+    let (window_handle, ws) = build_workspace(cx);
+    let draft = "draft ".repeat(25);
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.activate_bottom_input(cx);
+            ws.docks.bottom.update(cx, |dock, _| {
+                dock.open();
+                dock.resize(0.0);
+            });
+            ws.input_dock.input.update(cx, |state, cx| {
+                state.set_value(draft.clone(), window, cx);
+                state.focus(window, cx);
+            });
+        });
+    })
+    .unwrap();
+    let mut vcx = gpui::VisualTestContext::from_window(window_handle.into(), cx);
+    vcx.run_until_parked();
+    let before = ws.read_with(&vcx, |ws, cx| ws.input_dock.input.read(cx).display_rows());
+    let mut config = daruda_config::Config::default();
+    config.font.input.size = 24.0;
+    config.font.input.line_height = 1.5;
+    ws.update(&mut vcx, |ws, cx| ws.apply_config(&config, cx));
+    vcx.run_until_parked();
+    vcx.update(|window, cx| {
+        ws.read_with(cx, |ws, cx| {
+            let state = ws.input_dock.input.read(cx);
+            let rows = state
+                .display_map()
+                .wrap_row_count()
+                .clamp(1, usize::from(config.agent.input_max_rows));
+            assert!(rows > before, "larger text wraps to more rows");
+            assert_eq!(state.display_rows(), rows);
+            assert_eq!(ws.input_dock.line_count, rows);
+            assert_eq!(state.value().as_ref(), draft);
+            assert!(state.focus_handle(cx).is_focused(window));
+        });
+    });
+}
+
+#[gpui::test]
+fn large_input_font_caps_rows_to_the_bottom_dock_height(cx: &mut TestAppContext) {
+    let mut config = daruda_config::Config::default();
+    config.font.input.size = 72.0;
+    config.font.input.line_height = 2.0;
+    let (window, ws) = build_workspace_with(cx, &config, None);
+    cx.update_window(window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.activate_bottom_input(cx);
+            ws.docks.bottom.update(cx, |dock, _| dock.resize(0.0));
+            ws.input_dock.input.update(cx, |state, cx| {
+                state.set_value("first\nsecond\nthird", window, cx);
+            });
+            ws.adapt_dock_to_input_lines(window, cx);
+            assert_eq!(ws.input_dock.input.read(cx).display_rows(), 2);
+            assert_eq!(ws.input_dock.line_count, 2);
+            assert_eq!(
+                ws.bottom_dock_display_size(cx),
+                layout::ops::bottom_dock_height_for_rows(2, 144.0)
+            );
+            ws.set_composer_expanded(true, window, cx);
+            assert_eq!(ws.input_dock.input.read(cx).display_rows(), 2);
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn large_input_font_keeps_send_visible_as_queue_changes(cx: &mut TestAppContext) {
+    let mut config = daruda_config::Config::default();
+    config.font.input.size = 72.0;
+    config.font.input.line_height = 2.0;
+    let (handle, ws) = build_workspace_with(cx, &config, None);
+    let (pane_id, view) = cx
+        .update_window(handle.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                let pane = ws.create_agent_chat_pane(
+                    None,
+                    None,
+                    daruda_config::AgentDefinition::claude_default().id,
+                    None,
+                    window,
+                    cx,
+                );
+                let id = pane.id;
+                let view = pane.agent_chat_view().unwrap().clone();
+                ws.active_runtime_mut().panes.push(pane);
+                ws.active_runtime_mut().focused_pane_id = id;
+                ws.activate_bottom_input(cx);
+                ws.docks.bottom.update(cx, |dock, _| {
+                    dock.open();
+                    dock.resize(0.0);
+                });
+                ws.input_dock.input.update(cx, |state, cx| {
+                    state.set_value("first\nsecond\nthird", window, cx);
+                    state.focus(window, cx);
+                });
+                (id, view)
+            })
+        })
+        .unwrap();
+    let mut vcx = gpui::VisualTestContext::from_window(handle.into(), cx);
+    vcx.run_until_parked();
+    let before = ws.read_with(&vcx, |ws, _| ws.input_dock.row_limit);
+    let saved_size = ws.read_with(&vcx, |ws, cx| ws.docks.bottom.read(cx).size);
+    assert_eq!(before, 2);
+    view.update(&mut vcx, |view, cx| {
+        view.fill_queue_for_test(1);
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    let button = vcx
+        .debug_bounds("composer-submit")
+        .expect("send button painted");
+    let body = vcx
+        .debug_bounds("bottom-input-body")
+        .expect("input body painted");
+    vcx.update(|window, cx| {
+        ws.read_with(cx, |ws, cx| {
+            let state = ws.input_dock.input.read(cx);
+            assert_eq!(ws.input_dock.row_limit, 1);
+            assert_eq!(ws.docks.bottom.read(cx).size, saved_size);
+            assert_eq!(ws.input_dock.line_count, 1);
+            assert_eq!(state.display_rows(), 1);
+            assert_eq!(state.value().as_ref(), "first\nsecond\nthird");
+            assert!(state.focus_handle(cx).is_focused(window));
+            assert!(state.input_bounds().bottom() <= button.top());
+            assert!(button.bottom() <= body.bottom());
+            assert!(ws.bottom_dock_display_size(cx) <= crate::ui::theme::DOCK_BOTTOM_MAX_H);
+        });
+        ws.update(cx, |ws, cx| ws.clear_queued_prompts(pane_id, window, cx));
+    });
+    vcx.run_until_parked();
+    ws.read_with(&vcx, |ws, cx| {
+        assert_eq!(ws.input_dock.row_limit, before);
+        assert_eq!(ws.docks.bottom.read(cx).size, saved_size);
+        assert_eq!(ws.input_dock.input.read(cx).display_rows(), 2);
+    });
 }
