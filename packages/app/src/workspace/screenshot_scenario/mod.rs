@@ -131,6 +131,9 @@ pub(crate) enum ScreenshotScenario {
     ErrorModal,
     /// Push a synthetic error toast.
     Toast,
+    GitFailure {
+        dismiss: bool,
+    },
     /// Protocol advisories through the chat host's reporting path.
     SessionNotices,
     /// Two file tabs side by side — one committed, one the replaceable
@@ -530,6 +533,9 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::ErrorModal => {
             dialog_helpers::open_error_report_dialog(sample_report(), window, cx);
+        }
+        ScreenshotScenario::GitFailure { dismiss } => {
+            workspace.update(cx, |ws, cx| ws.git_failure_for_shot(dismiss, cx));
         }
         ScreenshotScenario::Toast => {
             workspace.update(cx, |ws, cx| ws.report_error(sample_report(), cx));

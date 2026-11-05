@@ -241,7 +241,7 @@ fn view_header(
             .tooltip(app_strings::usage::refresh())
             .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
                 if let Some(ws) = workspace_refresh.upgrade() {
-                    ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
+                    ws.update(cx, |ws, cx| ws.refresh_git_status_manual(active_ref, cx));
                 }
             }));
 
@@ -657,7 +657,7 @@ fn loading_placeholder(
     )
     .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
         if let Some(ws) = workspace.upgrade() {
-            ws.update(cx, |ws, cx| ws.refresh_git_status(active_ref, cx));
+            ws.update(cx, |ws, cx| ws.refresh_git_status_manual(active_ref, cx));
         }
     }));
     div()

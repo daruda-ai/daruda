@@ -49,7 +49,7 @@ fn a_local_base_without_upstream_resolves_to_itself() {
     let dir = repo_with_feature("base_local");
     let base = resolve_base_ref(&dir, "main").unwrap();
     assert_eq!(base.label, "main");
-    assert_eq!(base.sha, verify(&dir, "main").unwrap());
+    assert_eq!(base.sha, verify(&dir, "main").unwrap().unwrap());
     teardown(&dir);
 }
 
@@ -72,7 +72,7 @@ fn a_local_base_with_upstream_reads_as_the_upstream() {
     run_git(&dir, ["config", "branch.main.merge", "refs/heads/main"]).unwrap();
     let base = resolve_base_ref(&dir, "main").unwrap();
     assert_eq!(base.label, "origin/main");
-    assert_eq!(base.sha, verify(&dir, "main~1").unwrap());
+    assert_eq!(base.sha, verify(&dir, "main~1").unwrap().unwrap());
     teardown(&dir);
 }
 
@@ -109,7 +109,7 @@ fn tips_refuse_a_missing_base_and_the_base_branch_itself() {
         Err(BaseProblem::OnBaseBranch)
     );
     let tips = base_tips(&dir, Some("main"), Some("feature")).unwrap();
-    assert_eq!(tips.head, verify(&dir, "HEAD").unwrap());
+    assert_eq!(tips.head, verify(&dir, "HEAD").unwrap().unwrap());
     teardown(&dir);
 }
 

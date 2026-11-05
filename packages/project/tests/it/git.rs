@@ -567,3 +567,58 @@ fn unstaging_an_empty_unborn_index_succeeds() {
     git_restore_all_staged(temp.path()).unwrap();
     assert!(git_worktree_status(temp.path()).unwrap().staged.is_empty());
 }
+
+#[test]
+fn environment_failure_classification_is_narrow() {
+    use daruda_project::lane::git::{GitEnvironmentFailure, GitError};
+    let license = "You have not agreed to the Xcode license agreements. Please run 'sudo xcodebuild -license' from within a Terminal window to review and agree to the Xcode and Apple SDKs license.";
+    assert_eq!(
+        GitError::NotFound.environment_failure(),
+        Some(GitEnvironmentFailure::ExecutableMissing)
+    );
+    for ending in ["", "\n", "\r\n"] {
+        assert_eq!(
+            GitError::Exit {
+                code: Some(69),
+                stderr: format!("{license}{ending}")
+            }
+            .environment_failure(),
+            Some(GitEnvironmentFailure::XcodeLicenseNotAccepted)
+        );
+    }
+    for stderr in [
+        "unrelated error".to_owned(),
+        format!("{license}\nfatal: other failure"),
+        format!("hook: {license}"),
+    ] {
+        assert_eq!(
+            GitError::Exit {
+                code: Some(69),
+                stderr
+            }
+            .environment_failure(),
+            None
+        );
+    }
+    for error in [
+        GitError::Utf8,
+        GitError::Parse("bad".into()),
+        GitError::Timeout(std::time::Duration::from_secs(1)),
+        GitError::Spawn(std::io::ErrorKind::NotFound.into()),
+    ] {
+        assert_eq!(error.environment_failure(), None);
+    }
+}
+
+#[test]
+fn base_problem_preserves_environment_failure() {
+    let problem = base::BaseProblem::from(GitError::NotFound);
+    assert_eq!(
+        problem.environment_failure(),
+        Some(GitEnvironmentFailure::ExecutableMissing)
+    );
+    assert_eq!(
+        base::BaseProblem::NoBaseConfigured.environment_failure(),
+        None
+    );
+}

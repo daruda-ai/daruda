@@ -14,6 +14,8 @@ use super::watch::GitWatch;
 use crate::workspace::{CommitChanges, Workspace};
 
 pub(in crate::workspace) struct GitContext {
+    pub(super) health: super::health::GitReadHealth,
+    pub(super) recovery: Option<gpui::Task<()>>,
     /// Commit-message input panel rendered in the Git Changes footer.
     pub(in crate::workspace) commit_input: gpui::Entity<crate::ui::InputPanel>,
     /// Keeps the commit input's subscription alive with the Workspace.
@@ -85,6 +87,8 @@ impl GitContext {
             },
         );
         Self {
+            health: Default::default(),
+            recovery: None,
             commit_input,
             _commit_subscription: commit_subscription,
             commit_mode: CommitMode::default(),

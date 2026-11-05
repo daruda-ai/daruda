@@ -125,10 +125,10 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         match lock {
-            GitLock::Index => self.refresh_worktree_status(target, cx),
+            GitLock::Index => self.refresh_worktree_status_manual(target, cx),
             GitLock::Repo => {
+                self.refresh_worktree_status_manual(target, cx);
                 self.refresh_tracking_across_repo(target.project, cx);
-                self.refresh_worktree_status(target, cx);
             }
         }
     }
@@ -140,7 +140,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use daruda_store::project::LaneRef;
-    use gpui::TestAppContext;
+    use gpui::{AppContext, TestAppContext};
 
     use super::GitLock;
     use crate::lane::git::GitError;
@@ -214,7 +214,12 @@ mod tests {
     /// what the repo lock's fan-out has to reach.
     fn build_two_lane_git_workspace(
         cx: &mut TestAppContext,
-    ) -> (gpui::Entity<crate::workspace::Workspace>, LaneRef, LaneRef) {
+    ) -> (
+        gpui::AnyWindowHandle,
+        gpui::Entity<crate::workspace::Workspace>,
+        LaneRef,
+        LaneRef,
+    ) {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().to_path_buf();
         for args in [
@@ -265,7 +270,7 @@ mod tests {
                 },
             )
         });
-        (ws, first, second)
+        (_wh.into(), ws, first, second)
     }
 
     /// What the lock claim buys: the caller never re-reads git state by hand,
@@ -277,7 +282,7 @@ mod tests {
         if !crate::lane::git::has_git() {
             return;
         }
-        let (ws, first, second) = build_two_lane_git_workspace(cx);
+        let (_wh, ws, first, second) = build_two_lane_git_workspace(cx);
         ws.update(cx, |ws, _| {
             for target in [first, second] {
                 let git = &mut ws.lane_scoped_mut(target).git;
@@ -326,7 +331,7 @@ mod tests {
         if !crate::lane::git::has_git() {
             return;
         }
-        let (ws, first, _second) = build_two_lane_git_workspace(cx);
+        let (_wh, ws, first, _second) = build_two_lane_git_workspace(cx);
         ws.update(cx, |ws, _| {
             let git = &mut ws.lane_scoped_mut(first).git;
             git.tracking = None;
@@ -341,6 +346,102 @@ mod tests {
             let git = &ws.lane_scoped[&first].git;
             assert!(git.tracking.is_none() && git.worktree.is_none());
             assert!(!ws.git_lock_held(GitLock::Repo), "the lock still releases");
+        });
+    }
+    #[gpui::test]
+    fn git_refresh_health_post_write_bypasses_cooldown(cx: &mut TestAppContext) {
+        use super::super::health::{ReadOrigin, ReadOutcome};
+        use crate::lane::git::GitEnvironmentFailure;
+        if !crate::lane::git::has_git() {
+            return;
+        }
+        let (_wh, ws, first, second) = build_two_lane_git_workspace(cx);
+        for lock in [GitLock::Index, GitLock::Repo] {
+            ws.update(cx, |ws, cx| {
+                let now = cx.background_executor().now();
+                let permit = ws.git.health.admit(ReadOrigin::Automatic, now).unwrap();
+                ws.git.health.finish(
+                    permit,
+                    ReadOutcome::Environment(GitEnvironmentFailure::ExecutableMissing),
+                    now,
+                );
+                for target in [first, second] {
+                    let git = &mut ws.lane_scoped_mut(target).git;
+                    git.tracking = None;
+                    git.worktree = None;
+                }
+                ws.spawn_locked_git_work(lock, first, cx, ok, |_, _, _| {});
+            });
+            cx.run_until_parked();
+            ws.read_with(cx, |ws, _| {
+                assert!(!ws.git.health.is_blocked());
+                assert!(ws.lane_git_worktree(first).is_some());
+                for target in [first, second] {
+                    assert!(ws.lane_scoped[&target].git.tracking.is_some());
+                }
+            });
+        }
+    }
+    #[gpui::test]
+    fn git_refresh_health_activation_during_probe_refreshes_current_lane(cx: &mut TestAppContext) {
+        use super::super::health::{ReadOrigin, ReadOutcome};
+        use crate::lane::git::GitEnvironmentFailure;
+        if !crate::lane::git::has_git() {
+            return;
+        }
+        let (wh, ws, first, second) = build_two_lane_git_workspace(cx);
+        cx.update_window(wh, |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                let now = cx.background_executor().now();
+                let permit = ws.git.health.admit(ReadOrigin::Automatic, now).unwrap();
+                ws.git.health.finish(
+                    permit,
+                    ReadOutcome::Environment(GitEnvironmentFailure::ExecutableMissing),
+                    now,
+                );
+                for target in [first, second] {
+                    ws.lane_scoped_mut(target).git.worktree = None;
+                }
+                ws.refresh_worktree_status_manual(first, cx);
+                ws.activate_lane(second, window, cx);
+            });
+        })
+        .unwrap();
+        cx.run_until_parked();
+        ws.read_with(cx, |ws, _| {
+            assert!(!ws.git.health.is_blocked());
+            assert!(ws.lane_git_worktree(first).is_some());
+            assert!(ws.lane_git_worktree(second).is_some());
+        });
+    }
+    #[gpui::test]
+    fn git_refresh_health_manual_intent_survives_inflight_failure(cx: &mut TestAppContext) {
+        use super::super::health::ReadOrigin;
+        use super::super::status::ReadRequest;
+        if !crate::lane::git::has_git() {
+            return;
+        }
+        let (_wh, ws, first, _) = build_two_lane_git_workspace(cx);
+        ws.update(cx, |ws, cx| {
+            ws.lane_scoped_mut(first).git.worktree = None;
+            ws.run_git_axis(
+                ReadRequest {
+                    target: first,
+                    recovery_origin: Some(ReadOrigin::Automatic),
+                },
+                |git| &mut git.worktree_refresh,
+                || Err::<(), _>(GitError::NotFound),
+                |_, _, _| false,
+                crate::workspace::Workspace::refresh_worktree_status,
+                cx,
+            );
+            ws.refresh_worktree_status_manual(first, cx);
+        });
+        cx.run_until_parked();
+        ws.read_with(cx, |ws, _| {
+            assert!(!ws.git.health.is_blocked());
+            assert!(ws.lane_git_worktree(first).is_some());
+            assert!(!ws.lane_scoped[&first].git.manual_refresh_pending);
         });
     }
 }

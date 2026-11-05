@@ -118,6 +118,9 @@ impl Workspace {
     /// has not opened yet still shows an ahead/behind badge — and would
     /// otherwise never be watched.
     fn probe_missing_git_dirs(&mut self, cx: &mut Context<Self>) {
+        if self.git.health.is_blocked() {
+            return;
+        }
         let pending: Vec<(LaneRef, PathBuf)> = self
             .projects
             .lanes()
@@ -133,21 +136,40 @@ impl Workspace {
             .collect();
 
         for (target, path) in pending {
+            let Some(permit) = self.git.health.admit(
+                super::health::ReadOrigin::Automatic,
+                cx.background_executor().now(),
+            ) else {
+                break;
+            };
             self.lane_scoped_mut(target).git.dirs = GitDirsState::Probing;
             crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
                 cx,
                 move || crate::lane::git::git_dirs(&path),
                 move |ws, result, cx| {
-                    let Some(state) = ws.lane_scoped.get_mut(&target) else {
-                        return;
-                    };
-                    state.git.dirs = match result {
-                        Ok(dirs) => GitDirsState::Known(dirs),
-                        // Silent: a lane whose git dir cannot be located is
-                        // already reporting through its status refresh.
-                        Err(_) => GitDirsState::Unavailable,
-                    };
-                    ws.sync_git_watchers(cx);
+                    ws.complete_git_read(
+                        target,
+                        permit,
+                        result,
+                        move |ws, result, accepted, cx| {
+                            let dirs = if !accepted {
+                                if ws.git.health.is_blocked() {
+                                    GitDirsState::Unavailable
+                                } else {
+                                    GitDirsState::Unknown
+                                }
+                            } else {
+                                match result {
+                                    Ok(dirs) => GitDirsState::Known(dirs),
+                                    // Status refresh reports repository-local errors.
+                                    Err(_) => GitDirsState::Unavailable,
+                                }
+                            };
+                            ws.lane_scoped_mut(target).git.dirs = dirs;
+                            ws.sync_git_watchers(cx);
+                        },
+                        cx,
+                    );
                 },
             )
             .detach();

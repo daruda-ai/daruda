@@ -316,7 +316,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let target = self.active;
-        self.refresh_git_status(target, cx);
+        self.refresh_git_status_manual(target, cx);
     }
 
     pub(in crate::workspace) fn on_commit_amend_action(

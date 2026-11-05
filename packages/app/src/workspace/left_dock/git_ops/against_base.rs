@@ -4,6 +4,7 @@
 //! a rebase, a fetch into the common dir — can change it. The diff is skipped
 //! when neither tip moved, which is what most ref events amount to here.
 
+use super::health::{GitReadResult, ReadOutcome};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::LaneRef;
@@ -41,6 +42,25 @@ enum Read {
     Fresh(Result<AgainstBase, BaseProblem>),
 }
 
+impl GitReadResult for Read {
+    fn outcome(&self) -> ReadOutcome {
+        match self {
+            Self::Fresh(Err(e)) => e
+                .environment_failure()
+                .map(ReadOutcome::Environment)
+                .unwrap_or(ReadOutcome::OtherFailure),
+            _ => ReadOutcome::Success,
+        }
+    }
+
+    fn git_error_message(&self) -> Option<String> {
+        match self {
+            Self::Fresh(Err(BaseProblem::Git(failure))) => Some(failure.to_string()),
+            _ => None,
+        }
+    }
+}
+
 impl Workspace {
     /// The base a lane is compared against: the one it was created from,
     /// else the project's `effective_base_branch`.
@@ -76,7 +96,10 @@ impl Workspace {
 
         let path_for_report = path.clone();
         self.run_git_axis(
-            target,
+            super::status::ReadRequest {
+                target,
+                recovery_origin: None,
+            },
             |git| &mut git.against_base_refresh,
             move || {
                 let tips = match base::base_tips(&path, base_name.as_deref(), branch.as_deref()) {
@@ -97,7 +120,7 @@ impl Workspace {
                     let report =
                         ErrorReport::new(crate::surface::strings::error::git_against_base_failed())
                             .severity(ErrorSeverity::Warning)
-                            .message(message.clone())
+                            .message(message.to_string())
                             .at(file!(), line!())
                             .with_context("path", redact_home(&path_for_report))
                             .dedup("git.against_base")

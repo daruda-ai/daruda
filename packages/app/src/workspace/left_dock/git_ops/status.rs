@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use super::health::{GitReadResult, ReadOrigin};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::LaneRef;
@@ -11,6 +12,11 @@ use gpui::Context;
 use crate::workspace::Workspace;
 use crate::workspace::lane_scoped::{GitLaneState, RefreshSlot};
 use crate::workspace::left_dock::git_ops::lock::GitLock;
+
+pub(super) struct ReadRequest {
+    pub target: LaneRef,
+    pub recovery_origin: Option<ReadOrigin>,
+}
 
 impl Workspace {
     /// Repo root of the targeted lane, or `None` when it isn't
@@ -26,7 +32,10 @@ impl Workspace {
     /// non-git one — which no git read axis reads.
     pub(super) fn git_lane_path(&self, target: LaneRef) -> Option<PathBuf> {
         self.lane_for(target)
-            .filter(|lane| lane.is_git())
+            .filter(|lane| {
+                lane.is_git()
+                    && lane.availability == crate::lane::availability::LaneAvailability::Present
+            })
             .map(|lane| lane.path.clone())
     }
 
@@ -39,34 +48,64 @@ impl Workspace {
     /// written once. A lane torn down while the read ran is detected here
     /// too: the claim made its entry, so a missing one drops the result
     /// rather than recreating the state teardown just removed.
-    pub(super) fn run_git_axis<R: Send + 'static>(
+    pub(super) fn run_git_axis<R: GitReadResult + Send + 'static>(
         &mut self,
-        target: LaneRef,
+        request: ReadRequest,
         slot: fn(&mut GitLaneState) -> &mut RefreshSlot,
         read: impl FnOnce() -> R + Send + 'static,
         apply: impl FnOnce(&mut Self, R, &mut Context<Self>) -> bool + 'static,
         rerun: fn(&mut Self, LaneRef, &mut Context<Self>),
         cx: &mut Context<Self>,
     ) {
+        let ReadRequest {
+            target,
+            recovery_origin,
+        } = request;
+        if self.lane_for(target).is_none() {
+            return;
+        }
+        if self.git.health.is_blocked()
+            && (recovery_origin.is_none()
+                || (matches!(recovery_origin, Some(ReadOrigin::Automatic))
+                    && target != self.active))
+        {
+            self.schedule_git_recovery(cx);
+            return;
+        }
         if !slot(&mut self.lane_scoped_mut(target).git).claim() {
             return;
+        }
+        let Some(permit) = self.git.health.admit(
+            recovery_origin.unwrap_or(ReadOrigin::Automatic),
+            cx.background_executor().now(),
+        ) else {
+            slot(&mut self.lane_scoped_mut(target).git).release();
+            self.schedule_git_recovery(cx);
+            return;
+        };
+        if matches!(recovery_origin, Some(ReadOrigin::Manual)) {
+            self.lane_scoped_mut(target).git.manual_refresh_pending = false;
         }
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
             read,
             move |ws, result, cx| {
-                let Some(state) = ws.lane_scoped.get_mut(&target) else {
-                    return;
-                };
-                let pending = slot(&mut state.git).release();
-                // A repaint is a whole-window render (Pitfall 10), so a read
-                // that found nothing new asks for none.
-                if apply(ws, result, cx) {
-                    cx.notify();
-                }
-                if pending {
-                    rerun(ws, target, cx);
-                }
+                ws.complete_git_read(
+                    target,
+                    permit,
+                    result,
+                    move |ws, result, accepted, cx| {
+                        let pending = slot(&mut ws.lane_scoped_mut(target).git).release();
+                        // A read with unchanged data needs no whole-window repaint.
+                        if accepted && apply(ws, result, cx) {
+                            cx.notify();
+                        }
+                        if pending {
+                            rerun(ws, target, cx);
+                        }
+                    },
+                    cx,
+                );
             },
         )
         .detach();
@@ -80,12 +119,37 @@ impl Workspace {
         target: LaneRef,
         cx: &mut Context<Self>,
     ) {
-        self.refresh_tracking(target, cx);
         self.refresh_worktree_status(target, cx);
+        self.refresh_tracking(target, cx);
         // Wanting both axes current is also the moment this lane's git dirs
         // are worth watching — this is the one call every path that opens or
         // activates a git lane already makes.
         self.sync_git_watchers(cx);
+    }
+
+    pub(in crate::workspace) fn refresh_git_status_manual(
+        &mut self,
+        target: LaneRef,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_lane_path(target).is_none() {
+            return;
+        }
+        self.refresh_worktree_status_manual(target, cx);
+        self.refresh_tracking(target, cx);
+        self.sync_git_watchers(cx);
+    }
+
+    pub(super) fn refresh_worktree_status_manual(
+        &mut self,
+        target: LaneRef,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_lane_path(target).is_none() {
+            return;
+        }
+        self.lane_scoped_mut(target).git.manual_refresh_pending = true;
+        self.refresh_worktree_status(target, cx);
     }
 
     /// Kick off a background `git for-each-ref` for `target` and update the
@@ -99,7 +163,10 @@ impl Workspace {
         };
         let path_for_report = path.clone();
         self.run_git_axis(
-            target,
+            ReadRequest {
+                target,
+                recovery_origin: None,
+            },
             |git| &mut git.tracking_refresh,
             move || crate::lane::git::git_tracking(&path),
             move |ws, result, cx| {
@@ -180,8 +247,16 @@ impl Workspace {
             return;
         };
         let path_for_report = path.clone();
+        let manual = self.lane_scoped_mut(target).git.manual_refresh_pending;
         self.run_git_axis(
-            target,
+            ReadRequest {
+                target,
+                recovery_origin: Some(if manual {
+                    ReadOrigin::Manual
+                } else {
+                    ReadOrigin::Automatic
+                }),
+            },
             |git| &mut git.worktree_refresh,
             move || crate::lane::git::git_worktree_status(&path),
             move |ws, result, cx| {

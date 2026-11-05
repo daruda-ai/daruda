@@ -35,12 +35,48 @@ pub enum BaseProblem {
     /// The lane has no commit yet, so there is nothing it could have changed.
     UnbornHead,
     /// git itself failed; the message is for the log, not the row.
-    Git(String),
+    Git(GitFailure),
 }
 
 impl From<GitError> for BaseProblem {
     fn from(e: GitError) -> Self {
-        Self::Git(e.to_string())
+        Self::Git(GitFailure {
+            environment: e.environment_failure(),
+            message: e.to_string(),
+        })
+    }
+}
+
+/// Diagnostic details retained after a failed comparison read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitFailure {
+    message: String,
+    environment: Option<super::GitEnvironmentFailure>,
+}
+impl From<String> for GitFailure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            environment: None,
+        }
+    }
+}
+impl From<&str> for GitFailure {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+impl std::fmt::Display for GitFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+impl BaseProblem {
+    pub fn environment_failure(&self) -> Option<super::GitEnvironmentFailure> {
+        match self {
+            Self::Git(failure) => failure.environment,
+            _ => None,
+        }
     }
 }
 
@@ -78,7 +114,7 @@ pub struct AgainstBase {
 /// not a local copy that may be behind. A name no local branch carries falls
 /// back to `origin/<name>`.
 pub fn resolve_base_ref(repo: &Path, name: &str) -> Result<ResolvedBase, BaseProblem> {
-    if verify(repo, &format!("refs/heads/{name}")).is_some() {
+    if verify(repo, &format!("refs/heads/{name}"))?.is_some() {
         let upstream = run_git(
             repo,
             [
@@ -89,7 +125,7 @@ pub fn resolve_base_ref(repo: &Path, name: &str) -> Result<ResolvedBase, BasePro
         )?;
         let upstream = upstream.trim();
         if !upstream.is_empty()
-            && let Some(sha) = verify(repo, upstream)
+            && let Some(sha) = verify(repo, upstream)?
         {
             return Ok(ResolvedBase {
                 label: upstream.to_owned(),
@@ -97,14 +133,14 @@ pub fn resolve_base_ref(repo: &Path, name: &str) -> Result<ResolvedBase, BasePro
             });
         }
     }
-    if let Some(sha) = verify(repo, name) {
+    if let Some(sha) = verify(repo, name)? {
         return Ok(ResolvedBase {
             label: name.to_owned(),
             sha,
         });
     }
     let remote = format!("{DEFAULT_REMOTE}/{name}");
-    match verify(repo, &remote) {
+    match verify(repo, &remote)? {
         Some(sha) => Ok(ResolvedBase { label: remote, sha }),
         None => Err(BaseProblem::NotFound(name.to_owned())),
     }
@@ -123,7 +159,7 @@ pub fn base_tips(
     if current_branch.is_some_and(|b| b == name || b == base.label) {
         return Err(BaseProblem::OnBaseBranch);
     }
-    let head = verify(wt, "HEAD").ok_or(BaseProblem::UnbornHead)?;
+    let head = verify(wt, "HEAD")?.ok_or(BaseProblem::UnbornHead)?;
     Ok(BaseTips { base, head })
 }
 
@@ -201,8 +237,8 @@ fn merge_base(wt: &Path, a: &str, b: &str) -> Result<String, BaseProblem> {
 }
 
 /// The commit `rev` names, or `None` when it names none.
-fn verify(repo: &Path, rev: &str) -> Option<String> {
-    run_git(
+fn verify(repo: &Path, rev: &str) -> Result<Option<String>, BaseProblem> {
+    match run_git(
         repo,
         [
             "rev-parse",
@@ -210,10 +246,11 @@ fn verify(repo: &Path, rev: &str) -> Option<String> {
             "--quiet",
             &format!("{rev}^{{commit}}"),
         ],
-    )
-    .ok()
-    .map(|s| s.trim().to_owned())
-    .filter(|s| !s.is_empty())
+    ) {
+        Ok(s) => Ok((!s.trim().is_empty()).then(|| s.trim().to_owned())),
+        Err(GitError::Exit { code: Some(1), .. }) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// `--name-status -z` records: `STATUS\0PATH\0`, or for a rename or copy

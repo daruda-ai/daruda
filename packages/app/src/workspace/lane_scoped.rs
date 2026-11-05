@@ -94,6 +94,8 @@ pub(in crate::workspace) struct GitLaneState {
     pub worktree: Option<GitWorktreeStatus>,
     pub tracking_refresh: RefreshSlot,
     pub worktree_refresh: RefreshSlot,
+    /// An explicit refresh awaiting its status slot or the shared recovery probe.
+    pub manual_refresh_pending: bool,
     /// What the lane committed since its base. A third axis riding the
     /// tracking one: only a ref move can change it. `None` until first read.
     /// Shared so the per-render dock snapshot clones a pointer, not the list.

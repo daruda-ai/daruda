@@ -17,6 +17,8 @@
 
 pub mod base;
 mod command;
+mod environment;
+pub use environment::GitEnvironmentFailure;
 pub mod discard;
 mod status;
 

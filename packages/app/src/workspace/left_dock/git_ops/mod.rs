@@ -13,12 +13,14 @@ pub(super) mod against_base;
 pub(in crate::workspace) mod context;
 mod external_open;
 pub(super) mod file_view;
+mod health;
 pub(in crate::workspace) mod history;
 pub(super) mod index;
 pub(super) mod init;
 pub(in crate::workspace) mod lock;
 pub(super) mod nav;
 mod pane_status;
+mod recovery;
 pub(super) mod status;
 pub(in crate::workspace) mod watch;
 
