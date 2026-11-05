@@ -105,10 +105,8 @@ fn the_toggle_opens_and_refolds_a_settled_prompt(cx: &mut gpui::TestAppContext) 
     let click_toggle = |visual: &mut gpui::VisualTestContext| {
         let toggle = visual
             .debug_bounds("agent-chat-user-fold-0")
-            .expect("the toggle sits under the prompt");
-        // Right-aligned in a full-width row: press just inside its right end.
-        let at = gpui::point(toggle.right() - gpui::px(8.), toggle.center().y);
-        visual.simulate_click(at, gpui::Modifiers::default());
+            .expect("the toggle leads the prompt's footer");
+        visual.simulate_click(toggle.center(), gpui::Modifiers::default());
         visual.run_until_parked();
     };
 
@@ -128,7 +126,8 @@ fn the_toggle_opens_and_refolds_a_settled_prompt(cx: &mut gpui::TestAppContext) 
 }
 
 /// Lay out one settled prompt and return the bounds of its bubble and of each
-/// named control, so a test can say which element a control belongs to.
+/// named control, so a test can say which element a control belongs to, plus
+/// the window width the bubble is capped against.
 fn bubble_and_controls(
     prompt: String,
     controls: &[&'static str],
@@ -136,6 +135,7 @@ fn bubble_and_controls(
 ) -> (
     gpui::Bounds<gpui::Pixels>,
     Vec<Option<gpui::Bounds<gpui::Pixels>>>,
+    gpui::Pixels,
 ) {
     let window = make_test_view(cx);
     window
@@ -152,7 +152,8 @@ fn bubble_and_controls(
         .debug_bounds("agent-chat-user-bubble-0")
         .expect("the prompt bubble is laid out");
     let found = controls.iter().map(|c| visual.debug_bounds(c)).collect();
-    (bubble, found)
+    let width = visual.update(|window, _| window.viewport_size().width);
+    (bubble, found, width)
 }
 
 fn inside(outer: gpui::Bounds<gpui::Pixels>, inner: gpui::Bounds<gpui::Pixels>) -> bool {
@@ -166,7 +167,7 @@ fn inside(outer: gpui::Bounds<gpui::Pixels>, inner: gpui::Bounds<gpui::Pixels>) 
 /// its bubble: outside it, they read as loose controls of the pane.
 #[gpui::test]
 fn a_folded_prompt_keeps_its_toggle_and_copy_inside_the_bubble(cx: &mut gpui::TestAppContext) {
-    let (bubble, found) = bubble_and_controls(
+    let (bubble, found, _) = bubble_and_controls(
         "pasted log line\n".repeat(40),
         &["agent-chat-user-fold-0", "agent-chat-user-copy-0"],
         cx,
@@ -188,7 +189,7 @@ fn a_folded_prompt_keeps_its_toggle_and_copy_inside_the_bubble(cx: &mut gpui::Te
 
 #[gpui::test]
 fn a_short_prompt_keeps_its_copy_inside_the_bubble(cx: &mut gpui::TestAppContext) {
-    let (bubble, found) = bubble_and_controls(
+    let (bubble, found, width) = bubble_and_controls(
         "a short question".into(),
         &["agent-chat-user-copy-0", "agent-chat-user-fold-0"],
         cx,
@@ -199,8 +200,8 @@ fn a_short_prompt_keeps_its_copy_inside_the_bubble(cx: &mut gpui::TestAppContext
     assert!(inside(bubble, copy), "copy {copy:?} in {bubble:?}");
     assert!(found[1].is_none(), "a short prompt has no fold toggle");
     assert!(
-        bubble.size.width < gpui::px(300.),
-        "a short prompt's bubble hugs its text: {bubble:?}"
+        bubble.size.width < width / 4.0,
+        "a short prompt's bubble hugs its text, not the 85% cap: {bubble:?} in {width:?}"
     );
 }
 
@@ -210,7 +211,7 @@ fn a_short_prompt_keeps_its_copy_inside_the_bubble(cx: &mut gpui::TestAppContext
 fn a_wrapping_short_prompt_stays_inside_its_bubble(cx: &mut gpui::TestAppContext) {
     let prompt = "words that wrap across the bubble ".repeat(12);
     assert!(prompt.chars().count() < crate::PROMPT_FOLD_CHARS);
-    let (bubble, found) = bubble_and_controls(prompt, &["agent-chat-user-copy-0"], cx);
+    let (bubble, found, _) = bubble_and_controls(prompt, &["agent-chat-user-copy-0"], cx);
     let Some(copy) = found[0] else {
         panic!("the copy button is laid out");
     };

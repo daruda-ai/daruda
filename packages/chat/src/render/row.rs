@@ -34,7 +34,13 @@ pub(super) fn render_row(
                     this.turn_boundary,
                     &this.live_units,
                 );
-                let copy = message_copy(("agent-chat-user-copy", *i), text, window, cx);
+                let copy = message_copy(
+                    ("agent-chat-user-copy", *i),
+                    text,
+                    this.dim_amount,
+                    window,
+                    cx,
+                );
                 user_bubble(*i, text, fold, this.dim_amount, copy, cx).into_any_element()
             }
             _ => gpui::Empty.into_any_element(),
@@ -129,7 +135,13 @@ pub(super) fn render_row(
                     expanded,
                     text,
                     turn_stats_element(this, *i, cx),
-                    message_copy(("agent-chat-answer-copy", *i), text, window, cx),
+                    message_copy(
+                        ("agent-chat-answer-copy", *i),
+                        text,
+                        this.dim_amount,
+                        window,
+                        cx,
+                    ),
                     MarkdownRender::new(
                         &this.assets.mermaid_images,
                         this.dim_amount,
@@ -276,7 +288,7 @@ fn render_item(
     match item {
         ChatItem::UserText(text) => {
             let fold = prompt_fold(ix, text, fold, items, boundary, live_units);
-            let copy = message_copy(("agent-chat-user-copy", ix), text, window, cx);
+            let copy = message_copy(("agent-chat-user-copy", ix), text, dim, window, cx);
             user_bubble(ix, text, fold, dim, copy, cx).into_any_element()
         }
         // Prose reaching here is never the conclusion (that is

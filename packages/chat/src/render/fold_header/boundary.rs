@@ -65,11 +65,13 @@ pub(in crate::render) fn prompt_fold_toggle(
     dim: f32,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
+    // Label and chevron dim together with the bubble they sit in.
+    let surface = theme::PaneSurfaceTokens::agent_chat(cx).dimmed(dim);
     let chevron: Disclosure = disclosure(("agent-chat-user-fold-chevron", ix), expanded)
         .axis(DisclosureAxis::Vertical)
-        .color(theme::dim_toward_gray(theme::agent_chat_fg_subtle(cx), dim));
+        .color(surface.foreground_subtle);
     let toggle = FoldToggle::from(FoldKey::UserPrompt(ix)).into_fn();
-    crate::render::blocks::pane_quiet_button(("agent-chat-user-fold", ix), label, cx)
+    daruda_ui::button_on_surface(("agent-chat-user-fold", ix), label, &surface, cx)
         .child(chevron)
         .on_click(cx.listener(move |this, _ev, window, cx| toggle(this, window, cx)))
         .into_any_element()

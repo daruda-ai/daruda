@@ -1,8 +1,6 @@
 //! The chat's own wording on `daruda_ui`'s label-taking widgets.
 
-use daruda_ui::{
-    Button, ButtonVariants as _, CopyTooltips, Markdown, button_icon, copy_button, icons,
-};
+use daruda_ui::{Button, CopyTooltips, Markdown, button_icon, copy_button, icons};
 use gpui::{App, ElementId, IntoElement, SharedString, Window};
 
 use crate::strings as s;
@@ -33,15 +31,18 @@ pub(crate) fn code_copy_button<I: Into<ElementId>>(
     )
 }
 
-/// A copy-to-clipboard button for a whole message, ghosted so it sits on the
-/// row's own background. `id` must be stable per message across renders.
+/// A copy-to-clipboard button for a whole message, coloured from the pane it
+/// sits on: `ghost` would take the UI theme's foreground, which has no
+/// contrast guarantee on the terminal-mirrored pane. `id` must be stable per
+/// message across renders.
 pub(crate) fn message_copy_button<I: Into<ElementId>>(
     id: I,
     text: SharedString,
+    surface: &daruda_ui::theme::PaneSurfaceTokens,
     window: &mut Window,
     cx: &mut App,
 ) -> Button {
-    copy_button(
+    let button = copy_button(
         id,
         text,
         icons::icon(icons::COPY),
@@ -50,8 +51,8 @@ pub(crate) fn message_copy_button<I: Into<ElementId>>(
         s::agent_chat::code_copied().into(),
         window,
         cx,
-    )
-    .ghost()
+    );
+    daruda_ui::button_with_surface(button, surface, cx)
 }
 
 /// Rendered, drag-selectable Markdown whose code blocks carry a copy button.

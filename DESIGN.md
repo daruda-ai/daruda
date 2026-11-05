@@ -616,7 +616,7 @@ pane-hover-tint:   neutral overlay at 3%         # hover fill on a fold header
 pane-active-tint:  neutral overlay at 12%        # selected fill
 pane-border-tint:  neutral overlay at 12%        # card edges — tool cards, code blocks
 pane-control-edge: neutral overlay at 34% / 42%  # resting edge of an interactive control
-pane-accent:       UI link hue, lightness clamped against pane-bg  # links, focused-field rail
+pane-accent:       UI link hue, lightness clamped against pane-bg  # links, focused / picked rail
 ```
 
 `neutral overlay` is white over a dark background and black over a light one, so
@@ -983,9 +983,11 @@ actions:   ghost Skip on the pane and primary Send
   the settled summary do; a UI-theme card would float as a foreign panel and
   change look the moment it is answered. The focused field's rail is its only
   cue, so it keeps the accent: `pane-accent` is the UI link hue with its
-  lightness resolved against the pane (`agent_chat_link_color`), held to the
-  3:1 component floor. Send uses the standard primary action. Card padding
-  uses PAD_XL, row padding PAD_SM, and the footer is separated by a hairline.
+  lightness resolved against the pane (`agent_chat_link_color`), verified at
+  3:1 on every shipped preset and a light background; a mid-lightness custom
+  background can still fall short, as for `pane-control-edge`. Send uses the
+  standard primary action. Card padding uses PAD_XL, row padding PAD_SM, and
+  the footer is separated by a hairline.
 - **The agent's words are verbatim.** Message, titles and option labels pass
   through; only the host's own words (header, status, Skip, Send) are i18n.
 - **A question is its own row, never a tool group's member.** It sits at the

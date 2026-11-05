@@ -51,6 +51,7 @@ impl<'a> MarkdownRender<'a> {
 /// question/instruction, not authored markup, so `#`, `---` (setext heading),
 /// lists, and code fences must display literally rather than being promoted to
 /// headings / rules / blocks the way the assistant's markdown reply is.
+/// The prompt's copy and fold controls sit inside the bubble.
 pub(super) fn user_bubble(
     ix: usize,
     text: &str,
@@ -96,11 +97,15 @@ pub(super) fn user_bubble(
     // message's own; outside it they floated loose in the pane. A short prompt
     // trails copy after its text, a long one gets a footer under a hairline.
     let chrome = match fold {
+        // Copy keeps its slot while hidden so hovering never reflows the
+        // bubble; the slot takes the right inset and a tight gap, so it costs
+        // little more than the button itself.
         PromptFold::Short => chrome
+            .pr(px(theme::PAD_XS))
             .flex()
             .flex_row()
             .items_end()
-            .gap(px(theme::AGENT_CHAT_TRAILING_GAP))
+            .gap(px(theme::GAP_XS))
             // Without `min_w_0` the text keeps its one-line width and pushes
             // copy past the bubble's 85% cap instead of wrapping.
             .child(div().min_w_0().child(body))
@@ -193,13 +198,15 @@ pub(super) const MESSAGE_HOVER_GROUP: &str = "agent-chat-message";
 
 /// A whole-message copy button, revealed on row hover. It copies `text` as
 /// written — the prompt verbatim, the answer's markdown source — not the
-/// rendered or folded view of it.
+/// rendered or folded view of it. Pane-toned and dimmed with the row it sits on.
 pub(super) fn message_copy(
     id: (&'static str, usize),
     text: &str,
+    dim: f32,
     window: &mut gpui::Window,
     cx: &mut App,
 ) -> AnyElement {
+    let surface = theme::PaneSurfaceTokens::agent_chat(cx).dimmed(dim);
     div()
         .debug_selector(move || format!("{}-{}", id.0, id.1))
         .flex_none()
@@ -208,6 +215,7 @@ pub(super) fn message_copy(
         .child(crate::localized::message_copy_button(
             id,
             SharedString::from(text.to_string()),
+            &surface,
             window,
             cx,
         ))
@@ -431,24 +439,6 @@ pub(super) fn pane_action_button(
             // One step up the same overlay, so hover is felt on any pane
             // background rather than borrowed from the window theme.
             .hover(theme::agent_chat_border_tint(cx))
-            .active(theme::agent_chat_border_tint(cx)),
-    )
-}
-
-/// [`pane_action_button`]'s quiet form: no fill until hovered, a muted label —
-/// for a disclosure that sits under content rather than offering an action.
-/// Pane-toned for the same reason; ghost would take the window theme's label.
-pub(super) fn pane_quiet_button(
-    id: impl Into<gpui::ElementId>,
-    label: String,
-    cx: &mut Context<AgentChatView>,
-) -> daruda_ui::Button {
-    daruda_ui::button(id, label).custom(
-        daruda_ui::ButtonCustomVariant::new(cx)
-            .color(theme::TRANSPARENT)
-            .foreground(theme::agent_chat_fg_muted(cx))
-            .border(theme::TRANSPARENT)
-            .hover(theme::agent_chat_tint(cx))
             .active(theme::agent_chat_border_tint(cx)),
     )
 }

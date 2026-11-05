@@ -99,12 +99,12 @@ pub(super) fn choice_glyph(multi: bool, picked: bool) -> &'static str {
     }
 }
 
-#[cfg(test)]
-mod tests;
-
 /// The bar marking the field being answered and a picked option. It is that
 /// field's only cue, so it keeps the UI theme's link hue — resolved against the
 /// pane like every other colour on it — rather than a neutral edge.
 pub(in crate::render) fn question_accent(cx: &gpui::App) -> gpui::Hsla {
     theme::agent_chat_link_color(cx)
 }
+
+#[cfg(test)]
+mod tests;

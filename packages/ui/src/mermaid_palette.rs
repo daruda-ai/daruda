@@ -259,6 +259,11 @@ mod tests {
         assert!(palette.background.starts_with('#'));
     }
 
+    fn hex(color: &str) -> Hsla {
+        let rgb = u32::from_str_radix(color.trim_start_matches('#'), 16).expect("#rrggbb");
+        gpui::rgb(rgb).into()
+    }
+
     #[gpui::test]
     fn from_agent_chat_uses_chat_surface_not_light_ui_text(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
@@ -289,9 +294,11 @@ mod tests {
             assert_ne!(palette.primary_text_color, "#000000");
             assert_ne!(palette.line_color, "#000000");
             // Lifelines must stand out from the card hairline yet stay
-            // quieter than connectors: black canvas, so higher hex = brighter.
-            assert!(palette.primary_border_color < palette.structural_line);
-            assert!(palette.structural_line < palette.line_color);
+            // quieter than connectors.
+            let canvas = hex(&palette.background);
+            let against = |color: &str| theme::contrast_ratio(hex(color), canvas);
+            assert!(against(&palette.primary_border_color) < against(&palette.structural_line));
+            assert!(against(&palette.structural_line) < against(&palette.line_color));
         });
     }
 }
