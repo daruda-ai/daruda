@@ -297,7 +297,10 @@ fn a_reconciliation_that_fails_without_crashing_leaves_the_next_start_writable(
 ) {
     let dir = tempfile::tempdir().unwrap();
     let store = store_at(dir.path(), None);
-    let ids = seed_lost_runs(&store, &["first", "second"]);
+    let mut ids = seed_lost_runs(&store, &["first", "second"]);
+    // The pass settles in id order, and two ULIDs minted in one millisecond
+    // sort at random, so seeding order does not say which run comes first.
+    ids.sort();
     drop(store);
     // A hook that panics stops the committer at the first settle: a commit
     // failure this process handles, not a crash of it. Only the first call

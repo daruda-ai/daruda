@@ -39,10 +39,12 @@ async fn rendered_chat_links_open_outside_files_as_read_only_references(cx: &mut
                     view.set_status_for_test(AgentSessionStatus::Connected);
                     view.seed_items_for_test(
                         [daruda_acp::ChatItem::AssistantText {
+                            // A raw Windows path loses `\` before punctuation to
+                            // Markdown escaping (`Temp\.tmp…`), so links carry URLs.
                             text: format!(
                                 "- [First link](<{}>)\n- [Second link](<{}>)",
-                                paths[0].display(),
-                                paths[1].display()
+                                daruda_core::file_url::from_local_path(&paths[0]).unwrap(),
+                                daruda_core::file_url::from_local_path(&paths[1]).unwrap()
                             ),
                             streaming: false,
                             message_id: None,
