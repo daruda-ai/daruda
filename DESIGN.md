@@ -616,6 +616,7 @@ pane-hover-tint:   neutral overlay at 3%         # hover fill on a fold header
 pane-active-tint:  neutral overlay at 12%        # selected fill
 pane-border-tint:  neutral overlay at 12%        # card edges — tool cards, code blocks
 pane-control-edge: neutral overlay at 34% / 42%  # resting edge of an interactive control
+pane-accent:       UI link hue, lightness clamped against pane-bg  # links, focused-field rail
 ```
 
 `neutral overlay` is white over a dark background and black over a light one, so
@@ -966,19 +967,25 @@ Please answer the following questions.
 ┃ ▸ 1 ○ Yes                         # highlighted: ▸ + fill
                                    [Skip] [Send answer]
 
-fill:      workspace button surface; edge: workspace border
-rail:      pane-control-edge on the focused field, pane-border-tint otherwise
+fill:      pane-tint; edge: pane-border-tint (the shared card frame)
+rail:      pane-accent on the focused field and a picked option,
+           pane-border-tint otherwise
 selected:  pane-active-tint — the fill is secondary; the glyph carries it
-actions:   ghost Skip and primary Send on the workspace interaction surface
+actions:   ghost Skip on the pane and primary Send
 ```
 
 - **Selection never rides on colour alone.** Single ○/◉, multiple ☐/☑, the
   keyboard highlight ▸, free text ✎, and a number on every option. Options are
   list rows, not chips: chips are view settings, and these are answers.
-- **Question interaction uses workspace chrome colors.** The opaque card
-  follows the app theme independently of the terminal. Selection has a rail
-  and glyph; Send uses the standard primary action. Card padding uses PAD_XL,
-  row padding PAD_SM, and the footer is separated by a hairline.
+- **A question wears the pane's colours, like every card beside it.** It is
+  conversation structure on the terminal-mirrored surface, so it takes
+  `PaneSurfaceTokens` and the shared card frame, as the permission card and
+  the settled summary do; a UI-theme card would float as a foreign panel and
+  change look the moment it is answered. The focused field's rail is its only
+  cue, so it keeps the accent: `pane-accent` is the UI link hue with its
+  lightness resolved against the pane (`agent_chat_link_color`), held to the
+  3:1 component floor. Send uses the standard primary action. Card padding
+  uses PAD_XL, row padding PAD_SM, and the footer is separated by a hairline.
 - **The agent's words are verbatim.** Message, titles and option labels pass
   through; only the host's own words (header, status, Skip, Send) are i18n.
 - **A question is its own row, never a tool group's member.** It sits at the

@@ -153,3 +153,32 @@ fn a_lone_select_offers_send_once_other_text_is_committed() {
     assert!(lone.offers_send());
     assert!(open(two_questions()).offers_send());
 }
+
+/// The bar marking the field being answered is its only cue, so the accent
+/// keeps the UI theme's link hue but must clear the 3:1 component floor on the
+/// card fill of every terminal preset, under either UI theme.
+#[gpui::test]
+fn question_accent_keeps_link_hue_and_clears_the_pane_contrast_floor(
+    cx: &mut gpui::TestAppContext,
+) {
+    use daruda_ui::theme::{self, PaneSurfaceTokens};
+    cx.update(|cx| {
+        theme::init_if_missing(cx);
+        for ui in ["daruda_light", "daruda_dark"] {
+            assert!(theme::apply_ui_theme(ui, cx));
+            for preset in daruda_config::theme_presets::PRESETS {
+                let Some(colors) = daruda_config::theme_presets::colors_for_preset(preset.name)
+                else {
+                    continue;
+                };
+                let bg = colors.background;
+                theme::set_agent_chat_bg(cx, bg.r, bg.g, bg.b);
+                let surface = PaneSurfaceTokens::agent_chat(cx);
+                let accent = super::question_accent(cx);
+                assert_eq!(accent.h, theme::current(cx).link_color.h);
+                let ratio = theme::contrast_ratio(accent, surface.background.blend(surface.tint));
+                assert!(ratio >= 3.0, "{ui} / {}: {ratio:.2}:1", preset.name);
+            }
+        }
+    });
+}

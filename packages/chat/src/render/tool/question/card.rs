@@ -5,10 +5,12 @@ use daruda_acp::{QuestionField, QuestionFieldKind, ToolCallItem};
 use daruda_ui::theme::{self, PaneSurfaceTokens};
 use daruda_ui::{ButtonCustomVariant, ButtonVariants as _, Disableable as _, icons};
 use gpui::{
-    AnyElement, Context, Div, FontWeight, IntoElement, SharedString, Stateful, div, prelude::*, px,
+    AnyElement, Context, Div, FontWeight, Hsla, IntoElement, SharedString, Stateful, div,
+    prelude::*, px,
 };
 
 use super::{GLYPH_HIGHLIGHT, GLYPH_WRITE, choice_glyph, field_heading, row_frame};
+use crate::render::card_frame::{CardFrame, CardTone};
 use crate::strings as s;
 use crate::view::AgentChatView;
 use crate::view::questions::{OpenQuestion, QuestionCountdown, QuestionHighlight, primary_fields};
@@ -50,17 +52,14 @@ pub(in crate::render) fn question_form(
     surface: &PaneSurfaceTokens,
     cx: &mut Context<AgentChatView>,
 ) -> Div {
-    div()
-        .w_full()
-        .min_w_0()
+    let accent = theme::dim_toward_gray(super::question_accent(cx), dim);
+    // The shared card chrome, as the permission card beside it wears.
+    CardFrame::new(CardTone::Standard)
+        .render(dim, cx)
         .flex()
         .flex_col()
         .gap(px(theme::GAP_LG))
         .p(px(theme::PAD_XL))
-        .rounded(px(theme::RADIUS_MD))
-        .border_1()
-        .border_color(surface.border_tint)
-        .bg(surface.tint)
         .text_size(px(theme::agent_chat_font_size(cx)))
         .text_color(surface.foreground)
         .child(card_header(open, agent, surface))
@@ -68,7 +67,9 @@ pub(in crate::render) fn question_form(
         .children(
             primary_fields(&open.request)
                 .enumerate()
-                .map(|(index, field)| field_block(open, may_write, index, field, surface, cx)),
+                .map(|(index, field)| {
+                    field_block(open, may_write, index, field, surface, accent, cx)
+                }),
         )
         .child(actions(open, dim, surface, cx))
 }
@@ -143,6 +144,7 @@ fn field_block(
     field_index: usize,
     field: &QuestionField,
     surface: &PaneSurfaceTokens,
+    accent: Hsla,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
     let id = open.id;
@@ -152,11 +154,7 @@ fn field_block(
     let mut block = field_heading(field, surface)
         .pl(px(theme::PAD_SM))
         .border_l_2()
-        .border_color(if current {
-            surface.control_border
-        } else {
-            surface.border_tint
-        });
+        .border_color(if current { accent } else { surface.border_tint });
     let rows = match &field.kind {
         QuestionFieldKind::SingleSelect(options) | QuestionFieldKind::MultiSelect(options) => {
             let multi = matches!(field.kind, QuestionFieldKind::MultiSelect(_));
@@ -173,6 +171,7 @@ fn field_block(
                         highlighted: highlighted(index),
                     },
                     surface,
+                    accent,
                 )
                 .on_click(cx.listener(move |view, _, _, cx| {
                     view.pick_question_option(id, field_index, index, cx)
@@ -202,6 +201,7 @@ fn field_block(
                         highlighted: highlighted(index),
                     },
                     surface,
+                    accent,
                 )
                 .on_click(cx.listener(move |view, _, _, cx| {
                     view.set_question_flag(id, field_index, value, cx)
@@ -249,7 +249,12 @@ struct OptionRow<'a> {
 
 /// One clickable option. Picked and highlighted rows take the selected fill;
 /// the glyphs, not the fill, tell the two apart.
-fn option_row(selector: String, row: OptionRow<'_>, surface: &PaneSurfaceTokens) -> Stateful<Div> {
+fn option_row(
+    selector: String,
+    row: OptionRow<'_>,
+    surface: &PaneSurfaceTokens,
+    accent: Hsla,
+) -> Stateful<Div> {
     let filled = row.picked || row.highlighted;
     let hover = surface.hover_tint;
     let debug = selector.clone();
@@ -260,7 +265,7 @@ fn option_row(selector: String, row: OptionRow<'_>, surface: &PaneSurfaceTokens)
         .py(px(theme::PAD_SM))
         .border_l_2()
         .border_color(if row.picked {
-            surface.control_border
+            accent
         } else {
             surface.border_tint.opacity(0.0)
         })
@@ -445,7 +450,8 @@ fn actions(
                             .when(!lit, |el| el.invisible())
                             .child(GLYPH_HIGHLIGHT),
                     )
-                    // The primary action uses the workspace interaction palette.
+                    // The primary action keeps the standard accent fill, which
+                    // carries its own contrast on any pane.
                     .child(
                         daruda_ui::button(
                             SharedString::from(submit.clone()),
