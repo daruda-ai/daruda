@@ -431,6 +431,33 @@ fn a_same_bot_replacement_keeps_its_card_and_settles_it(cx: &mut gpui::TestAppCo
 }
 
 #[gpui::test]
+fn a_card_whose_message_is_gone_is_not_edited_again(cx: &mut gpui::TestAppContext) {
+    use crate::control::approval::{self, ApprovalOutcome};
+    use crate::remote_channel::cards::EditFailure;
+    use crate::remote_channel::cards::tests::EditCapture;
+    cx.update(|cx| {
+        let mut outgoing = install_for_test(true, Some(42), cx);
+        cx.set_global(EditCapture::default());
+        let (id, answer) =
+            approval::request("Deleted".into(), super::super::Delivery::Explicit, cx);
+        outgoing.begin_send(72, cx).unwrap()(cx);
+        cx.global_mut::<EditCapture>().fail = Some(EditFailure::Gone(
+            "Bad Request: message to edit not found".into(),
+        ));
+        assert!(approval::resolve_desktop(id.0, "approve", cx));
+        assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Approved));
+        assert_eq!(cx.global::<EditCapture>().edits.len(), 1);
+        cx.global_mut::<EditCapture>().fail = None;
+        flush_edits(cx);
+        assert_eq!(
+            cx.global::<EditCapture>().edits.len(),
+            1,
+            "a gone message leaves the retry queue"
+        );
+    });
+}
+
+#[gpui::test]
 fn an_offline_settlement_survives_replacement_and_an_edit_failure(cx: &mut gpui::TestAppContext) {
     use crate::control::approval::{self, ApprovalOutcome};
     use crate::remote_channel::cards::tests::EditCapture;
@@ -451,10 +478,12 @@ fn an_offline_settlement_survives_replacement_and_an_edit_failure(cx: &mut gpui:
             generation: uuid::Uuid::new_v4(),
         }));
         TelegramBridge::sync_card_owner(cx);
-        cx.global_mut::<EditCapture>().fail = true;
+        cx.global_mut::<EditCapture>().fail = Some(
+            crate::remote_channel::cards::EditFailure::Transient("HTTP 502".into()),
+        );
         flush_edits(cx);
         assert_eq!(cx.global::<EditCapture>().edits.len(), 1);
-        cx.global_mut::<EditCapture>().fail = false;
+        cx.global_mut::<EditCapture>().fail = None;
         flush_edits(cx);
         assert_eq!(cx.global::<EditCapture>().edits.len(), 2);
         flush_edits(cx);
@@ -503,5 +532,30 @@ fn a_late_send_response_keeps_its_settlement_while_telegram_reopens(cx: &mut gpu
         );
         approval::relay_outstanding(cx);
         assert!(outgoing.try_recv().is_err());
+    });
+}
+
+#[gpui::test]
+fn a_telegram_bot_that_is_not_serving_keeps_its_cards_at_quit(cx: &mut gpui::TestAppContext) {
+    use crate::control::approval;
+    use crate::remote_channel::cards::tests::EditCapture;
+    cx.update(|cx| {
+        let mut outgoing = install_for_test(true, Some(42), cx);
+        cx.set_global(EditCapture::default());
+        let (id, _answer) = approval::request("Quit".into(), super::super::Delivery::Explicit, cx);
+        outgoing.begin_send(75, cx).unwrap()(cx);
+        let original = cx.global::<TelegramBridge>().bot.ready().unwrap().clone();
+        cx.global_mut::<TelegramBridge>().release_claim();
+        assert!(TelegramBridge::quit_edits("Cancelled at quit", cx).is_empty());
+        cx.global_mut::<TelegramBridge>().bot = Ownership::Ready(Arc::new(ReadyBot {
+            token: original.token.clone(),
+            inbox: original.inbox.clone(),
+            generation: uuid::Uuid::new_v4(),
+        }));
+        TelegramBridge::sync_card_owner(cx);
+        assert!(approval::resolve_desktop(id.0, "approve", cx));
+        let edits = &cx.global::<EditCapture>().edits;
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].ids, ["75"]);
     });
 }

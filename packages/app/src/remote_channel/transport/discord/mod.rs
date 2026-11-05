@@ -3,6 +3,7 @@
 use super::{
     Credentials, Incoming, IncomingKind, Message, Result, TransportError, chunks, http, socket,
 };
+use crate::remote_channel::cards::EditFailure;
 use daruda_config::remote::RemoteRecipient;
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -273,9 +274,9 @@ pub fn edit(
     message_id: &str,
     original: &str,
     label: &str,
-) -> Result<()> {
+) -> std::result::Result<(), EditFailure> {
     let text = super::feedback(original, label, CONTENT_LIMIT);
-    http::request(
+    edit_result(http::request_with_status(
         "PATCH",
         &format!(
             "{API}/channels/{}/messages/{message_id}",
@@ -283,8 +284,15 @@ pub fn edit(
         ),
         Some(&format!("Bot {}", credentials.bot)),
         &json!({"content":text,"components":[],"allowed_mentions":{"parse":[]}}),
-    )?;
-    Ok(())
+    ))
+}
+
+/// Classify a message `PATCH`. Discord refuses by status alone: 404 is an
+/// unknown message or channel, 401/403 a bot that lost its access.
+fn edit_result(
+    response: std::result::Result<Value, http::Failure>,
+) -> std::result::Result<(), EditFailure> {
+    response.map(drop).map_err(http::edit_failure)
 }
 
 #[cfg(test)]

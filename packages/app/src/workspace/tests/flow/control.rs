@@ -1379,7 +1379,7 @@ nodes:
     run: \"echo $$ > quit.pid; sleep 30\"
 ";
     let (lane, ws, flow_path, wh) = workspace_with_a_flow(cx, RECORDS_ITS_PID);
-    cx.update(crate::runs::RunsHost::install_quit_flush);
+    cx.update(crate::startup::quit::install);
     // A real run: its log thread wakes the app from outside the scheduler,
     // so the opt-out has to come before the run starts.
     cx.executor().allow_parking();

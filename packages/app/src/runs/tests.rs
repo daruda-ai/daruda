@@ -40,7 +40,7 @@ async fn the_tasks_file_is_never_written_after_import(cx: &mut TestAppContext) {
     let store = store_at(log.path(), Some(legacy.path()));
     cx.update(|cx| {
         RunsHost::install(RunsHost::open(Ok(store.clone())), cx);
-        RunsHost::install_quit_flush(cx);
+        crate::startup::quit::install(cx);
     });
     cx.update(|cx| {
         RunsHost::task(
@@ -184,7 +184,7 @@ fn quit_flushes_commands_that_have_not_reached_the_projection(cx: &mut TestAppCo
     let id = spec.id.clone();
     cx.update(|cx| {
         RunsHost::install(RunsHost::open(Ok(store.clone())), cx);
-        RunsHost::install_quit_flush(cx);
+        crate::startup::quit::install(cx);
         RunsHost::propose(TaskEvent::Created { spec }, cx).detach();
     });
     cx.quit();
@@ -228,7 +228,7 @@ fn an_unfinished_reconciliation_reopens_read_only_and_preserves_files(cx: &mut T
     assert_eq!(reopened.current().unwrap(), expected);
     cx.update(|cx| {
         RunsHost::install(RunsHost::open(Ok(reopened)), cx);
-        RunsHost::install_quit_flush(cx);
+        crate::startup::quit::install(cx);
         assert!(!RunsHost::is_writable(cx));
         assert!(cx.global::<GlobalTasks>().get(&id).is_some());
     });

@@ -4,7 +4,8 @@ use crate::control::approval::ApprovalId;
 use crate::remote_channel::bridge::PaneRef;
 
 mod edits;
-pub(crate) use edits::{EditQueue, RETRY_INTERVAL};
+pub(crate) mod quit;
+pub(crate) use edits::{EditFailure, EditOutcome, EditQueue, RETRY_INTERVAL};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum CardId {
@@ -97,6 +98,9 @@ enum SendState<Receipt> {
     Settled(String),
     Sent(Receipt),
     Attempted,
+    /// Edited as the app quit. Nothing may edit it again, and keeping the
+    /// entry stops a still-waiting request from being offered anew.
+    ClosedAtQuit,
 }
 
 impl<Receipt> Default for CardLedger<Receipt> {
@@ -210,7 +214,7 @@ impl<Receipt> CardLedger<Receipt> {
                 self.cards.insert(card.clone(), entry);
                 Settlement::Recorded
             }
-            SendState::Settled(_) => {
+            SendState::Settled(_) | SendState::ClosedAtQuit => {
                 self.cards.insert(card.clone(), entry);
                 Settlement::Recorded
             }

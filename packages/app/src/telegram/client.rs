@@ -12,6 +12,8 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use ureq::Body;
+
+use crate::remote_channel::cards::EditFailure;
 use ureq::http::Response;
 
 /// Failure surface for the Bot API calls, mirroring
@@ -127,6 +129,16 @@ fn agent() -> &'static ureq::Agent {
     })
 }
 
+/// What [`post_json`] does with a non-2xx status.
+#[derive(Clone, Copy)]
+enum Statuses {
+    /// Fail with the status alone, as ureq does by default.
+    AsError,
+    /// Return the response, so the caller can read Telegram's `error_code`
+    /// and `description` from its body.
+    AsResponse,
+}
+
 /// POST `payload` to `method`, retrying once on a fresh connection when the
 /// pooled one turns out dead — after sleep or a network change the pool hands
 /// back a socket the server already dropped, and ureq retries no POST itself.
@@ -134,12 +146,15 @@ fn post_json(
     token: &str,
     method: &str,
     payload: serde_json::Value,
+    statuses: Statuses,
 ) -> Result<Response<Body>, ClientError> {
     let url = base_url(token, method);
+    let status_as_error = matches!(statuses, Statuses::AsError);
     let sent = match agent()
         .post(&url)
         .config()
         .timeout_global(Some(REQUEST_TIMEOUT))
+        .http_status_as_error(status_as_error)
         .build()
         .send_json(payload.clone())
     {
@@ -147,6 +162,7 @@ fn post_json(
             let fresh: ureq::Agent = ureq::Agent::config_builder()
                 .max_idle_connections(0)
                 .timeout_global(Some(REQUEST_TIMEOUT))
+                .http_status_as_error(status_as_error)
                 .proxy(None)
                 .build()
                 .into();
@@ -252,7 +268,7 @@ pub fn send_message(
         payload["reply_markup"] = inline_keyboard_json(&keyboard);
     }
 
-    let response = post_json(token, "sendMessage", payload)?;
+    let response = post_json(token, "sendMessage", payload, Statuses::AsError)?;
 
     let body = read_body(response)?;
     parse_send_message_response(&body)
@@ -282,7 +298,7 @@ pub fn answer_callback(
         payload["text"] = serde_json::json!(clamp_callback_text(text));
     }
 
-    let response = post_json(token, "answerCallbackQuery", payload)?;
+    let response = post_json(token, "answerCallbackQuery", payload, Statuses::AsError)?;
 
     let body = read_body(response)?;
     parse_answer_callback_response(&body)
@@ -298,7 +314,7 @@ pub fn edit_message_text(
     chat_id: i64,
     message_id: i64,
     text: &str,
-) -> Result<(), ClientError> {
+) -> Result<(), EditFailure> {
     if cfg!(test) {
         return Ok(());
     }
@@ -308,10 +324,12 @@ pub fn edit_message_text(
         "text": text,
     });
 
-    let response = post_json(token, "editMessageText", payload)?;
-
-    let body = read_body(response)?;
-    parse_edit_message_response(&body)
+    let transient = |error: ClientError| EditFailure::Transient(error.to_string());
+    let response =
+        post_json(token, "editMessageText", payload, Statuses::AsResponse).map_err(transient)?;
+    let status = response.status().as_u16();
+    let body = read_body(response).map_err(transient)?;
+    classify_edit_response(status, &body)
 }
 
 fn read_body(response: Response<Body>) -> Result<String, ClientError> {
@@ -328,7 +346,7 @@ fn read_body(response: Response<Body>) -> Result<String, ClientError> {
     Ok(body)
 }
 
-/// Top-level Telegram API envelope shared by all three endpoints:
+/// Top-level Telegram API envelope for a reply whose `result` is unused:
 /// `{"ok": bool, "result": ..., "description": "..."}`. `description`
 /// is only present when `ok` is `false`.
 #[derive(Debug, Deserialize)]
@@ -496,11 +514,38 @@ fn parse_answer_callback_response(body: &str) -> Result<(), ClientError> {
     )
 }
 
-/// Decode an `editMessageText` response body.
-fn parse_edit_message_response(body: &str) -> Result<(), ClientError> {
-    let envelope: RawEnvelope =
-        serde_json::from_str(body).map_err(|e| ClientError::Parse(e.to_string()))?;
-    require_ok(envelope.ok, envelope.description, "editMessageText failed")
+#[derive(Debug, Deserialize)]
+struct EditEnvelope {
+    ok: bool,
+    error_code: Option<i64>,
+    description: Option<String>,
+}
+
+/// Classify an `editMessageText` reply by whether a retry could succeed.
+/// Telegram refuses an edit to identical text, which means the card already
+/// shows its settlement; a 400 or 403 names a message, chat or bot access
+/// that is gone, or a request that stays malformed.
+fn classify_edit_response(status: u16, body: &str) -> Result<(), EditFailure> {
+    let envelope: EditEnvelope = serde_json::from_str(body).map_err(|e| {
+        EditFailure::Transient(format!(
+            "editMessageText returned HTTP {status} with an unreadable body: {e}"
+        ))
+    })?;
+    if envelope.ok {
+        return Ok(());
+    }
+    let code = envelope.error_code.unwrap_or(i64::from(status));
+    let description = envelope
+        .description
+        .unwrap_or_else(|| "editMessageText failed".to_string());
+    if description.contains("message is not modified") {
+        return Ok(());
+    }
+    let reason = format!("editMessageText error {code}: {description}");
+    match code {
+        400 | 403 => Err(EditFailure::Gone(reason)),
+        _ => Err(EditFailure::Transient(reason)),
+    }
 }
 
 #[cfg(test)]

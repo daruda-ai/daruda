@@ -18,8 +18,8 @@ use gpui::{App, BorrowAppContext as _, Global};
 use super::{RunsEffects, TaskIntent};
 
 /// How long quitting waits, in all, for queued task commits to become
-/// durable and for flow runs to end their processes.
-const QUIT_FLUSH_DEADLINE: Duration = Duration::from_secs(2);
+/// durable, phone cards to be edited and flow runs to end their processes.
+pub(crate) const QUIT_FLUSH_DEADLINE: Duration = Duration::from_secs(2);
 
 /// The read-only task projection every window renders from. Only
 /// [`RunsHost`] replaces it, from a committed `state_after`.
@@ -382,45 +382,50 @@ impl RunsHost {
         }
     }
 
-    /// Task commits, terminal history and flow shutdown share one deadline.
-    /// Signal flows first so their processes wind down while journals flush.
-    pub(crate) fn install_quit_flush(cx: &mut App) {
-        cx.on_app_quit(|cx| {
-            let until = std::time::Instant::now() + QUIT_FLUSH_DEADLINE;
-            Self::shut_down_flows(cx);
-            if let Access::Writable(store) = &cx.global::<RunsHost>().access
-                && let Err(error) =
-                    store.flush(until.saturating_duration_since(std::time::Instant::now()))
-            {
-                LogWriter::log(
-                    ErrorReport::new("Task commits were still queued at quit")
-                        .severity(ErrorSeverity::Warning)
-                        .from_error(&error)
-                        .at(file!(), line!())
-                        .dedup("tasks.quit_flush")
-                        .build(),
-                );
-            }
-            if !super::cli::history::flush(until, cx) {
-                LogWriter::log(
-                    ErrorReport::new("Terminal history was not fully persisted at quit")
-                        .severity(ErrorSeverity::Warning)
-                        .dedup("terminal_history.quit_flush")
-                        .build(),
-                );
-            }
-            if !Self::wait_flows_ended(until, cx) {
-                LogWriter::log(
-                    ErrorReport::new("A flow run was still ending its processes at quit")
-                        .severity(ErrorSeverity::Warning)
-                        .at(file!(), line!())
-                        .dedup("flows.quit_shutdown")
-                        .build(),
-                );
-            }
-            async {}
-        })
-        .detach();
+    /// Quit, first phase: signal flows so their processes wind down while
+    /// the later phases run. The app's quit hook orders the phases and gives
+    /// them one deadline.
+    pub(crate) fn quit_begin(cx: &App) {
+        Self::shut_down_flows(cx);
+    }
+
+    /// Quit, second phase: make queued task commits and terminal history
+    /// durable by `until`.
+    pub(crate) fn quit_flush(until: std::time::Instant, cx: &App) {
+        if let Access::Writable(store) = &cx.global::<RunsHost>().access
+            && let Err(error) =
+                store.flush(until.saturating_duration_since(std::time::Instant::now()))
+        {
+            LogWriter::log(
+                ErrorReport::new("Task commits were still queued at quit")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&error)
+                    .at(file!(), line!())
+                    .dedup("tasks.quit_flush")
+                    .build(),
+            );
+        }
+        if !super::cli::history::flush(until, cx) {
+            LogWriter::log(
+                ErrorReport::new("Terminal history was not fully persisted at quit")
+                    .severity(ErrorSeverity::Warning)
+                    .dedup("terminal_history.quit_flush")
+                    .build(),
+            );
+        }
+    }
+
+    /// Quit, last phase: wait, until `until`, for signalled flows to end.
+    pub(crate) fn quit_wait(until: std::time::Instant, cx: &App) {
+        if !Self::wait_flows_ended(until, cx) {
+            LogWriter::log(
+                ErrorReport::new("A flow run was still ending its processes at quit")
+                    .severity(ErrorSeverity::Warning)
+                    .at(file!(), line!())
+                    .dedup("flows.quit_shutdown")
+                    .build(),
+            );
+        }
     }
 
     /// Install the opened host and its projection. Flow runs in flight, the

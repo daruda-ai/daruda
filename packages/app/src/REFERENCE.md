@@ -9,7 +9,7 @@ sections below when changing a subsystem.
 ```
 app/src/
 ├── (top-level)           # App entry, window/menu lifecycle, PTY, config watcher, slot actions
-├── startup/              # Desktop startup and optional replay, capture, and smoke flows
+├── startup/              # Desktop startup, the quit hook, optional replay/capture/smoke flows
 ├── agent/                # Agent-side data models — MCP, skills — plus GPUI-free account + ACP launch resolution
 ├── runs/                 # Process-wide task log, live flows, result snapshots, delivery ledger, and host-installed effects
 ├── surface/              # App-shell constants — name, shortcuts, strings, keybinding action map
@@ -133,8 +133,10 @@ when no PID was available. Restored interactive CLI conversations claim the same
 lease before connecting; snapshots remain read-only until load succeeds.
 `TaskStore` imports an existing `tasks.json` once and never rewrites it.
 Task commands target only the task log; older builds read the preserved,
-potentially stale legacy file. App quit flushes both task and terminal-history
-queues within the shared flow-shutdown deadline.
+potentially stale legacy file. `startup/quit.rs` registers the single quit
+hook: it signals flows, starts phone card edits, flushes the task and
+terminal-history queues, then waits on the cards and the flows, all within
+one deadline (`runs::QUIT_FLUSH_DEADLINE`).
 
 `RunsHost` also owns every flow run in flight (`runs/flows/`), keyed by
 worktree: its thread, stop switch, and one pump that folds the run's
@@ -215,13 +217,15 @@ and its recipient), not a session: reconnects, inbox recovery, token revisions
 and same-bot credential rewrites keep sent cards editable and are not
 re-offered. Up to 64 settlement receipts per identity survive an unavailable
 editor or failed edit; they retry on reconnection and every 15 seconds until
-successful or evicted. A different bot, or Telegram unpairing or disabling,
-drops the ledger, pending edits and callback tombstones with its live tokens;
-a waiting approval is then offered once to the new identity. The 64 most recent
-settled callbacks identify taps even before a send returns its message ids;
-the 64 most recent settled message ids prevent competing stale edits. A stale
-tap on an untracked message loses its buttons. Workspace only updates its
-pane-local permission presentation.
+successful or evicted. An edit the platform refuses for good (message, chat or
+bot access gone, or a malformed request) is dropped and logged once instead.
+A different bot, or Telegram unpairing or disabling, drops the ledger, pending
+edits and callback tombstones with its live tokens; a waiting approval is then
+offered once to the new identity. The 64 most recent settled callbacks
+identify taps even before a send returns its message ids; the 64 most recent
+settled message ids prevent competing stale edits. A stale tap on an untracked
+message loses its buttons. Workspace only updates its pane-local permission
+presentation.
 
 An agent's question reaches the phone one field per card
 (`CardId::Question { pane, question, step }`), offered at arrival and by the
@@ -278,8 +282,20 @@ answer questions without a window. Waiting state updates chips in all windows
 where the orchestrator feature is on, including non-host windows. Clicking a
 non-host chip reveals the host's tab and activates that window; switching the
 feature off hides chips even while a session exists. Native waiting notifications obey
-preferences and visibility without stealing focus. Removing settled OS alerts,
-app-exit card cleanup and restart durability remain outside this contract.
+preferences and visibility without stealing focus.
+
+App quit cleans up phone cards best-effort within the quit deadline
+(`remote_channel::cards::quit`). Every card a serving identity can still edit
+is closed: a queued settlement edit keeps its result, and a delivered,
+unanswered card reads "Cancelled — the app quit" without buttons. The
+foreground blocks during quit, so the snapshot is taken first and the edits
+run on their own threads; edits still running at the deadline are logged once
+with their count. Cards without a receipt (still sending or unconfirmed), and
+cards of an identity not serving at quit, are left. Those, and every card after
+a crash or forced kill, settle only when tapped: a new process cannot tell a
+restart from an earlier answer, so the tap reads "No longer valid — handled
+already or the app restarted". Removing settled OS alerts and restart
+durability remain outside this contract.
 
 ### Result queries, waits and delivery
 

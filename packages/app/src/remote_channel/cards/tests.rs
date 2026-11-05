@@ -11,7 +11,8 @@ pub(crate) struct CapturedEdit {
 #[derive(Default)]
 pub(crate) struct EditCapture {
     pub edits: Vec<CapturedEdit>,
-    pub fail: bool,
+    /// Every captured edit answers with this failure while it is set.
+    pub fail: Option<EditFailure>,
 }
 
 impl gpui::Global for EditCapture {}
@@ -22,7 +23,7 @@ pub(crate) fn capture(
     original: &str,
     label: &str,
     cx: &mut gpui::App,
-) -> Option<Result<(), String>> {
+) -> Option<Result<(), EditFailure>> {
     if !cx.has_global::<EditCapture>() {
         return None;
     }
@@ -33,11 +34,7 @@ pub(crate) fn capture(
         original: original.to_owned(),
         label: label.to_owned(),
     });
-    Some(if capture.fail {
-        Err("injected edit failure".into())
-    } else {
-        Ok(())
-    })
+    Some(capture.fail.clone().map_or(Ok(()), Err))
 }
 
 fn approval() -> CardId {
@@ -285,7 +282,7 @@ fn queued_settlement_edits_follow_the_identity_and_not_a_connection() {
     owned.edits.push("message", "Approved".into());
     owned.bind("bot");
     let (id, _, _) = owned.edits.claim().pop().unwrap();
-    owned.edits.finish(id, false);
+    owned.edits.finish(id, EditOutcome::Transient);
     owned.bind("replacement");
     assert!(owned.edits.claim().is_empty());
     owned.edits.push("replacement-message", "Refused".into());

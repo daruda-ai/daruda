@@ -96,7 +96,7 @@ pub fn edit(
     message_id: &str,
     original: &str,
     label: &str,
-) -> Result<()> {
+) -> std::result::Result<(), crate::remote_channel::cards::EditFailure> {
     match kind {
         ChannelKind::Slack => slack::edit(credentials, recipient, message_id, original, label),
         ChannelKind::Discord => discord::edit(credentials, recipient, message_id, original, label),

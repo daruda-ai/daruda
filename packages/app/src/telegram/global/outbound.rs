@@ -8,7 +8,10 @@ use gpui::App;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use crate::remote_channel::cards::{CardCompletion, CardId, SendClaim, SendOutcome, Settlement};
+use crate::remote_channel::cards::quit::QuitEdit;
+use crate::remote_channel::cards::{
+    CardCompletion, CardId, EditOutcome, SendClaim, SendOutcome, Settlement,
+};
 use crate::settings_store::SettingsStore;
 use crate::telegram::bridge::{Outbound, OutboundMsg, PaneRef};
 use crate::telegram::{client, keychain, trace};
@@ -226,15 +229,33 @@ fn release(card: &SendClaim, cx: &mut App) {
 
 /// The bot that may edit `receipt`'s message: the one serving its identity now.
 fn editor(receipt: &Receipt, cx: &App) -> Option<Arc<ReadyBot>> {
+    serving(&receipt.owner, cx)
+}
+
+/// The bot serving `owner` now, if any.
+fn serving(owner: &CardOwner, cx: &App) -> Option<Arc<ReadyBot>> {
     let bridge = cx.global::<TelegramBridge>();
     let bot = bridge.bot.ready().filter(|_| bridge.bot.serves())?;
     let config = &SettingsStore::global(cx).user().telegram;
     let serves = config.enabled
-        && config.authorized_chat_id == Some(receipt.owner.chat_id)
-        && CardOwner::of(bot, receipt.owner.chat_id) == receipt.owner
-        && bridge.cards.borrow().owner() == Some(&receipt.owner);
+        && config.authorized_chat_id == Some(owner.chat_id)
+        && CardOwner::of(bot, owner.chat_id) == *owner
+        && bridge.cards.borrow().owner() == Some(owner);
     serves.then(|| bot.clone())
 }
+
+/// One quit edit, carrying the bot's token so it runs without the app.
+fn quit_edit(bot: &ReadyBot, receipt: Receipt, label: String) -> QuitEdit {
+    let token = bot.token.token.clone();
+    let body =
+        crate::remote_channel::dispatch::target::compose_edit_body(&receipt.original, &label);
+    QuitEdit::new(QUIT_EDIT_FAILED, QUIT_EDIT_DEDUP, move || {
+        client::edit_message_text(&token, receipt.owner.chat_id, receipt.message_id, &body)
+    })
+}
+
+const QUIT_EDIT_FAILED: &str = "Telegram card failed to edit at quit";
+const QUIT_EDIT_DEDUP: &str = "telegram.card.quit_edit";
 
 pub(super) fn edit(receipt: Receipt, label: String, cx: &mut App) {
     let cards = cx.global_mut::<TelegramBridge>().cards.get_mut();
@@ -254,7 +275,7 @@ pub(super) fn flush_edits(cx: &mut App) {
     let pending = bridge.cards.get_mut().edits.claim();
     for (attempt, receipt, label) in pending {
         if editor(&receipt, cx).is_none() {
-            finish_edit(attempt, false, cx);
+            finish_edit(attempt, EditOutcome::Transient, cx);
             continue;
         }
         #[cfg(test)]
@@ -265,15 +286,8 @@ pub(super) fn flush_edits(cx: &mut App) {
             &label,
             cx,
         ) {
-            let edited = result.is_ok();
-            if let Err(error) = result {
-                crate::remote_channel::log_error(
-                    "Telegram settled card failed to edit",
-                    &error,
-                    "telegram.card.edit",
-                );
-            }
-            finish_edit(attempt, edited, cx);
+            let outcome = EditOutcome::logged(result, EDIT_FAILED, EDIT_DEDUP);
+            finish_edit(attempt, outcome, cx);
             continue;
         }
         cx.spawn(async move |cx| {
@@ -290,7 +304,7 @@ pub(super) fn flush_edits(cx: &mut App) {
                 editor(&receipt, cx)
             });
             let Some(bot) = bot else {
-                cx.update(|cx| finish_edit(attempt, false, cx));
+                cx.update(|cx| finish_edit(attempt, EditOutcome::Transient, cx));
                 return;
             };
             let body = crate::remote_channel::dispatch::target::compose_edit_body(
@@ -300,44 +314,78 @@ pub(super) fn flush_edits(cx: &mut App) {
             let result = cx
                 .background_executor()
                 .spawn(async move {
+                    // A rewritten token waits for the bridge to serve it; the
+                    // same bot can still edit the message afterwards.
                     if bot.token.revision != keychain::revision() {
-                        return Ok(false);
+                        return None;
                     }
-                    client::edit_message_text(
+                    Some(client::edit_message_text(
                         &bot.token.token,
                         receipt.owner.chat_id,
                         receipt.message_id,
                         &body,
-                    )
-                    .map(|()| true)
+                    ))
                 })
                 .await;
-            let edited = match result {
-                Ok(edited) => edited,
-                Err(error) => {
-                    crate::remote_channel::log_error(
-                        "Telegram settled card failed to edit",
-                        &error,
-                        "telegram.card.edit",
-                    );
-                    false
-                }
+            let outcome = match result {
+                Some(result) => EditOutcome::logged(result, EDIT_FAILED, EDIT_DEDUP),
+                None => EditOutcome::Transient,
             };
-            cx.update(|cx| finish_edit(attempt, edited, cx));
+            cx.update(|cx| finish_edit(attempt, outcome, cx));
         })
         .detach();
     }
 }
 
-fn finish_edit(attempt: uuid::Uuid, edited: bool, cx: &mut App) {
+const EDIT_FAILED: &str = "Telegram settled card failed to edit";
+const EDIT_DEDUP: &str = "telegram.card.edit";
+
+fn finish_edit(attempt: uuid::Uuid, outcome: EditOutcome, cx: &mut App) {
     cx.global_mut::<TelegramBridge>()
         .cards
         .get_mut()
         .edits
-        .finish(attempt, edited);
+        .finish(attempt, outcome);
 }
 
 impl TelegramBridge {
+    /// The edits this bot owes as the app quits, closing their cards. A bot
+    /// not serving its identity right now keeps its cards for tap-time
+    /// cleanup, as it would for a settlement.
+    pub(crate) fn quit_edits(cancelled: &str, cx: &mut App) -> Vec<QuitEdit> {
+        let Some(owner) = cx
+            .try_global::<Self>()
+            .and_then(|bridge| bridge.cards.borrow().owner().cloned())
+        else {
+            return Vec::new();
+        };
+        let Some(bot) =
+            serving(&owner, cx).filter(|bot| bot.token.revision == keychain::revision())
+        else {
+            return Vec::new();
+        };
+        let cards = cx.global_mut::<Self>().cards.get_mut();
+        let owed = cards.close_for_quit(cancelled);
+        for (receipt, _) in &owed {
+            cards.note_settled(receipt.message_id);
+        }
+        owed.into_iter()
+            .map(|(receipt, label)| {
+                #[cfg(test)]
+                if let Some(result) = crate::remote_channel::cards::tests::capture(
+                    "telegram",
+                    vec![receipt.message_id.to_string()],
+                    &receipt.original,
+                    &label,
+                    cx,
+                ) {
+                    return QuitEdit::new(QUIT_EDIT_FAILED, QUIT_EDIT_DEDUP, move || result);
+                }
+                quit_edit(&bot, receipt, label)
+            })
+            .collect()
+    }
+
     /// Bind the card ledger to the identity now serving. The same bot and chat
     /// keep every record; another identity can neither edit the old messages
     /// nor receive their taps, so their callback tokens are forgotten with

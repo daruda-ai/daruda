@@ -1,7 +1,9 @@
 use super::RemoteChannels;
 use crate::remote_channel::{
     bridge::{InlineKeyboard, MessageTail, Outbound, PaneRef},
-    cards::{CardCompletion, CardId, SendClaim, SendOutcome, Settlement},
+    cards::{
+        CardCompletion, CardId, EditOutcome, SendClaim, SendOutcome, Settlement, quit::QuitEdit,
+    },
     runtime::BotSession,
     transport::{self, Message},
 };
@@ -188,19 +190,14 @@ fn flush_connection(id: &str, cx: &mut App) {
             &label,
             cx,
         ) {
-            let edited = result.is_ok();
-            if let Err(error) = result {
-                crate::remote_channel::log_error(
-                    "Remote settled card failed to edit",
-                    &error,
-                    "remote.card.edit",
-                );
-            }
-            finish_edit(&receipt, attempt, edited, cx);
+            let outcome = EditOutcome::logged(result, EDIT_FAILED, EDIT_DEDUP);
+            finish_edit(&receipt, attempt, outcome, cx);
             continue;
         }
         cx.spawn(async move |cx| {
-            let mut edited = true;
+            // A gone message does not stop the rest of a split card from
+            // losing its buttons; a transient failure retries all of them.
+            let mut outcome = EditOutcome::Edited;
             for message_id in &receipt.ids {
                 let serving = cx.update(|cx| {
                     let connection = cx.global::<RemoteChannels>().connections.get(&receipt.id)?;
@@ -210,7 +207,7 @@ fn flush_connection(id: &str, cx: &mut App) {
                     editor(&receipt, cx)
                 });
                 let Some((kind, bot)) = serving else {
-                    edited = false;
+                    outcome = EditOutcome::Transient;
                     break;
                 };
                 let recipient = receipt.recipient.clone();
@@ -221,53 +218,131 @@ fn flush_connection(id: &str, cx: &mut App) {
                     .background_executor()
                     .spawn(async move {
                         if !bot.is_live() {
-                            return Ok(false);
+                            return None;
                         }
-                        transport::edit(
+                        Some(transport::edit(
                             kind,
                             &bot.credentials,
                             &recipient,
                             &message_id,
                             &original,
                             &label,
-                        )
-                        .map(|()| true)
+                        ))
                     })
                     .await;
-                match result {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        edited = false;
-                        break;
-                    }
-                    Err(error) => {
-                        crate::remote_channel::log_error(
-                            "Remote settled card failed to edit",
-                            &error,
-                            "remote.card.edit",
-                        );
-                        edited = false;
+                let Some(result) = result else {
+                    outcome = EditOutcome::Transient;
+                    break;
+                };
+                match EditOutcome::logged(result, EDIT_FAILED, EDIT_DEDUP) {
+                    EditOutcome::Edited => {}
+                    EditOutcome::Gone => outcome = EditOutcome::Gone,
+                    EditOutcome::Transient => {
+                        outcome = EditOutcome::Transient;
                         break;
                     }
                 }
             }
-            cx.update(|cx| finish_edit(&receipt, attempt, edited, cx));
+            cx.update(|cx| finish_edit(&receipt, attempt, outcome, cx));
         })
         .detach();
     }
 }
 
-fn finish_edit(receipt: &Receipt, attempt: uuid::Uuid, edited: bool, cx: &mut App) {
+/// One quit edit, carrying the session's credentials so it runs without the
+/// app. With no retry after quit, a failed message does not stop the rest
+/// of a split card.
+fn quit_edit(kind: ChannelKind, bot: Arc<BotSession>, receipt: Receipt, label: String) -> QuitEdit {
+    QuitEdit::new(QUIT_EDIT_FAILED, QUIT_EDIT_DEDUP, move || {
+        let mut result = Ok(());
+        for message_id in &receipt.ids {
+            let edited = transport::edit(
+                kind,
+                &bot.credentials,
+                &receipt.recipient,
+                message_id,
+                &receipt.original,
+                &label,
+            );
+            if let Err(failure) = edited {
+                result = Err(failure);
+            }
+        }
+        result
+    })
+}
+
+const QUIT_EDIT_FAILED: &str = "Remote card failed to edit at quit";
+const QUIT_EDIT_DEDUP: &str = "remote.card.quit_edit";
+
+const EDIT_FAILED: &str = "Remote settled card failed to edit";
+const EDIT_DEDUP: &str = "remote.card.edit";
+
+fn finish_edit(receipt: &Receipt, attempt: uuid::Uuid, outcome: EditOutcome, cx: &mut App) {
     if let Some(connection) = cx
         .global_mut::<RemoteChannels>()
         .connections
         .get_mut(&receipt.id)
     {
-        connection.cards.get_mut().edits.finish(attempt, edited);
+        connection.cards.get_mut().edits.finish(attempt, outcome);
     }
 }
 
 impl RemoteChannels {
+    /// The edits every serving connection owes as the app quits, closing
+    /// their cards. A connection not serving right now keeps its cards for
+    /// tap-time cleanup, as it would for a settlement.
+    pub(crate) fn quit_edits(cancelled: &str, cx: &mut App) -> Vec<QuitEdit> {
+        let Some(channels) = cx.try_global::<Self>() else {
+            return Vec::new();
+        };
+        let serving: Vec<_> = channels
+            .connections
+            .keys()
+            .filter(|id| {
+                channels
+                    .live(id, cx)
+                    .is_some_and(|connection| connection.can_send())
+            })
+            .cloned()
+            .collect();
+        let mut owed = Vec::new();
+        for id in serving {
+            let Some(connection) = cx.global_mut::<Self>().connections.get_mut(&id) else {
+                continue;
+            };
+            let cards = connection.cards.get_mut();
+            for (receipt, label) in cards.close_for_quit(cancelled) {
+                for message in &receipt.ids {
+                    cards.note_settled(message.clone());
+                }
+                owed.push((receipt, label));
+            }
+        }
+        let mut edits = Vec::new();
+        for (receipt, label) in owed {
+            #[cfg(test)]
+            if let Some(result) = crate::remote_channel::cards::tests::capture(
+                &receipt.id,
+                receipt.ids.clone(),
+                &receipt.original,
+                &label,
+                cx,
+            ) {
+                edits.push(QuitEdit::new(
+                    QUIT_EDIT_FAILED,
+                    QUIT_EDIT_DEDUP,
+                    move || result,
+                ));
+                continue;
+            }
+            if let Some((kind, bot)) = editor(&receipt, cx) {
+                edits.push(quit_edit(kind, bot, receipt, label));
+            }
+        }
+        edits
+    }
+
     pub(crate) fn settle_card(card: &CardId, label: &str, cx: &mut App) {
         if !cx.has_global::<Self>() {
             return;

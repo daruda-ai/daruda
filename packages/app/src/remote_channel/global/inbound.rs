@@ -304,7 +304,8 @@ async fn serve<F: Future<Output = ClaimResult>>(
                     &message_id,
                     &original,
                     &label,
-                ),
+                )
+                .map_err(|failure| transport::TransportError::Message(failure.to_string())),
             }
         })
         .await;

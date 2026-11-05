@@ -3,6 +3,7 @@
 mod desktop;
 mod failure;
 mod inspection;
+pub(crate) mod quit;
 
 pub(crate) fn run() {
     // Helpers must inherit the original environment and never create a GUI,

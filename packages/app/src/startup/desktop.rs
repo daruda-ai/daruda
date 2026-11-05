@@ -39,7 +39,7 @@ pub(super) fn run() {
         crate::workspace_storage::install(workspace_store, cx);
         // Before any Workspace: every window reads this one projection.
         crate::runs::RunsHost::install(runs, cx);
-        crate::runs::RunsHost::install_quit_flush(cx);
+        super::quit::install(cx);
         globals::init_all(cx);
         platform::desktop_instance::install(instance, cx);
         platform::notifications::install(cx);

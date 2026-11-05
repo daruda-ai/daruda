@@ -370,14 +370,6 @@ fn endpoint_envelope_parsers_handle_ok_and_http_errors() {
         parse_answer_callback_response(r#"{ "ok": false }"#),
         "answerCallbackQuery failed",
     );
-
-    assert!(parse_edit_message_response(r#"{ "ok": true, "result": {} }"#).is_ok());
-    assert_http_contains(
-        parse_edit_message_response(
-            r#"{ "ok": false, "description": "message to edit not found" }"#,
-        ),
-        "message to edit not found",
-    );
 }
 
 #[test]
@@ -386,4 +378,90 @@ fn client_error_display_includes_inner() {
     assert!(e.to_string().contains("connection refused"));
     let e = ClientError::Parse("missing field".to_string());
     assert!(e.to_string().contains("missing field"));
+}
+
+/// Telegram answers a refused edit with a non-2xx status and an `ok: false`
+/// envelope; whether the card is retried hinges on telling the two apart.
+#[test]
+fn edit_responses_classify_into_success_gone_or_transient() {
+    use crate::remote_channel::cards::EditFailure;
+
+    #[derive(Debug, PartialEq)]
+    enum Want {
+        Edited,
+        Gone,
+        Transient,
+    }
+    let cases: &[(u16, &str, Want)] = &[
+        (
+            200,
+            r#"{"ok":true,"result":{"message_id":5}}"#,
+            Want::Edited,
+        ),
+        (
+            400,
+            r#"{"ok":false,"error_code":400,"description":"Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message"}"#,
+            Want::Edited,
+        ),
+        (
+            400,
+            r#"{"ok":false,"error_code":400,"description":"Bad Request: message to edit not found"}"#,
+            Want::Gone,
+        ),
+        (
+            400,
+            r#"{"ok":false,"error_code":400,"description":"Bad Request: message can't be edited"}"#,
+            Want::Gone,
+        ),
+        (
+            400,
+            r#"{"ok":false,"error_code":400,"description":"Bad Request: MESSAGE_ID_INVALID"}"#,
+            Want::Gone,
+        ),
+        (
+            400,
+            r#"{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}"#,
+            Want::Gone,
+        ),
+        (
+            400,
+            r#"{"ok":false,"error_code":400,"description":"Bad Request: message text is empty"}"#,
+            Want::Gone,
+        ),
+        (
+            403,
+            r#"{"ok":false,"error_code":403,"description":"Forbidden: bot was blocked by the user"}"#,
+            Want::Gone,
+        ),
+        (
+            429,
+            r#"{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 7","parameters":{"retry_after":7}}"#,
+            Want::Transient,
+        ),
+        (
+            502,
+            r#"{"ok":false,"error_code":502,"description":"Bad Gateway"}"#,
+            Want::Transient,
+        ),
+        (502, "<html>Bad Gateway</html>", Want::Transient),
+        (200, "not json", Want::Transient),
+    ];
+    for (status, body, want) in cases {
+        let got = match classify_edit_response(*status, body) {
+            Ok(()) => Want::Edited,
+            Err(EditFailure::Gone(_)) => Want::Gone,
+            Err(EditFailure::Transient(_)) => Want::Transient,
+        };
+        assert_eq!(&got, want, "status {status} body {body}");
+    }
+    match classify_edit_response(
+        400,
+        r#"{"ok":false,"error_code":400,"description":"Bad Request: message to edit not found"}"#,
+    ) {
+        Err(EditFailure::Gone(reason)) => assert!(
+            reason.contains("message to edit not found"),
+            "the log keeps Telegram's reason: {reason}"
+        ),
+        other => panic!("expected Gone, got {other:?}"),
+    }
 }

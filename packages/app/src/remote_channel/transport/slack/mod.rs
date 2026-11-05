@@ -3,6 +3,7 @@
 use super::{
     Credentials, Incoming, IncomingKind, Message, Result, TransportError, chunks, http, socket,
 };
+use crate::remote_channel::cards::EditFailure;
 use daruda_config::remote::RemoteRecipient;
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,20 +23,41 @@ fn api(credentials: &str, method: &str, payload: &Value) -> Result<Value> {
         Some(&format!("Bearer {credentials}")),
         payload,
     )?;
-    if value["ok"] != true {
-        // Only Slack's symbolic error code leaves the adapter, never payload text.
-        let code = value["error"].as_str().unwrap_or("unknown_error");
-        let safe: String = code
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
-            .take(80)
-            .collect();
+    if let Some(code) = refusal(&value) {
         return Err(TransportError::Message(format!(
-            "Slack {method} failed: {safe}"
+            "Slack {method} failed: {code}"
         )));
     }
     Ok(value)
 }
+
+/// The error code of an `ok: false` reply. Only Slack's symbolic code leaves
+/// the adapter, never payload text.
+fn refusal(value: &Value) -> Option<String> {
+    if value["ok"] == true {
+        return None;
+    }
+    let code = value["error"].as_str().unwrap_or("unknown_error");
+    Some(
+        code.chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .take(80)
+            .collect(),
+    )
+}
+
+/// `ok: false` codes Slack documents as its own temporary trouble: rate
+/// limits, server faults, timeouts and an organization migration in progress.
+/// Any other code is a refusal of this request or of the bot's access, which
+/// the same request will meet again.
+const TRANSIENT_REFUSALS: &[&str] = &[
+    "ratelimited",
+    "internal_error",
+    "fatal_error",
+    "service_unavailable",
+    "request_timeout",
+    "team_added_to_org",
+];
 
 pub fn session(
     credentials: &Credentials,
@@ -234,15 +256,38 @@ pub fn edit(
     message_id: &str,
     original: &str,
     label: &str,
-) -> Result<()> {
+) -> std::result::Result<(), EditFailure> {
     let text = super::feedback(original, label, SECTION_LIMIT);
-    api(
-        &credentials.bot,
-        "chat.update",
+    update_result(http::request_with_status(
+        "POST",
+        &format!("{API}/chat.update"),
+        Some(&format!("Bearer {}", credentials.bot)),
         &json!({"channel": recipient.conversation_id, "ts": message_id,
         "text": text, "parse": "none", "blocks": blocks(&text, None, false)}),
-    )?;
-    Ok(())
+    ))
+}
+
+/// Classify a `chat.update` reply. Slack refuses with HTTP 200 and an error
+/// code; an HTTP error status means the request never reached the method.
+fn update_result(
+    response: std::result::Result<Value, http::Failure>,
+) -> std::result::Result<(), EditFailure> {
+    match response {
+        Ok(value) => match refusal(&value) {
+            None => Ok(()),
+            Some(code) => {
+                let reason = format!("Slack chat.update failed: {code}");
+                // A reply without a code says nothing about the request.
+                let named = value["error"].is_string();
+                if named && !TRANSIENT_REFUSALS.contains(&code.as_str()) {
+                    Err(EditFailure::Gone(reason))
+                } else {
+                    Err(EditFailure::Transient(reason))
+                }
+            }
+        },
+        Err(failure) => Err(http::edit_failure(failure)),
+    }
 }
 
 #[cfg(test)]

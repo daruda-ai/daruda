@@ -90,3 +90,56 @@ fn literal_text_keeps_its_line_breaks() {
     assert_eq!(element["type"], "text");
     assert_eq!(element["text"], body);
 }
+
+#[test]
+fn chat_update_refusals_are_gone_unless_slack_names_them_transient() {
+    use super::http::Failure;
+    use crate::remote_channel::cards::EditFailure;
+
+    #[derive(Debug, PartialEq)]
+    enum Want {
+        Edited,
+        Gone,
+        Transient,
+    }
+    let error = |code: &str| Ok(json!({"ok": false, "error": code}));
+    let cases = vec![
+        (Ok(json!({"ok": true, "ts": "1.2"})), Want::Edited),
+        (error("message_not_found"), Want::Gone),
+        (error("channel_not_found"), Want::Gone),
+        (error("cant_update_message"), Want::Gone),
+        (error("edit_window_closed"), Want::Gone),
+        (error("is_archived"), Want::Gone),
+        (error("not_in_channel"), Want::Gone),
+        (error("invalid_auth"), Want::Gone),
+        (error("account_inactive"), Want::Gone),
+        (error("token_revoked"), Want::Gone),
+        (error("msg_too_long"), Want::Gone),
+        (error("invalid_blocks"), Want::Gone),
+        (error("a_code_slack_adds_later"), Want::Gone),
+        (error("ratelimited"), Want::Transient),
+        (error("internal_error"), Want::Transient),
+        (error("fatal_error"), Want::Transient),
+        (error("service_unavailable"), Want::Transient),
+        (error("request_timeout"), Want::Transient),
+        (error("team_added_to_org"), Want::Transient),
+        (Ok(json!({"ok": false})), Want::Transient),
+        (Err(Failure::Status(429)), Want::Transient),
+        (Err(Failure::Status(503)), Want::Transient),
+        (
+            Err(Failure::Transport(TransportError::Message(
+                "Remote API connection failed".into(),
+            ))),
+            Want::Transient,
+        ),
+    ];
+    for (response, want) in cases {
+        let shown = format!("{response:?}");
+        let got = match update_result(response) {
+            Ok(()) => Want::Edited,
+            Err(EditFailure::Gone(_)) => Want::Gone,
+            Err(EditFailure::Transient(_)) => Want::Transient,
+        };
+        assert_eq!(got, want, "{shown}");
+    }
+}

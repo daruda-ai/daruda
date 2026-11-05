@@ -1,10 +1,12 @@
 use super::*;
 use crate::control::approval::{self, ApprovalChoice, ApprovalOutcome};
+use crate::remote_channel::cards::EditFailure;
 use crate::remote_channel::cards::tests::EditCapture;
 use crate::remote_channel::global::Delivery;
 use futures::FutureExt as _;
 
 mod flow_asks;
+mod quit;
 
 fn queued(
     cx: &mut App,
@@ -155,6 +157,33 @@ fn settlement_before_preparation_drops_queued_cards_and_tokens(cx: &mut gpui::Te
     });
 }
 
+fn transient() -> EditFailure {
+    EditFailure::Transient("injected edit failure".into())
+}
+
+#[gpui::test]
+fn a_card_whose_message_is_gone_is_not_edited_again(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        let (mut remote, mut telegram) = queued(cx);
+        let (id, answer) = approval::request("Deleted".into(), Delivery::Explicit, cx);
+        complete(begin(&mut remote, cx), cx);
+        telegram.begin_send(14, cx).unwrap()(cx);
+        cx.global_mut::<EditCapture>().fail = Some(EditFailure::Gone(
+            "Slack chat.update failed: message_not_found".into(),
+        ));
+        assert!(approval::resolve_desktop(id.0, "approve", cx));
+        assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Approved));
+        assert_eq!(cx.global::<EditCapture>().edits.len(), 3);
+        cx.global_mut::<EditCapture>().fail = None;
+        flush_edits(cx);
+        assert_eq!(
+            cx.global::<EditCapture>().edits.len(),
+            3,
+            "gone messages leave the retry queue"
+        );
+    });
+}
+
 #[gpui::test]
 fn failed_edits_keep_the_first_decision_and_retire_live_card_entries(
     cx: &mut gpui::TestAppContext,
@@ -164,7 +193,7 @@ fn failed_edits_keep_the_first_decision_and_retire_live_card_entries(
         let (id, answer) = approval::request("Create worktree".into(), Delivery::Explicit, cx);
         complete(begin(&mut remote, cx), cx);
         telegram.begin_send(13, cx).unwrap()(cx);
-        cx.global_mut::<EditCapture>().fail = true;
+        cx.global_mut::<EditCapture>().fail = Some(transient());
         assert!(approval::resolve(
             id,
             ApprovalChoice::Approved,
@@ -539,10 +568,10 @@ fn settlement_during_recovery_waits_for_the_same_bot_and_failed_edits_retry(
             .get_mut("work")
             .unwrap()
             .status = crate::remote_channel::runtime::Status::Connected;
-        cx.global_mut::<EditCapture>().fail = true;
+        cx.global_mut::<EditCapture>().fail = Some(transient());
         flush_edits(cx);
         assert_eq!(cx.global::<EditCapture>().edits.len(), 2);
-        cx.global_mut::<EditCapture>().fail = false;
+        cx.global_mut::<EditCapture>().fail = None;
         flush_edits(cx);
         assert_eq!(cx.global::<EditCapture>().edits.len(), 3);
         flush_edits(cx);

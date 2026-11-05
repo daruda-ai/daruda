@@ -77,3 +77,40 @@ fn oversized_permission_lists_keep_every_button_across_messages() {
     assert_eq!(tokens.len(), 51);
     assert_eq!(tokens[50], "token-50");
 }
+
+#[test]
+fn message_edit_failures_classify_into_gone_or_transient() {
+    use super::http::Failure;
+    use crate::remote_channel::cards::EditFailure;
+
+    #[derive(Debug, PartialEq)]
+    enum Want {
+        Edited,
+        Gone,
+        Transient,
+    }
+    let cases = vec![
+        (Ok(json!({"id": "8"})), Want::Edited),
+        (Err(Failure::Status(404)), Want::Gone),
+        (Err(Failure::Status(403)), Want::Gone),
+        (Err(Failure::Status(401)), Want::Gone),
+        (Err(Failure::Status(429)), Want::Transient),
+        (Err(Failure::Status(500)), Want::Transient),
+        (Err(Failure::Status(502)), Want::Transient),
+        (
+            Err(Failure::Transport(TransportError::Message(
+                "Remote API connection failed".into(),
+            ))),
+            Want::Transient,
+        ),
+    ];
+    for (response, want) in cases {
+        let shown = format!("{response:?}");
+        let got = match edit_result(response) {
+            Ok(()) => Want::Edited,
+            Err(EditFailure::Gone(_)) => Want::Gone,
+            Err(EditFailure::Transient(_)) => Want::Transient,
+        };
+        assert_eq!(got, want, "{shown}");
+    }
+}

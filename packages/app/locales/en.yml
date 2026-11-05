@@ -1621,8 +1621,11 @@ notification:
   # Feedback for a phone-tapped Reject.
   telegram_permission_rejected: "🚫 Rejected"
   telegram_permission_cancelled: "Cancelled"
-  # Feedback when the tapped request was already answered in-app or cancelled.
-  telegram_permission_stale: "Already handled in the app"
+  # A phone card the app could still edit when it quit, before anyone answered.
+  card_cancelled_at_quit: "Cancelled — the app quit"
+  # Feedback when the tapped request is no longer outstanding: answered,
+  # cancelled, or sent before the app restarted, which a new run cannot tell apart.
+  telegram_permission_stale: "No longer valid — handled already or the app restarted"
   # Feedback when the target pane/session is gone (closed since the prompt sent).
   telegram_permission_gone: "This session is no longer available"
   # First tail line of a phone card relaying an agent's question; `agent`
@@ -2527,7 +2530,7 @@ remote_channel:
   unpair: "Unpair…"
   copy_pair: "Copy pairing command"
   paired: "Paired: %{user} / %{conversation}"
-  stale_callback: "Already handled in the app"
+  stale_callback: "No longer valid — handled already or the app restarted"
   pair_success: "Paired with daruda."
   error: "Channel update failed: %{error}"
   disabled: "Disabled"
