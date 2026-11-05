@@ -411,3 +411,124 @@ fn a_desktop_answer_before_the_send_response_protects_the_first_phone_tap(cx: &m
         finish(cx);
     });
 }
+
+/// Request an approval and leave its card queued, returning its tokens.
+fn queued_approval(
+    outgoing: &mut super::super::TestOutbox,
+    cx: &mut App,
+) -> (
+    crate::control::approval::ApprovalId,
+    smol::channel::Receiver<crate::control::approval::ApprovalOutcome>,
+    String,
+) {
+    let (id, answer) = crate::control::approval::request(
+        "Create worktree".into(),
+        crate::remote_channel::global::Delivery::Explicit,
+        cx,
+    );
+    let queued = outgoing.receiver.try_recv().unwrap();
+    let crate::remote_channel::bridge::Outbound::Approval(prompt) = &queued.outbound else {
+        panic!("approval");
+    };
+    let approve = prompt.buttons[0].1.clone();
+    cx.global::<TelegramBridge>()
+        .outbound_tx
+        .unbounded_send(queued)
+        .unwrap();
+    (id, answer, approve)
+}
+
+/// A send that ends without a receipt may still have reached the chat: the
+/// card it posted keeps answering, and the pump does not offer a second one.
+#[gpui::test]
+fn a_card_sent_without_a_receipt_still_answers_its_tap(cx: &mut TestAppContext) {
+    use crate::control::approval::{self, ApprovalOutcome};
+    use crate::remote_channel::cards::tests::EditCapture;
+    cx.update(|cx| {
+        let mut outgoing = super::super::install_for_test(true, Some(42), cx);
+        cx.set_global(EditCapture::default());
+        let bot = cx.global::<TelegramBridge>().bot.ready().unwrap().clone();
+        let (_id, answer, approve) = queued_approval(&mut outgoing, cx);
+        outgoing
+            .begin_send_with(crate::remote_channel::cards::SendOutcome::Unconfirmed, cx)
+            .unwrap()(cx);
+
+        approval::relay_outstanding(cx);
+        assert!(outgoing.try_recv().is_err(), "the chat may show this card");
+
+        let (effect, tapped) = dispatch_update(&bot, Some(42), tap(80, &approve), cx).unwrap();
+        assert!(matches!(
+            answer_for(effect, tapped),
+            Some(Answer::Ack { label, .. }) if label == s::control::approval_allowed()
+        ));
+        assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Approved));
+        assert!(cx.global::<EditCapture>().edits.is_empty());
+    });
+}
+
+/// Settling a card that has no receipt forgets its tokens: nothing will edit
+/// the message it may have posted, so a later tap takes its buttons off.
+#[gpui::test]
+fn settling_a_card_without_a_receipt_leaves_its_buttons_to_a_stale_tap(cx: &mut TestAppContext) {
+    use crate::control::approval::{self, ApprovalOutcome};
+    use crate::remote_channel::cards::tests::EditCapture;
+    cx.update(|cx| {
+        let mut outgoing = super::super::install_for_test(true, Some(42), cx);
+        cx.set_global(EditCapture::default());
+        let bot = cx.global::<TelegramBridge>().bot.ready().unwrap().clone();
+        let (id, answer, approve) = queued_approval(&mut outgoing, cx);
+        outgoing
+            .begin_send_with(crate::remote_channel::cards::SendOutcome::Unconfirmed, cx)
+            .unwrap()(cx);
+        assert_eq!(super::super::pending_approval_tokens_for_test(cx), 2);
+
+        assert!(approval::resolve_desktop(id.0, "approve", cx));
+        assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Approved));
+        assert_eq!(super::super::pending_approval_tokens_for_test(cx), 0);
+        assert!(
+            !cx.global::<TelegramBridge>()
+                .cards
+                .borrow()
+                .ledger()
+                .contains(&crate::remote_channel::cards::CardId::Approval(id))
+        );
+
+        let (effect, tapped) = dispatch_update(&bot, Some(42), tap(81, &approve), cx).unwrap();
+        assert!(matches!(
+            answer_for(effect, tapped),
+            Some(Answer::AckAndEdit { label, .. })
+                if label == s::control::approval_already_answered()
+        ));
+        assert!(cx.global::<EditCapture>().edits.is_empty());
+    });
+}
+
+/// A send that never left posted nothing: its claim and tokens go together,
+/// and the pump offers the card once more.
+#[gpui::test]
+fn a_card_that_never_left_is_offered_once_more(cx: &mut TestAppContext) {
+    use crate::control::approval;
+    use crate::remote_channel::bridge::InboundAction;
+    cx.update(|cx| {
+        let mut outgoing = super::super::install_for_test(true, Some(42), cx);
+        let (id, _answer, approve) = queued_approval(&mut outgoing, cx);
+        outgoing
+            .begin_send_with(crate::remote_channel::cards::SendOutcome::NotSent, cx)
+            .unwrap()(cx);
+        assert_eq!(super::super::pending_approval_tokens_for_test(cx), 0);
+        assert!(matches!(
+            cx.global_mut::<TelegramBridge>()
+                .core
+                .routing
+                .route_callback(approve),
+            InboundAction::StaleApproval
+        ));
+
+        approval::relay_outstanding(cx);
+        assert!(outgoing.try_recv().is_ok());
+        assert_eq!(super::super::pending_approval_tokens_for_test(cx), 2);
+        approval::relay_outstanding(cx);
+        assert!(outgoing.try_recv().is_err(), "exactly once");
+        assert!(approval::withdraw(id, cx));
+    });
+}

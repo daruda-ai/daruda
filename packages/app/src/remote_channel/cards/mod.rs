@@ -35,12 +35,55 @@ pub(crate) struct CardLedger<Receipt> {
     cards: HashMap<CardId, Entry<Receipt>>,
 }
 
+/// What one card send came to, as far as the transport can tell.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SendOutcome<Receipt> {
+    /// The platform answered with the posted message.
+    Delivered(Receipt),
+    /// The request left but no receipt came back (a timeout, a lost or
+    /// unreadable response, a refusal the transport cannot tell from those):
+    /// the person may hold the card.
+    Unconfirmed,
+    /// Nothing left this process, so the person cannot hold the card.
+    NotSent,
+}
+
+impl<Receipt> SendOutcome<Receipt> {
+    pub(crate) fn map<Other>(self, f: impl FnOnce(Receipt) -> Other) -> SendOutcome<Other> {
+        match self {
+            Self::Delivered(receipt) => SendOutcome::Delivered(f(receipt)),
+            Self::Unconfirmed => SendOutcome::Unconfirmed,
+            Self::NotSent => SendOutcome::NotSent,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum CardCompletion<Receipt> {
     Ignored,
     Delivered,
+    /// The card may be on screen: its tokens stay answerable until settlement.
     Unconfirmed,
+    /// Nothing was sent and the claim is gone: the caller forgets the card's
+    /// tokens, and a still-waiting request may be offered again.
+    Released,
+    Edit {
+        receipt: Receipt,
+        label: String,
+    },
+}
+
+/// What settling a card asks of its channel.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Settlement<Receipt> {
+    /// Rewrite the delivered message with the result.
     Edit { receipt: Receipt, label: String },
+    /// The send ended without a receipt, so no edit will ever own the message
+    /// it may have posted. Its tokens are forgotten rather than kept as settled
+    /// so a later tap takes the dead buttons off.
+    Unreceipted,
+    /// Nothing to edit now; an in-flight send's completion applies the result.
+    Recorded,
 }
 
 struct Entry<Receipt> {
@@ -120,7 +163,7 @@ impl<Receipt> CardLedger<Receipt> {
     pub(crate) fn complete(
         &mut self,
         claim: &SendClaim,
-        receipt: Option<Receipt>,
+        outcome: SendOutcome<Receipt>,
     ) -> CardCompletion<Receipt> {
         if !self.owns(claim) {
             return CardCompletion::Ignored;
@@ -128,46 +171,50 @@ impl<Receipt> CardLedger<Receipt> {
         let Some(mut entry) = self.cards.remove(&claim.card) else {
             return CardCompletion::Ignored;
         };
-        match entry.state {
-            SendState::Settled(label) => match receipt {
-                Some(receipt) => CardCompletion::Edit { receipt, label },
-                None => CardCompletion::Unconfirmed,
-            },
-            SendState::Sending => {
-                let completion = match receipt {
-                    Some(receipt) => {
-                        entry.state = SendState::Sent(receipt);
-                        CardCompletion::Delivered
-                    }
-                    None => {
-                        entry.state = SendState::Attempted;
-                        CardCompletion::Unconfirmed
-                    }
-                };
-                self.cards.insert(claim.card.clone(), entry);
-                completion
+        match (entry.state, outcome) {
+            (SendState::Settled(label), SendOutcome::Delivered(receipt)) => {
+                CardCompletion::Edit { receipt, label }
             }
-            _ => {
+            // Settlement already retired the tokens; there is no message to edit.
+            (SendState::Settled(_), SendOutcome::Unconfirmed) => CardCompletion::Unconfirmed,
+            (SendState::Settled(_) | SendState::Sending, SendOutcome::NotSent) => {
+                CardCompletion::Released
+            }
+            (SendState::Sending, SendOutcome::Delivered(receipt)) => {
+                entry.state = SendState::Sent(receipt);
+                self.cards.insert(claim.card.clone(), entry);
+                CardCompletion::Delivered
+            }
+            (SendState::Sending, SendOutcome::Unconfirmed) => {
+                entry.state = SendState::Attempted;
+                self.cards.insert(claim.card.clone(), entry);
+                CardCompletion::Unconfirmed
+            }
+            (state, _) => {
+                entry.state = state;
                 self.cards.insert(claim.card.clone(), entry);
                 CardCompletion::Ignored
             }
         }
     }
 
-    pub(crate) fn settle(&mut self, card: &CardId, label: String) -> Option<(Receipt, String)> {
-        let mut entry = self.cards.remove(card)?;
+    pub(crate) fn settle(&mut self, card: &CardId, label: String) -> Settlement<Receipt> {
+        let Some(mut entry) = self.cards.remove(card) else {
+            return Settlement::Recorded;
+        };
         match entry.state {
-            SendState::Sent(receipt) => Some((receipt, label)),
+            SendState::Sent(receipt) => Settlement::Edit { receipt, label },
+            SendState::Attempted => Settlement::Unreceipted,
             SendState::Sending => {
                 entry.state = SendState::Settled(label);
                 self.cards.insert(card.clone(), entry);
-                None
+                Settlement::Recorded
             }
             SendState::Settled(_) => {
                 self.cards.insert(card.clone(), entry);
-                None
+                Settlement::Recorded
             }
-            SendState::Queued | SendState::Attempted => None,
+            SendState::Queued => Settlement::Recorded,
         }
     }
 

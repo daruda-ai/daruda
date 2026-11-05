@@ -1,7 +1,7 @@
 use super::RemoteChannels;
 use crate::remote_channel::{
     bridge::{InlineKeyboard, MessageTail, Outbound, PaneRef},
-    cards::{CardCompletion, CardId, SendClaim},
+    cards::{CardCompletion, CardId, SendClaim, SendOutcome, Settlement},
     runtime::BotSession,
     transport::{self, Message},
 };
@@ -274,14 +274,18 @@ impl RemoteChannels {
         }
         let mut edits = Vec::new();
         for connection in cx.global_mut::<Self>().connections.values_mut() {
-            connection.core.settle_card(card);
-            if let Some(edit) = connection
+            match connection
                 .cards
                 .get_mut()
                 .ledger_mut()
                 .settle(card, label.to_owned())
             {
-                edits.push(edit);
+                Settlement::Edit { receipt, label } => {
+                    connection.core.settle_card(card);
+                    edits.push((receipt, label));
+                }
+                Settlement::Unreceipted => connection.core.forget_card(card),
+                Settlement::Recorded => connection.core.settle_card(card),
             }
         }
         for (receipt, label) in edits {
@@ -332,23 +336,18 @@ impl RemoteChannels {
     }
 }
 
-/// Record what a send came to. A card that reached the person is kept as sent
-/// even if its session was replaced meanwhile: the ledger's claim decides
+/// Record what a send came to. A card that may have reached the person is
+/// kept even if its session was replaced meanwhile: the ledger's claim decides
 /// whether it still belongs to this identity, and a same-bot replacement can
-/// still edit it, so the pump must not offer it again.
+/// still edit it or receive its taps, so the pump must not offer it again.
 pub(super) fn finish(
     pending: &Pending,
     pane: Option<PaneRef>,
-    ids: Vec<String>,
+    outcome: SendOutcome<Vec<String>>,
     original: String,
     cx: &mut App,
 ) {
     let live = current(pending, cx);
-    if ids.is_empty() && !live {
-        // Nothing went out: the session was gone before the send.
-        discard(pending, cx);
-        return;
-    }
     let orchestrator = crate::orchestrator::pane(cx);
     let Some(connection) = cx
         .global_mut::<RemoteChannels>()
@@ -357,12 +356,16 @@ pub(super) fn finish(
     else {
         return;
     };
+    let ids: &[String] = match &outcome {
+        SendOutcome::Delivered(ids) => ids,
+        SendOutcome::Unconfirmed | SendOutcome::NotSent => &[],
+    };
     if live && let Some(pane) = pane {
         let question = match pending.card.as_ref().map(|claim| &claim.card) {
             Some(CardId::Question { question, step, .. }) => Some((*question, *step)),
             _ => None,
         };
-        for id in &ids {
+        for id in ids {
             connection
                 .core
                 .record_delivered(id.clone(), pane, orchestrator);
@@ -375,18 +378,21 @@ pub(super) fn finish(
     }
     if let Some(card) = &pending.card {
         let cards = connection.cards.get_mut();
-        let receipt = cards
-            .owner()
-            .filter(|_| !ids.is_empty())
-            .map(|owner| Receipt {
+        let outcome = match (outcome, cards.owner()) {
+            (SendOutcome::Delivered(ids), Some(owner)) => SendOutcome::Delivered(Receipt {
                 id: pending.id.clone(),
                 owner: owner.clone(),
                 recipient: pending.recipient.clone(),
                 ids,
                 original,
-            });
-        let completion = cards.ledger_mut().complete(card, receipt);
-        if matches!(completion, CardCompletion::Unconfirmed) {
+            }),
+            // Without a bound identity no edit can own the messages.
+            (SendOutcome::Delivered(_), None) => SendOutcome::Unconfirmed,
+            (SendOutcome::Unconfirmed, _) => SendOutcome::Unconfirmed,
+            (SendOutcome::NotSent, _) => SendOutcome::NotSent,
+        };
+        let completion = cards.ledger_mut().complete(card, outcome);
+        if matches!(completion, CardCompletion::Released) {
             connection.core.forget_card(&card.card);
         }
         crate::remote_channel::apply_card_completion(&card.card, completion, edit, cx);
@@ -425,6 +431,17 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
     .detach();
 }
 
+/// The transports report every failure as one message-only error, so a send
+/// that posted no chunk is unconfirmed: the platform may have taken it before
+/// the reply was lost. Any posted chunk is a receipt settlement can edit.
+fn sent_outcome(sent: Vec<String>) -> SendOutcome<Vec<String>> {
+    if sent.is_empty() {
+        SendOutcome::Unconfirmed
+    } else {
+        SendOutcome::Delivered(sent)
+    }
+}
+
 fn spawn_connection(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
     cx.spawn(async move |cx| {
         while let Some(pending) = receiver.next().await {
@@ -433,13 +450,13 @@ fn spawn_connection(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
             };
             let pane = prepared.pane;
             let original = prepared.original.clone();
-            let (ids, result) = cx
+            let (outcome, result) = cx
                 .background_executor()
                 .spawn(async move {
-                    let mut sent = Vec::new();
                     if !prepared.bot.is_live() {
-                        return (sent, Ok(Vec::new()));
+                        return (SendOutcome::NotSent, Ok(Vec::new()));
                     }
+                    let mut sent = Vec::new();
                     let result = transport::send_recording(
                         prepared.kind,
                         &prepared.bot.credentials,
@@ -447,10 +464,10 @@ fn spawn_connection(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
                         prepared.message,
                         |id| sent.push(id.to_owned()),
                     );
-                    (sent, result)
+                    (sent_outcome(sent), result)
                 })
                 .await;
-            cx.update(|cx| finish(&pending, pane, ids, original, cx));
+            cx.update(|cx| finish(&pending, pane, outcome, original, cx));
             if let Err(error) = result {
                 crate::remote_channel::log_error(
                     "Remote message failed to send",

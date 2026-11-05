@@ -35,7 +35,10 @@ fn complete(sending: Vec<(Pending, Prepared)>, cx: &mut App) {
         finish(
             &pending,
             prepared.pane,
-            vec![format!("{}-1", pending.id), format!("{}-2", pending.id)],
+            SendOutcome::Delivered(vec![
+                format!("{}-1", pending.id),
+                format!("{}-2", pending.id),
+            ]),
             prepared.original,
             cx,
         );
@@ -248,11 +251,17 @@ fn a_duplicate_send_failure_does_not_forget_delivered_card_tokens(cx: &mut gpui:
         finish(
             &pending,
             prepared.pane,
-            vec!["message".into()],
+            SendOutcome::Delivered(vec!["message".into()]),
             prepared.original.clone(),
             cx,
         );
-        finish(&pending, prepared.pane, vec![], prepared.original, cx);
+        finish(
+            &pending,
+            prepared.pane,
+            SendOutcome::Unconfirmed,
+            prepared.original,
+            cx,
+        );
         assert!(matches!(
             cx.global_mut::<RemoteChannels>()
                 .connections
@@ -282,7 +291,7 @@ fn a_fresh_remote_receipt_extends_the_deadline_but_a_duplicate_does_not(
             finish(
                 pending,
                 prepared.pane,
-                vec!["message".into()],
+                SendOutcome::Delivered(vec!["message".into()]),
                 prepared.original.clone(),
                 cx,
             );
@@ -302,7 +311,7 @@ fn a_fresh_remote_receipt_extends_the_deadline_but_a_duplicate_does_not(
             finish(
                 pending,
                 prepared.pane,
-                vec!["duplicate".into()],
+                SendOutcome::Delivered(vec!["duplicate".into()]),
                 prepared.original.clone(),
                 cx,
             );
@@ -348,7 +357,7 @@ fn an_old_remote_owner_cannot_extend_a_replacement_attempt(cx: &mut gpui::TestAp
         finish(
             &old,
             prepared.pane,
-            vec!["retired-message".into()],
+            SendOutcome::Delivered(vec!["retired-message".into()]),
             prepared.original,
             cx,
         );
@@ -380,9 +389,9 @@ fn relay_keeps_channel_claimed(delivered: bool, cx: &mut gpui::TestAppContext) {
             &pending,
             prepared.pane,
             if delivered {
-                vec!["sent".into()]
+                SendOutcome::Delivered(vec!["sent".into()])
             } else {
-                Vec::new()
+                SendOutcome::Unconfirmed
             },
             prepared.original,
             cx,

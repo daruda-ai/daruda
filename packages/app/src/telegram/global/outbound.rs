@@ -8,7 +8,7 @@ use gpui::App;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use crate::remote_channel::cards::{CardCompletion, CardId, SendClaim};
+use crate::remote_channel::cards::{CardCompletion, CardId, SendClaim, SendOutcome, Settlement};
 use crate::settings_store::SettingsStore;
 use crate::telegram::bridge::{Outbound, OutboundMsg, PaneRef};
 use crate::telegram::{client, keychain, trace};
@@ -82,6 +82,14 @@ impl TestOutbox {
         message_id: i64,
         cx: &mut App,
     ) -> Option<impl FnOnce(&mut App) + use<>> {
+        self.begin_send_with(SendOutcome::Delivered(message_id), cx)
+    }
+
+    pub(crate) fn begin_send_with(
+        &mut self,
+        outcome: SendOutcome<i64>,
+        cx: &mut App,
+    ) -> Option<impl FnOnce(&mut App) + use<>> {
         let queued = self.receiver.try_recv().ok()?;
         let prepared = prepare(queued, cx)?;
         Some(move |cx: &mut App| {
@@ -90,7 +98,7 @@ impl TestOutbox {
                 prepared.chat_id,
                 prepared.pane,
                 prepared.card,
-                Some(message_id),
+                outcome,
                 prepared.original,
                 cx,
             )
@@ -368,14 +376,18 @@ impl TelegramBridge {
             return;
         }
         let bridge = cx.global_mut::<Self>();
-        bridge.core.routing.settle_card(card);
-        let edit_action = bridge
+        match bridge
             .cards
             .get_mut()
             .ledger_mut()
-            .settle(card, label.to_owned());
-        if let Some((receipt, label)) = edit_action {
-            edit(receipt, label, cx);
+            .settle(card, label.to_owned())
+        {
+            Settlement::Edit { receipt, label } => {
+                bridge.core.routing.settle_card(card);
+                edit(receipt, label, cx);
+            }
+            Settlement::Unreceipted => bridge.core.routing.forget_card(card),
+            Settlement::Recorded => bridge.core.routing.settle_card(card),
         }
     }
 
@@ -412,29 +424,26 @@ impl TelegramBridge {
     }
 }
 
-/// Record what a send came to. A card that reached the chat is kept as sent
+/// Record what a send came to. A card that may have reached the chat is kept
 /// even if its `ReadyBot` was replaced meanwhile: the ledger's claim decides
 /// whether it still belongs to this identity, and a same-bot replacement can
-/// still edit it, so it must not be offered again.
+/// still edit it or receive its taps, so it must not be offered again.
 fn finish(
     bot: &Arc<ReadyBot>,
     chat_id: i64,
     pane: Option<PaneRef>,
     card: Option<SendClaim>,
-    message_id: Option<i64>,
+    outcome: SendOutcome<i64>,
     original: String,
     cx: &mut App,
 ) {
     let live = super::inbound::live_bot(bot, Some(chat_id), keychain::revision(), cx);
-    if !live && message_id.is_none() {
-        // Nothing went out: the bot was retired before the send.
-        if let Some(card) = &card {
-            release(card, cx);
-        }
-        return;
-    }
     let orchestrator = crate::orchestrator::pane(cx);
     let bridge = cx.global_mut::<TelegramBridge>();
+    let message_id = match &outcome {
+        SendOutcome::Delivered(id) => Some(*id),
+        SendOutcome::Unconfirmed | SendOutcome::NotSent => None,
+    };
     if live && let Some((pane, id)) = pane.zip(message_id) {
         bridge.core.record_delivered(id, pane, orchestrator);
         if let Some(CardId::Question { question, step, .. }) =
@@ -447,22 +456,25 @@ fn finish(
         }
     }
     if let Some(card) = card {
-        let receipt = message_id.map(|message_id| Receipt {
+        let outcome = outcome.map(|message_id| Receipt {
             owner: CardOwner::of(bot, chat_id),
             message_id,
             original,
         });
-        let completion = bridge.cards.get_mut().ledger_mut().complete(&card, receipt);
-        if matches!(completion, CardCompletion::Unconfirmed) {
+        let completion = bridge.cards.get_mut().ledger_mut().complete(&card, outcome);
+        if matches!(completion, CardCompletion::Released) {
             bridge.core.routing.forget_card(&card.card);
         }
         crate::remote_channel::apply_card_completion(&card.card, completion, edit, cx);
     }
 }
 
-fn send(prepared: Prepared) -> Result<Option<i64>, client::ClientError> {
+/// Telegram's client folds transport failures, unreadable replies and API
+/// refusals into one error, so a failed `sendMessage` is unconfirmed: only a
+/// send that never started is known not to have posted.
+fn send(prepared: Prepared) -> Result<SendOutcome<i64>, client::ClientError> {
     if prepared.bot.token.revision != keychain::revision() {
-        return Ok(None);
+        return Ok(SendOutcome::NotSent);
     }
     let token = &prepared.bot.token.token;
     let sent = match prepared.body {
@@ -507,7 +519,7 @@ fn send(prepared: Prepared) -> Result<Option<i64>, client::ClientError> {
             }
         }
     };
-    sent.map(Some)
+    sent.map(SendOutcome::Delivered)
 }
 
 pub(super) fn spawn_send_task(
@@ -553,7 +565,9 @@ pub(super) fn spawn_send_task(
                     chat_id,
                     pane,
                     card,
-                    result.as_ref().ok().copied().flatten(),
+                    result
+                        .as_ref()
+                        .map_or(SendOutcome::Unconfirmed, Clone::clone),
                     original,
                     cx,
                 )

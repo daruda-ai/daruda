@@ -639,7 +639,7 @@ fn callbacks_before_send_completion_cannot_schedule_a_stale_edit(cx: &mut TestAp
         super::super::outbound::finish(
             &pending,
             None,
-            vec!["early-message".into()],
+            crate::remote_channel::cards::SendOutcome::Delivered(vec!["early-message".into()]),
             prompt.summary.clone(),
             cx,
         );
@@ -695,4 +695,204 @@ async fn a_presence_edit_during_a_durable_claim_preserves_the_command(cx: &mut T
     cx.update(|cx| cx.global_mut::<RemoteChannels>().connections.clear());
     drop(bot);
     wait_release(root.path());
+}
+
+/// An approval whose card every channel has started sending.
+struct SendingApproval {
+    id: crate::control::approval::ApprovalId,
+    answer: smol::channel::Receiver<crate::control::approval::ApprovalOutcome>,
+    outgoing: futures::channel::mpsc::UnboundedReceiver<super::super::outbound::Pending>,
+    /// Each channel's pending card with its approve token.
+    sending: Vec<(super::super::outbound::Pending, String)>,
+}
+
+fn sending_approval(cx: &mut App) -> SendingApproval {
+    let mut outgoing = crate::remote_channel::global::tests::setup(cx);
+    cx.set_global(crate::remote_channel::cards::tests::EditCapture::default());
+    let (id, answer) = crate::control::approval::request(
+        "Create worktree".into(),
+        super::super::Delivery::Explicit,
+        cx,
+    );
+    let mut sending = Vec::new();
+    while let Ok(pending) = outgoing.try_recv() {
+        super::super::outbound::prepare(&pending, cx).unwrap();
+        let crate::remote_channel::bridge::Outbound::Approval(prompt) = &pending.outbound else {
+            panic!("approval");
+        };
+        let approve = prompt.buttons[0].1.clone();
+        sending.push((pending, approve));
+    }
+    assert_eq!(sending.len(), 2);
+    SendingApproval {
+        id,
+        answer,
+        outgoing,
+        sending,
+    }
+}
+
+/// Tap `token` on `message_id`, returning what the sender is owed.
+fn tap_card(
+    pending: &super::super::outbound::Pending,
+    token: &str,
+    message_id: &str,
+    cx: &mut App,
+) -> Feedback {
+    let incoming = transport::Incoming {
+        event_id: format!("tap-{message_id}"),
+        sender: pending.recipient.clone(),
+        kind: IncomingKind::Callback {
+            data: token.into(),
+            message_id: message_id.into(),
+            original: "Create worktree".into(),
+        },
+    };
+    let effect =
+        dispatch_claimed(&pending.id, pending.generation, &pending.bot, &incoming, cx).unwrap();
+    let connection = &cx.global::<RemoteChannels>().connections[&pending.id];
+    let tap = if connection.cards.borrow().untracked(&message_id.into()) {
+        Tap::Untracked
+    } else {
+        Tap::Settled
+    };
+    feedback_for(effect, incoming.kind, tap)
+}
+
+/// A send that ends without a receipt may still have reached the person: the
+/// card it posted keeps answering, and the pump does not offer a second one.
+#[gpui::test]
+fn a_remote_card_sent_without_a_receipt_still_answers_its_tap(cx: &mut TestAppContext) {
+    use crate::control::approval::{self, ApprovalOutcome};
+    use crate::remote_channel::cards::tests::EditCapture;
+    cx.update(|cx| {
+        let SendingApproval {
+            answer,
+            mut outgoing,
+            sending,
+            ..
+        } = sending_approval(cx);
+        for (pending, _) in &sending {
+            super::super::outbound::finish(
+                pending,
+                None,
+                crate::remote_channel::cards::SendOutcome::Unconfirmed,
+                "Create worktree".into(),
+                cx,
+            );
+        }
+
+        approval::relay_outstanding(cx);
+        assert!(
+            outgoing.try_recv().is_err(),
+            "the person may see these cards"
+        );
+
+        let (pending, approve) = &sending[0];
+        assert_eq!(
+            tap_card(pending, approve, "unconfirmed", cx),
+            Feedback::Nothing
+        );
+        assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Approved));
+        assert!(cx.global::<EditCapture>().edits.is_empty());
+    });
+}
+
+/// Settling a card that has no receipt forgets its tokens: nothing will edit
+/// the message it may have posted, so a later tap takes its buttons off.
+#[gpui::test]
+fn settling_a_remote_card_without_a_receipt_leaves_its_buttons_to_a_stale_tap(
+    cx: &mut TestAppContext,
+) {
+    use crate::control::approval::{self, ApprovalOutcome};
+    use crate::remote_channel::cards::tests::EditCapture;
+    cx.update(|cx| {
+        let SendingApproval {
+            id,
+            answer,
+            outgoing: _outgoing,
+            sending,
+        } = sending_approval(cx);
+        for (pending, _) in &sending {
+            super::super::outbound::finish(
+                pending,
+                None,
+                crate::remote_channel::cards::SendOutcome::Unconfirmed,
+                "Create worktree".into(),
+                cx,
+            );
+        }
+        for connection in cx.global::<RemoteChannels>().connections.values() {
+            assert_eq!(connection.core.pending_approval_token_count(), 2);
+        }
+
+        assert!(approval::resolve_desktop(id.0, "approve", cx));
+        assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Approved));
+        for connection in cx.global::<RemoteChannels>().connections.values() {
+            assert_eq!(connection.core.pending_approval_token_count(), 0);
+            assert!(
+                !connection
+                    .cards
+                    .borrow()
+                    .ledger()
+                    .contains(&crate::remote_channel::cards::CardId::Approval(id))
+            );
+        }
+
+        let (pending, approve) = &sending[0];
+        assert_eq!(
+            tap_card(pending, approve, "unconfirmed", cx),
+            Feedback::Edit {
+                message_id: "unconfirmed".into(),
+                original: "Create worktree".into(),
+                label: s::control::approval_already_answered(),
+            }
+        );
+        assert!(cx.global::<EditCapture>().edits.is_empty());
+    });
+}
+
+/// A send that never left posted nothing: its claim and tokens go together,
+/// and the pump offers the card once more on each channel.
+#[gpui::test]
+fn a_remote_card_that_never_left_is_offered_once_more(cx: &mut TestAppContext) {
+    use crate::control::approval;
+    cx.update(|cx| {
+        let SendingApproval {
+            id,
+            answer: _answer,
+            mut outgoing,
+            sending,
+        } = sending_approval(cx);
+        for (pending, _) in &sending {
+            super::super::outbound::finish(
+                pending,
+                None,
+                crate::remote_channel::cards::SendOutcome::NotSent,
+                "Create worktree".into(),
+                cx,
+            );
+        }
+        for connection in cx.global::<RemoteChannels>().connections.values() {
+            assert_eq!(connection.core.pending_approval_token_count(), 0);
+            assert!(
+                !connection
+                    .cards
+                    .borrow()
+                    .ledger()
+                    .contains(&crate::remote_channel::cards::CardId::Approval(id))
+            );
+        }
+
+        approval::relay_outstanding(cx);
+        let mut offered = Vec::new();
+        while let Ok(pending) = outgoing.try_recv() {
+            offered.push(pending.id);
+        }
+        offered.sort();
+        assert_eq!(offered, ["personal", "work"]);
+        approval::relay_outstanding(cx);
+        assert!(outgoing.try_recv().is_err(), "exactly once");
+        assert!(approval::withdraw(id, cx));
+    });
 }

@@ -51,14 +51,20 @@ fn a_sent_card_is_consumed_once_with_its_original_receipt() {
     assert!(cards.claim(approval()).is_none());
     assert!(cards.begin(&claim));
     assert_eq!(
-        cards.complete(&claim, Some("message-1")),
+        cards.complete(&claim, SendOutcome::Delivered("message-1")),
         CardCompletion::Delivered
     );
     assert_eq!(
         cards.settle(&approval(), "Allowed".into()),
-        Some(("message-1", "Allowed".into()))
+        Settlement::Edit {
+            receipt: "message-1",
+            label: "Allowed".into()
+        }
     );
-    assert!(cards.settle(&approval(), "Rejected".into()).is_none());
+    assert_eq!(
+        cards.settle(&approval(), "Rejected".into()),
+        Settlement::Recorded
+    );
     assert!(!cards.contains(&approval()));
 }
 
@@ -67,10 +73,16 @@ fn settlement_while_sending_edits_the_late_receipt_with_the_first_result() {
     let mut cards = CardLedger::default();
     let claim = cards.claim(approval()).unwrap();
     assert!(cards.begin(&claim));
-    assert!(cards.settle(&approval(), "Cancelled".into()).is_none());
-    assert!(cards.settle(&approval(), "Allowed".into()).is_none());
     assert_eq!(
-        cards.complete(&claim, Some("late-id")),
+        cards.settle(&approval(), "Cancelled".into()),
+        Settlement::Recorded
+    );
+    assert_eq!(
+        cards.settle(&approval(), "Allowed".into()),
+        Settlement::Recorded
+    );
+    assert_eq!(
+        cards.complete(&claim, SendOutcome::Delivered("late-id")),
         CardCompletion::Edit {
             receipt: "late-id",
             label: "Cancelled".into()
@@ -83,7 +95,10 @@ fn settlement_while_sending_edits_the_late_receipt_with_the_first_result() {
 fn settlement_before_preparation_cannot_register_live_buttons() {
     let mut cards = CardLedger::<String>::default();
     let claim = cards.claim(approval()).unwrap();
-    assert!(cards.settle(&approval(), "Cancelled".into()).is_none());
+    assert_eq!(
+        cards.settle(&approval(), "Cancelled".into()),
+        Settlement::Recorded
+    );
     assert!(!cards.begin(&claim));
     assert!(!cards.contains(&approval()));
 }
@@ -93,10 +108,36 @@ fn ambiguous_transport_failure_is_attempted_until_the_request_settles() {
     let mut cards = CardLedger::<String>::default();
     let claim = cards.claim(approval()).unwrap();
     assert!(cards.begin(&claim));
-    assert_eq!(cards.complete(&claim, None), CardCompletion::Unconfirmed);
+    assert_eq!(
+        cards.complete(&claim, SendOutcome::Unconfirmed),
+        CardCompletion::Unconfirmed
+    );
     assert!(cards.contains(&approval()));
     assert!(cards.claim(approval()).is_none());
-    assert!(cards.settle(&approval(), "Cancelled".into()).is_none());
+    assert_eq!(
+        cards.settle(&approval(), "Cancelled".into()),
+        Settlement::Unreceipted
+    );
+    assert!(!cards.contains(&approval()));
+}
+
+#[test]
+fn a_send_that_never_left_releases_its_claim_for_another_offer() {
+    let mut cards = CardLedger::<String>::default();
+    let claim = cards.claim(approval()).unwrap();
+    assert!(cards.begin(&claim));
+    assert_eq!(
+        cards.complete(&claim, SendOutcome::NotSent),
+        CardCompletion::Released
+    );
+    assert!(!cards.contains(&approval()));
+    let again = cards.claim(approval()).unwrap();
+    assert!(cards.begin(&again));
+    cards.settle(&approval(), "Cancelled".into());
+    assert_eq!(
+        cards.complete(&again, SendOutcome::NotSent),
+        CardCompletion::Released
+    );
     assert!(!cards.contains(&approval()));
 }
 
@@ -108,14 +149,20 @@ fn rejected_queue_releases_the_claim_and_old_completions_cannot_touch_a_new_clai
     let next = cards.claim(approval()).unwrap();
     assert!(cards.begin(&next));
     cards.release(&first);
-    assert_eq!(cards.complete(&first, Some("old")), CardCompletion::Ignored);
     assert_eq!(
-        cards.complete(&next, Some("new")),
+        cards.complete(&first, SendOutcome::Delivered("old")),
+        CardCompletion::Ignored
+    );
+    assert_eq!(
+        cards.complete(&next, SendOutcome::Delivered("new")),
         CardCompletion::Delivered
     );
     assert_eq!(
         cards.settle(&approval(), "Allowed".into()),
-        Some(("new", "Allowed".into()))
+        Settlement::Edit {
+            receipt: "new",
+            label: "Allowed".into()
+        }
     );
 }
 
@@ -125,7 +172,10 @@ fn sending_failure_after_settlement_retains_no_tombstone() {
     let claim = cards.claim(approval()).unwrap();
     assert!(cards.begin(&claim));
     cards.settle(&approval(), "Cancelled".into());
-    assert_eq!(cards.complete(&claim, None), CardCompletion::Unconfirmed);
+    assert_eq!(
+        cards.complete(&claim, SendOutcome::Unconfirmed),
+        CardCompletion::Unconfirmed
+    );
     assert!(!cards.contains(&approval()));
 }
 
@@ -141,9 +191,9 @@ fn only_the_current_unsettled_attempt_is_sending() {
     assert!(cards.begin(&current));
     assert!(!cards.is_sending(&old));
     assert!(cards.is_sending(&current));
-    cards.complete(&old, Some("old"));
+    cards.complete(&old, SendOutcome::Delivered("old"));
     assert!(cards.is_sending(&current));
-    cards.complete(&current, Some("current"));
+    cards.complete(&current, SendOutcome::Delivered("current"));
     assert!(!cards.is_sending(&current));
     cards.settle(&approval(), "Allowed".into());
     assert!(!cards.is_sending(&current));
@@ -154,22 +204,28 @@ fn duplicate_or_unprepared_completions_have_no_effect() {
     let mut cards = CardLedger::default();
     let claim = cards.claim(approval()).unwrap();
     assert_eq!(
-        cards.complete(&claim, Some("early")),
+        cards.complete(&claim, SendOutcome::Delivered("early")),
         CardCompletion::Ignored
     );
     assert!(cards.begin(&claim));
     assert_eq!(
-        cards.complete(&claim, Some("first")),
+        cards.complete(&claim, SendOutcome::Delivered("first")),
         CardCompletion::Delivered
     );
-    assert_eq!(cards.complete(&claim, None), CardCompletion::Ignored);
     assert_eq!(
-        cards.complete(&claim, Some("duplicate")),
+        cards.complete(&claim, SendOutcome::Unconfirmed),
+        CardCompletion::Ignored
+    );
+    assert_eq!(
+        cards.complete(&claim, SendOutcome::Delivered("duplicate")),
         CardCompletion::Ignored
     );
     assert_eq!(
         cards.settle(&approval(), "Allowed".into()),
-        Some(("first", "Allowed".into()))
+        Settlement::Edit {
+            receipt: "first",
+            label: "Allowed".into()
+        }
     );
 }
 
@@ -180,7 +236,7 @@ fn rebinding_the_same_identity_keeps_records_and_another_returns_them() {
     let ledger = owned.ledger_for(&"bot-a").unwrap();
     let claim = ledger.claim(approval()).unwrap();
     assert!(ledger.begin(&claim));
-    ledger.complete(&claim, Some("message-1"));
+    ledger.complete(&claim, SendOutcome::Delivered("message-1"));
     assert!(owned.bind("bot-a").is_empty(), "a reconnect keeps the card");
     assert!(owned.ledger().contains(&approval()));
     assert!(owned.ledger_for(&"bot-b").is_none());

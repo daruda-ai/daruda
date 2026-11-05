@@ -38,7 +38,7 @@ fn a_telegram_flow_callback_keeps_original_options_and_never_adopts_a_target(
         assert!(!token.contains("worktree"));
         let action = cx.global_mut::<TelegramBridge>().core.routing.route_callback(token.clone());
         assert!(matches!(action, InboundAction::ResolveFlowAsk { ask_id: 4, decision: PermissionDecision::Allow(ref id), .. } if id == "original-always"));
-        finish(&prepared.bot, prepared.chat_id, prepared.pane, prepared.card, Some(41), prepared.original, cx);
+        finish(&prepared.bot, prepared.chat_id, prepared.pane, prepared.card, SendOutcome::Delivered(41), prepared.original, cx);
         assert!(matches!(cx.global_mut::<TelegramBridge>().core.routing.route_text("hello".into(), None), Routed::NeedsTarget(_)));
         cx.set_global(crate::remote_channel::cards::tests::EditCapture::default());
         TelegramBridge::settle_card(&CardId::FlowAsk { run_dir: "/worktree/with/a/long/path/.daruda/flow-runs/run".into(), ask_id: 4 }, "Done", cx);
@@ -154,7 +154,7 @@ fn a_duplicate_send_failure_does_not_forget_delivered_card_tokens(cx: &mut gpui:
             prepared.chat_id,
             prepared.pane,
             prepared.card.clone(),
-            Some(47),
+            SendOutcome::Delivered(47),
             prepared.original.clone(),
             cx,
         );
@@ -163,7 +163,7 @@ fn a_duplicate_send_failure_does_not_forget_delivered_card_tokens(cx: &mut gpui:
             prepared.chat_id,
             prepared.pane,
             prepared.card,
-            None,
+            SendOutcome::Unconfirmed,
             prepared.original,
             cx,
         );
@@ -203,7 +203,7 @@ fn a_fresh_telegram_receipt_extends_the_deadline_but_a_duplicate_does_not(
             prepared.chat_id,
             prepared.pane,
             prepared.card.clone(),
-            Some(44),
+            SendOutcome::Delivered(44),
             prepared.original.clone(),
             cx,
         );
@@ -223,7 +223,7 @@ fn a_fresh_telegram_receipt_extends_the_deadline_but_a_duplicate_does_not(
             prepared.chat_id,
             prepared.pane,
             prepared.card.clone(),
-            Some(44),
+            SendOutcome::Delivered(44),
             prepared.original.clone(),
             cx,
         );
@@ -270,7 +270,7 @@ fn an_old_telegram_owner_cannot_extend_a_replacement_attempt(cx: &mut gpui::Test
             old.chat_id,
             old.pane,
             old.card,
-            Some(45),
+            SendOutcome::Delivered(45),
             old.original,
             cx,
         );
@@ -377,7 +377,7 @@ fn a_receipt_from_before_recipient_rotation_cannot_extend_an_approval(
             old.chat_id,
             old.pane,
             old.card,
-            Some(46),
+            SendOutcome::Delivered(46),
             old.original,
             cx,
         );

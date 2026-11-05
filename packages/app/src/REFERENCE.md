@@ -249,10 +249,18 @@ has never queued it, keeping a solicited request explicit and re-reading
 presence for the rest. Settled cards name the surface that answered (desktop,
 Telegram, Slack or Discord). Timeout means no answer, never consent or
 permission to retry or bypass the gate. Remote card ledgers retain settlement
-while a send is in flight, then edit its returned message ids. The ledger
-classifies send completion as ignored, delivered, unconfirmed or requiring an
-edit. The common coordinator extends approval deadlines only for a fresh
-delivery. Duplicate or retired completions neither extend deadlines nor discard
+while a send is in flight, then edit its returned message ids. Transports
+report each send as delivered (message ids), unconfirmed (it left but no
+receipt came back, which includes every transport error because none
+distinguishes a refusal from a lost reply) or not sent (the session was gone
+before it left). The ledger classifies the completion as ignored, delivered,
+unconfirmed, released or requiring an edit. An unconfirmed card keeps its
+ledger entry and live tokens, so the pump does not offer it again and a tap on
+it still answers; settling it forgets the tokens without a tombstone, since
+no edit will own its message, so a later stale tap strips the buttons unless
+an earlier tap on that message answered it. A released card drops its claim
+and tokens together and may be offered again. The common coordinator extends
+approval deadlines only for a fresh delivery. Duplicate or retired completions neither extend deadlines nor discard
 current buttons. Transports keep their own receipts, token cleanup and
 message-edit implementations.
 

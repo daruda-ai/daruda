@@ -57,7 +57,9 @@ pub(crate) fn apply_card_completion<Receipt>(
             }
         }
         cards::CardCompletion::Edit { receipt, label } => edit(receipt, label, cx),
-        cards::CardCompletion::Ignored | cards::CardCompletion::Unconfirmed => {}
+        cards::CardCompletion::Ignored
+        | cards::CardCompletion::Unconfirmed
+        | cards::CardCompletion::Released => {}
     }
 }
 
