@@ -702,6 +702,9 @@ existing debug build.
 Windows builds embed `assets/icon.ico` into `daruda.exe`; the installer and
 uninstaller use the same icon. After changing `assets/icon.png`, regenerate
 the committed ICO with `./scripts/make-icon.ps1` on Windows before building.
+On macOS, `./scripts/make-icon.sh` regenerates `assets/icon.icns` and places
+the full-bleed artwork in Apple's app icon template (824px rounded rect with a
+100px transparent margin); macOS before 26 draws the icns unmasked.
 
 Build a portable Windows ZIP (including MSVC runtime DLLs) for the host
 architecture, x86_64 or ARM64:
