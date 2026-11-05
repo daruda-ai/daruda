@@ -192,7 +192,7 @@ pub(super) fn package(manifest_path: &Path, namespace: &str) -> Result<Theme, Lo
 pub(crate) fn catalog(sources: &[(String, PathBuf)]) -> (Catalog, Vec<LoadError>) {
     let mut result = Catalog::default();
     let mut errors = Vec::new();
-    for (namespace, root) in sources {
+    'providers: for (namespace, root) in sources {
         let entries = match std::fs::read_dir(root) {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
@@ -212,7 +212,7 @@ pub(crate) fn catalog(sources: &[(String, PathBuf)]) -> (Catalog, Vec<LoadError>
         for path in paths.into_iter().filter(|p| p.is_file()) {
             if result.themes.len() >= MAX_THEMES {
                 errors.push(error(&path, "theme catalog limit reached"));
-                break;
+                break 'providers;
             }
             match package(&path, namespace) {
                 Ok(theme) if result.themes.contains_key(&theme.id) => {

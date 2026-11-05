@@ -1,17 +1,21 @@
 use super::*;
 #[test]
-fn missing_providers_fall_back_without_animating_settled_states() {
+fn missing_providers_fall_back_to_dots_without_animating_settled_states() {
     let catalog = Catalog::default();
     let missing = daruda_config::StatusIconTheme::Custom("user/missing".into());
-    assert_eq!(catalog.base(&missing), Base::Icons);
+    assert_eq!(catalog.base(&missing), Base::Dots);
+    assert_eq!(
+        catalog.base(&daruda_config::StatusIconTheme::Icons),
+        Base::Icons
+    );
     assert!(catalog.animates(&missing, State::Working));
+    assert!(catalog.animates(&missing, State::NeedsAttention));
     for state in [
         State::Disconnected,
         State::Idle,
         State::Completed,
         State::Errored,
         State::Failed,
-        State::NeedsAttention,
     ] {
         assert!(!catalog.animates(&missing, state));
     }

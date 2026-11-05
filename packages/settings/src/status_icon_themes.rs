@@ -35,20 +35,18 @@ impl SettingsView {
         cx: &mut Context<Self>,
     ) {
         self.status_icon_themes = themes;
-        let selected = crate::store::SettingsStore::global(cx)
-            .user()
-            .left_dock
-            .status_icon_theme
-            .clone();
-        self.refresh_status_icon_themes(&selected, window, cx);
+        self.refresh_status_icon_theme_select(window, cx);
         cx.notify();
     }
-    pub(super) fn refresh_status_icon_themes(
+    /// Both the host's catalog and the live selection shape the option list,
+    /// so every refresh rebuilds it from the store rather than moving the value.
+    pub(super) fn refresh_status_icon_theme_select(
         &self,
-        selected: &StatusIconTheme,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let live = crate::store::SettingsStore::global(cx).user_arc();
+        let selected = &live.left_dock.status_icon_theme;
         let choices = options(&self.status_icon_themes, selected);
         let value = SharedString::from(selected.as_str().to_owned());
         self.status_icon_theme_select.update(cx, |select, cx| {

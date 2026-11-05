@@ -76,3 +76,33 @@ fn svg_edits_invalidate_the_renderer_cache_and_external_content_is_rejected() {
     .unwrap();
     assert!(package(&path, "user").is_err());
 }
+#[test]
+fn manifests_without_extends_inherit_dots() {
+    let dir = tempfile::tempdir().unwrap();
+    let theme = package(&seed(dir.path(), manifest()), "user").unwrap();
+    assert_eq!(theme.base, Base::Dots);
+    let mut icons = manifest();
+    icons["extends"] = "icons".into();
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(
+        package(&seed(dir.path(), icons), "user").unwrap().base,
+        Base::Icons
+    );
+}
+#[test]
+fn catalog_limit_stops_every_later_provider_with_one_error() {
+    let first = tempfile::tempdir().unwrap();
+    for index in 0..=MAX_THEMES {
+        let mut spec = manifest();
+        spec["id"] = format!("theme-{index:03}").into();
+        seed(&first.path().join(format!("theme-{index:03}")), spec);
+    }
+    let second = tempfile::tempdir().unwrap();
+    seed(&second.path().join("late"), manifest());
+    let (catalog, errors) = catalog(&[
+        ("user".into(), first.path().into()),
+        ("plugin/late".into(), second.path().into()),
+    ]);
+    assert_eq!(catalog.themes.len(), MAX_THEMES);
+    assert_eq!(errors.len(), 1);
+}

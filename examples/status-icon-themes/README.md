@@ -44,7 +44,7 @@ status-icon-themes/
 }
 ```
 
-`extends` is `icons` (default) or `dots`. Missing states, frames and colors
+`extends` is `dots` (default) or `icons`. Missing states, frames and colors
 inherit the selected base. A colors-only override preserves the base animation.
 A single frame makes that state static. Colors must provide both dark and light
 `#rrggbb` values; SVG artwork is monochrome and tinted with the selected color.
@@ -109,7 +109,7 @@ to the user folder and select the user copy.
 
 ## Missing or invalid themes
 
-A removed or invalid selected theme falls back to Icons. Settings retains and
+A removed or invalid selected theme falls back to Dots. Settings retains and
 shows the unavailable ID so reinstalling or fixing the package restores the
 selection automatically. Invalid packages are omitted without hiding valid
 neighbors; details are logged under `status_icon_theme`. The saved preference

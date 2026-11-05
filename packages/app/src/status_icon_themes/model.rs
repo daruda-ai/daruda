@@ -28,8 +28,8 @@ impl State {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Base {
-    Dots,
     #[default]
+    Dots,
     Icons,
 }
 
@@ -102,12 +102,13 @@ impl Catalog {
     pub(crate) fn get(&self, id: &daruda_config::StatusIconTheme) -> Option<&Theme> {
         self.themes.get(id.as_str())
     }
+    /// Unavailable custom themes fall back to the same Dots default as the config.
     pub(crate) fn base(&self, id: &daruda_config::StatusIconTheme) -> Base {
         self.get(id).map(|t| t.base).unwrap_or_else(|| {
-            if *id == daruda_config::StatusIconTheme::Dots {
-                Base::Dots
-            } else {
+            if *id == daruda_config::StatusIconTheme::Icons {
                 Base::Icons
+            } else {
+                Base::Dots
             }
         })
     }

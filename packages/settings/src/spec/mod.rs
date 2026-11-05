@@ -22,8 +22,8 @@ pub(super) enum SelectLoad {
     /// Font pickers rebuild their list so the live family stays selectable even
     /// when it is not among the installed fonts.
     Font,
-    /// Orchestrator pickers derive both list and selection from live state, so
-    /// they own the whole refresh.
+    /// Pickers whose list and selection both derive from live state
+    /// (orchestrator, status icon theme) own the whole refresh.
     Rebuild(fn(&SettingsView, &mut gpui::Window, &mut gpui::Context<SettingsView>)),
 }
 
@@ -154,7 +154,7 @@ pub(super) const SELECT_SETTINGS: &[SelectSpec] = &[
         read: |v| daruda_config::StatusIconTheme::from_value(v).map(SettingsPatch::StatusIconTheme),
         current: |c| SettingsPatch::StatusIconTheme(c.left_dock.status_icon_theme.clone()),
         show: |c| c.left_dock.status_icon_theme.as_str().into(),
-        load: SelectLoad::Value,
+        load: SelectLoad::Rebuild(SettingsView::refresh_status_icon_theme_select),
     },
     SelectSpec {
         setting: SelectSetting::FileIconColorMode,
