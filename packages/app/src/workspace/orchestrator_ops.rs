@@ -89,6 +89,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The chip exists only while the feature is on (`orchestrator_chip_state`),
+        // and a throwaway capture profile has it off.
+        use gpui::BorrowAppContext as _;
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            let mut cfg = (*store.user()).clone();
+            cfg.orchestrator.enabled = true;
+            store.override_user_for_shot(cfg);
+        });
         let pane = self.insert_orchestrator_chat(
             self.mirrors.agents[0].id.clone(),
             self.data_dir.join("orchestrator"),

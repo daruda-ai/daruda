@@ -179,6 +179,14 @@ impl SettingsStore {
         }
     }
 
+    /// Publish `cfg` without writing it, for a screenshot scenario whose
+    /// subject needs a switch the capture profile has off. Nothing reaches
+    /// disk, so a capture cannot rewrite the profile's `config.toml`.
+    #[cfg(feature = "screenshot")]
+    pub fn override_user_for_shot(&mut self, cfg: Config) {
+        self.user = Arc::new(cfg);
+    }
+
     /// Replace the user layer for tests; production uses reload/patch paths.
     #[cfg(any(test, feature = "test-support"))]
     #[doc(hidden)]
