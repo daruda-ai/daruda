@@ -264,6 +264,8 @@ pub(crate) enum ScreenshotScenario {
     /// the bare chevron is its only control and whether it reads as one is a
     /// question only a capture answers.
     AgentChatSoleReply,
+    AgentChatLinks,
+    AgentChatLinkMenu,
     /// A tool card whose call is still running, its group open. The badge's
     /// live state is the one a settled seed cannot reach, and it is the only
     /// state that carries a number — which only a capture can judge.
@@ -923,6 +925,15 @@ pub(crate) fn drive(
         } => {
             workspace.update(cx, |ws, cx| {
                 ws.open_input_dock_shrunk_for_shot(with_queue, expanded, window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatLinks | ScreenshotScenario::AgentChatLinkMenu => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_links_for_shot(
+                    scenario == ScreenshotScenario::AgentChatLinkMenu,
+                    window,
+                    cx,
+                )
             });
         }
         ScreenshotScenario::AgentChatSoleReply => {

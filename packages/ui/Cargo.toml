@@ -14,7 +14,7 @@ workspace = true
 # Test-only observation hooks (inline-bounds probe, painted-cursor log,
 # contrast ratio) and the widget-test globals, for dependent packages' tests.
 # Never a shipping default.
-test-support = ["gpui/test-support"]
+test-support = ["gpui/test-support", "gpui-base/test-support"]
 
 [dependencies]
 daruda_config = { workspace = true }

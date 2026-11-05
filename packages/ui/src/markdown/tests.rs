@@ -729,6 +729,7 @@ fn a_press_inside_an_occluding_panel_does_not_grab_the_prose_under_it(cx: &mut T
 struct LinkProbe {
     occluded: bool,
     opened: Arc<AtomicBool>,
+    context: Option<(gpui::Point<Pixels>, SharedString)>,
 }
 
 /// Height the link block is confined to, so the space under it is genuinely
@@ -736,8 +737,15 @@ struct LinkProbe {
 const LINK_BLOCK_H: f32 = 30.;
 
 impl Render for LinkProbe {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    this.context = crate::take_right_clicked_link(cx, window, event.position)
+                        .map(|url| (event.position, url));
+                }),
+            )
             .relative()
             .size_full()
             .flex()
@@ -791,7 +799,11 @@ fn with_link_probe<R>(
         .update(|cx| {
             let opened = opened.clone();
             cx.open_window(opts, |_window, cx| {
-                cx.new(|_cx| LinkProbe { occluded, opened })
+                cx.new(|_cx| LinkProbe {
+                    occluded,
+                    opened,
+                    context: None,
+                })
             })
         })
         .expect("window opens");
@@ -867,7 +879,13 @@ fn drive_probe<R>(cx: &mut TestAppContext, drive: impl FnOnce(&mut VisualTestCon
 /// What a host answering the press at `at` gets from the capture-phase
 /// recorder.
 fn take_as(vcx: &mut VisualTestContext, at: gpui::Point<gpui::Pixels>) -> Option<SharedString> {
-    vcx.update(|_window, cx| crate::take_right_clicked_link(cx, at))
+    vcx.update(|window, cx| {
+        let view = window.root::<LinkProbe>().flatten().unwrap();
+        view.update(cx, |view, _| match view.context.take() {
+            Some((position, url)) if position == at => Some(url),
+            _ => None,
+        })
+    })
 }
 
 /// A release is not a click: navigation needs a press that agreed with it.
@@ -991,3 +1009,6 @@ fn compact_heading_size_reduces_wrapping_without_changing_default_callers(cx: &m
             < probe_height(cx, text, px(240.), None)
     );
 }
+
+#[path = "link_tests.rs"]
+mod link_interaction;

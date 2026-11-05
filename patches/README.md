@@ -138,6 +138,21 @@ are applied for these paths.
 Taffy 0.15.0 to 0.15.1 while retaining the pinned Zed revision. Regenerate
 through `tools/vendor_gpui`; do not edit the generated manifest directly.
 
+## `gpui-mouse-button-sequence.patch`
+
+Expose `Window::mouse_button_event_sequence()`, advanced for every mouse-down
+and mouse-up before capture listeners run, including synthesized touch input.
+An earlier disabled input or closing dialog can stop capture before an Inline
+sees it. The link coordinator compares a release with the sequence immediately
+after its recorded press, so hidden button events invalidate the old gesture.
+Pointer movement and ordinary redraw do not invalidate a press.
+
+The patch is platform-independent and additive. Its only consumer is
+`gpui-base`'s link input adapter. The `stopped_capture_cannot_leave_a_press_for_a_later_release`
+UI regression fails without it; the private model also tests skipped button
+events and deferred cleanup from an older gesture. Reproduce the tree with
+`vendor_gpui`; never edit generated `vendor/zed` by hand.
+
 ## `vendor/gpui-kit/` — vendored gpui-component 0.9.0, **patched in place**
 
 daruda's widget library is upstream gpui-component 0.9.0 (`longbridge/gpui-kit`,
@@ -638,17 +653,24 @@ same way.
 
 | Delta | Detail |
 |---|---|
-| Press recorder | A **capture**-phase `MouseDownEvent` listener, gated on the inline hitbox, records the link under the press in the `LinkPressRecord` global: a left press stores it as `pressed`; a right press clears `pressed` and stores `(position, url)` as `right`; any other button clears `pressed`. Capture phase runs before every bubble listener, so the record lands before the host's bubble-phase menu opener whichever order they registered in. |
-| Release match | The release handler opens a link on a left release only if `pressed` (taken) is that same URL. Middle releases keep upstream's behaviour. |
-| `take_right_clicked_link(cx, at)` | Re-exported from `gpui_base` (`base/src/text/mod.rs`). Takes the right-press record and returns its URL only when `at` equals the press position, so a record no menu consumed cannot be adopted by a later, unrelated menu. A global rather than view state because an `Inline` is an element built fresh each frame with no handle the host can reach. Drives the chat's Open in File View / Open Externally / Copy Link Address entries. |
+| Window dispatch | `base/src/text/link_interaction/` owns a private gesture model and a weak registry keyed by `WindowId`. The existing Inline capture listeners begin each mouse-down dispatch once; later listeners only record hits. Deferred cleanup ends that dispatch and expires unconsumed context addresses. GPUI's button-event sequence detects input hidden by an earlier capture stopper. No Root layer is required, so independent `RenderContext` hosts keep working. |
+| Press identity | A retained opaque owner token, rendered host, window-space placement, byte range and URL distinguish equal-URL links. The token does not participate in Inline content equality. A non-hovered block never overwrites another block's hit. |
+| Release match | A left release consumes the matching identity, preserving the selection and occlusion guards. Capture schedules sequence-checked release cleanup even when a bubble handler stops propagation, so an outside release cannot leave a reusable press. |
+| `take_right_clicked_link(cx, window, at)` | Re-exported from `gpui_base`. The host consumes the current window's context URL during mouse-down bubble, before moving focus. A wrong position consumes it too; deferred dispatch-end cleanup expires an unconsumed address. Only an immutable URL crosses the UI/Workspace boundary. |
+| Lifetime | Event handlers retain the window's interaction entity; the registry holds weak references. Release removes only the matching registry entry, without retaining a closed window or reviving a replaced owner. |
 
 ### Re-vendor procedure
 
-Re-apply the three rows. Paired tests in `packages/ui/src/markdown/tests.rs`
-fail loudly if you forget: `a_click_on_a_link_opens_it`,
-`a_click_inside_an_occluding_panel_does_not_open_the_link_under_it`,
-`a_drag_that_merely_ends_on_a_link_does_not_open_it`, and
-`a_non_primary_click_on_a_link_does_not_open_it`.
+Re-apply the interaction module, retained Inline owner, capture/release calls,
+and public retrieval export/signature. Keep the default construction in
+`node.rs::set_leaf_key`, which also creates a fresh input owner when rekeying.
+The transition tests live in `base/src/text/link_interaction/tests.rs`;
+`packages/ui/src/markdown/link_tests.rs` covers multiple blocks, Root-backed
+and independent windows, redraw, replacement and stale gestures. Existing
+selection, occlusion and button tests remain in `markdown/tests.rs`.
+`base/Cargo.toml` explicitly registers `tests/text_host.rs` (autotests are
+disabled); its public-API fixture verifies independent `RenderContext` link
+opening and context capture. Run Base tests with `--features test-support`.
 
 ---
 

@@ -28,6 +28,7 @@ use crate::{
     async_util::Sender,
     input::Selection,
     text::TextViewMultiClickKind,
+    text::link_interaction::{LinkInteraction, LinkOwner},
     text::node::LinkMark,
     text::range_highlight::RevealAt,
     text::selection::word_range_at,
@@ -346,6 +347,8 @@ pub(super) struct Inline {
 pub(crate) struct InlineState {
     /// The text that actually rendering, matched with selection.
     pub(super) text: SharedString,
+    // daruda patch: ephemeral input identity, excluded from content equality.
+    link_owner: LinkOwner,
     pub(super) selection: Option<Selection>,
     /// Set only through the editor host API (`Paragraph::with_leaf_key`):
     /// the leaf reports its geometry to the collector installed by
@@ -1438,32 +1441,48 @@ impl Element for Inline {
             });
         }
 
-        // daruda patch: record which link a press landed on. A left release
-        // opens a link only if the press began on that same link, so a drag
-        // that merely ends on one does not navigate; a right press hands the
-        // host the URL for its context menu (`take_right_clicked_link`).
+        // daruda patch: the first capture listener begins this window's
+        // dispatch once; misses in sibling blocks cannot erase its hit.
+        let interaction = LinkInteraction::acquire(window, cx);
+        let link_owner = state.link_owner.clone();
+        let origin = [f32::from(bounds.origin.x), f32::from(bounds.origin.y)];
         if !self.links.is_empty() {
             window.on_mouse_event({
                 let links = self.links.clone();
                 let text_layout = text_layout.clone();
                 let hitbox = hitbox.clone();
+                let interaction = interaction.clone();
+                let owner = link_owner.clone();
+                // ANY-BUTTON: every new press invalidates the prior gesture.
                 move |event: &MouseDownEvent, phase, window, cx| {
                     if !phase.capture() {
                         return;
                     }
-                    let link = hitbox
-                        .is_hovered(window)
-                        .then(|| Self::link_for_position(&text_layout, &links, event.position))
-                        .flatten()
-                        .map(|link| link.url);
-                    let record = cx.default_global::<LinkPressRecord>();
+                    LinkInteraction::capture_down(&interaction, window, cx);
+                    if !hitbox.is_hovered(window) {
+                        return;
+                    }
+                    let Some(range) =
+                        Self::link_range_for_position(&text_layout, &links, event.position)
+                    else {
+                        return;
+                    };
+                    let Some(link) = Self::link_for_position(&text_layout, &links, event.position)
+                    else {
+                        return;
+                    };
                     match event.button {
-                        MouseButton::Left => record.pressed = link,
-                        MouseButton::Right => {
-                            record.pressed = None;
-                            record.right = link.map(|url| (event.position, url));
-                        }
-                        _ => record.pressed = None,
+                        MouseButton::Left => interaction.update(cx, |state, _| {
+                            state.record_left(owner.hit(
+                                current_view.as_u64(),
+                                origin,
+                                range,
+                                &link.url,
+                            ))
+                        }),
+                        MouseButton::Right => interaction
+                            .update(cx, |state, _| state.record_right(event.position, &link.url)),
+                        _ => {}
                     }
                 }
             });
@@ -1477,8 +1496,14 @@ impl Element for Inline {
                 let hitbox = hitbox.clone();
                 let text_view_state = GlobalState::global(cx).text_view_state();
                 let link_click_handler = self.link_click_handler.clone();
+                let interaction = interaction.clone();
+                let owner = link_owner.clone();
 
                 move |event: &MouseUpEvent, phase, window, cx| {
+                    if phase.capture() {
+                        LinkInteraction::capture_up(&interaction, window, cx);
+                        return;
+                    }
                     if !phase.bubble() || !hitbox.is_hovered(window) {
                         return;
                     }
@@ -1495,8 +1520,13 @@ impl Element for Inline {
                         // daruda patch: a left release only opens the link its
                         // press began on.
                         if event.button == MouseButton::Left {
-                            let pressed = cx.default_global::<LinkPressRecord>().pressed.take();
-                            if pressed.as_ref() != Some(&link.url) {
+                            let Some(range) =
+                                Self::link_range_for_position(&text_layout, &links, event.position)
+                            else {
+                                return;
+                            };
+                            let hit = owner.hit(current_view.as_u64(), origin, range, &link.url);
+                            if !interaction.update(cx, |state, _| state.take_left(&hit)) {
                                 return;
                             }
                         }
@@ -3123,25 +3153,5 @@ mod retained_layout_tests {
             RETAINED_LAYOUTS.with(|layouts| layouts.borrow().is_empty()),
             "closing the last document must not need another text layout to release it"
         );
-    }
-}
-
-/// daruda patch: the link under the latest press, per button.
-#[derive(Default)]
-struct LinkPressRecord {
-    pressed: Option<SharedString>,
-    right: Option<(Point<Pixels>, SharedString)>,
-}
-
-impl gpui::Global for LinkPressRecord {}
-
-/// daruda patch: the URL of the link a right press at `at` landed on, taken so
-/// a later menu cannot act on a stale press. `None` when that press missed
-/// every link.
-pub fn take_right_clicked_link(cx: &mut App, at: Point<Pixels>) -> Option<SharedString> {
-    let record = cx.default_global::<LinkPressRecord>();
-    match record.right.take() {
-        Some((position, url)) if position == at => Some(url),
-        _ => None,
     }
 }

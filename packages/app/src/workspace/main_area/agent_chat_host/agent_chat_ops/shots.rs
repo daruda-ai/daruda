@@ -1,6 +1,9 @@
 //! Screenshot-scenario seeds: agent-chat panes opened with a fixed transcript
 //! or state so a capture needs no ACP session.
 
+#[cfg(feature = "screenshot")]
+mod links;
+
 use crate::workspace::Workspace;
 #[cfg(feature = "screenshot")]
 use daruda_chat::shot_transcript::{SHOT_GROUP_TAIL_WINDOW, SHOT_THOUGHT_CALL_WINDOW};

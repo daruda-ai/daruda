@@ -1,0 +1,27 @@
+diff --git a/crates/gpui/src/window.rs b/crates/gpui/src/window.rs
+--- a/crates/gpui/src/window.rs
++++ b/crates/gpui/src/window.rs
+@@ -1265,2 +1265,3 @@
+     mouse_position: Point<Pixels>,
++    mouse_button_event_sequence: u64,
+     mouse_hit_test: HitTest,
+@@ -2388,2 +2389,3 @@
+             mouse_position,
++            mouse_button_event_sequence: 0,
+             mouse_hit_test: HitTest::default(),
+@@ -3599,2 +3601,9 @@
+         self.mouse_position
++    }
++
++    /// Sequence of mouse button down/up events, advanced before capture dispatch.
++    /// Gesture owners can detect events hidden by stopped propagation. Movement
++    /// does not advance the sequence; wrapping preserves consecutive comparisons.
++    pub fn mouse_button_event_sequence(&self) -> u64 {
++        self.mouse_button_event_sequence
+     }
+@@ -6213,2 +6222,5 @@
+     fn dispatch_mouse_event(&mut self, event: &dyn Any, cx: &mut App) {
++        if event.is::<crate::MouseDownEvent>() || event.is::<MouseUpEvent>() {
++            self.mouse_button_event_sequence = self.mouse_button_event_sequence.wrapping_add(1);
++        }
+         let hit_test = self.rendered_frame.hit_test(self.mouse_position());

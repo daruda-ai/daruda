@@ -301,7 +301,7 @@ The patches this package's wrappers depend on:
 | `LineDecoration`, `set_line_decorations`, `set_highlight_override`, `scroll_size`, `display_rows`, `move_cursor_to_end` | editor callers through `code_editor`'s re-exports: the diff and output embeds, the file viewer and its scrollbar, the composer |
 | `ThemeStyle::new` + `bold` / `italic`, `query_compilations` | `theme::syntax`, `highlighter` |
 | `TextView::{code_block_render, debug_inline_bounds}`, `markdown-task-checkbox` selector, loose/tight list spacing | `markdown` and the app's Markdown conformance probe |
-| `take_right_clicked_link` | re-exported from `lib.rs` for the chat's link context menu |
+| `take_right_clicked_link(cx, window, at)` | window-scoped, one-shot URL retrieval during the chat menu's mouse-down bubble handler; independent Markdown hosts need no Root layer |
 | Left-button gates on scrollbar and resize-handle presses | `scrollbar` (`a_right_press_on_the_track_does_not_jump_the_view`) |
 
 The manifests allow every upstream lint (vendored code is outside daruda's
@@ -324,3 +324,10 @@ Text never falls below the shared readable minimum, and targets stay at least
 `button_split_caret_sized` uses the same height as a sized text action and
 keeps icon artwork independent of the vendor size tier. `InputPanel` composes
 the two halves through the shared dropdown-menu path.
+
+### Painted text test geometry
+
+With `test-support`, `test_support::painted_text_bounds(window, text)` returns
+only the last painted visible text bounds. Input integration tests use this
+value instead of guessing link coordinates. The feature also enables Base's
+text observation; it is not enabled in the shipping or screenshot builds.

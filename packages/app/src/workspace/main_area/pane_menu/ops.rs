@@ -28,6 +28,39 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let click = self.take_pane_click_info(pane_id, position, window, cx);
+        self.open_pane_context_menu_with_click(pane_id, position, click, window, cx);
+    }
+
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_link_menu_for_shot(
+        &mut self,
+        pane_id: PaneId,
+        url: &str,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let link = self.classify_markdown_link(pane_id, url.to_owned(), cx);
+        self.open_pane_context_menu_with_click(
+            pane_id,
+            position,
+            Some(ClickInfo {
+                link: Some(link),
+                annotation: None,
+            }),
+            window,
+            cx,
+        );
+    }
+
+    fn open_pane_context_menu_with_click(
+        &mut self,
+        pane_id: PaneId,
+        position: Point<Pixels>,
+        click: Option<ClickInfo>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(context) = self.begin_pane_menu(pane_id, click, window, cx) else {
             return;
         };
@@ -91,7 +124,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<ClickInfo> {
-        let markdown_link = crate::ui::take_right_clicked_link(cx, position);
+        let markdown_link = crate::ui::take_right_clicked_link(cx, window, position);
         let resource = self
             .main_area
             .resource_right_click

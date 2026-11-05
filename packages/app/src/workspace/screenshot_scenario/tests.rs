@@ -355,3 +355,12 @@ fn library_skills_has_a_cli_name() {
         )),
     );
 }
+
+#[test]
+fn link_scenarios_have_distinct_cli_names() {
+    let links = ScreenshotScenario::from_cli_name("agent-chat-links");
+    let menu = ScreenshotScenario::from_cli_name("agent-chat-link-menu");
+    assert!(links.is_some());
+    assert!(menu.is_some());
+    assert_ne!(links, menu);
+}

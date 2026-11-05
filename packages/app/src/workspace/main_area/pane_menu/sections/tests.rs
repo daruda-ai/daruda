@@ -466,3 +466,80 @@ fn composed_menus_never_start_or_end_with_a_separator() {
         assert!(!matches!(entries.last(), Some(MenuEntry::Separator)));
     }
 }
+
+#[test]
+fn local_file_links_copy_resolved_paths_and_reveal_existing_targets() {
+    for kind in [
+        LocalKind::Text,
+        LocalKind::Image,
+        LocalKind::Binary,
+        LocalKind::Directory,
+        LocalKind::Missing,
+    ] {
+        let ctx = PaneMenuContext {
+            click: Some(ClickInfo {
+                link: Some(ClickLink::File {
+                    url: "file:///repo/with%20space.md:42".into(),
+                    path: "/repo/with space.md".into(),
+                    kind,
+                }),
+                annotation: None,
+            }),
+            ..base(PaneMenuKind::AgentChat { busy: false })
+        };
+        let entries = compose(&ctx);
+        let Some(MenuItemSpec::Enabled {
+            activate: Activate::Clipboard(path),
+            ..
+        }) = find(&entries, &s::ctx::copy_file_path())
+        else {
+            panic!("resolved local path must be copyable: {kind:?}");
+        };
+        assert_eq!(path, "/repo/with space.md");
+        let Some(MenuItemSpec::Enabled {
+            activate: Activate::Clipboard(url),
+            ..
+        }) = find(&entries, &s::ctx::copy_link_address())
+        else {
+            panic!("original link must remain copyable");
+        };
+        assert_eq!(url, "file:///repo/with%20space.md:42");
+        assert_eq!(
+            find(&entries, &s::ctx::reveal_in_file_manager()).is_some(),
+            kind != LocalKind::Missing
+        );
+    }
+}
+
+#[test]
+fn encoded_link_addresses_keep_raw_copy_and_offer_decoded_file_path_copy() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("design with space.md");
+    std::fs::write(&path, "# Design").unwrap();
+    let raw = format!("{}:12", url::Url::from_file_path(&path).unwrap());
+    let target = daruda_content::link_target::classify(&raw, None);
+    let ctx = PaneMenuContext {
+        click: Some(ClickInfo {
+            link: Some(ClickLink::for_target(raw.clone(), target)),
+            annotation: None,
+        }),
+        ..base(PaneMenuKind::AgentChat { busy: false })
+    };
+    let entries = compose(&ctx);
+    let Some(MenuItemSpec::Enabled {
+        activate: Activate::Clipboard(resolved),
+        ..
+    }) = find(&entries, &s::ctx::copy_file_path())
+    else {
+        panic!("resolved path action");
+    };
+    assert_eq!(resolved, &path.to_string_lossy());
+    let Some(MenuItemSpec::Enabled {
+        activate: Activate::Clipboard(original),
+        ..
+    }) = find(&entries, &s::ctx::copy_link_address())
+    else {
+        panic!("original address action");
+    };
+    assert_eq!(original, &raw);
+}

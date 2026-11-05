@@ -1263,6 +1263,7 @@ pub struct Window {
     focus_lost_path: SmallVec<[FocusId; 8]>,
     default_prevented: bool,
     mouse_position: Point<Pixels>,
+    mouse_button_event_sequence: u64,
     mouse_hit_test: HitTest,
     modifiers: Modifiers,
     capslock: Capslock,
@@ -2386,6 +2387,7 @@ impl Window {
             focus_lost_path: SmallVec::new(),
             default_prevented: true,
             mouse_position,
+            mouse_button_event_sequence: 0,
             mouse_hit_test: HitTest::default(),
             modifiers,
             capslock,
@@ -3597,6 +3599,13 @@ impl Window {
     /// The position of the mouse relative to the window.
     pub fn mouse_position(&self) -> Point<Pixels> {
         self.mouse_position
+    }
+
+    /// Sequence of mouse button down/up events, advanced before capture dispatch.
+    /// Gesture owners can detect events hidden by stopped propagation. Movement
+    /// does not advance the sequence; wrapping preserves consecutive comparisons.
+    pub fn mouse_button_event_sequence(&self) -> u64 {
+        self.mouse_button_event_sequence
     }
 
     /// Captures the pointer for the given hitbox. While captured, all mouse move and mouse up
@@ -6211,6 +6220,9 @@ impl Window {
     }
 
     fn dispatch_mouse_event(&mut self, event: &dyn Any, cx: &mut App) {
+        if event.is::<crate::MouseDownEvent>() || event.is::<MouseUpEvent>() {
+            self.mouse_button_event_sequence = self.mouse_button_event_sequence.wrapping_add(1);
+        }
         let hit_test = self.rendered_frame.hit_test(self.mouse_position());
         if hit_test != self.mouse_hit_test {
             self.mouse_hit_test = hit_test;

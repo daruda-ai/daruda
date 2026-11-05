@@ -1039,12 +1039,11 @@ fn set_leaf_key(state: &mut Arc<Mutex<InlineState>>, key: u64) {
         .unwrap_or_default();
     // Rekeying creates a new rendered identity. Do not mutate the state of
     // another AST clone (or carry its transient selection into this instance).
-    *state = Arc::new(Mutex::new(InlineState {
-        text,
-        editor_key: Some(key),
-        cleanup_senders: Vec::new(),
-        ..Default::default()
-    }));
+    // daruda patch: construct retained input identity through Default too.
+    let mut replacement = InlineState::default();
+    replacement.set_text(text);
+    replacement.editor_key = Some(key);
+    *state = Arc::new(Mutex::new(replacement));
 }
 
 /// Wrap `text` with the Markdown syntax implied by `mark`.

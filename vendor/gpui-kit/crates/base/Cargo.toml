@@ -76,3 +76,8 @@ dead_code = "allow"
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dev-dependencies]
 # Native shaping tests borrow the pinned platform's text system without a window.
 "gpui_platform" = { workspace = true }
+
+# daruda patch: exercise the public renderer without a Base Root.
+[[test]]
+name = "text_host"
+path = "tests/text_host.rs"

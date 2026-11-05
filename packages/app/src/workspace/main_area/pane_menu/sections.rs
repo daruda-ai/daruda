@@ -275,6 +275,21 @@ fn link_entries(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
 
     match &link {
         ClickLink::File { url, path, kind } => {
+            entries.push(item(
+                s::ctx::copy_file_path(),
+                ItemState::Enabled,
+                Activate::Clipboard(path.to_string_lossy().into_owned()),
+            ));
+            if *kind != LocalKind::Missing {
+                let path = path.clone();
+                entries.push(item(
+                    s::ctx::reveal_in_file_manager(),
+                    ItemState::Enabled,
+                    Activate::Op(Box::new(move |ws, _window, cx| {
+                        ws.reveal_in_file_manager(&path, cx);
+                    })),
+                ));
+            }
             let path = path.clone();
             match kind {
                 // Text has two openers: the viewer, and the user's editor.

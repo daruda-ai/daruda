@@ -5,6 +5,7 @@
 
 mod composer;
 mod config;
+mod links;
 mod overage;
 mod panes;
 mod questions;

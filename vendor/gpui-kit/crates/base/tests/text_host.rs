@@ -79,3 +79,6 @@ fn external_host_uses_local_rendering_services(cx: &mut TestAppContext) {
     assert!(highlights.load(Ordering::SeqCst) > 0);
     assert!(images.load(Ordering::SeqCst) > 0);
 }
+
+#[path = "text_link_host.rs"]
+mod text_link_host;
