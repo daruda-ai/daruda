@@ -31,6 +31,7 @@ pub fn palette_from_theme(theme: &DarudaTheme) -> MermaidPalette {
         primary_text_color: to_hex(theme.text_body),
         primary_border_color: to_hex(theme.border),
         line_color: to_hex(theme.text_muted),
+        structural_line: structural_line_over(canvas),
         secondary_color: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA), canvas),
         surface_muted: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA), canvas),
         cluster_background: to_hex_over(diagram_surface(theme, DIAGRAM_SURFACE_ALT_ALPHA), canvas),
@@ -68,6 +69,7 @@ pub fn file_viewer_palette(cx: &gpui::App) -> MermaidPalette {
         primary_text_color: to_hex(surface.foreground),
         primary_border_color: to_hex_over(surface.border_tint, canvas),
         line_color: line,
+        structural_line: structural_line_over(canvas),
         secondary_color: secondary_surface_hex.clone(),
         surface_muted: secondary_surface_hex.clone(),
         cluster_background: secondary_surface_hex.clone(),
@@ -101,6 +103,7 @@ pub fn agent_chat_palette(cx: &gpui::App) -> MermaidPalette {
         primary_text_color: to_hex(surface.foreground),
         primary_border_color: to_hex_over(surface.border_tint, canvas),
         line_color: line,
+        structural_line: structural_line_over(canvas),
         secondary_color: secondary_surface_hex.clone(),
         surface_muted: secondary_surface_hex.clone(),
         cluster_background: secondary_surface_hex.clone(),
@@ -138,6 +141,15 @@ fn diagram_surface(theme: &DarudaTheme, alpha: f32) -> Hsla {
         a: alpha,
         ..theme.overlay_prominent
     }
+}
+
+/// The guide weight Markdown table rules use on the same surface, so a
+/// diagram's lifelines read as one system with the prose around it.
+fn structural_line_over(canvas: Hsla) -> String {
+    to_hex_over(
+        theme::neutral_tint_over(canvas, theme::MD_VIEW_STRUCTURAL_LINE_ALPHA),
+        canvas,
+    )
 }
 
 fn diagram_surface_for_base(base: Hsla, alpha: f32) -> Hsla {
@@ -276,6 +288,10 @@ mod tests {
             assert_eq!(palette.primary_text_color, "#ffffff");
             assert_ne!(palette.primary_text_color, "#000000");
             assert_ne!(palette.line_color, "#000000");
+            // Lifelines must stand out from the card hairline yet stay
+            // quieter than connectors: black canvas, so higher hex = brighter.
+            assert!(palette.primary_border_color < palette.structural_line);
+            assert!(palette.structural_line < palette.line_color);
         });
     }
 }

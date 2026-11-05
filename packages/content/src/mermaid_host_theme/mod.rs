@@ -161,10 +161,14 @@ fn mermaid_host_scoped_css(palette: &MermaidPalette) -> String {
     // color for each bright section fill and often resolves to black. Keep label
     // contrast intact, but draw timeline lines with the host structural line
     // color so dashed connectors stay visible on dark editor surfaces.
+    // Sequence lifelines take merman's `ActorBorder` role, which also edges the
+    // filled actor box. A card hairline all but vanishes as a free-standing
+    // line, so lifelines take the host's structural guide color instead.
     let text = &palette.primary_text_color;
     format!(
         concat!(
             ".lineWrapper line {{ stroke: {line} !important; }}",
+            " .actor-line {{ stroke: {guide} !important; }}",
             " text[fill=\"#000\"],",
             " text[fill=\"#000000\"],",
             " text[fill=\"black\"],",
@@ -235,6 +239,7 @@ fn mermaid_host_scoped_css(palette: &MermaidPalette) -> String {
             " span[style*=\"color: black\"] {{ color: {text} !important; }}",
         ),
         line = palette.line_color,
+        guide = palette.structural_line,
         text = text
     )
 }

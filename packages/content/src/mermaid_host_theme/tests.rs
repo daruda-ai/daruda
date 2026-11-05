@@ -8,6 +8,7 @@ fn test_palette() -> MermaidPalette {
         primary_text_color: "#eeeeee".to_owned(),
         primary_border_color: "#333333".to_owned(),
         line_color: "#cccccc".to_owned(),
+        structural_line: "#777777".to_owned(),
         secondary_color: "#444444".to_owned(),
         surface_muted: "#1a1a1a".to_owned(),
         cluster_background: "#1c1c1c".to_owned(),
@@ -442,4 +443,32 @@ fn author_themed_diagram_renders_svg_text_labels() {
         svg.contains("fill:#eee;stroke:#999"),
         "the author's `neutral` theme was not the one applied: {svg}"
     );
+}
+
+/// merman paints a sequence lifeline with the `ActorBorder` role, which the
+/// host fills with a card-edge hairline. On open canvas that hairline nearly
+/// vanishes, so the lifeline must resolve to the structural guide color.
+#[test]
+fn sequence_lifelines_paint_with_the_structural_guide_color() {
+    use resvg::usvg;
+
+    let palette = test_palette();
+    let svg = mermaid_host_theme_profile(&palette)
+        .render("sequenceDiagram\n  participant A\n  participant B\n  A->>B: hello\n")
+        .expect("merman should render")
+        .expect("diagram should be detected");
+    let tree = usvg::Tree::from_str(&svg, &crate::svg_fonts::usvg_options()).expect("parses");
+    for id in ["actor0", "actor1"] {
+        let Some(usvg::Node::Path(path)) = tree.node_by_id(id) else {
+            panic!("lifeline {id} missing from SVG: {svg}");
+        };
+        let Some(usvg::Paint::Color(color)) = path.stroke().map(usvg::Stroke::paint) else {
+            panic!("lifeline {id} has no solid stroke");
+        };
+        assert_eq!(
+            format!("#{:02x}{:02x}{:02x}", color.red, color.green, color.blue),
+            palette.structural_line,
+            "lifeline {id} must use the structural guide color, not the actor border"
+        );
+    }
 }

@@ -31,6 +31,9 @@ pub struct MermaidPalette {
     pub primary_text_color: String,
     pub primary_border_color: String,
     pub line_color: String,
+    /// Free-standing structural guides such as sequence lifelines: visible on
+    /// open canvas, but quieter than the connectors drawn in `line_color`.
+    pub structural_line: String,
     pub secondary_color: String,
     pub surface_muted: String,
     pub cluster_background: String,
@@ -53,6 +56,7 @@ fn test_palette() -> MermaidPalette {
         primary_text_color: "#d5d7db".into(),
         primary_border_color: "#23252a".into(),
         line_color: "#8a8f98".into(),
+        structural_line: "#4f5052".into(),
         secondary_color: "#2e2e30".into(),
         surface_muted: "#2e2e30".into(),
         cluster_background: "#2e2e30".into(),
