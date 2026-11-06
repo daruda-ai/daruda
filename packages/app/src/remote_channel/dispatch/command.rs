@@ -97,9 +97,10 @@ pub(crate) fn run_command(
                 cx.update(|cx| render_reply(&outcome, None, &target, cx))
             }));
         }
-        command::Resolution::OpenTask(task) => {
-            (crate::control::exec::open_task(task, true, cx), None)
-        }
+        command::Resolution::OpenTask(task) => (
+            crate::control::exec::open_task(task, crate::control::exec::Caller::Phone, cx),
+            None,
+        ),
         command::Resolution::Run(resolved, addressed) => (
             crate::control::exec::run(resolved, crate::control::exec::CommandOrigin::Phone, cx),
             addressed,
@@ -126,12 +127,8 @@ fn start_task(task: String, cx: &mut App) -> ControlOutcome {
     // A phone start asks no approval, so the notice says what a desktop
     // approval would have: the flow, and how freely its agents act.
     let flow = crate::control::exec::task_flow_summary(&task, cx);
-    let pending = crate::control::exec::begin_task_start(
-        task,
-        crate::control::exec::CommandOrigin::Phone,
-        true,
-        cx,
-    )?;
+    let pending =
+        crate::control::exec::begin_task_start(task, crate::control::exec::Caller::Phone, cx)?;
     if let Some(outcome) = pending.try_finish(cx) {
         return outcome;
     }

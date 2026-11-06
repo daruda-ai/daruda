@@ -15,6 +15,7 @@ mod metadata;
 #[cfg(any(test, feature = "screenshot"))]
 use metadata::flow_metadata;
 mod pump;
+mod submitter;
 mod view;
 
 use std::cell::RefCell;
@@ -31,6 +32,7 @@ pub(crate) use colour::apply_run_event;
 pub(crate) use colour::{NodeRunState, NodeRunStates, RunColouring};
 #[cfg(test)]
 use pump::pump;
+pub(crate) use submitter::FlowSubmitter;
 pub(crate) use view::{AnswerRefused, FlowSource, Lull, ParkedAsk, RunView};
 
 /// A run in flight.
@@ -44,18 +46,17 @@ pub(crate) struct FlowRun {
     overage: OverageStop,
     /// Who submitted this episode, start or resume: the one owed its
     /// answer. The run's first starter is provenance, kept in its log.
-    submitted_by: daruda_flow::request::StartedBy,
-    solicited: bool,
+    submitter: FlowSubmitter,
     /// Disconnects when the run's thread returns, so a quit can block on
     /// it with a deadline. Seeded runs have no engine behind them.
     finished: Option<std::sync::mpsc::Receiver<std::convert::Infallible>>,
 }
 
 impl FlowRun {
-    /// Who this episode answers to, and whether that request was solicited.
+    /// Who this episode answers to.
     #[cfg(test)]
-    pub(crate) fn submitter_for_test(&self) -> (daruda_flow::request::StartedBy, bool) {
-        (self.submitted_by, self.solicited)
+    pub(crate) fn submitter_for_test(&self) -> FlowSubmitter {
+        self.submitter
     }
 
     /// Whether the run's thread returned by `until`.
@@ -220,9 +221,8 @@ pub(crate) struct FlowStart {
     pub source: FlowSource,
     pub runners: Box<dyn FnOnce(&RunRequest) -> Runners + Send>,
     pub overage: OverageStop,
-    /// Who submitted this episode; see [`FlowRun::submitted_by`].
-    pub submitted_by: daruda_flow::request::StartedBy,
-    pub solicited: bool,
+    /// Who submitted this episode; see [`FlowRun::submitter`].
+    pub submitter: FlowSubmitter,
     pub events: smol::channel::Receiver<RunNotice>,
     pub asks: smol::channel::Receiver<PendingAsk>,
 }
@@ -246,8 +246,7 @@ pub(crate) enum FlowChanged {
         run_dir: PathBuf,
         ask_id: u64,
         alone: bool,
-        submitted_by: daruda_flow::request::StartedBy,
-        solicited: bool,
+        submitter: FlowSubmitter,
     },
     AskClosed {
         run_dir: PathBuf,

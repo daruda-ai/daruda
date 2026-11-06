@@ -269,3 +269,51 @@ fn a_flow_tasks_approval_names_what_it_runs(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// Who the run of a flow task started as `started_by` answers to, read once
+/// it is held.
+async fn task_run_submitter(
+    started_by: StartedBy,
+    cx: &mut TestAppContext,
+) -> crate::runs::FlowSubmitter {
+    cx.executor().allow_parking();
+    let (lane, ws, _path, wh) = workspace_with_a_flow(cx, SLOW);
+    let id = flow_task(&ws, lane.path(), "anything", cx);
+    let _answer = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.begin_task_start(&id, started_by, window, cx)
+            })
+        })
+        .expect("window is live");
+    assert!(
+        wait_for_run(cx, |cx| run_is_held(cx, lane.path())).await,
+        "the run started"
+    );
+    let submitter = cx.update(|cx| {
+        crate::runs::RunsHost::flow_run(lane.path(), cx)
+            .map(|run| run.submitter_for_test())
+            .expect("held")
+    });
+    cx.update(|cx| crate::runs::RunsHost::stop_flow(lane.path(), cx));
+    assert!(wait_for_run(cx, |cx| !run_is_held(cx, lane.path())).await);
+    submitter
+}
+
+/// A phone's flow task answers to the phone, whose questions always reach it.
+#[gpui::test]
+async fn a_phone_flow_task_answers_to_the_phone(cx: &mut TestAppContext) {
+    assert_eq!(
+        task_run_submitter(StartedBy::Phone, cx).await,
+        crate::runs::FlowSubmitter::Phone
+    );
+}
+
+/// The Tasks panel's start is the desktop's episode, owed to no one remote.
+#[gpui::test]
+async fn a_desktop_flow_task_answers_to_the_desktop(cx: &mut TestAppContext) {
+    assert_eq!(
+        task_run_submitter(StartedBy::Desktop, cx).await,
+        crate::runs::FlowSubmitter::Desktop
+    );
+}

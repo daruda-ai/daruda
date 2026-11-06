@@ -1,6 +1,6 @@
 use super::*;
 use crate::remote_channel::bridge::Outbound;
-use daruda_flow::request::StartedBy;
+use crate::runs::FlowSubmitter;
 use futures::{FutureExt as _, StreamExt as _};
 use std::path::Path;
 
@@ -41,21 +41,14 @@ fn parked(
     receiver
 }
 
-fn change(
-    tree: &Path,
-    run_dir: &Path,
-    ask_id: u64,
-    submitted_by: StartedBy,
-    solicited: bool,
-) -> FlowChange {
+fn change(tree: &Path, run_dir: &Path, ask_id: u64, submitter: FlowSubmitter) -> FlowChange {
     FlowChange {
         worktree: daruda_flow::lock::CanonicalTree::resolve(tree).unwrap(),
         what: FlowChanged::Asked {
             run_dir: run_dir.to_path_buf(),
             ask_id,
             alone: true,
-            submitted_by,
-            solicited,
+            submitter,
         },
     }
 }
@@ -81,11 +74,12 @@ fn flow_question_delivery_uses_the_submission_stamp_and_each_connections_presenc
             ),
             cx,
         );
-        for (index, (submitted_by, solicited, away, expected)) in [
-            (StartedBy::Desktop, false, false, 1),
-            (StartedBy::Desktop, false, true, 2),
-            (StartedBy::Orchestrator, true, false, 2),
-            (StartedBy::Phone, false, false, 2),
+        for (index, (submitter, away, expected)) in [
+            (FlowSubmitter::Desktop, false, 1),
+            (FlowSubmitter::Desktop, true, 2),
+            (FlowSubmitter::Orchestrator { solicited: true }, false, 2),
+            (FlowSubmitter::Orchestrator { solicited: false }, false, 1),
+            (FlowSubmitter::Phone, false, 2),
         ]
         .into_iter()
         .enumerate()
@@ -103,10 +97,7 @@ fn flow_question_delivery_uses_the_submission_stamp_and_each_connections_presenc
             );
             let ask_id = index as u64 + 1;
             let _receiver = parked(tree.path(), &run_dir, ask_id, cx);
-            deliver(
-                &change(tree.path(), &run_dir, ask_id, submitted_by, solicited),
-                cx,
-            );
+            deliver(&change(tree.path(), &run_dir, ask_id, submitter), cx);
             let mut channels = Vec::new();
             while let Some(Some(pending)) = remote.next().now_or_never() {
                 assert!(matches!(pending.outbound, Outbound::FlowAsk(_)));
@@ -143,18 +134,14 @@ fn an_already_closed_or_replaced_flow_question_never_sends_or_notifies(
         let _ = crate::platform::notifications::take_recorded_for_test();
         let receiver = parked(tree.path(), &run_dir, 1, cx);
         drop(receiver);
-        deliver(
-            &change(tree.path(), &run_dir, 1, StartedBy::Phone, true),
-            cx,
-        );
+        deliver(&change(tree.path(), &run_dir, 1, FlowSubmitter::Phone), cx);
         let _receiver = parked(tree.path(), &run_dir, 2, cx);
         deliver(
             &change(
                 tree.path(),
                 &tree.path().join("old"),
                 2,
-                StartedBy::Phone,
-                true,
+                FlowSubmitter::Phone,
             ),
             cx,
         );
@@ -193,7 +180,7 @@ fn native_flow_waiting_notifications_honor_the_waiting_preference(cx: &mut gpui:
             cx.global_mut::<crate::settings_store::SettingsStore>()
                 .set_user_for_testing(config);
             deliver(
-                &change(tree.path(), &run_dir, 1, StartedBy::Desktop, false),
+                &change(tree.path(), &run_dir, 1, FlowSubmitter::Desktop),
                 cx,
             );
             assert_eq!(

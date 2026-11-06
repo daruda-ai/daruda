@@ -188,7 +188,7 @@ async fn an_unknown_flow_name_is_refused(cx: &mut TestAppContext) {
                     "nope",
                     None,
                     &Default::default(),
-                    (daruda_flow::request::StartedBy::Phone, true),
+                    crate::runs::FlowSubmitter::Phone,
                     cx
                 ),
                 Err(ControlError::FlowNotFound {
@@ -215,7 +215,7 @@ async fn a_name_resolves_with_or_without_its_extension(cx: &mut TestAppContext) 
                         name,
                         None,
                         &Default::default(),
-                        (daruda_flow::request::StartedBy::Phone, true),
+                        crate::runs::FlowSubmitter::Phone,
                         cx
                     ),
                     Err(ControlError::FlowNeedsInteraction {
@@ -363,7 +363,7 @@ async fn a_flow_declaring_profiles_is_refused_before_desktop_selection(cx: &mut 
                     "ship",
                     None,
                     &Default::default(),
-                    (daruda_flow::request::StartedBy::Phone, true),
+                    crate::runs::FlowSubmitter::Phone,
                     cx
                 ),
                 Err(ControlError::FlowNeedsInteraction {
@@ -418,7 +418,7 @@ async fn an_undeclared_profile_is_refused(cx: &mut TestAppContext) {
                         "ship",
                         Some("dear"),
                         &Default::default(),
-                        (daruda_flow::request::StartedBy::Orchestrator, true),
+                        crate::runs::FlowSubmitter::Orchestrator { solicited: true },
                         cx
                     ),
                     Err(ControlError::FlowUnknownProfile {
@@ -446,7 +446,7 @@ async fn a_declared_profile_starts_the_flow(cx: &mut TestAppContext) {
                     "ship",
                     Some("cheap"),
                     &Default::default(),
-                    (daruda_flow::request::StartedBy::Orchestrator, true),
+                    crate::runs::FlowSubmitter::Orchestrator { solicited: true },
                     cx,
                 )
                 .expect("a declared profile needs no desktop choice");
@@ -518,7 +518,7 @@ async fn a_flow_that_will_not_run_is_answered_not_reported_as_started(cx: &mut T
                     "ship",
                     None,
                     &Default::default(),
-                    (daruda_flow::request::StartedBy::Phone, true),
+                    crate::runs::FlowSubmitter::Phone,
                     cx
                 ),
                 Err(ControlError::FlowRefused {
@@ -566,7 +566,7 @@ async fn a_runnable_flow_starts_and_names_the_file_that_ran(cx: &mut TestAppCont
                     "ship",
                     None,
                     &Default::default(),
-                    (daruda_flow::request::StartedBy::Phone, true),
+                    crate::runs::FlowSubmitter::Phone,
                     cx,
                 )
                 .expect("a command-only flow needs neither an agent nor a person");
@@ -600,7 +600,7 @@ async fn a_lane_already_running_a_flow_refuses_the_next(cx: &mut TestAppContext)
                     "ship",
                     None,
                     &Default::default(),
-                    (daruda_flow::request::StartedBy::Phone, true),
+                    crate::runs::FlowSubmitter::Phone,
                     cx
                 ),
                 Err(ControlError::FlowLocked {
@@ -639,7 +639,7 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
                     "deploy",
                     None,
                     &Default::default(),
-                    (daruda_flow::request::StartedBy::Phone, true),
+                    crate::runs::FlowSubmitter::Phone,
                     cx
                 ),
                 Err(ControlError::FlowNotFound {
@@ -654,7 +654,7 @@ async fn a_flow_runs_in_the_named_worktree_not_the_active_one(cx: &mut TestAppCo
                     "deploy",
                     None,
                     &Default::default(),
-                    (daruda_flow::request::StartedBy::Phone, true),
+                    crate::runs::FlowSubmitter::Phone,
                     cx,
                 )
                 .expect("the named worktree holds it");
@@ -687,7 +687,7 @@ async fn a_worktree_that_is_gone_is_not_reported_as_a_missing_flow(cx: &mut Test
                     "ship",
                     None,
                     &Default::default(),
-                    (daruda_flow::request::StartedBy::Phone, true),
+                    crate::runs::FlowSubmitter::Phone,
                     cx
                 ),
                 Err(ControlError::TargetGone)
@@ -714,7 +714,7 @@ async fn a_named_worktree_already_running_refuses_without_a_dialog(cx: &mut Test
                     "deploy",
                     None,
                     &Default::default(),
-                    (daruda_flow::request::StartedBy::Phone, true),
+                    crate::runs::FlowSubmitter::Phone,
                     cx
                 ),
                 Err(ControlError::FlowLocked {
@@ -1107,20 +1107,19 @@ async fn started_run_reports_its_outcome(
     // A real run: its log thread wakes the app from outside the scheduler,
     // so the opt-out has to come before the run starts.
     cx.executor().allow_parking();
+    let submitter = match origin {
+        crate::control::exec::CommandOrigin::Phone => crate::runs::FlowSubmitter::Phone,
+        crate::control::exec::CommandOrigin::Orchestrator => {
+            crate::runs::FlowSubmitter::Orchestrator { solicited: true }
+        }
+    };
 
     let run_id = cx
         .update_window(wh.into(), |_, _, cx| {
             ws.update(cx, |ws, cx| {
-                ws.control_flow_run(
-                    ws.active,
-                    "ship",
-                    None,
-                    &Default::default(),
-                    (origin.flow_started_by(), true),
-                    cx,
-                )
-                .expect("dispatched")
-                .run_id
+                ws.control_flow_run(ws.active, "ship", None, &Default::default(), submitter, cx)
+                    .expect("dispatched")
+                    .run_id
             })
         })
         .expect("window is live");
@@ -1131,7 +1130,7 @@ async fn started_run_reports_its_outcome(
     let run_dir = crate::workspace::flow_paths::runs_dir(lane.path()).join(run_id);
     assert_eq!(
         daruda_flow::run_log::reader::read(&run_dir).started_by,
-        Some(origin.flow_started_by())
+        Some(submitter.started_by())
     );
     if origin == crate::control::exec::CommandOrigin::Orchestrator {
         assert!(sent.is_none());
@@ -1206,7 +1205,7 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
                 "ship",
                 None,
                 &Default::default(),
-                (daruda_flow::request::StartedBy::Phone, true),
+                crate::runs::FlowSubmitter::Phone,
                 cx,
             )
             .expect("dispatched");
@@ -1498,7 +1497,7 @@ async fn a_worktree_held_by_another_process_names_its_run(cx: &mut TestAppContex
                 "ship",
                 None,
                 &Default::default(),
-                (daruda_flow::request::StartedBy::Phone, true),
+                crate::runs::FlowSubmitter::Phone,
                 cx
             ),
             Err(ControlError::FlowLocked {
@@ -1540,7 +1539,7 @@ nodes:
                 name,
                 None,
                 &Default::default(),
-                (daruda_flow::request::StartedBy::Phone, true),
+                crate::runs::FlowSubmitter::Phone,
                 cx,
             )
             .expect("dispatched")
@@ -1649,7 +1648,7 @@ async fn a_start_that_finds_a_run_held_is_refused_typed_without_a_dialog(cx: &mu
             &flow_path,
             None,
             &crate::workspace::flow_request::FlowSelection::default(),
-            (daruda_flow::request::StartedBy::Phone, true),
+            crate::runs::FlowSubmitter::Phone,
             cx,
         );
         assert!(
@@ -1688,7 +1687,7 @@ async fn a_refused_start_tells_the_control_caller_why(cx: &mut TestAppContext) {
             "ship",
             None,
             &Default::default(),
-            (daruda_flow::request::StartedBy::Phone, true),
+            crate::runs::FlowSubmitter::Phone,
             cx,
         );
         match refused {
@@ -1728,7 +1727,7 @@ async fn a_desktop_resume_of_a_phone_started_run_stays_off_the_phone(cx: &mut Te
             "ship",
             None,
             &Default::default(),
-            (daruda_flow::request::StartedBy::Phone, true),
+            crate::runs::FlowSubmitter::Phone,
             cx,
         )
         .expect("dispatched")

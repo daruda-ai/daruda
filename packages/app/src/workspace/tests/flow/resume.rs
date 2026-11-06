@@ -380,8 +380,13 @@ async fn a_worktree_that_no_longer_resolves_is_refused_as_a_start_is(cx: &mut Te
         let here = ws.active;
         (
             ws.control_flow_resume_check(here, &run_dir, cx).err(),
-            ws.control_flow_resume(here, &run_dir, (StartedBy::Orchestrator, false), cx)
-                .err(),
+            ws.control_flow_resume(
+                here,
+                &run_dir,
+                crate::runs::FlowSubmitter::Orchestrator { solicited: false },
+                cx,
+            )
+            .err(),
         )
     });
 
@@ -442,7 +447,7 @@ async fn the_flows_panel_resume_is_the_desktops_episode(cx: &mut TestAppContext)
             .map(|flow| flow.submitter_for_test())
             .expect("held")
     });
-    assert_eq!(submitter, (StartedBy::Desktop, false));
+    assert_eq!(submitter, crate::runs::FlowSubmitter::Desktop);
     assert_eq!(
         refused_before_the_card(run.resume(), cx),
         ControlError::FlowRunNotResumable {
@@ -460,6 +465,51 @@ async fn the_flows_panel_resume_is_the_desktops_episode(cx: &mut TestAppContext)
         daruda_flow::run_log::reader::read(&run.run_dir).started_by,
         Some(StartedBy::Orchestrator)
     );
+}
+
+/// A desktop Continue of a run the orchestrator asked for from the phone
+/// stays the desktop's episode, while the end the orchestrator is owed keeps
+/// the solicitation its key already had.
+#[gpui::test]
+async fn a_desktop_resume_keeps_the_solicitation_the_run_was_owed_with(cx: &mut TestAppContext) {
+    let run = interrupted_orchestrator_run(cx).await;
+    let key = RunKey::Flow(run.run_id.clone());
+    cx.update(|cx| RunsHost::register_run_solicited(key.clone(), true, cx));
+    let here = run.ws.read_with(cx, |ws, _| ws.active);
+    run.ws
+        .update(cx, |ws, cx| ws.resume_flow_run(here, &run.run_dir, cx));
+    let submitter = cx.update(|cx| {
+        RunsHost::flow_run(run.lane.path(), cx)
+            .map(|flow| flow.submitter_for_test())
+            .expect("held")
+    });
+    assert_eq!(submitter, crate::runs::FlowSubmitter::Desktop);
+    assert!(
+        wait_for_run(cx, |cx| {
+            run.run_dir.join("DONE").exists() && !run_is_held(cx, run.lane.path())
+        })
+        .await,
+        "the resumed run did not finish"
+    );
+    cx.update(|cx| {
+        let completed: Vec<_> = RunsHost::unreported_run_events(cx)
+            .into_iter()
+            .filter(|event| {
+                event.snapshot.key == key
+                    && matches!(
+                        event.snapshot.state,
+                        RunState::Ended {
+                            ended_as: EndedAs::Completed,
+                            ..
+                        }
+                    )
+            })
+            .collect();
+        // The first run's own end joins the scope with the key; the
+        // resumed episode's end is the last.
+        let resumed = completed.last().expect("the resumed episode's end");
+        assert!(resumed.solicited, "the key's solicitation is kept");
+    });
 }
 
 /// A new process knows the run only from the run ledger: its owner crashed
@@ -657,7 +707,7 @@ async fn a_desktop_resume_while_the_card_waits_is_not_resumed_twice(cx: &mut Tes
     });
     assert_eq!(
         submitter,
-        (StartedBy::Desktop, false),
+        crate::runs::FlowSubmitter::Desktop,
         "still the desktop's"
     );
 

@@ -168,7 +168,7 @@ async fn a_task_keeps_solicitation_after_its_approval_and_phone_turn_close(
             cx,
         );
         assert!(RunsHost::unreported_run_events(cx)[0].solicited);
-        assert!(!CommandOrigin::Orchestrator.is_solicited(cx));
+        assert!(!CommandOrigin::Orchestrator.capture(cx).solicited());
     });
 }
 

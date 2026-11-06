@@ -94,7 +94,7 @@ pub(crate) fn run_gated(cmd: GatedCommand, origin: super::CommandOrigin, cx: &mu
     run_gated_with(
         cmd,
         origin,
-        |cmd, origin, solicited, cx| perform_gated(cmd, origin, solicited, cx).boxed_local(),
+        |cmd, caller, cx| perform_gated(cmd, caller, cx).boxed_local(),
         cx,
     )
 }
@@ -104,8 +104,7 @@ fn run_gated_with(
     origin: super::CommandOrigin,
     perform: impl for<'a> FnOnce(
         Asked,
-        super::CommandOrigin,
-        bool,
+        super::Caller,
         &'a mut gpui::AsyncApp,
     ) -> LocalBoxFuture<'a, ControlOutcome>
     + 'static,
@@ -122,9 +121,8 @@ fn run_gated_with(
         Ok(summary) => summary,
         Err(refusal) => return Dispatch::Ready(Err(refusal)),
     };
-    let solicited = origin.is_solicited(cx);
-    let away = crate::app_presence::is_away(cx);
-    let delivery = crate::remote_channel::delivery::remote_delivery(solicited, away);
+    let caller = origin.capture(cx);
+    let delivery = caller.delivery(crate::app_presence::is_away(cx));
     let (approval, answer) = crate::control::approval::request(summary, delivery, cx);
     let (tx, rx) = smol::channel::bounded(1);
     cx.spawn(async move |cx| {
@@ -135,7 +133,7 @@ fn run_gated_with(
             Ok(ApprovalOutcome::Approved) => {
                 Some(match cx.update(|cx| reserve_gated(&asked, cx)) {
                     Ok(permit) => {
-                        let outcome = perform(asked, origin, solicited, cx).await;
+                        let outcome = perform(asked, caller, cx).await;
                         if let Some(permit) = permit {
                             cx.update(|cx| permit.finish(outcome.is_ok(), cx));
                         }
@@ -337,13 +335,12 @@ fn approval_summary(asked: &Asked, cx: &mut App) -> Result<String, ControlError>
 /// Do the thing, now that the user has said yes.
 async fn perform_gated(
     asked: Asked,
-    origin: super::CommandOrigin,
-    solicited: bool,
+    caller: super::Caller,
     cx: &mut gpui::AsyncApp,
 ) -> ControlOutcome {
     let created = match asked {
         Asked::FlowResume(target) => {
-            return cx.update(|cx| flow_resume::resume(target, origin, solicited, cx));
+            return cx.update(|cx| flow_resume::resume(target, caller, cx));
         }
         Asked::TaskCreate {
             workspace,
@@ -361,8 +358,8 @@ async fn perform_gated(
                 .await
                 .map(|task| ControlResult::TaskCreated { task });
         }
-        Asked::TaskStart { task } => return start_task(task, origin, solicited, cx).await,
-        Asked::TaskOpen { task } => return cx.update(|cx| open_task(task, solicited, cx)),
+        Asked::TaskStart { task } => return start_task(task, caller, cx).await,
+        Asked::TaskOpen { task } => return cx.update(|cx| open_task(task, caller, cx)),
         Asked::ChatNew { lane, agent } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {
@@ -383,7 +380,7 @@ async fn perform_gated(
             base_ref,
             agent,
             prompt,
-            origin,
+            caller.origin(),
             cx,
         )
         .await
@@ -393,7 +390,7 @@ async fn perform_gated(
     // Read back rather than echo the request: an agent id the catalog does
     // not hold resolves to the default, so what opened is the only honest
     // answer. The announcement keeps the command's delivery provenance.
-    let label = cx.update(|cx| announce_chat(chat, solicited, cx));
+    let label = cx.update(|cx| announce_chat(chat, caller, cx));
     let agent = label.map_or_else(String::new, |l| l.agent);
     Ok(match lane {
         Some(target) => ControlResult::LaneCreated {
@@ -411,11 +408,10 @@ async fn perform_gated(
 /// A start for the agent: approved already, so this only waits for it.
 async fn start_task(
     task: String,
-    origin: super::CommandOrigin,
-    solicited: bool,
+    caller: super::Caller,
     cx: &mut gpui::AsyncApp,
 ) -> ControlOutcome {
-    cx.update(|cx| begin_task_start(task, origin, solicited, cx))?
+    cx.update(|cx| begin_task_start(task, caller, cx))?
         .finish(cx)
         .await
 }
@@ -424,8 +420,7 @@ async fn start_task(
 pub(crate) struct PendingTaskStart {
     pub(crate) task: String,
     pub(crate) title: String,
-    origin: super::CommandOrigin,
-    solicited: bool,
+    caller: super::Caller,
     workspace: daruda_store::project::WorkspaceUuid,
     answer: smol::channel::Receiver<crate::workspace::ControlTaskStart>,
 }
@@ -434,22 +429,20 @@ pub(crate) struct PendingTaskStart {
 /// runs is already in the answer — see [`PendingTaskStart::try_finish`].
 pub(crate) fn begin_task_start(
     task: String,
-    origin: super::CommandOrigin,
-    solicited: bool,
+    caller: super::Caller,
     cx: &mut App,
 ) -> Result<PendingTaskStart, ControlError> {
     let title = task_title(&task, cx);
     let (workspace, answer) = in_task_window(&task, cx, |ws, window, cx| {
         Ok((
             ws.uuid(),
-            ws.control_task_start(&task, origin.task_started_by(), window, cx),
+            ws.control_task_start(&task, caller.task_started_by(), window, cx),
         ))
     })?;
     Ok(PendingTaskStart {
         task,
         title,
-        origin,
-        solicited,
+        caller,
         workspace,
         answer,
     })
@@ -475,19 +468,14 @@ impl PendingTaskStart {
     /// Announce a started task's chat with the start request's provenance.
     fn started(&self, outcome: crate::workspace::ControlTaskStart, cx: &mut App) -> ControlOutcome {
         let (exec, lane, pane) = outcome?;
-        if matches!(self.origin, super::CommandOrigin::Orchestrator) {
-            crate::runs::RunsHost::register_run_solicited(
-                crate::runs::result::RunKey::Task(exec.clone()),
-                self.solicited,
-                cx,
-            );
-        }
+        self.caller
+            .scope_run(crate::runs::result::RunKey::Task(exec.clone()), cx);
         let chat = pane.map(|pane| PaneRef {
             workspace: self.workspace,
             pane,
         });
         if let Some(chat) = chat {
-            announce_chat(chat, self.solicited, cx);
+            announce_chat(chat, self.caller, cx);
         }
         Ok(ControlResult::TaskStarted {
             handle: crate::control::mcp::runs::run_handle(crate::runs::result::RunKey::Task(exec)),
@@ -499,7 +487,7 @@ impl PendingTaskStart {
 }
 
 /// Bring up the chat `task` ran in and announce it to remote channels.
-pub(crate) fn open_task(task: String, solicited: bool, cx: &mut App) -> ControlOutcome {
+pub(crate) fn open_task(task: String, caller: super::Caller, cx: &mut App) -> ControlOutcome {
     let chat = in_task_window(&task, cx, |ws, window, cx| {
         let pane = ws.control_task_open(&task, window, cx)?;
         Ok(PaneRef {
@@ -507,7 +495,7 @@ pub(crate) fn open_task(task: String, solicited: bool, cx: &mut App) -> ControlO
             pane,
         })
     })?;
-    announce_chat(chat, solicited, cx);
+    announce_chat(chat, caller, cx);
     Ok(ControlResult::TaskOpened { task, chat })
 }
 
@@ -517,11 +505,10 @@ pub(crate) fn open_task(task: String, solicited: bool, cx: &mut App) -> ControlO
 /// same tick has no label, so there is nothing to announce or report.
 fn announce_chat(
     pane: PaneRef,
-    solicited: bool,
+    caller: super::Caller,
     cx: &mut App,
 ) -> Option<crate::workspace::ChatLabel> {
-    let away = crate::app_presence::is_away(cx);
-    let delivery = crate::remote_channel::delivery::remote_delivery(solicited, away);
+    let delivery = caller.delivery(crate::app_presence::is_away(cx));
     let label = in_pane_window(pane, cx, |ws, _window, cx| {
         ws.control_chat_label(pane.pane, cx)
             .ok_or(ControlError::TargetGone)

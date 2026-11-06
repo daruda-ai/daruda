@@ -355,9 +355,8 @@ async fn a_phone_task_start_records_phone_provenance(cx: &mut gpui::TestAppConte
     });
     cx.run_until_parked();
     let task = created.await.unwrap();
-    let pending = cx.update(|cx| {
-        super::begin_task_start(task.clone(), CommandOrigin::Phone, true, cx).unwrap()
-    });
+    let pending =
+        cx.update(|cx| super::begin_task_start(task.clone(), super::Caller::Phone, cx).unwrap());
     cx.run_until_parked();
     assert!(cx.update(|cx| pending.try_finish(cx)).unwrap().is_ok());
     cx.update(|cx| {

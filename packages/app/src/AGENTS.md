@@ -103,8 +103,10 @@ agent/ → lane/
 - Control entries carry `control::exec::CommandOrigin`: Phone or Orchestrator
   names the caller, not the person's location. Convert to domain `StartedBy`
   before dispatch; desktop uses `StartedBy::Desktop`. Persist at start, never
-  infer later; resume preserves it. Capture solicitation from Phone or an open
-  orchestrator `PhoneTurn` before approval/async work. Follow the
+  infer later; resume preserves it. Capture solicitation once, as
+  `CommandOrigin::capture` -> `Caller`, before approval/async work; a flow
+  receives the caller as the run-owned `runs::FlowSubmitter`, never as a
+  `(StartedBy, bool)` pair. Follow the
   [delivery and settlement contract](REFERENCE.md#human-delivery-approvals-and-questions).
 - The Settings view is `daruda_settings` (`packages/settings/`); its host is
   `workspace/settings_ops.rs`, and the boundary between them is in

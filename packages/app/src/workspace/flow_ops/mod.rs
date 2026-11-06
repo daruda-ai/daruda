@@ -412,7 +412,7 @@ impl Workspace {
                     path,
                     profile,
                     selection,
-                    (daruda_flow::request::StartedBy::Desktop, false),
+                    crate::runs::FlowSubmitter::Desktop,
                     cx,
                 );
                 if let Err(refused) = started {

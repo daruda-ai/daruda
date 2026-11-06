@@ -10,8 +10,7 @@ pub(super) fn deliver(change: &FlowChange, cx: &mut App) {
         FlowChanged::Asked {
             run_dir,
             ask_id,
-            submitted_by,
-            solicited,
+            submitter,
             ..
         } => {
             let Some(ask) = RunsHost::flow_run(change.worktree.as_path(), cx)
@@ -49,7 +48,7 @@ pub(super) fn deliver(change: &FlowChange, cx: &mut App) {
                     .collect(),
             };
             let delivery = crate::remote_channel::delivery::remote_delivery(
-                *submitted_by == daruda_flow::request::StartedBy::Phone || *solicited,
+                submitter.solicited(),
                 crate::app_presence::is_away(cx),
             );
             crate::remote_channel::send_flow_ask(prompt, delivery, cx);

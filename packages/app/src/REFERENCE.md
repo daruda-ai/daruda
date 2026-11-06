@@ -161,7 +161,7 @@ and `RunsEffects::run_event`, receiving the run-owned `RunEvent`.
 Phone and MCP starts carry `control::exec::CommandOrigin::{Phone, Orchestrator}`
 into each domain's own `StartedBy`. `Orchestrator` names the tool caller,
 not the person's location. Desktop starts pass `StartedBy::Desktop`
-directly. Flow `RunStarted` and Task `DispatchRequested` persist this provenance;
+(a flow, `FlowSubmitter::Desktop`) directly. Flow `RunStarted` and Task `DispatchRequested` persist this provenance;
 resume and Task reopen preserve it. Start responses construct handles from the
 actual returned run id or `ExecutionRef`: `flow:<run-id>` or
 `task:<task-id>/<execution-id>`. `task:<task-id>` resolves the latest execution
@@ -172,10 +172,16 @@ conversion between a `RunKey` and its handle; notices print the handle's
 replacement in the same worktree.
 
 Solicitation is separate, process-local metadata captured when a request enters,
-before approval or asynchronous preparation. An orchestrator command is solicited
-while its phone turn is open; direct phone commands are always solicited. Flow
-submissions keep it beside the episode's submitter, while task registration
-installs it before replaying a fast cached completion. Every `RunEvent` stamps
+before approval or asynchronous preparation: `CommandOrigin::capture` yields a
+`control::exec::Caller` (`Phone`, or `Orchestrator { solicited }`, solicited
+while the orchestrator's phone turn is open), and the command carries that
+value, never an origin beside a bool. `Caller::scope_run` is the one place an
+orchestrator start or resume scopes its run key with that solicitation. A flow
+episode is submitted as the run-owned `runs::FlowSubmitter` (`Desktop`,
+`Phone`, `Orchestrator { solicited }`): its questions use `solicited()`, the
+run key takes `solicitation()` (`Desktop` keeps the key's), and only `Phone`
+is owed the end as a remote answer. Task registration installs the
+solicitation before replaying a fast cached completion. Every `RunEvent` stamps
 its own solicitation so a desktop resume cannot relabel an earlier held end.
 
 `RunsHost::run_query` stages foreground facts; `RunQuery::read` performs disk

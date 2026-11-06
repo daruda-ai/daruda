@@ -29,7 +29,7 @@ mod origin;
 
 pub(crate) use gated::{begin_task_start, open_task, run_gated, task_flow_summary};
 pub(crate) use listing::{brief, listing};
-pub(crate) use origin::CommandOrigin;
+pub(crate) use origin::{Caller, CommandOrigin};
 
 pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> ControlOutcome {
     match cmd {
@@ -86,14 +86,14 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
             profile,
             inputs,
         }) => {
-            let solicited = origin.is_solicited(cx);
+            let caller = origin.capture(cx);
             in_lane_window(lane, cx, |ws, _window, cx| {
                 ws.control_flow_run(
                     lane.lane_ref(),
                     &name,
                     profile.as_deref(),
                     &inputs,
-                    (origin.flow_started_by(), solicited),
+                    caller.flow_submitter(),
                     cx,
                 )
             })
@@ -101,13 +101,10 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
             // `ship` may pick `ship.yaml` or `ship.yml`, and the answer has to
             // say which.
             .map(|started| {
-                if matches!(origin, CommandOrigin::Orchestrator) {
-                    crate::runs::RunsHost::register_run_solicited(
-                        crate::runs::result::RunKey::Flow(started.run_id.clone()),
-                        solicited,
-                        cx,
-                    );
-                }
+                caller.scope_run(
+                    crate::runs::result::RunKey::Flow(started.run_id.clone()),
+                    cx,
+                );
                 ControlResult::FlowStarting {
                     handle: crate::control::mcp::runs::run_handle(
                         crate::runs::result::RunKey::Flow(started.run_id),

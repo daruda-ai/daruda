@@ -126,7 +126,7 @@ async fn a_control_start_names_what_its_values_lack(cx: &mut TestAppContext) {
                     "ship",
                     None,
                     &inputs,
-                    (daruda_flow::request::StartedBy::Orchestrator, true),
+                    crate::runs::FlowSubmitter::Orchestrator { solicited: true },
                     cx,
                 )
                 .map(|started| started.run_id)

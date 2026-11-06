@@ -37,7 +37,7 @@ pub(crate) use flow_description::flow_run_name;
 pub(crate) use flow_tasks::{REPO_DIR, runs_dir, task_run_dir};
 pub(crate) use flows::{
     AlreadyRunning, AnswerRefused, FlowAskOutcome, FlowChange, FlowChanged, FlowEnded, FlowRun,
-    FlowSource, FlowStart, Lull, NodeRunState, ParkedAsk, RunColouring, RunView,
+    FlowSource, FlowStart, FlowSubmitter, Lull, NodeRunState, ParkedAsk, RunColouring, RunView,
 };
 #[cfg(test)]
 pub(crate) use flows::{NodeRunStates, apply_run_event};

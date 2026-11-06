@@ -116,22 +116,19 @@ pub(super) fn summary(target: &ResumeTarget, cx: &mut App) -> Result<String, Con
     })
 }
 
-/// Resume `target` as the approved command's own episode: its starter and
+/// Resume `target` as the approved command's own episode: its caller, with
 /// the solicitation captured before the card. An orchestrator resume scopes
 /// only the owner's key, or one run would end twice.
 pub(super) fn resume(
     target: ResumeTarget,
-    origin: super::super::CommandOrigin,
-    solicited: bool,
+    caller: super::super::Caller,
     cx: &mut App,
 ) -> ControlOutcome {
     let owner = target.owner(cx)?;
     let resumed = in_run_window(&target.run_id, cx, |ws, lane, run_dir, cx| {
-        ws.control_flow_resume(lane, run_dir, (origin.flow_started_by(), solicited), cx)
+        ws.control_flow_resume(lane, run_dir, caller.flow_submitter(), cx)
     })?;
-    if matches!(origin, super::super::CommandOrigin::Orchestrator) {
-        RunsHost::register_run_solicited(owner.clone(), solicited, cx);
-    }
+    caller.scope_run(owner.clone(), cx);
     Ok(ControlResult::FlowResuming {
         handle: run_handle(owner),
         name: resumed.name,

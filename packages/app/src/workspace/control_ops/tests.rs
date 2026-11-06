@@ -441,8 +441,8 @@ fn phone_say_starts_a_phone_turn_and_both_origins_handle_clear(cx: &mut gpui::Te
 #[gpui::test]
 fn command_origin_uses_only_the_registered_orchestrators_phone_turn(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        assert!(CommandOrigin::Phone.is_solicited(cx));
-        assert!(!CommandOrigin::Orchestrator.is_solicited(cx));
+        assert!(CommandOrigin::Phone.capture(cx).solicited());
+        assert!(!CommandOrigin::Orchestrator.capture(cx).solicited());
     });
     let fixture = workspace_with_agent_chat(cx);
     let orchestrator = cx
@@ -471,7 +471,7 @@ fn command_origin_uses_only_the_registered_orchestrators_phone_turn(cx: &mut gpu
             fixture.workspace.downgrade(),
             cx,
         );
-        assert!(!CommandOrigin::Orchestrator.is_solicited(cx));
+        assert!(!CommandOrigin::Orchestrator.capture(cx).solicited());
     });
     fixture.workspace.update(cx, |ws, cx| {
         ws.agent_chat_view(orchestrator)
@@ -480,13 +480,13 @@ fn command_origin_uses_only_the_registered_orchestrators_phone_turn(cx: &mut gpu
                 view.start_phone_turn_for_test(std::time::Instant::now());
             });
     });
-    cx.update(|cx| assert!(CommandOrigin::Orchestrator.is_solicited(cx)));
+    cx.update(|cx| assert!(CommandOrigin::Orchestrator.capture(cx).solicited()));
     fixture.workspace.update(cx, |ws, cx| {
         ws.agent_chat_view(orchestrator)
             .unwrap()
             .update(cx, |view, _| view.end_phone_turn());
     });
-    cx.update(|cx| assert!(!CommandOrigin::Orchestrator.is_solicited(cx)));
+    cx.update(|cx| assert!(!CommandOrigin::Orchestrator.capture(cx).solicited()));
 }
 
 #[gpui::test]

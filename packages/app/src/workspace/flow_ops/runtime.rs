@@ -18,13 +18,13 @@ impl Workspace {
         path: &Path,
         profile: Option<&str>,
         selection: &FlowSelection,
-        submitter: (daruda_flow::request::StartedBy, bool),
+        submitter: crate::runs::FlowSubmitter,
         cx: &mut Context<Self>,
     ) -> Result<String, FlowStartRefused> {
         let mut submission = self
             .build_flow_request(lane, path, profile, selection, cx)
             .map_err(FlowStartRefused::Submit)?;
-        submission.request.started_by = Some(submitter.0);
+        submission.request.started_by = Some(submitter.started_by());
         Self::start_flow_thread(submission, submitter, cx)
     }
 
@@ -51,7 +51,7 @@ impl Workspace {
         run_dir: &Path,
         cx: &mut Context<Self>,
     ) {
-        let submitter = (daruda_flow::request::StartedBy::Desktop, false);
+        let submitter = crate::runs::FlowSubmitter::Desktop;
         let submitted = self
             .read_flow_resume(lane_ref, run_dir)
             .map_err(FlowStartRefused::Submit)
@@ -71,7 +71,7 @@ impl Workspace {
         lane_ref: daruda_store::project::LaneRef,
         run_dir: &Path,
         read: crate::workspace::flow_request::ReadResume,
-        submitter: (daruda_flow::request::StartedBy, bool),
+        submitter: crate::runs::FlowSubmitter,
         cx: &mut Context<Self>,
     ) -> Result<String, FlowStartRefused> {
         let submission = self
@@ -82,13 +82,12 @@ impl Workspace {
 
     /// Hand the run to the process. Its thread, stop switch and pump live
     /// there, so this window closing does not take the run with it.
-    /// `submitted_by` is who this episode answers to.
+    /// `submitter` is who this episode answers to.
     fn start_flow_thread(
         submission: FlowSubmission,
-        submitter: (daruda_flow::request::StartedBy, bool),
+        submitter: crate::runs::FlowSubmitter,
         cx: &mut Context<Self>,
     ) -> Result<String, FlowStartRefused> {
-        let (submitted_by, solicited) = submitter;
         let FlowSubmission {
             tree,
             request,
@@ -111,8 +110,7 @@ impl Workspace {
                 source,
                 runners,
                 overage,
-                submitted_by,
-                solicited,
+                submitter,
                 events,
                 asks,
             },

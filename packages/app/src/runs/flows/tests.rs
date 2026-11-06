@@ -89,8 +89,7 @@ fn run_in(run_dir: &str) -> FlowRun {
         view: RunView::new(run_dir.clone(), FlowSource::Resumed { run_dir }, Vec::new()),
         cancel: CancelToken::default(),
         overage: OverageStop::default(),
-        submitted_by: daruda_flow::request::StartedBy::Desktop,
-        solicited: false,
+        submitter: crate::runs::FlowSubmitter::Desktop,
         finished: None,
     }
 }
@@ -228,8 +227,7 @@ async fn a_waiter_open_when_a_flow_ends_receives_its_report(cx: &mut gpui::TestA
                     command: daruda_flow::runner::ProcessRunner::new(vec![]),
                 }),
                 overage: OverageStop::default(),
-                submitted_by: StartedBy::Orchestrator,
-                solicited: false,
+                submitter: crate::runs::FlowSubmitter::Orchestrator { solicited: false },
                 events,
                 asks,
             },

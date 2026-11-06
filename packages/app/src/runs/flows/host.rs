@@ -83,8 +83,7 @@ impl RunsHost {
             source,
             runners,
             overage,
-            submitted_by,
-            solicited,
+            submitter,
             events,
             asks,
         } = start;
@@ -120,16 +119,12 @@ impl RunsHost {
             view: RunView::new(run_dir.clone(), source, nodes_at_start),
             cancel: cancel.clone(),
             overage,
-            submitted_by,
-            solicited,
+            submitter,
             finished: Some(finished),
         };
-        // A desktop start brings no solicitation of its own; a resume keeps the
-        // run's, while a phone or orchestrator start answers to its caller.
-        let solicitation =
-            (run.submitted_by != daruda_flow::request::StartedBy::Desktop).then_some(run.solicited);
         cx.update_global::<RunsHost, _>(|host, _| {
-            host.watch.begin_with(&run.snapshot.key, solicitation);
+            host.watch
+                .begin_with(&run.snapshot.key, run.submitter.solicitation());
             host.flows.insert(tree.clone(), run)?;
             host.watch.locate(location);
             Ok(())
@@ -281,16 +276,15 @@ impl RunsHost {
                 .filter(|id| run.view.question(*id).is_none())
                 .collect();
             host.watch.observe_waiting(run.result());
-            Some((key, parked, closed, run.submitted_by, run.solicited))
+            Some((key, parked, closed, run.submitter))
         });
-        if let Some((key, parked, closed, submitted_by, solicited)) = parked {
+        if let Some((key, parked, closed, submitter)) = parked {
             Self::close_flow_asks(&key, run_dir, closed, cx);
             let what = FlowChanged::Asked {
                 run_dir: run_dir.to_path_buf(),
                 ask_id,
                 alone: parked == Parked::Alone,
-                submitted_by,
-                solicited,
+                submitter,
             };
             Self::tell_windows(key, what, cx);
         }
@@ -351,10 +345,7 @@ impl RunsHost {
                     end: end.clone(),
                     run_dir: run_dir.to_path_buf(),
                     overage: run.overage.tripped().cloned(),
-                    owes_remote_answer: matches!(
-                        run.submitted_by,
-                        daruda_flow::request::StartedBy::Phone
-                    ),
+                    owes_remote_answer: run.submitter.owes_remote_answer(),
                     colouring: run.view.colouring(),
                 }));
                 return Some((key, closed, Some(ended)));
@@ -457,8 +448,13 @@ impl RunsHost {
             view,
             cancel: CancelToken::default(),
             overage: OverageStop::default(),
-            submitted_by,
-            solicited: submitted_by == daruda_flow::request::StartedBy::Phone,
+            submitter: match submitted_by {
+                daruda_flow::request::StartedBy::Desktop => super::FlowSubmitter::Desktop,
+                daruda_flow::request::StartedBy::Phone => super::FlowSubmitter::Phone,
+                daruda_flow::request::StartedBy::Orchestrator => {
+                    super::FlowSubmitter::Orchestrator { solicited: false }
+                }
+            },
             finished: None,
         };
         // A seed lands on whatever a test left there: it stands in for

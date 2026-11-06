@@ -143,16 +143,16 @@ async fn task_completion(
     });
     cx.run_until_parked();
     let task = created.await.unwrap();
-    let origin = if matches!(conversation, Conversation::DirectPhone) {
-        CommandOrigin::Phone
+    let caller = if matches!(conversation, Conversation::DirectPhone) {
+        exec::Caller::Phone
     } else {
-        CommandOrigin::Orchestrator
+        exec::Caller::Orchestrator { solicited: true }
     };
-    let pending = cx.update(|cx| exec::begin_task_start(task.clone(), origin, true, cx).unwrap());
+    let pending = cx.update(|cx| exec::begin_task_start(task.clone(), caller, cx).unwrap());
     cx.run_until_parked();
     let (execution, child) = fixture.workspace.read_with(cx, |ws, cx| {
         let task = cx.global::<crate::runs::GlobalTasks>().get(&task).unwrap();
-        assert_eq!(task.started_by, Some(origin.task_started_by()));
+        assert_eq!(task.started_by, Some(caller.task_started_by()));
         let execution = task.current_exec().unwrap().clone();
         assert!(RunsHost::run_scope(cx).is_empty());
         let pane = ws

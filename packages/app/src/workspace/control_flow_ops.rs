@@ -83,7 +83,7 @@ impl Workspace {
         name: &str,
         profile: Option<&str>,
         inputs: &BTreeMap<String, String>,
-        submitter: (daruda_flow::request::StartedBy, bool),
+        submitter: crate::runs::FlowSubmitter,
         cx: &mut Context<Self>,
     ) -> Result<FlowStarted, ControlError> {
         let Some(cwd) = self.lane_for(lane).map(|l| l.path.clone()) else {

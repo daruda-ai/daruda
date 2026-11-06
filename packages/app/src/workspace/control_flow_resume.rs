@@ -124,7 +124,7 @@ impl Workspace {
         &mut self,
         lane: LaneRef,
         run_dir: &Path,
-        submitter: (daruda_flow::request::StartedBy, bool),
+        submitter: crate::runs::FlowSubmitter,
         cx: &mut Context<Self>,
     ) -> Result<FlowResumed, ControlError> {
         let (name, read) = self.read_resumable(lane, run_dir, cx)?;

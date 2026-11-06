@@ -57,7 +57,7 @@ async fn an_approved_creation_holds_the_last_budget_slot_until_completion(cx: &m
         let dispatch = run_gated_with(
             command(),
             CommandOrigin::Orchestrator,
-            move |_, _, _, _| {
+            move |_, _, _| {
                 async move {
                     resume.recv().await.unwrap();
                     Ok(ControlResult::TaskStarting {
@@ -76,7 +76,7 @@ async fn an_approved_creation_holds_the_last_budget_slot_until_completion(cx: &m
         run_gated_with(
             command(),
             CommandOrigin::Orchestrator,
-            |_, _, _, _| {
+            |_, _, _| {
                 async { panic!("a second creation cannot begin in the reserved slot") }
                     .boxed_local()
             },
@@ -105,7 +105,7 @@ async fn a_failed_approved_creation_returns_its_reserved_budget_slot(cx: &mut Te
         let dispatch = run_gated_with(
             command(),
             CommandOrigin::Orchestrator,
-            move |_, _, _, _| {
+            move |_, _, _| {
                 async move {
                     resume.recv().await.unwrap();
                     Err(ControlError::TargetGone)
@@ -143,7 +143,7 @@ async fn already_open_approvals_cannot_share_the_last_creation_slot(cx: &mut Tes
         let first = run_gated_with(
             command(),
             CommandOrigin::Orchestrator,
-            move |_, _, _, _| {
+            move |_, _, _| {
                 async move {
                     resume.recv().await.unwrap();
                     Ok(ControlResult::TaskStarting {
@@ -158,7 +158,7 @@ async fn already_open_approvals_cannot_share_the_last_creation_slot(cx: &mut Tes
         let second = run_gated_with(
             command(),
             CommandOrigin::Orchestrator,
-            |_, _, _, _| {
+            |_, _, _| {
                 async {
                     Ok(ControlResult::TaskStarting {
                         task: "second".into(),

@@ -23,7 +23,7 @@ use super::task_existing_lane_ops::ExistingLaneStart;
 use super::task_start::{
     Answer, StartedOn, TaskStartError, TaskStarted, WorktreeStart, abandon_start,
 };
-use crate::runs::{GlobalTasks, RunsHost};
+use crate::runs::{FlowSubmitter, GlobalTasks, RunsHost};
 use crate::workspace::Workspace;
 use crate::workspace::flow_ops::FlowStartRefused;
 use crate::workspace::flow_request::FlowSelection;
@@ -36,7 +36,7 @@ pub(super) struct TaskFlowStart {
     inputs: InputValues,
     /// Chosen now so the start can record it: the task finds its run by it.
     run_id: String,
-    started_by: StartedBy,
+    submitter: FlowSubmitter,
     place: FlowPlace,
 }
 
@@ -122,7 +122,7 @@ impl Workspace {
             target,
             inputs,
             run_id: self.next_run_id(cx),
-            started_by,
+            submitter: FlowSubmitter::of_task(started_by, false),
             place,
         })
     }
@@ -159,14 +159,14 @@ impl Workspace {
             target,
             inputs,
             run_id,
-            started_by,
+            submitter,
             place,
         } = start;
         let launch = FlowLaunch {
             target,
             inputs,
             run_id,
-            started_by,
+            submitter,
         };
         match place {
             FlowPlace::Existing(lane) => {
@@ -315,14 +315,13 @@ impl Workspace {
             target,
             inputs,
             run_id,
-            started_by,
+            submitter,
         } = launch;
         let selection = FlowSelection {
             inputs: Some(inputs),
             run_id: Some(run_id),
             ..FlowSelection::default()
         };
-        let submitter = (flow_started_by(started_by), false);
         self.submit_flow_run(
             lane,
             &target.path,
@@ -349,7 +348,7 @@ struct FlowLaunch {
     target: TaskFlowTarget,
     inputs: InputValues,
     run_id: String,
-    started_by: StartedBy,
+    submitter: FlowSubmitter,
 }
 
 /// Whether `exec` is still the task's current run, in a state `is` accepts.
@@ -357,15 +356,6 @@ fn task_is(exec: &ExecutionRef, cx: &gpui::App, is: impl Fn(&Lifecycle) -> bool)
     cx.global::<GlobalTasks>()
         .get(&exec.task_id)
         .is_some_and(|task| task.current_exec() == Some(exec) && is(&task.lifecycle))
-}
-
-/// The flow run's record of who started it, from the task's.
-fn flow_started_by(started_by: StartedBy) -> daruda_flow::request::StartedBy {
-    match started_by {
-        StartedBy::Desktop => daruda_flow::request::StartedBy::Desktop,
-        StartedBy::Phone => daruda_flow::request::StartedBy::Phone,
-        StartedBy::Orchestrator => daruda_flow::request::StartedBy::Orchestrator,
-    }
 }
 
 /// A flow the task cannot run as described, as a start refusal.
@@ -450,15 +440,5 @@ mod tests {
             on_branch(&target(main.path(), global.clone()), branch.path()),
             global
         );
-    }
-
-    /// Two unrelated domain enums with the same variants: a swapped arm
-    /// would compile, so the mapping is pinned here.
-    #[test]
-    fn a_tasks_starter_is_the_runs_starter() {
-        use daruda_flow::request::StartedBy as Flow;
-        assert_eq!(flow_started_by(StartedBy::Desktop), Flow::Desktop);
-        assert_eq!(flow_started_by(StartedBy::Phone), Flow::Phone);
-        assert_eq!(flow_started_by(StartedBy::Orchestrator), Flow::Orchestrator);
     }
 }
