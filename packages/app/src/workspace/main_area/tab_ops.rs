@@ -130,10 +130,9 @@ impl Workspace {
         Some(pane_id)
     }
 
-    /// Total open tabs across every lane runtime in the window (all
-    /// projects, all lanes). The window-close decision reads this — not the
-    /// active lane's count alone — so closing one lane's last tab never
-    /// tears down the window while another lane still holds content.
+    /// Total open user tabs across every lane runtime in the window (all
+    /// projects, all lanes), excluding the orchestrator's tab.
+    #[cfg(test)]
     pub(in crate::workspace) fn total_open_tabs(&self) -> usize {
         self.main_area
             .runtimes
@@ -184,14 +183,9 @@ impl Workspace {
             self.hide_orchestrator_tab(window, cx);
             return;
         }
-        if self.total_open_tabs() <= 1 {
-            window.remove_window();
-            return;
-        }
-        // The active lane's last tab. Close the window only when it is also
-        // the window's last tab across every lane and project; otherwise empty
-        // this lane in place (→ empty-state) and keep the window, so closing
-        // one lane's content never tears down others parked in `runtimes`.
+        // The active lane's last tab empties the lane in place (→ empty-state)
+        // and keeps the window, even when it is the window's last tab: on
+        // Windows and Linux the last window closing quits the app.
         if self.active_runtime().tabs.len() <= 1 {
             self.empty_active_lane_runtime(window, cx);
             return;

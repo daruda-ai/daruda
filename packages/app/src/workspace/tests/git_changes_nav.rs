@@ -650,7 +650,7 @@ async fn a_preview_armed_before_leaving_the_panel_does_not_fire(cx: &mut TestApp
 async fn closing_the_scratch_tab_leaves_the_next_preview_intact(cx: &mut TestAppContext) {
     let (w, ws) = dock_showing_changes(cx, vec![entry("a.rs"), entry("b.rs")]);
     // A second tab, so closing the scratch one is a real close —
-    // `close_tab_at` closes the *window* when it would empty the last tab.
+    // `close_tab_at` empties the whole lane when it would close the last tab.
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| ws.add_tab(window, cx));
     })

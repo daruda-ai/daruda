@@ -141,7 +141,7 @@ fn closing_the_only_orchestrator_tab_keeps_the_window_and_slot(cx: &mut TestAppC
 }
 
 #[gpui::test]
-fn closing_last_user_tab_with_orchestrator_visible_closes_window(cx: &mut TestAppContext) {
+fn closing_last_user_tab_with_orchestrator_visible_keeps_window(cx: &mut TestAppContext) {
     let (window, workspace) = build_workspace(cx);
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
@@ -155,9 +155,14 @@ fn closing_last_user_tab_with_orchestrator_visible_closes_window(cx: &mut TestAp
     .unwrap();
     cx.run_until_parked();
     assert!(
-        cx.update_window(window.into(), |_, _, _| ()).is_err(),
-        "the orchestrator must not count as a user tab"
+        cx.update_window(window.into(), |_, _, _| ()).is_ok(),
+        "closing the last user tab keeps the window"
     );
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(ws.total_open_tabs(), 0);
+        assert_eq!(ws.active_runtime().tabs.len(), 1, "only the orchestrator");
+        assert!(ws.is_orchestrator_tab(&ws.active_runtime().tabs[0]));
+    });
 }
 
 #[gpui::test]

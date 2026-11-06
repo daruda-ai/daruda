@@ -1141,11 +1141,11 @@ fn apply_discovered_lanes_rekeys_active_ref_and_preserves_non_git_noop(cx: &mut 
     .unwrap();
 }
 
-/// The single-lane convention is preserved: when the active lane's last
-/// tab is also the window's last tab across every lane, closing it removes
-/// the window (B1). Nothing else is open, so there is nothing to keep.
+/// Closing the window's last tab across every lane empties the lane in place
+/// and keeps the window: on Windows and Linux the last window closing quits
+/// the app, so a tab close must never be the way out.
 #[gpui::test]
-fn closing_last_tab_of_only_lane_closes_window(cx: &mut TestAppContext) {
+fn closing_last_tab_of_only_lane_keeps_window(cx: &mut TestAppContext) {
     let config = daruda_config::Config::default();
     let root = std::path::PathBuf::from("/tmp/daruda_close_last_tab_only_lane");
     let _ = std::fs::create_dir_all(&root);
@@ -1172,11 +1172,17 @@ fn closing_last_tab_of_only_lane_closes_window(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
+    cx.run_until_parked();
 
-    assert!(
-        cx.windows().is_empty(),
-        "closing the only lane's last tab removes the window"
+    assert_eq!(
+        cx.windows().len(),
+        1,
+        "closing the only lane's last tab keeps the window"
     );
+    ws.read_with(cx, |ws, _| {
+        assert!(ws.active_runtime().tabs.is_empty(), "lane shows empty state");
+        assert!(ws.active_runtime().panes.is_empty());
+    });
 
     let _ = std::fs::remove_dir_all(&root);
 }
