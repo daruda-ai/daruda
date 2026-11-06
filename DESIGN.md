@@ -990,6 +990,11 @@ actions:   ghost Skip on the pane and primary Send
   the footer is separated by a hairline.
 - **The agent's words are verbatim.** Message, titles and option labels pass
   through; only the host's own words (header, status, Skip, Send) are i18n.
+- **What a question says can be copied.** The header's "asks" line, the
+  message, titles, descriptions and option labels are drag-selectable, open
+  or settled; the write row and the controls are not. A drag across an option
+  selects its text and does not pick it; a click that selects no character
+  still picks. A clamped preview selects nothing until Show full question.
 - **A question is its own row, never a tool group's member.** It sits at the
   run's item level like a permission prompt, so no group bar stands between
   the agent's prose and what it asked.
@@ -1009,7 +1014,7 @@ actions:   ghost Skip on the pane and primary Send
   `? 1 asked — stopped before an answer`, `? 1 asked — withdrawn by the
   agent`, `? 1 asked — expired after 5m`. It folds once when the answer
   settles; after that the person's choice holds. Opened, the frozen form is
-  inert (no hover, no cursor), picks in the foreground and semibold, the rest
+  inert apart from text selection (no hover, no cursor), picks in the foreground and semibold, the rest
   `pane-fg-subtle`. Records fold with previous-response cleanup but are never
   filtered: they are the person's words.
 

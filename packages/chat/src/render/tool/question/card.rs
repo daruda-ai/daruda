@@ -5,11 +5,13 @@ use daruda_acp::{QuestionField, QuestionFieldKind, ToolCallItem};
 use daruda_ui::theme::{self, PaneSurfaceTokens};
 use daruda_ui::{ButtonCustomVariant, ButtonVariants as _, Disableable as _, icons};
 use gpui::{
-    AnyElement, Context, Div, FontWeight, Hsla, IntoElement, SharedString, Stateful, div,
-    prelude::*, px,
+    AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, IntoElement, SharedString, Stateful,
+    Window, div, prelude::*, px,
 };
 
-use super::{GLYPH_HIGHLIGHT, GLYPH_WRITE, choice_glyph, field_heading, row_frame};
+use super::{
+    GLYPH_HIGHLIGHT, GLYPH_WRITE, choice_glyph, field_heading, form_scope, row_frame, text_id,
+};
 use crate::render::card_frame::{CardFrame, CardTone};
 use crate::strings as s;
 use crate::view::AgentChatView;
@@ -117,9 +119,14 @@ fn card_header(open: &OpenQuestion, agent: &str, surface: &PaneSurfaceTokens) ->
                 .child(icons::icon(icons::SESSION)),
         )
         .child(
-            div()
-                .flex_none()
-                .child(SharedString::from(s::agent_chat::question_asked_by(agent))),
+            div().flex_none().child(
+                daruda_ui::selectable_text(
+                    text_id(&form_scope(open.id), "header", "asked-by"),
+                    s::agent_chat::question_asked_by(agent),
+                )
+                .color(surface.foreground)
+                .full_width(false),
+            ),
         )
         .child(div().flex_1())
         .child(
@@ -151,7 +158,8 @@ fn field_block(
     let current = open.focus.field == field_index;
     let highlighted =
         |row: usize| current && open.focus.highlight == Some(QuestionHighlight::Row(row));
-    let mut block = field_heading(field, surface)
+    let scope = form_scope(id);
+    let mut block = field_heading(&scope, field, surface)
         .pl(px(theme::PAD_SM))
         .border_l_2()
         .border_color(if current { accent } else { surface.border_tint });
@@ -163,6 +171,7 @@ fn field_block(
                 let row = option_row(
                     format!("agent-chat-question-{id}-{}-{index}", field.key),
                     OptionRow {
+                        text_id: text_id(&scope, &field.key, index),
                         number: index + 1,
                         glyph: choice_glyph(multi, picked),
                         label: &option.label,
@@ -173,9 +182,9 @@ fn field_block(
                     surface,
                     accent,
                 )
-                .on_click(cx.listener(move |view, _, _, cx| {
+                .on_click(cx.listener(unless_selecting(move |view, cx| {
                     view.pick_question_option(id, field_index, index, cx)
-                }));
+                })));
                 block = block.child(row);
             }
             options.len()
@@ -193,6 +202,7 @@ fn field_block(
                 let row = option_row(
                     format!("agent-chat-question-{id}-{}-{value}", field.key),
                     OptionRow {
+                        text_id: text_id(&scope, &field.key, value),
                         number: index + 1,
                         glyph: choice_glyph(false, picked),
                         label: &label,
@@ -203,9 +213,9 @@ fn field_block(
                     surface,
                     accent,
                 )
-                .on_click(cx.listener(move |view, _, _, cx| {
+                .on_click(cx.listener(unless_selecting(move |view, cx| {
                     view.set_question_flag(id, field_index, value, cx)
-                }));
+                })));
                 block = block.child(row);
             }
             2
@@ -238,7 +248,22 @@ fn field_block(
     block.into_any_element()
 }
 
+/// A press that drags out a selection across a row's text copies it rather
+/// than picking the row, as a markdown link ignores that same release. Only
+/// selected characters count: a click that slips a pixel still picks.
+fn unless_selecting(
+    act: impl Fn(&mut AgentChatView, &mut Context<AgentChatView>) + 'static,
+) -> impl Fn(&mut AgentChatView, &ClickEvent, &mut Window, &mut Context<AgentChatView>) + 'static {
+    move |view, _, window, cx| {
+        if !daruda_ui::TextSelection::selects_text(window, cx) {
+            act(view, cx)
+        }
+    }
+}
+
 struct OptionRow<'a> {
+    /// The selection key its `label` and `description` extend.
+    text_id: SharedString,
     number: usize,
     glyph: &'static str,
     label: &'a str,
@@ -258,6 +283,7 @@ fn option_row(
     let filled = row.picked || row.highlighted;
     let hover = surface.hover_tint;
     let debug = selector.clone();
+    let label_debug = format!("{selector}-label");
     row_frame(None, row.highlighted, row.glyph, surface)
         .id(SharedString::from(selector))
         .debug_selector(move || debug.clone())
@@ -280,15 +306,25 @@ fn option_row(
                 .gap(px(theme::GAP_XS))
                 .child(
                     div()
+                        .debug_selector(move || label_debug.clone())
                         .whitespace_normal()
                         .when(row.picked, |el| el.font_weight(FontWeight::SEMIBOLD))
-                        .child(SharedString::from(row.label.to_owned())),
+                        .child(
+                            daruda_ui::selectable_text(
+                                SharedString::from(format!("{}-label", row.text_id)),
+                                row.label.to_owned(),
+                            )
+                            .color(surface.foreground),
+                        ),
                 )
                 .children(row.description.map(|description| {
-                    div()
-                        .whitespace_normal()
-                        .text_color(surface.foreground_subtle)
-                        .child(SharedString::from(description.to_owned()))
+                    div().whitespace_normal().child(
+                        daruda_ui::selectable_text(
+                            SharedString::from(format!("{}-description", row.text_id)),
+                            description.to_owned(),
+                        )
+                        .color(surface.foreground_subtle),
+                    )
                 })),
         )
         .child(

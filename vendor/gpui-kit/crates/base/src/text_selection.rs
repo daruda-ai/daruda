@@ -2876,6 +2876,14 @@ impl TextSelection {
         live_text_selection_state(window, cx).is_some_and(|state| state.read(cx).has_selection(cx))
     }
 
+    // daruda patch: a control under selectable text asks whether a press
+    // selected any character. `has_selection` compares raw pointer points, so
+    // a click that slips one pixel inside a glyph already counts as a drag.
+    /// Returns whether the window's selection takes in at least one character.
+    pub fn selects_text(window: &mut Window, cx: &mut App) -> bool {
+        live_text_selection_state(window, cx).is_some_and(|state| state.read(cx).selects_text(cx))
+    }
+
     /// Clears window selection and every participant's local selection.
     pub fn clear(window: &mut Window, cx: &mut App) {
         if let Some(state) = live_text_selection_state(window, cx) {

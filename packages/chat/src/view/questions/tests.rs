@@ -1028,6 +1028,186 @@ fn a_fields_committed_text_is_readable_for_the_composer(cx: &mut gpui::TestAppCo
         .unwrap();
 }
 
+/// [`color_question`] open on its row, in a window that draws text selection,
+/// and the bounds of the "blue" option's label.
+fn selectable_card(
+    cx: &mut gpui::TestAppContext,
+) -> (
+    gpui::VisualTestContext,
+    gpui::Entity<crate::view::AgentChatView>,
+    daruda_acp::QuestionProbe,
+    gpui::Bounds<gpui::Pixels>,
+) {
+    let window = crate::view::tests::make_selectable_test_view(cx);
+    cx.run_until_parked();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    let view = window
+        .root(&mut visual)
+        .unwrap()
+        .read_with(&visual, |root, _| root.view.clone());
+    let (handle, _probe) = AcpSessionHandle::detached_for_test();
+    let answer = handle.park_question_for_test(1);
+    view.update(&mut visual, |view, cx| {
+        view.status = crate::view::AgentSessionStatus::Connected;
+        view.attach_handle(handle);
+        view.items = vec![
+            daruda_acp::ChatItem::UserText("q".into()),
+            running_call("toolu_1"),
+        ];
+        view.rebuild_rows();
+        let question = color_question("toolu_1");
+        view.apply_event(AcpEvent::QuestionAsked { id: 1, question }, "", false, cx);
+        cx.notify();
+    });
+    visual.run_until_parked();
+    let label = visual
+        .debug_bounds("agent-chat-question-1-question_0-1-label")
+        .expect("the option's label paints");
+    (visual, view, answer, label)
+}
+
+fn press(visual: &mut gpui::VisualTestContext, at: gpui::Point<gpui::Pixels>) {
+    visual.simulate_event(gpui::MouseDownEvent {
+        position: at,
+        modifiers: gpui::Modifiers::default(),
+        button: gpui::MouseButton::Left,
+        click_count: 1,
+        first_mouse: false,
+    });
+}
+
+fn release(visual: &mut gpui::VisualTestContext, at: gpui::Point<gpui::Pixels>) {
+    visual.simulate_event(gpui::MouseUpEvent {
+        position: at,
+        modifiers: gpui::Modifiers::default(),
+        button: gpui::MouseButton::Left,
+        click_count: 1,
+    });
+    visual.run_until_parked();
+}
+
+/// Press at `from`, move with the button held, release at `to`.
+fn drag(
+    visual: &mut gpui::VisualTestContext,
+    from: gpui::Point<gpui::Pixels>,
+    to: gpui::Point<gpui::Pixels>,
+) {
+    press(visual, from);
+    visual.simulate_event(gpui::MouseMoveEvent {
+        position: to,
+        modifiers: gpui::Modifiers::default(),
+        pressed_button: Some(gpui::MouseButton::Left),
+    });
+    visual.run_until_parked();
+    release(visual, to);
+}
+
+/// Across the whole label: the debug bounds span the row's text column, so
+/// its right edge lies past the word whatever the font measures.
+fn across(label: gpui::Bounds<gpui::Pixels>) -> [gpui::Point<gpui::Pixels>; 2] {
+    let y = label.center().y;
+    [
+        gpui::point(label.left() + gpui::px(1.), y),
+        gpui::point(label.right() - gpui::px(1.), y),
+    ]
+}
+
+/// Dragging across an option's label selects its text for copying; it does
+/// not pick the option.
+#[gpui::test]
+fn dragging_across_an_option_selects_its_text_without_picking(cx: &mut gpui::TestAppContext) {
+    let (mut visual, view, mut answer, label) = selectable_card(cx);
+    let [start, end] = across(label);
+    drag(&mut visual, start, end);
+
+    assert_eq!(
+        visual.update(daruda_ui::TextSelection::selected_text),
+        "blue"
+    );
+    view.read_with(&visual, |view, _| {
+        assert!(view.questions().open_for_tool("toolu_1").is_some());
+    });
+    assert_eq!(answered(&mut answer), None);
+}
+
+/// A selection left from an earlier drag does not swallow the next click:
+/// the press clears it before the click lands.
+#[gpui::test]
+fn a_click_after_a_selection_still_picks(cx: &mut gpui::TestAppContext) {
+    let (mut visual, view, mut answer, label) = selectable_card(cx);
+    let [start, end] = across(label);
+    drag(&mut visual, start, end);
+    assert!(visual.update(daruda_ui::TextSelection::has_selection));
+
+    let red = visual
+        .debug_bounds("agent-chat-question-1-question_0-0-label")
+        .expect("the first option's label paints");
+    let at = gpui::point(red.left() + gpui::px(4.), red.center().y);
+    press(&mut visual, at);
+    release(&mut visual, at);
+
+    let mut expected = std::collections::BTreeMap::new();
+    expected.insert("question_0".into(), QuestionValue::Text("red".into()));
+    view.read_with(&visual, |view, _| {
+        assert_eq!(
+            outcome(view, "toolu_1"),
+            Some(QuestionOutcome::Answered(expected.clone()))
+        );
+    });
+    assert_eq!(
+        answered(&mut answer),
+        Some(QuestionAnswer::Submit(expected))
+    );
+}
+
+/// A click whose pointer slips a pixel without crossing a character is still
+/// a click: it picks.
+#[gpui::test]
+fn a_click_that_slips_a_pixel_still_picks(cx: &mut gpui::TestAppContext) {
+    let (mut visual, view, mut answer, label) = selectable_card(cx);
+    let at = gpui::point(label.left() + gpui::px(4.), label.center().y);
+    drag(
+        &mut visual,
+        at,
+        at + gpui::point(gpui::px(1.), gpui::px(0.)),
+    );
+
+    let mut expected = std::collections::BTreeMap::new();
+    expected.insert("question_0".into(), QuestionValue::Text("blue".into()));
+    view.read_with(&visual, |view, _| {
+        assert_eq!(
+            outcome(view, "toolu_1"),
+            Some(QuestionOutcome::Answered(expected.clone()))
+        );
+    });
+    assert_eq!(
+        answered(&mut answer),
+        Some(QuestionAnswer::Submit(expected))
+    );
+}
+
+/// A click on an option's label still picks it.
+#[gpui::test]
+fn clicking_an_options_label_picks_it(cx: &mut gpui::TestAppContext) {
+    let (mut visual, view, mut answer, label) = selectable_card(cx);
+    let at = gpui::point(label.left() + gpui::px(4.), label.center().y);
+    press(&mut visual, at);
+    release(&mut visual, at);
+
+    let mut expected = std::collections::BTreeMap::new();
+    expected.insert("question_0".into(), QuestionValue::Text("blue".into()));
+    view.read_with(&visual, |view, _| {
+        assert_eq!(
+            outcome(view, "toolu_1"),
+            Some(QuestionOutcome::Answered(expected.clone()))
+        );
+    });
+    assert_eq!(
+        answered(&mut answer),
+        Some(QuestionAnswer::Submit(expected))
+    );
+}
+
 /// "↑ Question" brings the card's top into view.
 #[gpui::test]
 fn revealing_a_question_scrolls_to_its_row(cx: &mut gpui::TestAppContext) {

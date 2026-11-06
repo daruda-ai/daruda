@@ -586,8 +586,9 @@ the wheel while the embed can scroll and passing it on at the end.
 |---|---|---|
 | CJK and Hangul words | `base/src/text_boundary.rs` (`CharacterKind::from`), `base/src/text/selection.rs` (`is_word_char`) | Any-script alphanumerics (`char::is_alphanumeric`, plus `_`) are word characters, so a double click selects a Hangul or CJK word rather than one syllable. The first covers the input engine, the second `TextView`. Upstream test expectations in `base/src/input/base/selection.rs` and `base/src/text/selection.rs` change to match (a CJK run is one word). |
 | Fourth click selects all | `base/src/input/base/state.rs` (mouse-down ladder, `test_fourth_click_selects_all`) | A left `click_count >= 4` selects the whole text, as in macOS text views; three clicks still select the line. |
+| A click can ask whether it selected text | `base/src/text_selection.rs` (`TextSelection::selects_text`), `base/src/selectable_text.rs` (`selects_text_counts_characters_not_pointer_motion`) | Publishes the private character-level check. `has_selection` compares raw pointer points with no drag threshold, so a click that slips a pixel inside a glyph reads as a selection. The agent chat's question options skip their pick only when characters are selected (`daruda_chat` `a_click_that_slips_a_pixel_still_picks`). |
 
-Re-apply both and their test expectations; the vendored suites fail on the
+Re-apply these and their test expectations; the vendored suites fail on the
 upstream expectations otherwise.
 
 ---

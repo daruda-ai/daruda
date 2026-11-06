@@ -25,8 +25,12 @@ const GLYPH_CHECK_ON: &str = "☑";
 const GLYPH_WRITE: &str = "✎";
 
 /// A field's title (with the multi-select marker) and description, as the
-/// top of its column.
-pub(super) fn field_heading(field: &QuestionField, surface: &PaneSurfaceTokens) -> Div {
+/// top of its column. `scope` keys their selection state to this form.
+pub(super) fn field_heading(
+    scope: &str,
+    field: &QuestionField,
+    surface: &PaneSurfaceTokens,
+) -> Div {
     let multi = matches!(field.kind, QuestionFieldKind::MultiSelect(_));
     let mut title = field.title.clone().unwrap_or_default();
     if multi {
@@ -41,18 +45,33 @@ pub(super) fn field_heading(field: &QuestionField, surface: &PaneSurfaceTokens) 
         .gap(px(theme::GAP_XS))
         .when(!title.is_empty(), |block| {
             block.child(
-                div()
-                    .text_color(surface.foreground_muted)
-                    .whitespace_normal()
-                    .child(SharedString::from(title)),
+                div().whitespace_normal().child(
+                    daruda_ui::selectable_text(text_id(scope, &field.key, "title"), title)
+                        .color(surface.foreground_muted),
+                ),
             )
         })
         .children(field.description.as_ref().map(|description| {
-            div()
-                .text_color(surface.foreground_subtle)
-                .whitespace_normal()
-                .child(SharedString::from(description.clone()))
+            div().whitespace_normal().child(
+                daruda_ui::selectable_text(
+                    text_id(scope, &field.key, "description"),
+                    description.clone(),
+                )
+                .color(surface.foreground_subtle),
+            )
         }))
+}
+
+/// Where an open form's selectable text is keyed: the card and the fallback
+/// panel draw the same open question, never both at once.
+pub(super) fn form_scope(question: u64) -> String {
+    format!("agent-chat-question-{question}")
+}
+
+/// A stable selection key for one `part` of a form: keyed state, and the
+/// selection with it, resets whenever an id changes between renders.
+pub(super) fn text_id(scope: &str, key: &str, part: impl std::fmt::Display) -> SharedString {
+    SharedString::from(format!("{scope}-{key}-{part}"))
 }
 
 /// The leading cells every row shares: the highlight cursor (kept in the

@@ -109,30 +109,68 @@ fn add_test_view_with_writer(
     cx: &mut gpui::TestAppContext,
     writer: super::AgentDefaultWriter,
 ) -> gpui::WindowHandle<super::AgentChatView> {
+    cx.add_window(|window, cx| new_test_view(window, writer, cx))
+}
+
+fn new_test_view(
+    window: &mut gpui::Window,
+    writer: super::AgentDefaultWriter,
+    cx: &mut gpui::Context<super::AgentChatView>,
+) -> super::AgentChatView {
+    super::AgentChatView::new(
+        0,
+        window.window_handle(),
+        None,
+        super::AgentSessionStatus::Idle,
+        None,
+        super::AgentIdentity {
+            id: "claude".to_string(),
+            name: "Claude".to_string(),
+            icon: None,
+        },
+        None,
+        super::super::transcript_defaults::TranscriptDefaults {
+            tail: super::super::rows::tail::StepWindow::default(),
+            content_width: super::ChatContentWidth::Reading,
+            tool_summary: super::ToolSummaryStyle::Labeled,
+            fold_mode: daruda_transcript::fold_mode::FoldMode::default(),
+            filter: daruda_transcript::display_filter::DisplayFilter::default(),
+        },
+        daruda_config::file_viewer::DEFAULT_SYNTAX_THEME.to_owned(),
+        writer,
+        cx,
+    )
+}
+
+/// A pane under the window's text-selection layer, as the app's `Root`
+/// draws it, so drag-selection and copy work as they do in the app.
+pub(crate) struct SelectionRoot {
+    pub(crate) view: gpui::Entity<super::AgentChatView>,
+}
+
+impl gpui::Render for SelectionRoot {
+    fn render(
+        &mut self,
+        _window: &mut gpui::Window,
+        _cx: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        use gpui::{ParentElement as _, Styled as _};
+        gpui::div()
+            .size_full()
+            .child(self.view.clone())
+            .child(daruda_ui::TextSelectionLayer)
+    }
+}
+
+/// [`make_test_view`] under a [`SelectionRoot`].
+pub(crate) fn make_selectable_test_view(
+    cx: &mut gpui::TestAppContext,
+) -> gpui::WindowHandle<SelectionRoot> {
+    use gpui::AppContext as _;
+    crate::test_support::init_gpui_component(cx);
     cx.add_window(|window, cx| {
-        super::AgentChatView::new(
-            0,
-            window.window_handle(),
-            None,
-            super::AgentSessionStatus::Idle,
-            None,
-            super::AgentIdentity {
-                id: "claude".to_string(),
-                name: "Claude".to_string(),
-                icon: None,
-            },
-            None,
-            super::super::transcript_defaults::TranscriptDefaults {
-                tail: super::super::rows::tail::StepWindow::default(),
-                content_width: super::ChatContentWidth::Reading,
-                tool_summary: super::ToolSummaryStyle::Labeled,
-                fold_mode: daruda_transcript::fold_mode::FoldMode::default(),
-                filter: daruda_transcript::display_filter::DisplayFilter::default(),
-            },
-            daruda_config::file_viewer::DEFAULT_SYNTAX_THEME.to_owned(),
-            writer,
-            cx,
-        )
+        let view = cx.new(|cx| new_test_view(window, std::rc::Rc::new(|_, _, _| Ok(())), cx));
+        SelectionRoot { view }
     })
 }
 

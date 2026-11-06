@@ -297,6 +297,44 @@ mod tests {
         });
     }
 
+    // daruda patch: covers `TextSelection::selects_text`.
+    /// A press that slips a pixel inside a glyph has a selection by point but
+    /// takes in no character; a drag across the text takes in some.
+    #[gpui::test]
+    fn selects_text_counts_characters_not_pointer_motion(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| SelectableTextTestView);
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let mut press_and_move = |from: f32, to: f32| {
+            cx.simulate_mouse_down(
+                point(px(from), px(12.)),
+                MouseButton::Left,
+                Modifiers::default(),
+            );
+            cx.simulate_mouse_move(
+                point(px(to), px(12.)),
+                Some(MouseButton::Left),
+                Modifiers::default(),
+            );
+            cx.simulate_mouse_up(
+                point(px(to), px(12.)),
+                MouseButton::Left,
+                Modifiers::default(),
+            );
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+                (
+                    TextSelection::has_selection(window, cx),
+                    TextSelection::selects_text(window, cx),
+                )
+            })
+        };
+
+        assert_eq!(press_and_move(2., 3.), (true, false));
+        assert_eq!(press_and_move(1., 220.), (true, true));
+    }
+
     struct CopyCallbackTestView {
         handle: TextSelectionHandle,
     }

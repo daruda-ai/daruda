@@ -7,7 +7,7 @@ use daruda_acp::{QuestionField, QuestionFieldKind, QuestionValue, ToolCallItem};
 use daruda_ui::theme::{self, PaneSurfaceTokens};
 use gpui::{AnyElement, Context, Div, FontWeight, IntoElement, SharedString, div, prelude::*, px};
 
-use super::{GLYPH_WRITE, choice_glyph, field_heading};
+use super::{GLYPH_WRITE, choice_glyph, field_heading, text_id};
 use crate::fold::FoldKey;
 use crate::render::fold_header::{FoldHeader, FoldRow};
 use crate::strings as s;
@@ -48,6 +48,7 @@ pub(in crate::render) fn question_record(
             .into_any_element(),
     );
     let surface = *surface;
+    let tool_scope = format!("agent-chat-question-record-{}", tc.id);
     div()
         .debug_selector(move || format!("agent-chat-question-record-{tool}"))
         .w_full()
@@ -60,7 +61,7 @@ pub(in crate::render) fn question_record(
                 key,
                 expanded,
                 header,
-                move |_| frozen_form(record, &surface).into_any_element(),
+                move |_| frozen_form(&tool_scope, record, &surface).into_any_element(),
             )
             .render(dim, cx),
         )
@@ -69,8 +70,8 @@ pub(in crate::render) fn question_record(
 
 /// The form as it was settled: picked options in the foreground, the rest
 /// subtle, typed answers on their own line. Nothing here responds to the
-/// pointer.
-fn frozen_form(record: &QuestionRecord, surface: &PaneSurfaceTokens) -> Div {
+/// pointer but to selection, so its text can be copied.
+fn frozen_form(scope: &str, record: &QuestionRecord, surface: &PaneSurfaceTokens) -> Div {
     let empty = BTreeMap::new();
     let values = match &record.outcome {
         QuestionOutcome::Answered(values) => values,
@@ -84,15 +85,23 @@ fn frozen_form(record: &QuestionRecord, surface: &PaneSurfaceTokens) -> Div {
         .pl(px(theme::PAD_STANDARD))
         .text_color(surface.foreground)
         .child(
-            div()
-                .whitespace_normal()
-                .child(SharedString::from(request.message.clone())),
+            div().whitespace_normal().child(
+                daruda_ui::selectable_text(
+                    text_id(scope, "message", "body"),
+                    request.message.clone(),
+                )
+                .color(surface.foreground),
+            ),
         )
-        .children(primary_fields(request).map(|field| frozen_field(record, values, field, surface)))
+        .children(
+            primary_fields(request)
+                .map(|field| frozen_field(scope, record, values, field, surface)),
+        )
 }
 
 /// One question of a settled form, in [`frozen_form`]'s terms.
 fn frozen_field(
+    scope: &str,
     record: &QuestionRecord,
     values: &BTreeMap<String, QuestionValue>,
     field: &QuestionField,
@@ -128,27 +137,32 @@ fn frozen_field(
         Some(QuestionValue::Text(text)) => Some(s::agent_chat::question_typed(text)),
         _ => None,
     };
-    let choice = |(label, picked): (String, bool)| {
+    let choice = |(index, (label, picked)): (usize, (String, bool))| {
+        let color = if picked {
+            surface.foreground
+        } else {
+            surface.foreground_subtle
+        };
         div()
             .flex()
             .gap(px(theme::GAP_SM))
-            .text_color(if picked {
-                surface.foreground
-            } else {
-                surface.foreground_subtle
-            })
+            .text_color(color)
             .when(picked, |el| el.font_weight(FontWeight::SEMIBOLD))
             .child(choice_glyph(multi, picked))
-            .child(SharedString::from(label))
+            .child(
+                daruda_ui::selectable_text(text_id(scope, &field.key, index), label)
+                    .color(color)
+                    .full_width(false),
+            )
     };
-    field_heading(field, surface)
+    field_heading(scope, field, surface)
         .when(!choices.is_empty(), |block| {
             block.child(
                 div()
                     .flex()
                     .flex_wrap()
                     .gap(px(theme::GAP_LG))
-                    .children(choices.into_iter().map(choice)),
+                    .children(choices.into_iter().enumerate().map(choice)),
             )
         })
         .children(typed.map(|typed| {
@@ -157,10 +171,10 @@ fn frozen_field(
                 .gap(px(theme::GAP_SM))
                 .child(GLYPH_WRITE)
                 .child(
-                    div()
-                        .min_w_0()
-                        .whitespace_normal()
-                        .child(SharedString::from(typed)),
+                    div().min_w_0().whitespace_normal().child(
+                        daruda_ui::selectable_text(text_id(scope, &field.key, "typed"), typed)
+                            .color(surface.foreground),
+                    ),
                 )
         }))
 }

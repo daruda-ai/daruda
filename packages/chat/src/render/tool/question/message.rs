@@ -36,9 +36,17 @@ pub(super) fn render(
                 .whitespace_normal()
                 .when(long && !open.message_expanded, |body| {
                     // Ellipsis enables wrapped truncation across logical lines.
+                    // The shortened run is not selectable: selection maps only
+                    // runs laid out whole, so the expanded body is the copy path.
                     body.line_clamp(PREVIEW_LINES).text_ellipsis()
                 })
-                .child(SharedString::from(open.request.message.clone())),
+                .child(
+                    daruda_ui::selectable_text(
+                        super::text_id(&super::form_scope(id), "message", "body"),
+                        open.request.message.clone(),
+                    )
+                    .color(surface.foreground),
+                ),
         )
         .when(long, |body| {
             body.child(
