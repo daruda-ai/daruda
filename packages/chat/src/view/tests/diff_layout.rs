@@ -59,7 +59,7 @@ impl DiffProbe {
                 .soft_wrap(true)
                 .language("rust");
             state.set_value(text, window, cx_state);
-            state.set_disabled(true, cx_state);
+            state.set_readonly(true, cx_state);
             state
         });
         Self {
@@ -100,6 +100,38 @@ impl Render for DiffProbe {
     }
 }
 
+/// A viewer must be read-only, never disabled: a disabled input paints its
+/// text at half opacity and refuses focus, which also blocks drag-selection.
+fn read_only_not_disabled(state: &daruda_ui::EditorState) -> bool {
+    let presentation = state.presentation();
+    presentation.is_readonly() && !presentation.is_disabled()
+}
+
+#[gpui::test]
+async fn diff_editor_drag_selects_text(cx: &mut TestAppContext) {
+    init_gpui_component(cx);
+    let (probe, cx) = cx.add_window_view(|window, cx| DiffProbe::new(DIFF_TEXT, window, cx));
+    cx.run_until_parked();
+
+    let bounds = probe
+        .read_with(cx, |p, cx| p.editor.read(cx).text_bounds())
+        .expect("editor text element painted");
+    let row = default_row_height();
+    let start = point(bounds.origin.x + px(2.), bounds.origin.y + px(row * 1.5));
+    let end = point(bounds.origin.x + px(60.), bounds.origin.y + px(row * 2.5));
+    let none = gpui::Modifiers::none();
+    cx.simulate_mouse_down(start, gpui::MouseButton::Left, none);
+    cx.simulate_mouse_move(end, gpui::MouseButton::Left, none);
+    cx.simulate_mouse_up(end, gpui::MouseButton::Left, none);
+    cx.run_until_parked();
+
+    let selected = probe.read_with(cx, |p, cx| p.editor.read(cx).selected_value());
+    assert!(
+        !selected.is_empty(),
+        "dragging across the read-only diff embed must select text"
+    );
+}
+
 #[gpui::test]
 async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppContext) {
     init_gpui_component(cx);
@@ -108,20 +140,20 @@ async fn diff_editor_keeps_seeded_rows_and_paints_full_height(cx: &mut TestAppCo
 
     let rows_frame1 = probe.read_with(cx, |p, cx| p.editor.read(cx).display_rows());
     assert!(
-        probe.read_with(cx, |p, cx| p.editor.read(cx).presentation().is_disabled()),
+        probe.read_with(cx, |p, cx| read_only_not_disabled(p.editor.read(cx))),
         "frame 1: read-only flag survived the first paint"
     );
 
     // Draw a second frame: the first paint runs `set_input_bounds` /
     // `set_font` on the wrapper, whose `cx.notify()` schedules a re-render —
     // any rows drift shows from frame 2 on. `Input::render` also reconciles
-    // disabled state every frame, so this covers the read-only regression too.
+    // the disabled/read-only flags every frame, so this covers that regression too.
     cx.update(|window, _| window.refresh());
     cx.run_until_parked();
 
     let rows_frame2 = probe.read_with(cx, |p, cx| p.editor.read(cx).display_rows());
     assert!(
-        probe.read_with(cx, |p, cx| p.editor.read(cx).presentation().is_disabled()),
+        probe.read_with(cx, |p, cx| read_only_not_disabled(p.editor.read(cx))),
         "frame 2: read-only flag clobbered by Input::render"
     );
     let wrapper = cx

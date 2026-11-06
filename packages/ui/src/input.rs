@@ -49,6 +49,7 @@ pub trait TextState {
     fn text_input_state(&self) -> TextInputState;
     fn focus_handle(&self, cx: &App) -> FocusHandle;
     fn is_disabled(&self, cx: &App) -> bool;
+    fn is_readonly(&self, cx: &App) -> bool;
     /// The editor's own scroll offset (negative y = rows hidden above).
     fn scroll_offset(&self, cx: &App) -> Point<Pixels>;
 }
@@ -64,6 +65,9 @@ macro_rules! impl_text_state {
             }
             fn is_disabled(&self, cx: &App) -> bool {
                 self.read(cx).presentation().is_disabled()
+            }
+            fn is_readonly(&self, cx: &App) -> bool {
+                self.read(cx).presentation().is_readonly()
             }
             fn scroll_offset(&self, cx: &App) -> Point<Pixels> {
                 self.read(cx).scroll_offset()
@@ -167,6 +171,12 @@ impl TextState for FieldState {
             Self::Text(state) => TextState::is_disabled(state, cx),
         }
     }
+    fn is_readonly(&self, cx: &App) -> bool {
+        match self {
+            Self::Line(state) => TextState::is_readonly(state, cx),
+            Self::Text(state) => TextState::is_readonly(state, cx),
+        }
+    }
     fn scroll_offset(&self, cx: &App) -> Point<Pixels> {
         match self {
             Self::Line(state) => TextState::scroll_offset(state, cx),
@@ -176,8 +186,13 @@ impl TextState for FieldState {
 }
 
 /// The styled `Input` element over any [`TextState`].
-pub(crate) fn input_element(state: &impl TextState) -> Input {
+/// `Input::render` writes its own disabled/read-only flags back into the state
+/// every frame, so the element must carry the state's flags or the next paint
+/// would silently clear a `set_disabled` / `set_readonly` the host applied.
+pub(crate) fn input_element(state: &impl TextState, cx: &App) -> Input {
     Input::from_state(state.text_input_state())
+        .disabled(state.is_disabled(cx))
+        .readonly(state.is_readonly(cx))
 }
 
 /// Tab-participation specifier for [`input`].
@@ -232,8 +247,7 @@ fn field_input<T: InputTabSpec>(
     tab: T,
 ) -> Input {
     let inner = geometry.apply(
-        input_element(state)
-            .disabled(state.is_disabled(cx))
+        input_element(state, cx)
             .small()
             // `FieldGeometry` owns the inset; the size tier's would stack on
             // it inside a multi-line editor.
@@ -391,11 +405,10 @@ pub(crate) fn composer_input_sized(
     cx: &App,
     metrics: d::UiMetrics,
 ) -> Input {
-    input_element(state)
+    input_element(state, cx)
         .small()
         .appearance(false)
         .input_padding(false)
-        .disabled(state.is_disabled(cx))
         .text_size(px(metrics.text(d::FONT_SIZE_MD)))
         .line_height(px(metrics.row(d::INPUT_LINE_HEIGHT)))
 }

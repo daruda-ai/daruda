@@ -149,7 +149,7 @@ pub(super) fn diff_stat_from_hunks(hunks: &[daruda_content::diff::DiffHunk]) -> 
 /// Create + configure a read-only diff editor entity against the live window
 /// `access` resolves. Mirrors the File viewer's editor construction
 /// (`multi_line` + `code_editor`) and the diff-config it applies
-/// (`set_disabled(true)` for read-only + decorations + injected highlight
+/// (`set_readonly(true)` + decorations + injected highlight
 /// spans), but wrapped where the viewer scrolls sideways — an embed has no
 /// width of its own to spend. Returns `None` if the owning window is gone.
 ///
@@ -178,7 +178,7 @@ pub(crate) fn create_diff_editor(
                 .language(daruda_ui::highlighter::PLAIN_LANGUAGE)
                 .soft_wrap(true);
             state.set_value(model.text, window, cx_state);
-            state.set_disabled(true, cx_state);
+            state.set_readonly(true, cx_state);
             state.set_line_decorations(model.decorations, cx_state);
             let spans = model
                 .highlights

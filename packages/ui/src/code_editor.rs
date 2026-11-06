@@ -30,12 +30,11 @@ pub use gpui_component::input::LineDecoration;
 /// slightly lighter than the bespoke `TextInput`) so every input on
 /// the Task editor shares the same surface color.
 pub fn markdown_editor(state: &impl TextState, cx: &App) -> Input {
-    input_element(state)
+    input_element(state, cx)
         .small()
         .bordered(true)
         .px(px(theme::INPUT_TEXTAREA_PAD_X))
         .py(px(theme::INPUT_TEXTAREA_PAD_Y))
-        .disabled(state.is_disabled(cx))
         .bg(theme::current(cx).modal_input_bg)
         // Follow the config-driven editor font (`font.editor.size`) like the
         // file-viewer editor; rows remain sized by the configured line height.
@@ -100,12 +99,11 @@ pub fn make_markdown_prose_state(
 /// appearance ring, no size-default padding (gutter flush left), the built-in
 /// scrollbar suppressed (hosts overlay their own thin daruda thumb), the
 /// config-driven editor font size, and the state's own read-only flag
-/// forwarded back into the element.
+/// forwarded back into the element (see [`input_element`]).
 ///
-/// The read-only forward matters because `Input::render` rewrites
-/// `state.disabled = self.disabled` every frame, so an element left at the
-/// builder default (`false`) would clobber a `set_disabled(true)` the host
-/// applied to the state on the next paint. The base text colour is pinned
+/// Viewers are read-only rather than disabled: a disabled input paints its
+/// text at half opacity and never takes focus, so drag-selection cannot start.
+/// The base text colour is pinned
 /// because `Input` never sets one, so tree-sitter-uncaptured runs (whitespace,
 /// unmapped captures) would inherit gpui's default black `text_style` and
 /// vanish on a dark theme; `fg` is the host's slot for it — each caller picks
@@ -119,11 +117,10 @@ fn code_editor_chrome(
     line_height: f32,
     cx: &App,
 ) -> Input {
-    input_element(state)
+    input_element(state, cx)
         .appearance(false)
         .input_padding(false)
         .show_scrollbar(false)
-        .disabled(state.is_disabled(cx))
         .font_family(family)
         .text_size(px(size))
         .line_height(relative(line_height))

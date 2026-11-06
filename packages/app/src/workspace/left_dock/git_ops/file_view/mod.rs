@@ -553,7 +553,7 @@ impl Workspace {
             // content never visually filters.
             editor.update(cx, move |state, cx_s| {
                 state.set_value(model.text, window, cx_s);
-                state.set_disabled(true, cx_s);
+                state.set_readonly(true, cx_s);
                 state.set_line_decorations(model.decorations, cx_s);
                 state.set_highlight_override(Some(model.highlights), cx_s);
             });

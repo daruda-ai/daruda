@@ -73,7 +73,7 @@ impl OutputProbe {
                 .language(daruda_ui::highlighter::PLAIN_LANGUAGE)
                 .line_number(false);
             state.set_value(text, window, cx_state);
-            state.set_disabled(true, cx_state);
+            state.set_readonly(true, cx_state);
             state
         });
         Self {

@@ -168,7 +168,7 @@ impl Workspace {
                             let editor = fc.editor_state.clone();
                             configure_file_editor(cx, editor, move |state, window, cx_s| {
                                 state.set_value(model.text, window, cx_s);
-                                state.set_disabled(true, cx_s);
+                                state.set_readonly(true, cx_s);
                                 state.set_line_decorations(model.decorations, cx_s);
                                 state.set_highlight_override(Some(model.highlights), cx_s);
                                 if let Some(line) = pending_scroll_line {
@@ -199,7 +199,7 @@ impl Workspace {
                         let editor = fc.editor_state.clone();
                         configure_file_editor(cx, editor, move |state, window, cx_s| {
                             state.set_value(text, window, cx_s);
-                            state.set_disabled(truncated, cx_s);
+                            state.set_readonly(truncated, cx_s);
                             state.set_line_decorations(Vec::new(), cx_s);
                             state.set_highlight_override(None, cx_s);
                             if let Some(line) = pending_scroll_line {

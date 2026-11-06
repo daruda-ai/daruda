@@ -228,7 +228,7 @@ pub(super) fn create_output_editor(
                 // file's line 1.
                 .line_number(false);
             state.set_value(text, window, cx_state);
-            state.set_disabled(true, cx_state);
+            state.set_readonly(true, cx_state);
             state
         })
     }) {
