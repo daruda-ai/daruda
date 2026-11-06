@@ -156,6 +156,11 @@ fn every_result_variant_round_trips_through_json() {
             origin: FlowOriginKind::Global,
             lane: sample_lane().target,
         },
+        ControlResult::FlowResuming {
+            handle: "flow:run-1".parse().unwrap(),
+            name: "ship".into(),
+            lane: sample_lane().target,
+        },
         ControlResult::TaskStarted {
             task: "task-1".into(),
             handle: "task:task-1/exec-1".parse().unwrap(),
@@ -301,6 +306,11 @@ fn every_error_variant_round_trips_through_json() {
             }],
         },
         ControlError::RunMismatch,
+        ControlError::FlowRunNotFound,
+        ControlError::FlowRunNotResumable {
+            name: "ship".into(),
+            reason: NotResumableReason::NeverStarted,
+        },
         ControlError::NoActiveLane,
         ControlError::OrchestratorDisabled,
         ControlError::OrchestratorUnresolvable,
@@ -353,6 +363,36 @@ fn flow_not_started_carries_a_coded_reason() {
     );
     let unit = serde_json::to_value(FlowNotStartedReason::NoLane).expect("serialize");
     assert_eq!(unit, serde_json::json!({ "kind": "no_lane" }));
+}
+
+/// A refused resume says why in a code the orchestrator branches on: a
+/// running run is waited for, an ended one is not resumed, and one that never
+/// started a node is started again.
+#[test]
+fn a_refused_resume_carries_a_coded_reason() {
+    for (reason, wire) in [
+        (NotResumableReason::Running, "running"),
+        (NotResumableReason::Ended, "ended"),
+        (NotResumableReason::NeverStarted, "never_started"),
+        (NotResumableReason::Unknown, "unknown"),
+    ] {
+        let error = ControlError::FlowRunNotResumable {
+            name: "ship".into(),
+            reason,
+        };
+        assert_eq!(
+            serde_json::to_value(&error).expect("serialize"),
+            serde_json::json!({
+                "code": "flow_run_not_resumable",
+                "name": "ship",
+                "reason": wire,
+            })
+        );
+    }
+    assert_eq!(
+        serde_json::to_value(ControlError::FlowRunNotFound).expect("serialize"),
+        serde_json::json!({ "code": "flow_run_not_found" })
+    );
 }
 
 #[test]

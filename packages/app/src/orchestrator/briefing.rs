@@ -64,6 +64,7 @@ const TOOLS: &str = "\
 - daruda_run_wait — wait for ended or blocked run handles (required timeout, at most 110 seconds)
 - daruda_run_status — query current progress or retained results without marking them reported
 - daruda_flow_list, daruda_flow_run, daruda_flow_stop — the saved flows
+- daruda_flow_resume — pick an interrupted flow run up where it stopped
 - daruda_flow_validate — check flow YAML against a worktree without saving or running it
 - daruda_task_list — every task, by project, with its status
 - daruda_task_create — a new task in a project's backlog
@@ -82,8 +83,8 @@ second worktree. To add a tab to a worktree that already exists — including \
 the one a project is currently on — use daruda_chat_new. Match a name the \
 person says (\"main\", \"feat/x\") against daruda_worktree_list's rows rather \
 than guessing a handle.
-- daruda_chat_new, daruda_worktree_create, daruda_task_create, \
-daruda_task_start and daruda_task_open wait for approval on the desktop or \
+- daruda_chat_new, daruda_worktree_create, daruda_flow_resume, \
+daruda_task_create, daruda_task_start and daruda_task_open wait for approval on the desktop or \
 phone. The first answer wins and settles both cards. That wait is normal; \
 do not retry around it. A timeout means silence, not consent: do not retry \
 or bypass the approval.
@@ -98,6 +99,11 @@ Then end your turn: when a run you started ends or gets blocked, a notice \
 arrives on its own as a new message. The person cannot talk to you while you \
 wait, so call daruda_run_wait only when they asked you to wait for the \
 result, or with a short timeout.
+- A flow result with `resumable: true` stopped without deciding to (daruda \
+quit or crashed, or the run stalled). To offer resuming it, call \
+daruda_flow_resume with its handle: the approval card asks the person, so do \
+not ask them in chat first. The run keeps its handle, and its end arrives as \
+a notice like any other.
 - Flows using permission = ask are supported: the person can answer on the \
 desktop or phone, and the first answer wins. Flows requiring profile \
 selection are still refused; do not retry around that guard.
@@ -126,7 +132,7 @@ mod tests {
     fn every_advertised_tool_appears() {
         let text = briefing("daruda-x");
         let tools = crate::control::mcp::tools::table_for_test();
-        assert_eq!(tools.len(), 20);
+        assert_eq!(tools.len(), 21);
         for tool in tools {
             assert!(
                 text.contains(tool.name),
@@ -196,6 +202,17 @@ mod tests {
                 lower.contains("cannot talk to you while you wait"),
                 "{text}"
             );
+        }
+    }
+
+    /// A `resumable: true` end is the orchestrator's cue to offer a resume,
+    /// and the card is how the person is asked — not a prior chat question.
+    #[test]
+    fn a_resumable_end_is_offered_through_the_approval_card() {
+        for text in [briefing("daruda-x"), instructions()] {
+            assert!(text.contains("resumable: true"), "{text}");
+            assert!(text.contains("daruda_flow_resume"), "{text}");
+            assert!(text.contains("the approval card asks"), "{text}");
         }
     }
 

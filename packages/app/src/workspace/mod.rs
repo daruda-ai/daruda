@@ -24,6 +24,7 @@ mod config_passes;
 mod config_sync;
 mod construct;
 mod control_flow_ops;
+mod control_flow_resume;
 mod control_lane_ops;
 mod control_ops;
 mod control_task_ops;

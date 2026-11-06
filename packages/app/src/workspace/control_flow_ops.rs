@@ -259,14 +259,19 @@ impl Workspace {
 
     /// The handle of the run this process hosts in `lane`, the same one
     /// `daruda_flow_run` answered with.
-    fn hosted_flow_handle_in(&self, lane: LaneRef, cx: &Context<Self>) -> Option<RunHandle> {
+    fn hosted_flow_handle_in(&self, lane: LaneRef, cx: &gpui::App) -> Option<RunHandle> {
         let run = self.flow_run_in(lane, cx)?;
         flow_handle(run.view().run_dir().file_name()?.to_str()?)
     }
 
     /// The run holding `lane`'s worktree: one this process hosts, else the
     /// live lock holder another process left. `None` when neither names one.
-    fn flow_holder_in(&self, lane: LaneRef, cwd: &Path, cx: &Context<Self>) -> Option<RunHandle> {
+    pub(super) fn flow_holder_in(
+        &self,
+        lane: LaneRef,
+        cwd: &Path,
+        cx: &gpui::App,
+    ) -> Option<RunHandle> {
         self.hosted_flow_handle_in(lane, cx).or_else(|| {
             self.lane_holder(cwd)
                 .and_then(|holder| flow_handle(&holder.run_id))
@@ -342,7 +347,7 @@ fn input_problem(issue: &daruda_flow::error::ValidationIssue) -> Option<FlowInpu
 /// is `FlowRefused`, a held worktree `FlowLocked`; anything else names its
 /// reason as a code, since this caller sees no toast and the toast's wording
 /// is localized desktop text that an MCP result must not carry.
-fn refusal_answer(
+pub(super) fn refusal_answer(
     name: String,
     held_by: Option<RunHandle>,
     refused: FlowStartRefused,

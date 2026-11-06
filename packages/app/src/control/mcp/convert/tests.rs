@@ -231,6 +231,7 @@ fn every_new_refusal_travels_as_its_code() {
         (ControlError::AgentLimitReached, "agent_limit_reached"),
         (ControlError::QueueFull, "queue_full"),
         (ControlError::RunMismatch, "run_mismatch"),
+        (ControlError::FlowRunNotFound, "flow_run_not_found"),
         (ControlError::SelfTargetRefused, "self_target_refused"),
         (ControlError::LaneCreateBusy, "lane_create_busy"),
         (
@@ -540,6 +541,31 @@ fn flow_stop_accepts_only_flow_handles_and_keeps_omitted_behavior() {
         };
         assert_eq!(actual.map(|run| run.to_string()), run.map(str::to_owned));
     }
+}
+
+/// A resume names the run by the handle the orchestrator holds; a task's
+/// handle, a malformed one or none at all is the caller's mistake to fix.
+#[test]
+fn flow_resume_takes_only_a_flow_handle() {
+    assert_eq!(
+        to_command(
+            ToolId::FlowResume,
+            &serde_json::json!({"run": "flow:old-run"})
+        ),
+        Ok(Command::Gated(GatedCommand::FlowResume {
+            run_id: "old-run".into()
+        }))
+    );
+    for value in ["task:a/b", "task:a", "flow:../a", "flow:", "old-run"] {
+        assert_eq!(
+            to_command(ToolId::FlowResume, &serde_json::json!({"run": value})),
+            Err(ConvertError::BadArgument { name: "run" })
+        );
+    }
+    assert_eq!(
+        to_command(ToolId::FlowResume, &serde_json::json!({})),
+        Err(ConvertError::MissingArgument { name: "run" })
+    );
 }
 
 #[test]

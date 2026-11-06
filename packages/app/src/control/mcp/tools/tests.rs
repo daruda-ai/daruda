@@ -10,8 +10,8 @@ fn agents() -> Vec<daruda_config::AgentDefinition> {
 }
 
 #[test]
-fn twenty_tools_are_exposed() {
-    assert_eq!(ToolTable::all(&agents()).describe().len(), 20);
+fn twenty_one_tools_are_exposed() {
+    assert_eq!(ToolTable::all(&agents()).describe().len(), 21);
 }
 
 #[test]
@@ -77,6 +77,7 @@ fn every_tool_id_has_a_row() {
         ToolId::FlowRun,
         ToolId::FlowValidate,
         ToolId::FlowStop,
+        ToolId::FlowResume,
     ] {
         assert!(TABLE.iter().any(|t| t.id == id), "{id:?} has no row");
     }
@@ -131,6 +132,7 @@ fn exactly_the_creation_tools_are_gated() {
         vec![
             "daruda_worktree_create",
             "daruda_chat_new",
+            "daruda_flow_resume",
             "daruda_task_create",
             "daruda_task_start",
             "daruda_task_open",

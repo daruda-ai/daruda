@@ -2378,6 +2378,7 @@ control:
   # refused. It promises the outcome instead, which
   # `Workspace::settle_flow_run` then delivers.
   flow_starting: "Starting %{name}. You'll get the outcome when it ends."
+  flow_resuming: "Resuming %{name}. You'll get the outcome when it ends."
   # Unreachable from a phone today; the match over results is exhaustive.
   flow_valid: "The flow would run as written."
   flow_invalid: "The flow has %{count} problem(s)."
@@ -2390,6 +2391,13 @@ control:
   error_target_gone: "That chat is gone. Send /list for the current numbering."
   error_flow_not_found: "No flow named %{name}. Send /flow to list them."
   error_run_mismatch: "The requested run no longer owns this worktree."
+  error_flow_run_not_found: "That flow run is not in any open worktree."
+  # `reason` is one of the flow_not_resumable_* phrases.
+  error_flow_run_not_resumable: "%{name} cannot be resumed: %{reason}."
+  flow_not_resumable_running: "it is still running"
+  flow_not_resumable_ended: "it already ended"
+  flow_not_resumable_never_started: "it stopped before its first step, so start it again"
+  flow_not_resumable_unknown: "nothing shows it was interrupted"
   error_flow_locked: "A flow is already running in this worktree."
   error_flow_refused: "%{name} will not run as written. Validate it in daruda."
   # Said when the flow itself is fine but its start was refused; `reason` is
@@ -2488,6 +2496,9 @@ control:
   # `flow` is one of the approval_task_as_flow phrases.
   approval_task_start_flow: "daruda wants to start the task %{title} %{flow}. Allow?"
   approval_task_open: "daruda wants to open the chat of the task %{title}. Allow?"
+  # A flow run the app quit or a crash cut off: `passed` of its `total`
+  # steps had passed, and the step it was on runs again from the start.
+  approval_flow_resume: "daruda wants to resume the flow %{name} from where it stopped (%{passed} of %{total} steps done; the step it was on starts over). Allow?"
   task_created: "Task added."
   task_started: "Task started."
   task_stopped: "Task stopped."

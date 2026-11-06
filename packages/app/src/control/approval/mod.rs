@@ -481,6 +481,14 @@ pub(crate) fn waiting_count_for_test(cx: &App) -> usize {
     cx.try_global::<Approvals>().map_or(0, |a| a.waiting.len())
 }
 
+/// The sentences the outstanding requests ask, so a test can read a card.
+#[cfg(test)]
+pub(crate) fn waiting_summaries_for_test(cx: &App) -> Vec<String> {
+    cx.try_global::<Approvals>().map_or_else(Vec::new, |a| {
+        a.waiting.values().map(|w| w.summary.clone()).collect()
+    })
+}
+
 /// Answer whichever single request is outstanding. Lets a test stand in for
 /// the phone tap without knowing the id the dispatcher never handed it.
 #[cfg(test)]

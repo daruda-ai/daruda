@@ -459,6 +459,15 @@ pub enum ControlResult {
         lane: LaneHandle,
         issues: Vec<FlowIssue>,
     },
+    /// An interrupted run was handed back to the engine under its own id, so
+    /// `handle` is the one the caller already held. Requested, like
+    /// [`Self::FlowStarting`]: the end arrives as a notice, as for any start.
+    FlowResuming {
+        handle: RunHandle,
+        /// What the run calls itself: its flow's name, else its run id.
+        name: String,
+        lane: LaneHandle,
+    },
     /// A run the caller asked to end. `AlreadyIdle` is an `Ok`: nothing was
     /// running, which is the state a stop was asking for.
     FlowStopped {
@@ -577,6 +586,34 @@ impl std::fmt::Display for FlowNotStartedReason {
     }
 }
 
+/// Why a located flow run cannot be picked up, for
+/// [`ControlError::FlowRunNotResumable`]. Only a run that stopped without
+/// deciding to can be: the engine's `resume::is_resumable`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotResumableReason {
+    /// It is still running here.
+    Running,
+    /// It ended on its own terms: completed, failed or stopped by someone.
+    Ended,
+    /// It stopped before its first node; there is nothing to continue, so
+    /// the flow has to be started again.
+    NeverStarted,
+    /// What it left does not show it was interrupted.
+    Unknown,
+}
+
+impl std::fmt::Display for NotResumableReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Running => write!(f, "it is still running"),
+            Self::Ended => write!(f, "it already ended"),
+            Self::NeverStarted => write!(f, "it stopped before its first node"),
+            Self::Unknown => write!(f, "nothing shows it was interrupted"),
+        }
+    }
+}
+
 /// A command that cannot run. A branch the caller must take in the normal
 /// course — a queued prompt, an already-idle pane — is an `Ok` variant with a
 /// disposition, not an error.
@@ -635,6 +672,15 @@ pub enum ControlError {
     },
     /// The requested execution no longer owns this worktree.
     RunMismatch,
+    /// No open worktree holds the flow run the handle names: it is not one
+    /// this daruda knows, its directory is gone, or its worktree is closed.
+    FlowRunNotFound,
+    /// The flow run is there but cannot be picked up. Refused before the
+    /// approval card, since no answer would make it resumable.
+    FlowRunNotResumable {
+        name: String,
+        reason: NotResumableReason,
+    },
     NoActiveLane,
     /// `[orchestrator] enabled = false` — nothing to hand the prompt to.
     OrchestratorDisabled,
@@ -756,6 +802,10 @@ impl std::fmt::Display for ControlError {
                 Ok(())
             }
             Self::RunMismatch => write!(f, "the requested run no longer owns this worktree"),
+            Self::FlowRunNotFound => write!(f, "no open worktree holds that flow run"),
+            Self::FlowRunNotResumable { name, reason } => {
+                write!(f, "flow run {name} cannot be resumed: {reason}")
+            }
             Self::NoActiveLane => write!(f, "no active lane"),
             Self::OrchestratorDisabled => write!(f, "orchestrator is disabled"),
             Self::OrchestratorUnresolvable => write!(f, "orchestrator names no runnable agent"),

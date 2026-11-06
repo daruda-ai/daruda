@@ -9,13 +9,18 @@ pub(super) fn flow_spec(dir: &Path) -> Option<daruda_flow::parse::FlowFile> {
         .and_then(|text| daruda_flow::parse::parse_flow_file(&text).ok())
 }
 
-pub(super) fn flow_base(dir: &Path) -> RunSnapshot {
-    let what = flow_spec(dir)
+/// What a flow run calls itself: its flow's name, else its run id. One
+/// reading, so a result and a refusal about the run name it alike.
+pub(crate) fn flow_run_name(dir: &Path) -> String {
+    flow_spec(dir)
         .and_then(|spec| spec.name)
-        .unwrap_or_else(|| result::flow_run_id(dir));
+        .unwrap_or_else(|| result::flow_run_id(dir))
+}
+
+pub(super) fn flow_base(dir: &Path) -> RunSnapshot {
     RunSnapshot {
         key: RunKey::flow_of(dir),
-        what,
+        what: flow_run_name(dir),
         why: None,
         state: RunState::Unknown,
     }

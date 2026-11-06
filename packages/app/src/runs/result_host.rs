@@ -105,19 +105,14 @@ impl RunsHost {
                 });
             }
         }
-        if let RunKey::Flow(id) = &key {
-            let effects = cx
-                .try_global::<Self>()
-                .and_then(|host| host.effects.clone());
-            if let Some(dir) = effects.and_then(|effects| effects.locate_flow_run(id, cx)) {
-                Self::ensure_installed(cx);
-                cx.update_global::<Self, _>(|host, _| host.watch.locate(dir.clone()));
-                return RunQuery::Disk(DiskQuery {
-                    location: dir,
-                    fallback: None,
-                    local_end: None,
-                });
-            }
+        if let RunKey::Flow(id) = &key
+            && let Some(dir) = Self::locate_unrecorded_flow(id, cx)
+        {
+            return RunQuery::Disk(DiskQuery {
+                location: dir,
+                fallback: None,
+                local_end: None,
+            });
         }
         if let Some(snapshot) = cx
             .try_global::<Self>()
@@ -135,6 +130,25 @@ impl RunsHost {
             why: None,
             state,
         })
+    }
+
+    /// Where flow run `id` lives: where this process recorded it (its start,
+    /// a restored ledger entry, an earlier lookup), else wherever the host
+    /// finds it in an open worktree. The same lookup a result query makes.
+    pub(crate) fn flow_location(id: &str, cx: &mut App) -> Option<result::FlowRunLocation> {
+        cx.try_global::<Self>()
+            .and_then(|host| host.watch.location(id).cloned())
+            .or_else(|| Self::locate_unrecorded_flow(id, cx))
+    }
+
+    /// Ask the host's open worktrees for a run this process has no record
+    /// of, remembering what it finds.
+    fn locate_unrecorded_flow(id: &str, cx: &mut App) -> Option<result::FlowRunLocation> {
+        let effects = cx.try_global::<Self>()?.effects.clone()?;
+        let location = effects.locate_flow_run(id, cx)?;
+        Self::ensure_installed(cx);
+        cx.update_global::<Self, _>(|host, _| host.watch.locate(location.clone()));
+        Some(location)
     }
 
     /// Read each owned run with no end once, off the UI thread, as a new

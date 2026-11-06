@@ -1,6 +1,6 @@
 //! The tool table daruda advertises. GPUI-free.
 //!
-//! Nineteen tools, all for the orchestrator. A lane's own agent gets none — it
+//! Twenty-one tools, all for the orchestrator. A lane's own agent gets none — it
 //! reads untrusted text and could be steered into calling them — so there is
 //! no per-caller filtering here.
 //! Descriptions and schemas are English and not localized: a tool definition
@@ -34,6 +34,7 @@ pub(crate) enum ToolId {
     FlowRun,
     FlowValidate,
     FlowStop,
+    FlowResume,
     TaskList,
     TaskCreate,
     TaskStart,
@@ -312,6 +313,17 @@ fn flow_run_properties() -> serde_json::Value {
     })
 }
 
+fn flow_resume_properties() -> serde_json::Value {
+    serde_json::json!({
+        "run": {
+            "type": "string",
+            "description": "The flow:<run-id> handle whose daruda_run_status or \
+                            daruda_run_wait result ended with `resumable: true`.",
+            "examples": ["flow:1929fcd-a1-5"],
+        },
+    })
+}
+
 /// The `task` argument every task tool but the listing takes.
 fn task_property() -> serde_json::Value {
     serde_json::json!({
@@ -578,6 +590,23 @@ static TABLE: &[Tool] = &[
         gate: Gate::Open,
         properties: flow_stop_properties,
         required: &["worktree"],
+    },
+    Tool {
+        id: ToolId::FlowResume,
+        name: "daruda_flow_resume",
+        description: "Resume a flow run that stopped without deciding to — daruda quit or \
+                      crashed, or the run stalled — from where it stopped, under the same \
+                      handle. Only a result with `resumable: true` can be resumed; offer it \
+                      when you see one. Nodes that passed do not run again; the node it was \
+                      on starts over. Needs the user's approval on the desktop or phone, \
+                      which is how the person is asked: the first answer wins. Refusal or \
+                      timeout fails the call; silence is not consent. Do not retry or \
+                      bypass approval. Reports that it resumed, not that it finished: end \
+                      your turn after it, and a notice arrives on its own when the run \
+                      ends or is blocked.",
+        gate: Gate::NeedsApproval,
+        properties: flow_resume_properties,
+        required: &["run"],
     },
     Tool {
         id: ToolId::TaskList,

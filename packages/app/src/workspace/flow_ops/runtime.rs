@@ -43,29 +43,35 @@ impl Workspace {
         }
     }
 
-    /// Continue the run in `run_dir` through the funnel a fresh submission
-    /// takes, so a resumed run is watched, stopped and listed like any other.
-    /// The desktop resumes it, so the desktop is owed its answer; the run's
-    /// log keeps who first started it.
+    /// The Flows panel's Continue: the desktop resumes the run, so the
+    /// desktop is owed its answer, and a refusal is its own toast.
     pub(in crate::workspace) fn resume_flow_run(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
         run_dir: &Path,
         cx: &mut Context<Self>,
     ) {
-        let started = self
-            .build_resume_request(lane_ref, run_dir, cx)
-            .map_err(FlowStartRefused::Submit)
-            .and_then(|submission| {
-                Self::start_flow_thread(
-                    submission,
-                    (daruda_flow::request::StartedBy::Desktop, false),
-                    cx,
-                )
-            });
-        if let Err(refused) = started {
+        let submitter = (daruda_flow::request::StartedBy::Desktop, false);
+        if let Err(refused) = self.submit_flow_resume(lane_ref, run_dir, submitter, cx) {
             self.answer_flow_start_refusal(lane_ref, refused, cx);
         }
+    }
+
+    /// Continue the run in `run_dir` through the funnel a fresh submission
+    /// takes, so a resumed run is watched, stopped and listed like any other,
+    /// under its own id. `submitter` is who this episode answers to; the
+    /// run's log keeps who first started it. Says nothing on a refusal.
+    pub(in crate::workspace) fn submit_flow_resume(
+        &mut self,
+        lane_ref: daruda_store::project::LaneRef,
+        run_dir: &Path,
+        submitter: (daruda_flow::request::StartedBy, bool),
+        cx: &mut Context<Self>,
+    ) -> Result<String, FlowStartRefused> {
+        let submission = self
+            .build_resume_request(lane_ref, run_dir, cx)
+            .map_err(FlowStartRefused::Submit)?;
+        Self::start_flow_thread(submission, submitter, cx)
     }
 
     /// Hand the run to the process. Its thread, stop switch and pump live

@@ -299,7 +299,7 @@ durability remain outside this contract.
 
 ### Result queries, waits and delivery
 
-The orchestrator's twenty MCP tools include `daruda_run_status` and
+The orchestrator's twenty-one MCP tools include `daruda_run_status` and
 `daruda_run_wait`. These result tools are MCP-only; phone commands retain their
 existing surface. Status reads progress or results without consuming events.
 Both tools accept explicit handles from any origin, including older persisted
@@ -346,7 +346,19 @@ readers; a key that changed meanwhile is skipped. A flow ended on disk is
 delivered with its report as a `Recovered` episode. A flow `marker::run_status`
 reads as `Crashed` (a quit leaves its lock with a dead holder) or `Stalled` is
 an end too, with `resumable: true` on the wire, `resumable` in its notice, and,
-without a report, fixed English text naming how many nodes passed. A flow whose
+without a report, fixed English text naming how many nodes passed.
+`daruda_flow_resume` picks such a run up after the person approves, under the
+same `flow:<run-id>` handle. It finds the run through `RunsHost::flow_location`
+(the watch's recorded location, else `RunsEffects::locate_flow_run`, the
+lookup result queries use) and the window whose lane keeps its directory.
+Refusals no answer can change come before the card: `flow_run_not_found`,
+`flow_locked` naming the holder (checked first, since another run's lock hides
+this run's status), and `flow_run_not_resumable` with `running`, `ended`,
+`never_started` or `unknown`. A profile is never asked for: `run.yaml` already
+folds the start's profile in. The approved resume goes through the Flows
+panel's `submit_flow_resume`, submitted by `Orchestrator` with the solicitation
+captured before the card; the log keeps its first starter, and the resumed
+episode's end is delivered like any other. A flow whose
 holder is alive stays pending for wait refreshes; a missing run directory is
 retained as `Gone` and released `Expired`. A running Task whose flow no process
 here runs reads its result through the run directory and the profile's flow

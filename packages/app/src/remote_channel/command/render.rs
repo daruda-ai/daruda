@@ -10,8 +10,8 @@ use super::{Absorbed, CommandState, ListingRow};
 use crate::control::result::{
     Activity, AskDisposition, ChatSummary, ControlError, ControlOutcome, ControlResult,
     FlowInputProblem, FlowInputProblemKind, FlowNotStartedReason, FlowOriginKind, Health,
-    InterruptCause, Listing, PaneAnswer, SendDisposition, StopDisposition, TaskEntry, TaskProject,
-    TaskStatus,
+    InterruptCause, Listing, NotResumableReason, PaneAnswer, SendDisposition, StopDisposition,
+    TaskEntry, TaskProject, TaskStatus,
 };
 use crate::control::spec::{Ordinal, ParseError};
 use crate::remote_channel::bridge::InlineKeyboard;
@@ -131,6 +131,7 @@ fn render_result(result: &ControlResult, state: &CommandState) -> RenderedReply 
             plain(rows.join("\n"))
         }
         ControlResult::FlowStarting { name, .. } => plain(s::control::flow_starting(name)),
+        ControlResult::FlowResuming { name, .. } => plain(s::control::flow_resuming(name)),
         ControlResult::FlowValidated { issues, .. } if issues.is_empty() => {
             plain(s::control::flow_valid())
         }
@@ -273,6 +274,15 @@ fn flow_not_started_reason(reason: &FlowNotStartedReason) -> String {
     }
 }
 
+fn not_resumable_reason(reason: NotResumableReason) -> String {
+    match reason {
+        NotResumableReason::Running => s::control::flow_not_resumable_running(),
+        NotResumableReason::Ended => s::control::flow_not_resumable_ended(),
+        NotResumableReason::NeverStarted => s::control::flow_not_resumable_never_started(),
+        NotResumableReason::Unknown => s::control::flow_not_resumable_unknown(),
+    }
+}
+
 fn flow_input_problem(problem: &FlowInputProblem) -> String {
     let input = &problem.input;
     match problem.problem {
@@ -304,6 +314,10 @@ pub(crate) fn render_error(error: &ControlError) -> String {
             s::control::error_flow_inputs_refused(name, problems.join(", "))
         }
         ControlError::RunMismatch => s::control::error_run_mismatch(),
+        ControlError::FlowRunNotFound => s::control::error_flow_run_not_found(),
+        ControlError::FlowRunNotResumable { name, reason } => {
+            s::control::error_flow_run_not_resumable(name, not_resumable_reason(*reason))
+        }
         ControlError::NoActiveLane => s::control::error_no_active_lane(),
         ControlError::OrchestratorDisabled => s::control::error_orchestrator_disabled(),
         ControlError::OrchestratorUnresolvable => s::control::error_orchestrator_unresolvable(),

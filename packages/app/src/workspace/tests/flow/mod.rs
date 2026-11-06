@@ -18,6 +18,7 @@ mod inspector;
 mod ownership;
 mod partial;
 mod report;
+mod resume;
 mod run;
 mod task;
 

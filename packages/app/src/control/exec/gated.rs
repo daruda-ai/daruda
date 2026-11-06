@@ -151,6 +151,13 @@ fn guard_gated(cmd: &GatedCommand, cx: &mut App) -> Result<(), ControlError> {
             Ok(())
         }
         GatedCommand::TaskOpen { task } => in_task_window(task, cx, |_ws, _window, _cx| Ok(())),
+        // Not resumable, gone or held by another run: no answer changes
+        // that, so the card is not shown.
+        GatedCommand::FlowResume { run_id } => {
+            in_flow_run_window(run_id, cx, |ws, lane, run_dir, cx| {
+                ws.control_flow_resume_check(lane, run_dir, cx).map(|_| ())
+            })
+        }
     }
 }
 
@@ -247,6 +254,12 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> Result<String, ControlE
             None => s::control::approval_task_start(task_title(task, cx)),
         },
         GatedCommand::TaskOpen { task } => s::control::approval_task_open(task_title(task, cx)),
+        GatedCommand::FlowResume { run_id } => {
+            let plan = in_flow_run_window(run_id, cx, |ws, lane, run_dir, cx| {
+                ws.control_flow_resume_check(lane, run_dir, cx)
+            })?;
+            s::control::approval_flow_resume(&plan.name, plan.passed, plan.total)
+        }
     })
 }
 
@@ -276,6 +289,9 @@ async fn perform_gated(
         }
         GatedCommand::TaskStart { task } => return start_task(task, origin, solicited, cx).await,
         GatedCommand::TaskOpen { task } => return cx.update(|cx| open_task(task, solicited, cx)),
+        GatedCommand::FlowResume { run_id } => {
+            return cx.update(|cx| resume_flow(run_id, origin, solicited, cx));
+        }
         GatedCommand::ChatNew { lane, agent } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {
@@ -319,6 +335,61 @@ async fn perform_gated(
             agent,
         },
     })
+}
+
+/// Resume flow run `run_id` as the approved command's own episode: its
+/// starter and the solicitation captured before the card.
+fn resume_flow(
+    run_id: String,
+    origin: super::CommandOrigin,
+    solicited: bool,
+    cx: &mut App,
+) -> ControlOutcome {
+    let resumed = in_flow_run_window(&run_id, cx, |ws, lane, run_dir, cx| {
+        ws.control_flow_resume(lane, run_dir, (origin.flow_started_by(), solicited), cx)
+    })?;
+    if matches!(origin, super::CommandOrigin::Orchestrator) {
+        crate::runs::RunsHost::register_run_solicited(
+            crate::runs::result::RunKey::Flow(resumed.run_id.clone()),
+            solicited,
+            cx,
+        );
+    }
+    Ok(ControlResult::FlowResuming {
+        handle: daruda_control_types::runs::RunHandle::Flow {
+            run_id: resumed.run_id,
+        },
+        name: resumed.name,
+        lane: resumed.lane,
+    })
+}
+
+/// Run `f` in the window whose worktree keeps flow run `run_id`. The run is
+/// found where a result query finds it, so a handle that reads as a result
+/// names the run a resume picks up.
+fn in_flow_run_window<T>(
+    run_id: &str,
+    cx: &mut App,
+    mut f: impl FnMut(
+        &mut crate::workspace::Workspace,
+        daruda_store::project::LaneRef,
+        &std::path::Path,
+        &mut gpui::Context<crate::workspace::Workspace>,
+    ) -> Result<T, ControlError>,
+) -> Result<T, ControlError> {
+    let run_dir = crate::runs::RunsHost::flow_location(run_id, cx)
+        .map(|location| location.run_dir)
+        .filter(|run_dir| run_dir.is_dir())
+        .ok_or(ControlError::FlowRunNotFound)?;
+    let mut out = None;
+    crate::window_registry::WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
+        if out.is_none()
+            && let Some(lane) = ws.control_lane_holding_run(&run_dir)
+        {
+            out = Some(f(ws, lane, &run_dir, cx));
+        }
+    });
+    out.unwrap_or(Err(ControlError::FlowRunNotFound))
 }
 
 /// A start for the agent: approved already, so this only waits for it.

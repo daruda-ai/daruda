@@ -133,6 +133,9 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
             run: optional_flow_handle(args)?,
             lane: lane_arg(args, "worktree")?,
         })),
+        ToolId::FlowResume => Command::Gated(GatedCommand::FlowResume {
+            run_id: flow_run_id_arg(args)?,
+        }),
         ToolId::LaneCreate => Command::Gated(GatedCommand::LaneCreate {
             workspace: uuid_arg(args, "workspace")?,
             project: u64_arg(args, "project")?,
@@ -328,6 +331,14 @@ fn uuid_arg(
 ) -> Result<daruda_store::project::WorkspaceUuid, ConvertError> {
     serde_json::from_value(field(args, name)?.clone())
         .map_err(|_| ConvertError::BadArgument { name })
+}
+
+/// The run a resume names: only a flow handle, since only a flow resumes.
+fn flow_run_id_arg(args: &Value) -> Result<String, ConvertError> {
+    match string_arg(args, "run")?.parse() {
+        Ok(daruda_control_types::runs::RunHandle::Flow { run_id }) => Ok(run_id),
+        _ => Err(ConvertError::BadArgument { name: "run" }),
+    }
 }
 
 /// A stop may guard against a stale execution, but never targets a task.

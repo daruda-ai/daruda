@@ -199,6 +199,10 @@ pub enum GatedCommand {
     TaskStart { task: String },
     /// Bring up the chat a task's run belongs to.
     TaskOpen { task: String },
+    /// Pick up a flow run that stopped without deciding to (an app quit, a
+    /// dead process, a stall), in the run directory it already has: the run
+    /// id, and so the caller's `flow:<run-id>` handle, stays the same.
+    FlowResume { run_id: String },
 }
 
 /// The task [`GatedCommand::TaskCreate`] adds, as the caller named it.

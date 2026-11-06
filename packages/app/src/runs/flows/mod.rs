@@ -52,6 +52,12 @@ pub(crate) struct FlowRun {
 }
 
 impl FlowRun {
+    /// Who this episode answers to, and whether that request was solicited.
+    #[cfg(test)]
+    pub(crate) fn submitter_for_test(&self) -> (daruda_flow::request::StartedBy, bool) {
+        (self.submitted_by, self.solicited)
+    }
+
     /// Whether the run's thread returned by `until`.
     fn wait_ended(&self, until: std::time::Instant) -> bool {
         let Some(finished) = &self.finished else {
