@@ -6,8 +6,9 @@ use std::time::Duration;
 use daruda_runlog::testing::{assert_machine_laws, enumerate_crashes, enumerate_crashes_with};
 use daruda_runlog::{CommitError, Machine as _};
 use daruda_store::run_ledger::{
-    LedgerEnd, LedgerEndedAs, LedgerKey, LedgerPointers, LedgerRejected, ReleaseReason,
-    RunLedgerEvent, RunLedgerMachine, RunLedgerState, RunLedgerStore, RunLocation, UNREPORTED_MAX,
+    DIRECTORY_HOLD, LedgerEnd, LedgerEndedAs, LedgerKey, LedgerPointers, LedgerRejected,
+    ReleaseReason, RunLedgerEvent, RunLedgerMachine, RunLedgerState, RunLedgerStore, RunLocation,
+    UNREPORTED_MAX,
 };
 use daruda_store::tasks::ExecutionRef;
 
@@ -52,8 +53,35 @@ fn ended(key: LedgerKey, episode: u64) -> RunLedgerEvent {
         episode,
         end: end("work"),
         evicts: Vec::new(),
+        ended_at_ms: None,
     }
 }
+
+/// An end the proposer dated `at_ms`.
+fn ended_at(key: LedgerKey, episode: u64, at_ms: u64) -> RunLedgerEvent {
+    let RunLedgerEvent::Ended {
+        key,
+        solicited,
+        episode,
+        end,
+        evicts,
+        ..
+    } = ended(key, episode)
+    else {
+        unreachable!("`ended` builds an end");
+    };
+    RunLedgerEvent::Ended {
+        key,
+        solicited,
+        episode,
+        end,
+        evicts,
+        ended_at_ms: Some(at_ms),
+    }
+}
+
+const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+const HOLD_MS: u64 = DIRECTORY_HOLD.as_millis() as u64;
 
 fn reported(key: LedgerKey, episode: u64) -> RunLedgerEvent {
     RunLedgerEvent::Reported { key, episode }
@@ -188,6 +216,7 @@ fn re_recording_the_current_end_replaces_its_text_only() {
             episode: 0,
             end: enriched.clone(),
             evicts: Vec::new(),
+            ended_at_ms: None,
         },
     ]);
     let entry = state.get(&key).unwrap();
@@ -358,4 +387,111 @@ fn an_unreadable_ledger_is_refused_and_left_untouched() {
     std::fs::write(&log, &bytes).unwrap();
     assert!(RunLedgerStore::in_directory(dir.path(), "test").is_err());
     assert_eq!(std::fs::read(&log).unwrap(), bytes);
+}
+
+fn held(state: &RunLedgerState, now_ms: u64) -> Vec<String> {
+    let mut ids: Vec<_> = state.held_run_dirs(now_ms).into_iter().collect();
+    ids.sort();
+    ids
+}
+
+#[test]
+fn an_unreported_flow_end_holds_its_directory_for_the_hold_then_keeps_its_summary() {
+    let at = 100 * DAY_MS;
+    let state = replay(&[owned(flow("f"), true), ended_at(flow("f"), 0, at)]);
+    assert_eq!(held(&state, at), ["f"]);
+    assert_eq!(held(&state, at + HOLD_MS - 1), ["f"]);
+    assert!(held(&state, at + HOLD_MS).is_empty(), "the hold ended");
+    assert_eq!(HOLD_MS, 7 * DAY_MS);
+    // Only the directory's hold ends: the end is still there to deliver.
+    let entry = state.get(&flow("f")).unwrap();
+    assert_eq!(entry.unreported().unwrap().end, end("work"));
+}
+
+#[test]
+fn only_flows_the_ledger_still_owes_hold_their_directories() {
+    let at = 100 * DAY_MS;
+    let state = replay(&[
+        owned(flow("running"), false),
+        ended(flow("undated"), 0),
+        ended_at(flow("reported"), 1, at),
+        reported(flow("reported"), 1),
+        ended_at(flow("released"), 2, at),
+        reported(flow("released"), 2),
+        released(flow("released"), ReleaseReason::Reported),
+        ended_at(task("t"), 3, at),
+        ended_at(flow("resumed"), 4, at),
+        reported(flow("resumed"), 4),
+        ended_at(flow("resumed"), 5, at),
+    ]);
+    // An owned run with no end yet, and an end older than dated ends, have
+    // no hold deadline; a reported or released end and a Task hold nothing.
+    assert_eq!(
+        held(&state, at + 30 * DAY_MS),
+        ["running", "undated"],
+        "{state:?}"
+    );
+    assert_eq!(held(&state, at), ["resumed", "running", "undated"]);
+}
+
+#[test]
+fn re_recording_an_end_keeps_the_time_its_hold_counts_from() {
+    let at = 100 * DAY_MS;
+    let state = replay(&[
+        ended_at(flow("f"), 0, at),
+        ended_at(flow("f"), 0, at + 5 * DAY_MS),
+    ]);
+    assert!(held(&state, at + HOLD_MS).is_empty());
+
+    let state = replay(&[ended(flow("f"), 0), ended_at(flow("f"), 0, at)]);
+    assert!(
+        held(&state, at + HOLD_MS).is_empty(),
+        "an undated end takes the first time it is given"
+    );
+}
+
+#[test]
+fn directory_holds_replay_the_same_from_the_log() {
+    let at = 100 * DAY_MS;
+    let dir = tempfile::tempdir().unwrap();
+    let (store, _) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+    let events = [
+        owned(flow("a"), true),
+        ended_at(flow("a"), 0, at),
+        owned(flow("b"), true),
+        ended_at(flow("b"), 1, at + 3 * DAY_MS),
+        owned(flow("c"), true),
+    ];
+    for event in &events {
+        store.record(event.clone());
+    }
+    store.flush(Duration::from_secs(5)).unwrap();
+    assert!(store.take_failure().is_none());
+    let now = at + HOLD_MS;
+    let live = store.held_run_dirs(now);
+    drop(store);
+
+    let (reopened, state) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+    assert_eq!(state, replay(&events));
+    assert_eq!(held(&state, now), ["b", "c"]);
+    assert_eq!(
+        live,
+        state.held_run_dirs(now),
+        "the store's view is the log's"
+    );
+    assert_eq!(reopened.held_run_dirs(now), live);
+}
+
+#[test]
+fn a_store_stops_holding_a_directory_once_its_end_is_released() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, _) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+    store.record(owned(flow("f"), true));
+    store.record(ended_at(flow("f"), 0, 0));
+    store.flush(Duration::from_secs(5)).unwrap();
+    assert!(store.held_run_dirs(0).contains("f"));
+    store.record(reported(flow("f"), 0));
+    store.record(released(flow("f"), ReleaseReason::Reported));
+    store.flush(Duration::from_secs(5)).unwrap();
+    assert!(store.held_run_dirs(0).is_empty());
 }

@@ -132,6 +132,27 @@ fn a_run_sweeps_the_runs_directory_it_starts_in() {
     assert!(report.run_dir.join("DONE").is_file());
 }
 
+/// The request carries what the host still holds into that sweep.
+#[test]
+fn a_run_spares_the_runs_its_host_holds() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut request = request_for(CHAIN, dir.path());
+    let runs_dir = runs_dir_of(&request.run_dir).to_path_buf();
+    std::fs::create_dir_all(&runs_dir).expect("mkdir");
+    let held = finished_run_in(&runs_dir, "01A00");
+    for i in 0..DEFAULT_KEEP_RUNS + 5 {
+        finished_run_in(&runs_dir, &format!("01B{i:02}"));
+    }
+    request.held_runs.insert("01A00".to_owned());
+
+    let report = execute(&request, &FakeRunner::new(), &CancelToken::default());
+
+    assert!(report.warnings().is_empty(), "{:?}", report.warnings());
+    assert!(held.is_dir(), "a held run was swept");
+    assert!(!runs_dir.join("01B04").exists(), "the cap still applies");
+    assert!(runs_dir.join("01B05").is_dir(), "a held run was counted");
+}
+
 /// The reason this is not lazy: a first-run download inside a node's turn
 /// eats that node's timeout, and the node that pays is whichever happened
 /// to be first.

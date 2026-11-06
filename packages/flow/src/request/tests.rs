@@ -99,6 +99,7 @@ fn request_for(text: &str, agents: &[&str], dir: &std::path::Path) -> RunRequest
         events: None,
         ask: None,
         resume: None,
+        held_runs: Default::default(),
     }
 }
 

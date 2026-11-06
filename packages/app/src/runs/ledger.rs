@@ -5,6 +5,7 @@
 //! delivery timing never depends on the disk. A failed open or write leaves
 //! delivery memory-only for the rest of the process, as before the ledger.
 
+use std::collections::HashSet;
 use std::time::Instant;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -145,6 +146,7 @@ impl Ledger {
             episode,
             end,
             evicts: Vec::new(),
+            ended_at_ms: Some(now_ms()),
         });
         Some(episode)
     }
@@ -158,6 +160,7 @@ impl Ledger {
                 episode,
                 end,
                 evicts: Vec::new(),
+                ended_at_ms: Some(now_ms()),
             });
         }
     }
@@ -179,6 +182,15 @@ impl Ledger {
     /// The run is gone with nothing delivered: no later process can either.
     pub(super) fn expired(&mut self, key: &RunKey) {
         self.release(&ledger_key(key), ReleaseReason::Expired);
+    }
+
+    /// Flow runs, by id, whose directories the ledger holds at `now_ms`, as of
+    /// its committed records. Nothing is held without a writing ledger.
+    pub(crate) fn held_run_dirs(&self, now_ms: u64) -> HashSet<String> {
+        match self {
+            Self::Writing { store, .. } => store.held_run_dirs(now_ms),
+            Self::Off | Self::Stopped => HashSet::new(),
+        }
     }
 
     /// Make every queued write durable by `until`, as the app quits.
@@ -231,6 +243,16 @@ impl Ledger {
         );
         *self = Self::Stopped;
     }
+}
+
+/// The clock the ledger dates ends with and judges directory holds against,
+/// in Unix milliseconds; a clock before 1970 reads as 0.
+pub(crate) fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 fn open_failure(error: &RunLedgerError) -> ErrorReport {

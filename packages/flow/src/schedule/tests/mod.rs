@@ -270,6 +270,7 @@ pub(super) fn request_for_profile(
         events: None,
         ask: None,
         resume: None,
+        held_runs: Default::default(),
     }
 }
 

@@ -8,6 +8,7 @@
 use crate::error::{FlowIoError, IoSite};
 use crate::lock::IsAlive;
 use crate::schedule::RunOutcome;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// The marker file names, which are also the vocabulary a user reading the
@@ -228,9 +229,22 @@ pub const DEFAULT_KEEP_RUNS: usize = 20;
 /// Newest is by directory name, chronological only because the host names
 /// run directories with ULIDs — another id scheme would silently delete
 /// the wrong ones.
-pub fn sweep_old_runs(runs_dir: &Path, keep: usize) -> std::io::Result<Vec<PathBuf>> {
+///
+/// `held` names runs, by id (the directory name), whose directories the host
+/// still needs: they are neither deleted nor counted against `keep`.
+pub fn sweep_old_runs(
+    runs_dir: &Path,
+    keep: usize,
+    held: &HashSet<String>,
+) -> std::io::Result<Vec<PathBuf>> {
     let mut finished: Vec<PathBuf> = std::fs::read_dir(runs_dir)?
         .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_none_or(|name| !held.contains(name))
+        })
         .map(|entry| entry.path())
         .filter(|path| path.is_dir() && has_marker(path))
         .collect();
@@ -458,7 +472,7 @@ mod tests {
             finished_run_in(dir.path(), &format!("01B{i:02}"));
         }
 
-        let removed = sweep_old_runs(dir.path(), 20).expect("sweep");
+        let removed = sweep_old_runs(dir.path(), 20, &HashSet::new()).expect("sweep");
 
         assert_eq!(removed.len(), 5, "{removed:?}");
         let left = surviving(dir.path());
@@ -485,7 +499,7 @@ mod tests {
             finished_run_in(dir.path(), &format!("01B{i:02}"));
         }
 
-        let removed = sweep_old_runs(dir.path(), 20).expect("sweep");
+        let removed = sweep_old_runs(dir.path(), 20, &HashSet::new()).expect("sweep");
 
         assert_eq!(removed.len(), 5, "{removed:?}");
         let left = surviving(dir.path());
@@ -518,10 +532,35 @@ mod tests {
             "the misreading this test exists to survive"
         );
 
-        let removed = sweep_old_runs(dir.path(), 20).expect("sweep");
+        let removed = sweep_old_runs(dir.path(), 20, &HashSet::new()).expect("sweep");
 
         assert!(crashed.is_dir(), "the only evidence of a crash was swept");
         assert!(!removed.contains(&crashed), "{removed:?}");
+    }
+
+    /// A run the host still holds outlives the cap without displacing a
+    /// newer one: 25 finished beside 3 older held ones lose exactly the 5
+    /// oldest unheld, so the held three were neither deleted nor counted.
+    #[test]
+    fn a_sweep_neither_deletes_nor_counts_held_runs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let held: HashSet<String> = (0..3).map(|i| format!("01A{i:02}")).collect();
+        for name in &held {
+            finished_run_in(dir.path(), name);
+        }
+        for i in 0..25 {
+            finished_run_in(dir.path(), &format!("01B{i:02}"));
+        }
+
+        let removed = sweep_old_runs(dir.path(), 20, &held).expect("sweep");
+
+        assert_eq!(removed.len(), 5, "{removed:?}");
+        let left = surviving(dir.path());
+        assert_eq!(left.len(), 23, "{left:?}");
+        for name in &held {
+            assert!(left.contains(name), "held {name} was swept: {left:?}");
+        }
+        assert!(left.contains(&"01B05".to_string()), "{left:?}");
     }
 
     /// Newest kept, oldest dropped — and the ordering is by run-id, because
@@ -533,7 +572,7 @@ mod tests {
             finished_run_in(dir.path(), &format!("01B{i:02}"));
         }
 
-        let removed = sweep_old_runs(dir.path(), 20).expect("sweep");
+        let removed = sweep_old_runs(dir.path(), 20, &HashSet::new()).expect("sweep");
 
         let gone: Vec<String> = removed
             .iter()

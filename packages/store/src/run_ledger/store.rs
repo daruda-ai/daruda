@@ -4,14 +4,14 @@ use std::collections::VecDeque;
 use std::io;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use daruda_runlog::{
     CommitError, Committed, Committer, FileBackend, FlushTimedOut, OpenError, RunLog,
 };
 
-use super::{LedgerRejected, RunLedgerEvent, RunLedgerMachine, RunLedgerState};
+use super::{DirectoryHolds, LedgerRejected, RunLedgerEvent, RunLedgerMachine, RunLedgerState};
 
 type Answer = Pin<
     Box<
@@ -33,6 +33,8 @@ pub struct RunLedgerStore {
     committer: Committer<RunLedgerMachine>,
     /// Answers not yet looked at, oldest first; the committer answers in order.
     answers: Mutex<VecDeque<Answer>>,
+    /// The committed state's holds, refreshed by the committer after each record.
+    holds: Arc<Mutex<DirectoryHolds>>,
 }
 
 impl std::fmt::Debug for RunLedgerStore {
@@ -60,11 +62,20 @@ impl RunLedgerStore {
         std::fs::create_dir_all(&dir)?;
         let log = RunLog::<RunLedgerMachine, _>::open(FileBackend::new(dir), build)?;
         let state = log.state().clone();
-        let committer = Committer::spawn(log, "run-ledger", Box::new(|_, _| {}))?;
+        let holds = Arc::new(Mutex::new(state.directory_holds()));
+        let projection = Arc::clone(&holds);
+        let committer = Committer::spawn(
+            log,
+            "run-ledger",
+            Box::new(move |_, state: &RunLedgerState| {
+                *lock(&projection) = state.directory_holds();
+            }),
+        )?;
         Ok((
             Self {
                 committer,
                 answers: Mutex::default(),
+                holds,
             },
             state,
         ))
@@ -96,14 +107,22 @@ impl RunLedgerStore {
         failure
     }
 
+    /// Flow runs, by id, whose directories retention must spare at `now_ms`,
+    /// as of the records committed so far: one still being written is not seen.
+    pub fn held_run_dirs(&self, now_ms: u64) -> std::collections::HashSet<String> {
+        lock(&self.holds).at(now_ms)
+    }
+
     /// Wait until every earlier record is answered.
     pub fn flush(&self, deadline: Duration) -> Result<(), FlushTimedOut> {
         self.committer.flush(deadline)
     }
 
-    fn answers(&self) -> std::sync::MutexGuard<'_, VecDeque<Answer>> {
-        self.answers
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    fn answers(&self) -> MutexGuard<'_, VecDeque<Answer>> {
+        lock(&self.answers)
     }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }

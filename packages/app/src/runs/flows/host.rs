@@ -58,6 +58,14 @@ impl RunsHost {
         })
     }
 
+    /// Flow runs, by id, whose directories a sweep at `now_ms` must spare:
+    /// the orchestrator's runs whose ends the run ledger still owes.
+    pub(crate) fn held_flow_runs(now_ms: u64, cx: &App) -> std::collections::HashSet<String> {
+        cx.try_global::<RunsHost>()
+            .map(|host| host.watch.ledger.held_run_dirs(now_ms))
+            .unwrap_or_default()
+    }
+
     /// Start a run: its thread, its pump, and its entry, together, returning
     /// the run id its results are keyed by. Refused, with nothing started,
     /// when the worktree already has a run: replacing its entry would leave
@@ -65,7 +73,7 @@ impl RunsHost {
     pub(crate) fn start_flow(start: FlowStart, cx: &mut App) -> Result<String, AlreadyRunning> {
         let FlowStart {
             tree,
-            request,
+            mut request,
             source,
             runners,
             overage,
@@ -77,6 +85,10 @@ impl RunsHost {
         if cx.global::<RunsHost>().flows.runs.contains_key(&tree) {
             return Err(AlreadyRunning);
         }
+        // The engine sweeps old runs as it starts; it cannot see the ledger.
+        request
+            .held_runs
+            .extend(Self::held_flow_runs(crate::runs::ledger::now_ms(), cx));
         let run_dir = request.run_dir.clone();
         // The request names the lock root; the run's own lock lives in the
         // per-tree directory the engine derives from it.

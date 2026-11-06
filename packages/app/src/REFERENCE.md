@@ -324,7 +324,16 @@ written, so a result whose receipt never came is unreported after a restart.
 Writes are queued without waiting and flushed at quit; open or write failures
 leave delivery memory-only with one deduplicated warning and never affect tasks.
 At most 200 unreported ends are kept; a newer end evicts the oldest, and the
-`Ended` record names what it evicted. At install, before task history is
+`Ended` record names what it evicted. `Ended` carries the proposer's clock
+(`ended_at_ms`; a re-record keeps the first), so replay never reads one.
+Retention spares what the ledger still owes: `RunsHost::start_flow` fills
+`RunRequest::held_runs` from the committed ledger, and the engine's start sweep
+(`marker::sweep_old_runs`) neither deletes nor counts those run directories.
+A flow is held while it is owned with no end, or its latest end is unreported
+and under `DIRECTORY_HOLD` (7 days) old, judged against the clock at each
+start; nothing is written when a hold lapses. A lapsed hold frees only the
+directory: the end stays in the ledger until reported, and a release
+or eviction ends the hold. Task ends are kept by the ledger alone. At install, before task history is
 compared, restored keys rejoin the scope with their saved solicitation (a
 carried Task takes it from there), and unreported ends return as `Recovered`
 episodes. A Task whose end was already reported, or whose execution is gone

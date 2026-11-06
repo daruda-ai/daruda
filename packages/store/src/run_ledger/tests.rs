@@ -22,6 +22,7 @@ fn with_end(state: &mut RunLedgerState, key: LedgerKey, episode: u64) {
                 pointers: LedgerPointers::default(),
             },
             evicts: Vec::new(),
+            ended_at_ms: None,
         },
     );
 }

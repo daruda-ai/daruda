@@ -308,6 +308,7 @@ mod tests {
             pinned: Vec::new(),
             inputs: Default::default(),
             resume: None,
+            held_runs: Default::default(),
         };
         let runners = daruda_flow::runner::Runners {
             command: daruda_flow::runner::ProcessRunner::new(Vec::new()),

@@ -126,7 +126,7 @@ fn execute_with(
     // Past the lock, so no other run's directory is touched, and before the
     // first node, so a run that never finishes is still hidden from git and
     // still counted for retention.
-    let mut setup_warnings = prepare_runs_dir(request.run_dir.parent());
+    let mut setup_warnings = prepare_runs_dir(request.run_dir.parent(), &request.held_runs);
 
     // Only past the lock is the log opened: a continuation reads what the
     // run had finished here, never before the lock.
@@ -440,7 +440,7 @@ fn provision_agents(
 /// `None` is a run directory with no parent, which the host cannot produce —
 /// it builds `<cwd>/.daruda/flow-runs/<run-id>/` — and which has no runs
 /// directory to prepare.
-fn prepare_runs_dir(runs_dir: Option<&Path>) -> Vec<String> {
+fn prepare_runs_dir(runs_dir: Option<&Path>, held: &HashSet<String>) -> Vec<String> {
     let Some(runs_dir) = runs_dir else {
         return Vec::new();
     };
@@ -449,7 +449,7 @@ fn prepare_runs_dir(runs_dir: Option<&Path>) -> Vec<String> {
         warnings.push(e.to_string());
     }
     // Second, so the directory the sweep reads exists even on the first run.
-    if let Err(source) = sweep_old_runs(runs_dir, DEFAULT_KEEP_RUNS) {
+    if let Err(source) = sweep_old_runs(runs_dir, DEFAULT_KEEP_RUNS, held) {
         warnings.push(
             FlowIoError {
                 site: IoSite::Run,

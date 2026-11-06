@@ -5,7 +5,9 @@
 //! agent. A reservation awaiting its socket receipt is never recorded: after a
 //! restart it is simply unreported again, so it is delivered once more.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use daruda_runlog::Machine;
 use serde::{Deserialize, Serialize};
@@ -18,6 +20,10 @@ pub use store::{RunLedgerError, RunLedgerStore};
 
 /// Unreported ends the ledger keeps. A newer end beyond it evicts the oldest.
 pub const UNREPORTED_MAX: usize = 200;
+
+/// How long after its end an unreported flow run keeps its directory from
+/// retention. The summary stays in the ledger until it is reported.
+pub const DIRECTORY_HOLD: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// The run a ledger entry follows; store-level twin of the app's run key.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +88,10 @@ pub struct LedgerEnd {
 pub struct RecordedEnd {
     pub episode: u64,
     pub end: LedgerEnd,
+    /// When the proposer recorded the end, in Unix milliseconds; absent in
+    /// logs written before ends were dated.
+    #[serde(default)]
+    pub ended_at_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,6 +134,36 @@ impl RunLedgerState {
 
     pub fn get(&self, key: &LedgerKey) -> Option<&RunLedgerEntry> {
         self.entries.iter().find(|entry| &entry.key == key)
+    }
+
+    /// Flow runs, by id, whose directories retention must spare at `now_ms`.
+    pub fn held_run_dirs(&self, now_ms: u64) -> HashSet<String> {
+        self.directory_holds().at(now_ms)
+    }
+
+    /// What [`Self::held_run_dirs`] reads, without the clock. A Task keeps
+    /// its end in the ledger alone, so only flows are held. An owned run with
+    /// no end yet is held too: it may have ended on disk before it was judged.
+    pub(crate) fn directory_holds(&self) -> DirectoryHolds {
+        let hold_ms = u64::try_from(DIRECTORY_HOLD.as_millis()).unwrap_or(u64::MAX);
+        let holds = self
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                let LedgerKey::Flow { run_id } = &entry.key else {
+                    return None;
+                };
+                let until = match &entry.ended {
+                    None => None,
+                    Some(_) => entry
+                        .unreported()?
+                        .ended_at_ms
+                        .map(|at| at.saturating_add(hold_ms)),
+                };
+                Some((run_id.clone(), until))
+            })
+            .collect();
+        DirectoryHolds { holds }
     }
 
     /// The first episode number no recorded end has used.
@@ -187,6 +227,24 @@ impl RunLedgerState {
     }
 }
 
+/// Flow run directories the ledger holds, each with when its hold ends.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DirectoryHolds {
+    /// `None`: no dated end, so held until the ledger lets the run go.
+    holds: Vec<(String, Option<u64>)>,
+}
+
+impl DirectoryHolds {
+    /// The run ids still held at `now_ms`.
+    pub(crate) fn at(&self, now_ms: u64) -> HashSet<String> {
+        self.holds
+            .iter()
+            .filter(|(_, until)| until.is_none_or(|until| now_ms < until))
+            .map(|(run_id, _)| run_id.clone())
+            .collect()
+    }
+}
+
 enum Landing {
     New,
     Rerecord,
@@ -223,6 +281,10 @@ pub enum RunLedgerEvent {
         /// Filled by `assign`: the oldest unreported ends this one displaced.
         #[serde(default)]
         evicts: Vec<LedgerKey>,
+        /// The proposer's clock, in Unix milliseconds, so replay never reads one.
+        /// A re-record keeps the time of the end it replaces.
+        #[serde(default)]
+        ended_at_ms: Option<u64>,
     },
     /// An agent was handed `episode` and every earlier end of this key.
     Reported { key: LedgerKey, episode: u64 },
@@ -248,7 +310,7 @@ impl Machine for RunLedgerMachine {
     type Rejected = LedgerRejected;
     // Bump with any change to how `RunLedgerEvent` or `RunLedgerState`
     // serializes, so an older build refuses the log as too new.
-    const SCHEMA: u32 = 1;
+    const SCHEMA: u32 = 2;
 
     fn check(state: &RunLedgerState, event: &RunLedgerEvent) -> Result<(), LedgerRejected> {
         match event {
@@ -310,6 +372,7 @@ impl Machine for RunLedgerMachine {
                 episode,
                 end,
                 evicts,
+                ended_at_ms,
             } => {
                 let landing = state.landing(key, *episode);
                 state.entries.retain(|entry| !evicts.contains(&entry.key));
@@ -319,6 +382,7 @@ impl Machine for RunLedgerMachine {
                         state.entry(key, *solicited).ended = Some(RecordedEnd {
                             episode: *episode,
                             end: end.clone(),
+                            ended_at_ms: *ended_at_ms,
                         });
                     }
                     Landing::Rerecord => {
@@ -326,6 +390,7 @@ impl Machine for RunLedgerMachine {
                             state.get_mut(key).and_then(|entry| entry.ended.as_mut())
                         {
                             ended.end = end.clone();
+                            ended.ended_at_ms = ended.ended_at_ms.or(*ended_at_ms);
                         }
                     }
                     Landing::Stale => {}

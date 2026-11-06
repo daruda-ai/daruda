@@ -96,6 +96,10 @@ pub struct RunRequest {
     /// carries only what was fixed when the run started; what the run had
     /// finished is read after the lock is taken.
     pub resume: Option<crate::resume::Continuation>,
+    /// Ids of finished runs beside this one whose directories the host still
+    /// needs, such as a result it has not delivered yet. The retention sweep
+    /// at start neither deletes nor counts them.
+    pub held_runs: HashSet<String>,
 }
 
 impl RunRequest {

@@ -227,15 +227,35 @@ fn a_deleted_task_with_nothing_to_deliver_leaves_the_ledger(cx: &mut TestAppCont
 /// A one-node flow, run to its end in `lane` by the real engine: its log,
 /// marker and `run.md` are what a run that finished leaves.
 fn finished_flow(lane: &std::path::Path, locks: &std::path::Path, run_id: &str) -> PathBuf {
+    let run_dir = crate::runs::runs_dir(lane).join(run_id);
+    let request = command_flow(lane, locks, &run_dir);
+    let runners = command_runners(&request);
+    let report = daruda_flow::schedule::execute(
+        &request,
+        &runners,
+        &daruda_flow::runner::CancelToken::default(),
+    );
+    assert!(
+        matches!(report.outcome, daruda_flow::schedule::RunOutcome::Done),
+        "{report:?}"
+    );
+    run_dir
+}
+
+/// A one-command flow that runs in `lane` and records into `run_dir`.
+fn command_flow(
+    lane: &std::path::Path,
+    locks: &std::path::Path,
+    run_dir: &std::path::Path,
+) -> daruda_flow::request::RunRequest {
     let text =
         "version: 1\nname: Restarted\nnodes:\n  - id: ok\n    kind: command\n    run: \"exit 0\"\n";
-    let run_dir = crate::runs::runs_dir(lane).join(run_id);
-    let request = daruda_flow::request::RunRequest {
+    daruda_flow::request::RunRequest {
         history: Default::default(),
         started_by: Some(daruda_flow::request::StartedBy::Orchestrator),
         loaded: daruda_flow::load(text, None).unwrap(),
         cwd: lane.to_path_buf(),
-        run_dir: run_dir.clone(),
+        run_dir: run_dir.to_path_buf(),
         lock_dir: locks.to_path_buf(),
         flow_dir: lane.to_path_buf(),
         agents: Default::default(),
@@ -249,21 +269,18 @@ fn finished_flow(lane: &std::path::Path, locks: &std::path::Path, run_id: &str) 
         pinned: Vec::new(),
         inputs: Default::default(),
         resume: None,
-    };
-    let runners = daruda_flow::runner::Runners {
+        held_runs: Default::default(),
+    }
+}
+
+fn command_runners(request: &daruda_flow::request::RunRequest) -> daruda_flow::runner::Runners {
+    daruda_flow::runner::Runners {
         command: daruda_flow::runner::ProcessRunner::new(Vec::new()),
-        agent: daruda_flow::runner::AcpRunner::new(Default::default(), lane.join("node")),
-    };
-    let report = daruda_flow::schedule::execute(
-        &request,
-        &runners,
-        &daruda_flow::runner::CancelToken::default(),
-    );
-    assert!(
-        matches!(report.outcome, daruda_flow::schedule::RunOutcome::Done),
-        "{report:?}"
-    );
-    run_dir
+        agent: daruda_flow::runner::AcpRunner::new(
+            Default::default(),
+            request.node_install_dir.clone(),
+        ),
+    }
 }
 
 /// Make a finished run read as one a quit cut short: the log loses its end,
@@ -591,5 +608,145 @@ async fn a_task_whose_flow_was_interrupted_reads_resumable_then_settles_after_a_
         assert_eq!(pending[0].snapshot.key, key);
         assert_eq!(ended_as(&pending[0]), Some(EndedAs::Completed));
         assert_eq!(pending[0].origin, Origin::Live);
+    });
+}
+
+/// Finished runs newer than any other in `lane`, as earlier starts left
+/// them: enough that the cap alone would sweep everything older.
+fn newer_finished_runs(lane: &std::path::Path) -> PathBuf {
+    let runs_dir = crate::runs::runs_dir(lane);
+    for i in 0..daruda_flow::marker::DEFAULT_KEEP_RUNS + 5 {
+        let run_dir = runs_dir.join(format!("01B{i:02}"));
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::write(run_dir.join("DONE"), "").unwrap();
+    }
+    runs_dir
+}
+
+/// The sweep a run starting in `lane` at `now_ms` performs.
+fn sweep_at(lane: &std::path::Path, now_ms: u64, cx: &App) -> Vec<PathBuf> {
+    daruda_flow::marker::sweep_old_runs(
+        &crate::runs::runs_dir(lane),
+        daruda_flow::marker::DEFAULT_KEEP_RUNS,
+        &RunsHost::held_flow_runs(now_ms, cx),
+    )
+    .unwrap()
+}
+
+/// An orchestrator flow that finished while daruda was closed, older than
+/// every run [`newer_finished_runs`] adds: its end is recorded, unreported.
+fn unreported_flow(dirs: &Dirs, lane: &Lane, cx: &mut TestAppContext) -> (RunKey, PathBuf) {
+    let run_dir = finished_flow(&lane.path(), &lane.locks(), "01A00");
+    let key = cx.update(|cx| {
+        lane.start(dirs, cx);
+        own_flow(lane.location(&run_dir), cx)
+    });
+    cx.update(|cx| lane.restart(dirs, cx));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].snapshot.key, key);
+        RunsHost::flush_run_ledger_for_test(cx);
+    });
+    (key, run_dir)
+}
+
+fn wait_for_file(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !path.is_file() {
+        assert!(
+            Instant::now() < deadline,
+            "{} never appeared",
+            path.display()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[gpui::test]
+fn an_unreported_flow_end_survives_the_sweep_a_newer_start_runs(cx: &mut TestAppContext) {
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let (key, held) = unreported_flow(&dirs, &lane, cx);
+    let runs_dir = newer_finished_runs(&lane.path());
+    let next = runs_dir.join("01C00");
+    cx.update(|cx| {
+        let request = command_flow(&lane.path(), &lane.locks(), &next);
+        let (events_tx, events) = smol::channel::unbounded();
+        let (_, asks) = smol::channel::unbounded();
+        let request = daruda_flow::request::RunRequest {
+            events: Some(events_tx),
+            ..request
+        };
+        RunsHost::start_flow(
+            crate::runs::FlowStart {
+                tree: daruda_flow::lock::CanonicalTree::resolve(&lane.path()).unwrap(),
+                request,
+                source: crate::runs::FlowSource::File(lane.path().join("flow.yaml")),
+                runners: Box::new(command_runners),
+                overage: Default::default(),
+                submitted_by: daruda_flow::request::StartedBy::Desktop,
+                solicited: false,
+                events,
+                asks,
+            },
+            cx,
+        )
+        .expect("the worktree is free");
+    });
+    wait_for_file(&next.join("DONE"));
+
+    assert!(held.is_dir(), "the undelivered run was swept");
+    assert!(!runs_dir.join("01B04").exists(), "the cap still applies");
+    assert!(runs_dir.join("01B05").is_dir());
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].snapshot.key, key);
+    });
+}
+
+#[gpui::test]
+fn a_reported_flow_end_leaves_its_directory_to_the_sweep(cx: &mut TestAppContext) {
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let (key, held) = unreported_flow(&dirs, &lane, cx);
+    newer_finished_runs(&lane.path());
+    cx.update(|cx| {
+        let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
+        let answer = RunsHost::poll_run_wait(id, false, cx).unwrap();
+        assert_eq!(answer.ended.len(), 1);
+        assert_eq!(answer.ended[0].key, key);
+        RunsHost::finish_run_wait(id, true, cx);
+        RunsHost::flush_run_ledger_for_test(cx);
+        assert!(sweep_at(&lane.path(), now_ms(), cx).contains(&held));
+    });
+}
+
+#[gpui::test]
+fn an_unreported_flow_end_frees_its_directory_after_the_hold_but_is_still_delivered(
+    cx: &mut TestAppContext,
+) {
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let (key, held) = unreported_flow(&dirs, &lane, cx);
+    newer_finished_runs(&lane.path());
+    let hold_ms = u64::try_from(daruda_store::run_ledger::DIRECTORY_HOLD.as_millis()).unwrap();
+    cx.update(|cx| {
+        let now = now_ms();
+        assert!(!sweep_at(&lane.path(), now, cx).contains(&held));
+        assert!(held.is_dir());
+        assert_eq!(
+            sweep_at(&lane.path(), now + hold_ms, cx),
+            vec![held.clone()]
+        );
+    });
+    // The summary outlives the directory, across a restart too.
+    cx.update(|cx| lane.restart(&dirs, cx));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
+        let answer = RunsHost::poll_run_wait(id, false, cx).unwrap();
+        assert_eq!(answer.ended.len(), 1);
+        assert_eq!(answer.ended[0].key, key);
+        assert_eq!(answer.recovered, vec![key.clone()]);
     });
 }

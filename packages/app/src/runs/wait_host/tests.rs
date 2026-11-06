@@ -45,6 +45,7 @@ async fn real_flow_thread_and_two_tasks_each_deliver_once(cx: &mut TestAppContex
         pinned: vec![],
         inputs: Default::default(),
         resume: None,
+        held_runs: Default::default(),
     };
     let flow = RunKey::Flow("flow-result".into());
     let mut expected = vec![flow.clone()];
@@ -284,6 +285,7 @@ async fn resumed_pins_describe_live_and_retained_results_like_disk(cx: &mut Test
         pinned: vec![],
         inputs: Default::default(),
         resume: Some(continuation),
+        held_runs: Default::default(),
     };
     let key = RunKey::Flow("resumed-pins".into());
     let live = cx.update(|cx| {

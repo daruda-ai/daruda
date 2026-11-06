@@ -58,6 +58,7 @@ pub(in crate::workspace) fn seed(root: &Path, shot: ExecutionShot) -> PathBuf {
         pinned: Vec::new(),
         inputs: Default::default(),
         resume: None,
+        held_runs: Default::default(),
     };
     let report =
         daruda_flow::schedule::execute(&request, &FixtureRunner(shot), &CancelToken::default());

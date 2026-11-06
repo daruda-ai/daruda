@@ -229,6 +229,7 @@ nodes:
             events: None,
             ask: None,
             resume: None,
+            held_runs: Default::default(),
         }
     }
 

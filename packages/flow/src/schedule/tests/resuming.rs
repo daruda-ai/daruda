@@ -219,7 +219,7 @@ fn the_sweep_leaves_a_killed_run_where_it_is() {
     let run_dir = killed_after(dir.path(), CHAIN_OF_THREE, "two", FakeRunner::new());
     let runs = run_dir.parent().expect("runs dir");
     // Well past any retention: every other run may go.
-    let removed = crate::marker::sweep_old_runs(runs, 0).expect("sweep");
+    let removed = crate::marker::sweep_old_runs(runs, 0, &Default::default()).expect("sweep");
 
     assert!(run_dir.is_dir(), "the killed run was swept away");
     assert!(!removed.contains(&run_dir), "{removed:?}");
