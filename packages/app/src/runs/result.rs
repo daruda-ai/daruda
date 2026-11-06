@@ -41,6 +41,13 @@ pub(crate) struct RunSnapshot {
     pub state: RunState,
 }
 
+impl RunSnapshot {
+    /// Whether this is an end a resume picks up.
+    pub(crate) fn resumable(&self) -> bool {
+        matches!(self.state, RunState::Ended { ended_as, .. } if ended_as.resumable())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RunState {
     Running {
@@ -193,10 +200,7 @@ fn task_pointers(execution: Option<&TaskExecution>) -> Pointers {
 /// Whether `snapshot` is a Task's flow interruption: the end [`through_flow`]
 /// gives a still-running Task, whose own end is a later episode.
 pub(super) fn is_interruption(snapshot: &RunSnapshot) -> bool {
-    matches!(
-        (&snapshot.key, &snapshot.state),
-        (RunKey::Task(_), RunState::Ended { ended_as, .. }) if ended_as.resumable()
-    )
+    matches!(snapshot.key, RunKey::Task(_)) && snapshot.resumable()
 }
 
 /// A running task's result, read through its flow run: a flow interrupted

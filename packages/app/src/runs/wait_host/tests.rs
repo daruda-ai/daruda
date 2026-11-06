@@ -99,8 +99,8 @@ async fn real_flow_thread_and_two_tasks_each_deliver_once(cx: &mut TestAppContex
         };
         assert_eq!(answer.outcome, WaitOutcome::Settled);
         for end in answer.ended {
-            assert!(matches!(end.state, RunState::Ended { .. }));
-            received.push(end.key);
+            assert!(matches!(end.snapshot.state, RunState::Ended { .. }));
+            received.push(end.snapshot.key);
         }
         cx.update(|cx| RunsHost::finish_run_wait(id, true, cx));
         if received.len() == 3 {
@@ -316,7 +316,12 @@ async fn resumed_pins_describe_live_and_retained_results_like_disk(cx: &mut Test
     let (wait, wake) = cx.update(|cx| RunsHost::open_run_wait(None, cx).unwrap());
     let held = loop {
         if let Some(answer) = cx.update(|cx| RunsHost::poll_run_wait(wait, false, cx)) {
-            break answer.ended.into_iter().next().expect("flow ended");
+            break answer
+                .ended
+                .into_iter()
+                .next()
+                .expect("flow ended")
+                .snapshot;
         }
         wake.recv().await.unwrap();
     };

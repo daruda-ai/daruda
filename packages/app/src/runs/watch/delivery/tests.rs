@@ -107,5 +107,51 @@ fn evicting_an_old_reported_block_preserves_the_held_end_across_resume() {
     watch.release_end(held, ended(key.clone()));
     let (wait, _) = watch.open_wait(None).unwrap();
     let answer = watch.poll_wait(wait, false).unwrap();
-    assert_eq!(answer.ended, vec![ended(key)]);
+    let ended_snapshots: Vec<_> = answer
+        .ended
+        .into_iter()
+        .map(|event| event.snapshot)
+        .collect();
+    assert_eq!(ended_snapshots, vec![ended(key)]);
+}
+
+fn crashed(key: RunKey) -> RunSnapshot {
+    RunSnapshot {
+        state: RunState::Ended {
+            ended_as: crate::runs::result::EndedAs::Crashed,
+            text: None,
+            pointers: Default::default(),
+        },
+        ..ended(key)
+    }
+}
+
+/// A crash restored across a restart, a resume, then the resumed run's own
+/// end: one answer holds both, each with its own origin, and only the
+/// current end could still be resumed.
+#[test]
+fn each_delivered_end_keeps_its_origin_and_a_reopened_crash_is_not_resumable() {
+    let mut watch = RunWatch::default();
+    let key = RunKey::Flow("resumed".into());
+    watch.register(key.clone());
+    watch.settle(crashed(key.clone()), Origin::Recovered);
+    let (wait, _) = watch.open_wait(None).unwrap();
+    let before = watch.poll_wait(wait, false).unwrap();
+    assert!(before.ended[0].resumable(), "the crash is the current end");
+    watch.finish_wait(wait, false);
+
+    watch.begin(&key);
+    watch.retain(ended(key.clone()));
+    let (wait, _) = watch.open_wait(None).unwrap();
+    let answer = watch.poll_wait(wait, false).unwrap();
+    let delivered: Vec<_> = answer
+        .ended
+        .iter()
+        .map(|event| (event.origin, event.resumable()))
+        .collect();
+    assert_eq!(
+        delivered,
+        [(Origin::Recovered, false), (Origin::Live, false)],
+        "the crash is still owed, but a resume already picked it up"
+    );
 }

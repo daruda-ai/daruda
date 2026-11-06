@@ -45,14 +45,14 @@ pub(crate) enum WaitOutcome {
 }
 pub(crate) struct WaitAnswer {
     pub outcome: WaitOutcome,
-    pub ended: Vec<RunSnapshot>,
-    pub blocked: Vec<RunSnapshot>,
+    /// Episodes handed over: each keeps its origin and whether a resume
+    /// has since reopened its key.
+    pub ended: Vec<RunEvent>,
+    pub blocked: Vec<RunEvent>,
     pub already_reported: Vec<RunSnapshot>,
     pub not_running: Vec<RunSnapshot>,
     pub pending: Vec<RunSnapshot>,
     pub more: usize,
-    /// Keys among `ended` and `blocked` restored from before a restart.
-    pub recovered: Vec<RunKey>,
 }
 impl RunWatch {
     pub(crate) fn open_wait(
@@ -252,7 +252,6 @@ impl RunWatch {
             not_running: vec![],
             pending: vec![],
             more,
-            recovered: vec![],
         };
         let selected: HashSet<_> = eligible
             .iter()
@@ -317,13 +316,10 @@ impl RunWatch {
         for (i, blocked) in eligible.into_iter().take(BATCH_MAX) {
             let event = &mut self.events[i];
             event.delivery = Delivery::InFlight(id);
-            if event.origin == Origin::Recovered {
-                answer.recovered.push(event.snapshot.key.clone());
-            }
             if blocked {
-                answer.blocked.push(event.snapshot.clone());
+                answer.blocked.push(event.clone());
             } else {
-                answer.ended.push(event.snapshot.clone());
+                answer.ended.push(event.clone());
             }
         }
         Some(answer)

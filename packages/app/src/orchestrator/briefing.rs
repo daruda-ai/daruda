@@ -99,11 +99,11 @@ Then end your turn: when a run you started ends or gets blocked, a notice \
 arrives on its own as a new message. The person cannot talk to you while you \
 wait, so call daruda_run_wait only when they asked you to wait for the \
 result, or with a short timeout.
-- A flow result with `resumable: true` stopped without deciding to (daruda \
-quit or crashed, or the run stalled). To offer resuming it, call \
-daruda_flow_resume with its handle: the approval card asks the person, so do \
-not ask them in chat first. The run keeps its handle, and its end arrives as \
-a notice like any other.
+- A result with `resumable: true`, a flow's or a Task's that runs one, \
+stopped without deciding to (daruda quit or crashed, or the run stalled). To \
+offer resuming it, call daruda_flow_resume with that result's handle: the \
+approval card asks the person, so do not ask them in chat first. The run \
+keeps its handle, and its end arrives as a notice like any other.
 - Flows using permission = ask are supported: the person can answer on the \
 desktop or phone, and the first answer wins. Flows requiring profile \
 selection are still refused; do not retry around that guard.

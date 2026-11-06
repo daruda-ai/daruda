@@ -244,6 +244,43 @@ fn a_failed_start_is_toasted_once_and_the_result_stays_pending(cx: &mut TestAppC
     });
 }
 
+/// A recovered end that arrives later fails to start it: the toast goes
+/// where the start would have put the orchestrator, the window the person
+/// is using, not the first one opened.
+#[gpui::test]
+fn a_late_failed_start_is_toasted_in_the_active_window(cx: &mut TestAppContext) {
+    let profile = Profile::new();
+    profile.owe_and_quit(true, cx);
+    let (_outbound, _probes) = surroundings(true, cx);
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            let mut config = (*store.user()).clone();
+            config.orchestrator.agent_id = Some("no-such-agent".into());
+            store.set_user_for_testing(config);
+        });
+    });
+    let first = crate::test_support::workspace_for_control(cx);
+    let second = crate::test_support::workspace_for_control(cx);
+    cx.run_until_parked();
+    cx.update_window(second.window.into(), |_, window, _| {
+        window.activate_window()
+    })
+    .expect("the second window is open");
+    cx.update(|cx| profile.start(cx));
+    cx.run_until_parked();
+    let toasts = |fixture: &crate::test_support::ControlFixture, cx: &mut TestAppContext| {
+        fixture.workspace.read_with(cx, |ws, _| {
+            ws.error_history()
+                .iter()
+                .filter(|report| {
+                    report.dedup_key.as_deref() == Some("orchestrator.recovered_start")
+                })
+                .count()
+        })
+    };
+    assert_eq!((toasts(&first, cx), toasts(&second, cx)), (0, 1));
+}
+
 #[gpui::test]
 fn more_windows_and_a_closed_orchestrator_never_start_it_twice(cx: &mut TestAppContext) {
     let profile = Profile::new();

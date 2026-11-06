@@ -2498,7 +2498,9 @@ control:
   approval_task_open: "daruda wants to open the chat of the task %{title}. Allow?"
   # A flow run the app quit or a crash cut off: `passed` of its `total`
   # steps had passed, and the step it was on runs again from the start.
-  approval_flow_resume: "daruda wants to resume the flow %{name} from where it stopped (%{passed} of %{total} steps done; the step it was on starts over). Allow?"
+  approval_flow_resume: "daruda wants to resume the flow %{name} from where it stopped (%{passed} of %{total} steps done; any step that was running starts over). Allow?"
+  # A run cut off after its last step passed, before it recorded its end.
+  approval_flow_resume_all_passed: "daruda wants to resume the flow %{name}, which stopped after all %{total} steps passed (nothing runs again). Allow?"
   task_created: "Task added."
   task_started: "Task started."
   task_stopped: "Task stopped."

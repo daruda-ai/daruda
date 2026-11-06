@@ -52,7 +52,14 @@ async fn carried_cli_runs_report_normal_error_lost_and_confirmed_exit_once(
         assert_eq!(answer.outcome, WaitOutcome::Settled);
         assert_eq!(answer.ended.len(), 4);
         for key in keys {
-            assert_eq!(answer.ended.iter().filter(|end| end.key == key).count(), 1);
+            assert_eq!(
+                answer
+                    .ended
+                    .iter()
+                    .filter(|end| end.snapshot.key == key)
+                    .count(),
+                1
+            );
         }
         RunsHost::finish_run_wait(id, true, cx);
         let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();

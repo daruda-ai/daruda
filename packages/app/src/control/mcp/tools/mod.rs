@@ -317,9 +317,11 @@ fn flow_resume_properties() -> serde_json::Value {
     serde_json::json!({
         "run": {
             "type": "string",
-            "description": "The flow:<run-id> handle whose daruda_run_status or \
-                            daruda_run_wait result ended with `resumable: true`.",
-            "examples": ["flow:1929fcd-a1-5"],
+            "description": "The handle of a daruda_run_status or daruda_run_wait \
+                            result that ended with `resumable: true`: a flow:<run-id>, \
+                            or the task:<task-id>/<execution-id> of a Task that runs \
+                            a flow.",
+            "examples": ["flow:1929fcd-a1-5", "task:01J5A/2f9c"],
         },
     })
 }
@@ -595,10 +597,11 @@ static TABLE: &[Tool] = &[
         id: ToolId::FlowResume,
         name: "daruda_flow_resume",
         description: "Resume a flow run that stopped without deciding to — daruda quit or \
-                      crashed, or the run stalled — from where it stopped, under the same \
-                      handle. Only a result with `resumable: true` can be resumed; offer it \
-                      when you see one. Nodes that passed do not run again; the node it was \
-                      on starts over. Needs the user's approval on the desktop or phone, \
+                      crashed, or the run stalled — from where it stopped. Pass the handle of \
+                      a result with `resumable: true`, a flow's or a Task's that runs one; \
+                      the run keeps that handle. Only such a result can be resumed; offer it \
+                      when you see one. Nodes that passed do not run again; any node that \
+                      was running starts over. Needs the user's approval on the desktop or phone, \
                       which is how the person is asked: the first answer wins. Refusal or \
                       timeout fails the call; silence is not consent. Do not retry or \
                       bypass approval. Reports that it resumed, not that it finished: end \

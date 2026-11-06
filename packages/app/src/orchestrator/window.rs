@@ -81,12 +81,12 @@ pub(crate) fn install_instructions(dir: &std::path::Path) {
 
 /// Record a failed open. The caller answers the phone with its own wording, so
 /// this only makes sure the concrete reason reaches the log.
-pub(crate) fn log_open_failure(error: &OpenError) {
+pub(crate) fn log_open_failure(reason: &str) {
     LogWriter::log(
         ErrorReport::new("Orchestrator could not start")
             .severity(ErrorSeverity::Error)
             .at(file!(), line!())
-            .with_context("reason", error.to_string())
+            .with_context("reason", reason.to_owned())
             .dedup("orchestrator.open")
             .build(),
     );

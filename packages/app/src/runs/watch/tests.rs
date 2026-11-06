@@ -267,7 +267,7 @@ fn fifo_ended_first_batches_twenty_with_more_and_omitted_waiter_is_exclusive() {
     assert_eq!(first.ended.len(), 20);
     assert!(first.blocked.is_empty());
     assert_eq!(first.more, 3);
-    assert_eq!(first.ended[0].key, RunKey::Flow("0".into()));
+    assert_eq!(first.ended[0].snapshot.key, RunKey::Flow("0".into()));
     watch.finish_wait(wait, true);
     let (wait, _) = watch.open_wait(None).unwrap();
     let second = watch.poll_wait(wait, false).unwrap();
@@ -323,7 +323,7 @@ fn unreported_and_in_flight_results_survive_cap_and_text_enrichment_updates_even
     let (id, _) = watch.open_wait(None).unwrap();
     let result = watch.poll_wait(id, false).unwrap();
     assert!(
-        matches!(&result.ended[0].state, RunState::Ended { text: Some(t), .. } if t == "enriched")
+        matches!(&result.ended[0].snapshot.state, RunState::Ended { text: Some(t), .. } if t == "enriched")
     );
     assert_eq!(watch.retained_count(), 250);
     assert_eq!(watch.events.len(), 250);
@@ -434,7 +434,7 @@ fn explicit_flow_handle_selects_only_latest_episode_after_resume() {
     let (id, _) = watch.open_wait(Some(vec![key])).unwrap();
     let answer = watch.poll_wait(id, false).unwrap();
     assert_eq!(answer.ended.len(), 1);
-    assert_eq!(answer.ended[0].what, "latest");
+    assert_eq!(answer.ended[0].snapshot.what, "latest");
 }
 
 #[test]
@@ -458,11 +458,11 @@ fn resumed_flow_text_enrichment_updates_only_its_current_episode() {
     let answer = watch.poll_wait(id, false).unwrap();
     assert_eq!(answer.ended.len(), 2);
     assert!(matches!(
-        answer.ended[0].state,
+        answer.ended[0].snapshot.state,
         RunState::Ended { text: None, .. }
     ));
     assert!(
-        matches!(&answer.ended[1].state, RunState::Ended { text: Some(text), .. } if text == "latest answer")
+        matches!(&answer.ended[1].snapshot.state, RunState::Ended { text: Some(text), .. } if text == "latest answer")
     );
 }
 

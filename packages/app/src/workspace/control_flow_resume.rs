@@ -13,6 +13,7 @@ use crate::workspace::Workspace;
 use crate::workspace::flow_ops::FlowStartRefused;
 use crate::workspace::flow_paths;
 use crate::workspace::flow_request::FlowSubmitError;
+use daruda_control_types::runs::RunHandle;
 use daruda_flow::marker::RunStatus;
 use daruda_flow::resume::ResumeError;
 use daruda_store::project::LaneRef;
@@ -73,10 +74,18 @@ impl Workspace {
             });
         }
         if self.lane_holder(&cwd).is_some() || self.is_flow_running_in(lane, cx) {
-            return Err(ControlError::FlowLocked {
-                held_by: self.flow_holder_in(lane, &cwd, cx),
-                name,
-            });
+            let held_by = self.flow_holder_in(lane, &cwd, cx);
+            // A live process holding the lock for this very run is the run
+            // still going, not another run in its way.
+            if matches!(&held_by, Some(RunHandle::Flow { run_id })
+                if run_dir.file_name() == Some(std::ffi::OsStr::new(run_id)))
+            {
+                return Err(ControlError::FlowRunNotResumable {
+                    name,
+                    reason: NotResumableReason::Running,
+                });
+            }
+            return Err(ControlError::FlowLocked { held_by, name });
         }
         let lock_dir = flow_paths::lane_lock_dir(&self.lock_root, &cwd);
         let is_alive: fn(u32) -> bool = crate::workspace::flow_request::process_is_alive;
@@ -86,10 +95,9 @@ impl Workspace {
             Some(until) => resumed.loaded.graph().ancestors(until).len() + 1,
             None => resumed.loaded.flow().nodes.len(),
         };
-        let passed = daruda_flow::run_log::reader::read(run_dir).passed.len();
         Ok(FlowResumePlan {
             name,
-            passed: passed.min(selected),
+            passed: resumed.passed.len().min(selected),
             total: selected,
         })
     }

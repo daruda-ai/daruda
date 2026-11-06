@@ -118,9 +118,10 @@ pub enum RunState {
     Ended {
         ended_as: EndedAs,
         /// The run stopped without deciding to (an app quit, a dead process,
-        /// a stall) and can be picked up where it stopped, under the same
-        /// handle, by [`crate::spec::GatedCommand::FlowResume`]. Omitted when
-        /// false.
+        /// a stall), and [`crate::spec::GatedCommand::FlowResume`] given this
+        /// result's handle, a flow's or a Task's that runs one, picks it up
+        /// under that handle. False once a resume has picked it up. Omitted
+        /// when false.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         resumable: bool,
         text: Option<String>,

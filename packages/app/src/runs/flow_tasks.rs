@@ -38,7 +38,10 @@ pub(crate) fn task_run_dir(run: &TaskExecution) -> Option<PathBuf> {
 /// The task whose current run is the flow run in `run_dir`. By the run's
 /// id alone: ids are unique, and a worktree's path has many spellings.
 fn task_of_run<'a>(run_dir: &Path, book: &'a TasksBook) -> Option<(ExecutionRef, &'a Lifecycle)> {
-    let run_id = run_dir.file_name()?.to_str()?;
+    task_of_run_id(run_dir.file_name()?.to_str()?, book)
+}
+
+fn task_of_run_id<'a>(run_id: &str, book: &'a TasksBook) -> Option<(ExecutionRef, &'a Lifecycle)> {
     book.records().find_map(|record| {
         let run = record.execution.as_ref()?;
         let exec = record.current_exec()?;
@@ -101,6 +104,21 @@ pub(super) fn task_end(
 }
 
 impl RunsHost {
+    /// The task execution whose current run is flow run `run_id`.
+    pub(crate) fn task_of_flow_run(run_id: &str, cx: &App) -> Option<ExecutionRef> {
+        let tasks = cx.try_global::<GlobalTasks>()?;
+        task_of_run_id(run_id, tasks.book()).map(|(exec, _)| exec)
+    }
+
+    /// The flow run `exec` runs as, while it is its task's current execution.
+    pub(crate) fn flow_run_of_task(exec: &ExecutionRef, cx: &App) -> Option<String> {
+        let tasks = cx.try_global::<GlobalTasks>()?;
+        exec.resolve(tasks.book())?
+            .source
+            .flow_run_id()
+            .map(str::to_owned)
+    }
+
     /// The run in `run_dir` recorded its start: a task waiting on it is now
     /// running.
     pub(super) fn flow_task_started(run_dir: &Path, cx: &mut App) {

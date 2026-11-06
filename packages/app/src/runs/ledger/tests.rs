@@ -84,7 +84,7 @@ fn an_unreported_end_is_pending_again_after_a_restart(cx: &mut TestAppContext) {
         let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
         let answer = RunsHost::poll_run_wait(id, false, cx).unwrap();
         assert_eq!(answer.ended.len(), 1);
-        assert_eq!(answer.recovered, vec![key.clone()]);
+        assert_eq!(answer.ended[0].origin, Origin::Recovered);
     });
 }
 
@@ -227,7 +227,13 @@ fn a_carried_orchestrator_task_keeps_its_ledger_solicitation(cx: &mut TestAppCon
         );
         let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
         let answer = RunsHost::poll_run_wait(id, false, cx).unwrap();
-        assert_eq!(answer.recovered, vec![key.clone()]);
+        let recovered: Vec<_> = answer
+            .ended
+            .iter()
+            .filter(|end| end.origin == Origin::Recovered)
+            .map(|end| end.snapshot.key.clone())
+            .collect();
+        assert_eq!(recovered, vec![key.clone()]);
     });
 }
 
@@ -810,7 +816,7 @@ fn a_reported_flow_end_leaves_its_directory_to_the_sweep(cx: &mut TestAppContext
         let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
         let answer = RunsHost::poll_run_wait(id, false, cx).unwrap();
         assert_eq!(answer.ended.len(), 1);
-        assert_eq!(answer.ended[0].key, key);
+        assert_eq!(answer.ended[0].snapshot.key, key);
         RunsHost::finish_run_wait(id, true, cx);
         RunsHost::flush_run_ledger_for_test(cx);
         assert!(sweep_at(&lane.path(), now_ms(), cx).contains(&held));
@@ -841,8 +847,8 @@ fn an_unreported_flow_end_frees_its_directory_after_the_hold_but_is_still_delive
         let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
         let answer = RunsHost::poll_run_wait(id, false, cx).unwrap();
         assert_eq!(answer.ended.len(), 1);
-        assert_eq!(answer.ended[0].key, key);
-        assert_eq!(answer.recovered, vec![key.clone()]);
+        assert_eq!(answer.ended[0].snapshot.key, key);
+        assert_eq!(answer.ended[0].origin, Origin::Recovered);
     });
 }
 
@@ -962,7 +968,11 @@ fn writing_after_flush(cx: &mut App) -> bool {
 }
 
 fn whats(answer: &crate::runs::watch::WaitAnswer) -> Vec<&str> {
-    answer.ended.iter().map(|end| end.what.as_str()).collect()
+    answer
+        .ended
+        .iter()
+        .map(|end| end.snapshot.what.as_str())
+        .collect()
 }
 
 /// An earlier end reported after its run's newer end was reported, released
@@ -1029,7 +1039,7 @@ fn a_report_of_an_evicted_end_after_a_resume_keeps_the_ledger_writing(cx: &mut T
         }
         on_watch(cx, |w| w.begin(&first));
         let answer = report(None, cx);
-        assert_eq!(answer.ended[0].key, first);
+        assert_eq!(answer.ended[0].snapshot.key, first);
         assert!(writing_after_flush(cx));
     });
     cx.update(|cx| dirs.restart(cx));

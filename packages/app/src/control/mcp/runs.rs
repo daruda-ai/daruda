@@ -93,7 +93,22 @@ impl StatusQuery {
     }
 }
 
+/// A run's current result: an end that can be resumed says so.
 pub(super) fn convert(snapshot: domain::RunSnapshot) -> wire::RunResult {
+    let resumable = snapshot.resumable();
+    convert_as(snapshot, resumable)
+}
+
+/// A delivered episode: `recovered` and `resumable` are its own, not its key's.
+pub(super) fn convert_episode(event: crate::runs::watch::RunEvent) -> wire::RunResult {
+    let resumable = event.resumable();
+    wire::RunResult {
+        recovered: event.origin == crate::runs::watch::Origin::Recovered,
+        ..convert_as(event.snapshot, resumable)
+    }
+}
+
+fn convert_as(snapshot: domain::RunSnapshot, resumable: bool) -> wire::RunResult {
     let handle = match snapshot.key {
         domain::RunKey::Flow(run_id) => wire::RunHandle::Flow { run_id },
         domain::RunKey::Task(exec) => wire::RunHandle::Task {
@@ -126,7 +141,7 @@ pub(super) fn convert(snapshot: domain::RunSnapshot) -> wire::RunResult {
             text,
             pointers,
         } => wire::RunState::Ended {
-            resumable: ended_as.resumable(),
+            resumable,
             ended_as: match ended_as {
                 domain::EndedAs::Completed => wire::EndedAs::Completed,
                 domain::EndedAs::Failed => wire::EndedAs::Failed,

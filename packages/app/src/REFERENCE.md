@@ -358,27 +358,37 @@ it is a Task's flow interruption whose execution the log still holds: the
 Task's own end is still to come. A Task whose execution is gone with nothing to
 deliver is released too. When the task log cannot be read, no Task entry is
 judged or released. Recovered results carry
-`recovered: true` in `daruda_run_wait`/`daruda_run_status`, and their notice
-line says they were requested before daruda restarted.
+`recovered: true` in `daruda_run_wait`/`daruda_run_status` (per delivered
+episode, so a live end of the same key in one answer is not marked), and their
+notice line says they were requested before daruda restarted.
 After install, each scoped run with no end and nothing observed is read once
 off the UI thread (`RunsHost::judge_restored`), through `run_query`'s own disk
 readers; a key that changed meanwhile is skipped. A flow ended on disk is
 delivered with its report as a `Recovered` episode. A flow `marker::run_status`
 reads as `Crashed` (a quit leaves its lock with a dead holder) or `Stalled` is
 an end too, with `resumable: true` on the wire, `resumable` in its notice, and,
-without a report, fixed English text naming how many nodes passed.
-`daruda_flow_resume` picks such a run up after the person approves, under the
-same `flow:<run-id>` handle. It finds the run through `RunsHost::flow_location`
-(the watch's recorded location, else `RunsEffects::locate_flow_run`, the
-lookup result queries use) and the window whose lane keeps its directory.
-Refusals no answer can change come before the card: `flow_run_not_found`,
-`flow_locked` naming the holder (checked first, since another run's lock hides
-this run's status), and `flow_run_not_resumable` with `running`, `ended`,
-`never_started` or `unknown`. A profile is never asked for: `run.yaml` already
-folds the start's profile in. The approved resume goes through the Flows
-panel's `submit_flow_resume`, submitted by `Orchestrator` with the solicitation
-captured before the card; the log keeps its first starter, and the resumed
-episode's end is delivered like any other. A flow whose
+without a report, fixed English text naming how many nodes passed. Only an end
+no later episode superseded carries the hint (`RunEvent::resumable`): a crash
+still owed after a resume is delivered without it.
+`daruda_flow_resume` takes the handle of any result marked resumable: a flow's,
+or a Task's, which names the flow run its current execution runs as. The run
+keeps the handle its end arrives under: a flow handle whose run a scoped Task
+runs as answers with that Task's handle, and an orchestrator resume scopes only
+that owner key, so one run never ends under two keys. It finds the run through
+`RunsHost::flow_location` (the watch's recorded location, else
+`RunsEffects::locate_flow_run`, the lookup result queries use) and the window
+whose lane keeps its directory. The run is read once before the card into the
+plan the card quotes (passed nodes come from `resume::prepare`'s replay; all
+passed has its own wording), and once more after approval, since the worktree
+can change while the card waits. Refusals no answer can change come before the
+card: `flow_run_not_found`, `flow_locked` naming the holder (checked first,
+since another run's lock hides this run's status; a live holder of this same
+run is `running` instead), and `flow_run_not_resumable` with `running`,
+`ended`, `never_started` or `unknown`. A profile is never asked for:
+`run.yaml` already folds the start's profile in. The approved resume goes
+through the Flows panel's `submit_flow_resume`, submitted by `Orchestrator`
+with the solicitation captured before the card; the log keeps its first
+starter, and the resumed episode's end is delivered like any other. A flow whose
 holder is alive stays pending for wait refreshes; a missing run directory is
 retained as `Gone` and released `Expired`. A running Task whose flow no process
 here runs reads its result through the run directory and the profile's flow
@@ -494,8 +504,10 @@ solicitation, which the ledger restores. Results the desktop asked for never
 start it; the next ordinary start delivers them. Each start attempt is logged
 once: an info line with the count and outcome (started, already running, or
 disabled), or, for any other `EnsureError`, a warning with the count and reason
-that is also toasted in the first registered window, as a chip start failure
-is (the log alone if that window is gone). A failed start leaves the results
+that is also toasted in the window a start hosts the orchestrator in (the
+active workspace, else the first), as a chip start failure is (the log alone
+if that window is gone). `ensure` itself logs nothing: each caller reports a
+failed attempt once. A failed start leaves the results
 unreported and is not retried in that process.
 
 An active Orchestrator-started Task's matching child chat suppresses its own

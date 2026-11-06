@@ -200,9 +200,10 @@ pub enum GatedCommand {
     /// Bring up the chat a task's run belongs to.
     TaskOpen { task: String },
     /// Pick up a flow run that stopped without deciding to (an app quit, a
-    /// dead process, a stall), in the run directory it already has: the run
-    /// id, and so the caller's `flow:<run-id>` handle, stays the same.
-    FlowResume { run_id: String },
+    /// dead process, a stall), in the run directory it already has. `run` is
+    /// the handle its result carried: the flow's own, or the Task's whose
+    /// run it is. The run keeps the handle its owner holds it under.
+    FlowResume { run: crate::runs::RunHandle },
 }
 
 /// The task [`GatedCommand::TaskCreate`] adds, as the caller named it.

@@ -54,7 +54,7 @@ pub(super) fn prompt(events: &[RunEvent]) -> String {
             };
             let summary = match &snapshot.state {
                 RunState::Ended { ended_as, .. } => {
-                    let resumable = if ended_as.resumable() {
+                    let resumable = if event.resumable() {
                         RESUMABLE_NOTE
                     } else {
                         ""

@@ -106,10 +106,8 @@ pub(crate) fn seed_control_surface_for_test(cx: &mut App) {
 /// Bind the socket and publish its runtime file, then keep the inbound queue
 /// drained.
 fn serve_control_surface(dir: &std::path::Path, cx: &mut App) -> Result<(), EnsureError> {
-    let (server, inbound) = socket::Server::start(dir, cx).map_err(|e| {
-        window::log_open_failure(&window::OpenError::ControlSurfaceUnavailable(e.to_string()));
-        EnsureError::OpenFailed(e.to_string())
-    })?;
+    let (server, inbound) = socket::Server::start(dir, cx)
+        .map_err(|e| open_failed(window::OpenError::ControlSurfaceUnavailable(e.to_string())))?;
     let runtime_id = server.runtime_id.clone();
     let gate = server.gate.clone();
     cx.set_global(ControlSurface {
@@ -306,7 +304,11 @@ pub(crate) fn destination(cx: &mut App) -> Result<(PaneRef, bool), ControlError>
     let target = ensure(cx).map_err(|e| match e {
         EnsureError::Disabled => ControlError::OrchestratorDisabled,
         EnsureError::Unresolvable => ControlError::OrchestratorUnresolvable,
-        EnsureError::OpenFailed(_) => ControlError::OrchestratorUnavailable,
+        EnsureError::OpenFailed(reason) => {
+            // The phone is answered with fixed wording; the log keeps why.
+            window::log_open_failure(&reason);
+            ControlError::OrchestratorUnavailable
+        }
     })?;
     Ok((target, connecting))
 }
@@ -381,10 +383,7 @@ fn prepare(cx: &mut App) -> Result<Option<Prepared>, EnsureError> {
     if pane(cx).is_some() {
         return Ok(None);
     }
-    let cwd = window::cwd().map_err(|error| {
-        window::log_open_failure(&error);
-        EnsureError::OpenFailed(error.to_string())
-    })?;
+    let cwd = window::cwd().map_err(open_failed)?;
     window::install_instructions(&cwd);
     let (handle, weak) = host_workspace(cx)?;
     let workspace = weak.upgrade().ok_or_else(|| open_failed("host released"))?;
@@ -456,6 +455,17 @@ fn orchestrator_host_window_options(config: &daruda_config::Config) -> gpui::Win
     options
 }
 
+/// The open workspace a start hosts the orchestrator in: the active one, or
+/// another live one when Settings has focus.
+pub(crate) fn existing_host(
+    cx: &App,
+) -> Option<(
+    gpui::AnyWindowHandle,
+    gpui::WeakEntity<crate::workspace::Workspace>,
+)> {
+    WindowRegistry::active_workspace(cx).or_else(|| WindowRegistry::first_workspace(cx))
+}
+
 fn host_workspace_with(
     cx: &mut App,
     open: impl FnOnce(&mut App) -> Result<gpui::AnyWindowHandle, EnsureError>,
@@ -466,9 +476,7 @@ fn host_workspace_with(
     ),
     EnsureError,
 > {
-    if let Some(host) =
-        WindowRegistry::active_workspace(cx).or_else(|| WindowRegistry::first_workspace(cx))
-    {
+    if let Some(host) = existing_host(cx) {
         return Ok(host);
     }
     let handle = open(cx)?;
@@ -477,19 +485,10 @@ fn host_workspace_with(
     Ok((handle, weak))
 }
 
+/// A failed start, reported by its caller: each caller reports a start
+/// attempt once, in the way its surface reaches the person.
 fn open_failed(error: impl std::fmt::Display) -> EnsureError {
-    let reason = error.to_string();
-    daruda_store::observability::log_writer::LogWriter::log(
-        daruda_store::observability::error_report::ErrorReport::new(
-            "Orchestrator host unavailable",
-        )
-        .severity(daruda_store::observability::error_report::ErrorSeverity::Error)
-        .with_context("reason", reason.clone())
-        .at(file!(), line!())
-        .dedup("orchestrator.host")
-        .build(),
-    );
-    EnsureError::OpenFailed(reason)
+    EnsureError::OpenFailed(error.to_string())
 }
 
 /// Which refusal an unresolvable configuration is. Separate from [`ensure`] so

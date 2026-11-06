@@ -139,6 +139,16 @@ pub(crate) struct RunEvent {
     pub(super) recorded: Option<u64>,
     pub(crate) snapshot: RunSnapshot,
     pub(super) delivery: Delivery,
+    /// A later episode of the key began: a resume picked this end's run up,
+    /// or the Task's own end followed its flow's interruption.
+    pub(super) superseded: bool,
+}
+impl RunEvent {
+    /// Whether the run this end names can be picked up now: a resumable end
+    /// no later episode has superseded, so an owed crash is never re-offered.
+    pub(crate) fn resumable(&self) -> bool {
+        !self.superseded && self.snapshot.resumable()
+    }
 }
 #[cfg(test)]
 impl RunEvent {
@@ -151,6 +161,7 @@ impl RunEvent {
             recorded: None,
             snapshot,
             delivery: Delivery::Unreported,
+            superseded: false,
         }
     }
 }
@@ -225,6 +236,11 @@ impl RunWatch {
         let entry = self.changed(key);
         entry.episode = entry.revision;
         entry.floor = entry.last_sequence + 1;
+        for event in &mut self.events {
+            if &event.snapshot.key == key {
+                event.superseded = true;
+            }
+        }
     }
     pub(crate) fn waiting_on(&self, key: &RunKey) -> Option<&WaitingOn> {
         self.entries.get(key)?.block.as_ref().map(|block| &block.on)
@@ -279,6 +295,7 @@ impl RunWatch {
             recorded,
             snapshot,
             delivery: Delivery::Unreported,
+            superseded: false,
         };
         self.events.push(event.clone());
         self.announce(event);

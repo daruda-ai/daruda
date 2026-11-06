@@ -90,7 +90,7 @@ fn a_held_end_reaches_waiters_only_when_released_with_its_enrichment() {
     watch.release_end(token.clone(), ended(key.clone()));
     let answer = watch.poll_wait(wait, false).unwrap();
     assert!(
-        matches!(&answer.ended[0].state, RunState::Ended { text: Some(text), .. } if text == "answer")
+        matches!(&answer.ended[0].snapshot.state, RunState::Ended { text: Some(text), .. } if text == "answer")
     );
     watch.finish_wait(wait, true);
     watch.release_end(token, ended(key.clone()));
@@ -136,7 +136,7 @@ fn a_held_end_survives_an_immediate_resume_and_its_late_release_adds_its_text() 
     let answer = watch.poll_wait(wait, false).unwrap();
     assert_eq!(answer.ended.len(), 1, "the previous episode's end is kept");
     assert!(
-        matches!(&answer.ended[0].state, RunState::Ended { text: Some(text), .. } if text == "answer"),
+        matches!(&answer.ended[0].snapshot.state, RunState::Ended { text: Some(text), .. } if text == "answer"),
         "the late release still adds the report text"
     );
     watch.finish_wait(wait, true);
@@ -186,7 +186,8 @@ fn consecutive_resumes_enrich_only_the_end_that_owns_each_report() {
         let (wait, _) = watch.open_wait(None).unwrap();
         let answer = watch.poll_wait(wait, false).unwrap();
         assert_eq!(answer.ended.len(), 2);
-        for (snapshot, expected) in answer.ended.iter().zip(["first report", "second report"]) {
+        for (end, expected) in answer.ended.iter().zip(["first report", "second report"]) {
+            let snapshot = &end.snapshot;
             assert!(
                 matches!(&snapshot.state, RunState::Ended { text: Some(text), .. } if text == expected)
             );
@@ -213,6 +214,6 @@ fn an_outside_resume_invalidates_the_previous_report_without_a_ledger_event() {
     let answer = watch.poll_wait(wait, false).unwrap();
     assert_eq!(answer.ended.len(), 1);
     assert!(
-        matches!(&answer.ended[0].state, RunState::Ended { text: Some(text), .. } if text == "new report")
+        matches!(&answer.ended[0].snapshot.state, RunState::Ended { text: Some(text), .. } if text == "new report")
     );
 }

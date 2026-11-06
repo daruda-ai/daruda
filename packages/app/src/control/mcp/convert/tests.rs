@@ -543,20 +543,20 @@ fn flow_stop_accepts_only_flow_handles_and_keeps_omitted_behavior() {
     }
 }
 
-/// A resume names the run by the handle the orchestrator holds; a task's
-/// handle, a malformed one or none at all is the caller's mistake to fix.
+/// A resume names the run by the handle the orchestrator holds, a flow's or
+/// the task's it runs for; a malformed handle or none at all is the caller's
+/// mistake to fix.
 #[test]
-fn flow_resume_takes_only_a_flow_handle() {
-    assert_eq!(
-        to_command(
-            ToolId::FlowResume,
-            &serde_json::json!({"run": "flow:old-run"})
-        ),
-        Ok(Command::Gated(GatedCommand::FlowResume {
-            run_id: "old-run".into()
-        }))
-    );
-    for value in ["task:a/b", "task:a", "flow:../a", "flow:", "old-run"] {
+fn flow_resume_takes_the_handle_the_result_carried() {
+    for value in ["flow:old-run", "task:a/b", "task:a"] {
+        assert_eq!(
+            to_command(ToolId::FlowResume, &serde_json::json!({"run": value})),
+            Ok(Command::Gated(GatedCommand::FlowResume {
+                run: value.parse().unwrap()
+            }))
+        );
+    }
+    for value in ["flow:../a", "flow:", "old-run"] {
         assert_eq!(
             to_command(ToolId::FlowResume, &serde_json::json!({"run": value})),
             Err(ConvertError::BadArgument { name: "run" })

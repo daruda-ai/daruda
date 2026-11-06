@@ -267,3 +267,63 @@ impl crate::runs::RunsEffects for DiskLocation {
 }
 
 mod episodes;
+
+/// A crash a resume reopened goes out as owed history, without the hint
+/// that would have the orchestrator resume a run already going again.
+#[gpui::test]
+async fn a_reopened_crash_is_delivered_without_the_resume_hint(cx: &mut TestAppContext) {
+    let (tx, rx) = smol::channel::unbounded();
+    cx.update(|cx| {
+        RunsHost::ensure_installed(cx);
+        let crashed = crate::runs::result::RunSnapshot {
+            key: RunKey::Flow("crashed".into()),
+            what: "crashed".into(),
+            why: None,
+            state: RunState::Ended {
+                ended_as: crate::runs::result::EndedAs::Crashed,
+                text: None,
+                pointers: Default::default(),
+            },
+        };
+        RunsHost::register_run(crashed.key.clone(), cx);
+        RunsHost::seed_run_wait(crashed.clone(), cx);
+        RunsHost::reopen_run_for_test(&crashed.key, cx);
+        prepare(None, 0, cx)
+            .unwrap_or_else(|_| panic!("prepared"))
+            .send(serde_json::json!(1), tx, cx);
+    });
+    let reply = rx.recv().await.unwrap();
+    let value = frame_payload(&reply);
+    assert_eq!(value["ended"][0]["state"]["ended_as"], "crashed");
+    assert!(
+        value["ended"][0]["state"].get("resumable").is_none(),
+        "{value}"
+    );
+}
+
+/// `recovered` belongs to each delivered end, not to every end of its key.
+#[test]
+fn recovered_marks_only_the_end_restored_from_before_the_restart() {
+    use crate::runs::watch::{Origin, RunEvent};
+    let key = RunKey::Flow("run".into());
+    let end = |origin| {
+        let mut event = RunEvent::for_test(
+            1,
+            crate::runs::result::RunSnapshot {
+                key: key.clone(),
+                what: "run".into(),
+                why: None,
+                state: RunState::Ended {
+                    ended_as: crate::runs::result::EndedAs::Completed,
+                    text: None,
+                    pointers: Default::default(),
+                },
+            },
+        );
+        event.origin = origin;
+        event
+    };
+    let results = super::episodes(vec![end(Origin::Recovered), end(Origin::Live)]);
+    let recovered: Vec<_> = results.iter().map(|result| result.recovered).collect();
+    assert_eq!(recovered, [true, false]);
+}

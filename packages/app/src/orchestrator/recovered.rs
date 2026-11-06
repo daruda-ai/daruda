@@ -103,7 +103,8 @@ fn start(owed: usize, cx: &mut App) {
 }
 
 /// Nobody clicked anything, so a log line alone would leave the phone's
-/// results waiting without a word: the failure is toasted like a chip start.
+/// results waiting without a word: the failure is toasted like a chip start,
+/// in the window the start would have hosted the orchestrator in.
 fn report_failure(owed: usize, error: &EnsureError, cx: &mut App) {
     let report = ErrorReport::new(crate::surface::strings::orchestrator::start_failed())
         .severity(ErrorSeverity::Warning)
@@ -112,7 +113,7 @@ fn report_failure(owed: usize, error: &EnsureError, cx: &mut App) {
         .at(file!(), line!())
         .dedup(DEDUP)
         .build();
-    match WindowRegistry::first_workspace(cx) {
+    match super::existing_host(cx) {
         Some((_, host)) => super::report_start_failure(&host, report, cx),
         None => LogWriter::log(report),
     }

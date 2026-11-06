@@ -154,3 +154,28 @@ fn reported_episodes_leave_the_told_record(cx: &mut TestAppContext) {
         assert_eq!(told_count(cx), 1);
     });
 }
+
+/// A crash a resume picked up is still owed, but its line no longer offers
+/// a resume: the run it names is going again.
+#[gpui::test]
+fn a_crash_a_resume_reopened_is_not_offered_for_resuming(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        RunsHost::ensure_installed(cx);
+        let crashed = RunSnapshot {
+            state: RunState::Ended {
+                ended_as: EndedAs::Crashed,
+                text: None,
+                pointers: Default::default(),
+            },
+            ..ended("crashed")
+        };
+        RunsHost::register_run(crashed.key.clone(), cx);
+        RunsHost::seed_run_wait(crashed.clone(), cx);
+        let before = batch(audience(1, None), cx).unwrap().prompt;
+        assert!(before.contains("Crashed, resumable"), "{before}");
+        RunsHost::reopen_run_for_test(&crashed.key, cx);
+        let after = batch(audience(2, None), cx).unwrap().prompt;
+        assert!(after.contains("Crashed"), "{after}");
+        assert!(!after.contains("resumable"), "{after}");
+    });
+}

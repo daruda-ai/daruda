@@ -2,7 +2,7 @@
 use crate::runs::{
     RunsHost,
     result_host::RunQuery,
-    watch::{WaitAnswer, WaitId, WaitOutcome},
+    watch::{RunEvent, WaitAnswer, WaitId, WaitOutcome},
 };
 use daruda_control_types::runs as wire;
 use gpui::App;
@@ -153,14 +153,8 @@ impl PreparedWait {
     }
 
     fn payload(self, result: WaitAnswer) -> serde_json::Value {
-        let recovered = result.recovered;
         let convert = |runs: Vec<crate::runs::result::RunSnapshot>| -> Vec<wire::RunResult> {
-            runs.into_iter()
-                .map(|run| wire::RunResult {
-                    recovered: recovered.contains(&run.key),
-                    ..super::runs::convert(run)
-                })
-                .collect()
+            runs.into_iter().map(super::runs::convert).collect()
         };
         let mut answer = wire::WaitAnswer {
             outcome: match result.outcome {
@@ -168,8 +162,8 @@ impl PreparedWait {
                 WaitOutcome::TimedOut => wire::WaitOutcome::TimedOut,
                 WaitOutcome::Nothing => wire::WaitOutcome::Nothing,
             },
-            ended: convert(result.ended),
-            blocked: convert(result.blocked),
+            ended: episodes(result.ended),
+            blocked: episodes(result.blocked),
             already_reported: convert(result.already_reported),
             not_running: convert(result.not_running),
             pending: convert(result.pending),
@@ -186,6 +180,14 @@ impl PreparedWait {
         payload
     }
 }
+/// Delivered episodes as the wire carries them.
+fn episodes(events: Vec<RunEvent>) -> Vec<wire::RunResult> {
+    events
+        .into_iter()
+        .map(super::runs::convert_episode)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;
 

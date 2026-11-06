@@ -162,10 +162,13 @@ async fn delivered_end(
     let (id, wake) = wait;
     loop {
         if let Some(answer) = cx.update(|cx| RunsHost::poll_run_wait(id, false, cx))
-            && let Some(end) = answer.ended.into_iter().find(|end| &end.key == key)
+            && let Some(end) = answer
+                .ended
+                .into_iter()
+                .find(|end| &end.snapshot.key == key)
         {
             cx.update(|cx| RunsHost::finish_run_wait(id, true, cx));
-            return end;
+            return end.snapshot;
         }
         wake.recv().await.expect("the waiter stays open");
     }

@@ -65,6 +65,9 @@ pub struct Resumed {
     /// The input values the run started with: a continuation renders these,
     /// never values asked for again.
     pub inputs: crate::input::InputValues,
+    /// Nodes the log said had passed when this was read: for describing the
+    /// run before it resumes. Scheduling replays progress under the lock.
+    pub passed: Vec<NodeId>,
 }
 
 impl Resumed {
@@ -164,6 +167,7 @@ pub fn prepare(
         loaded,
         until: reader::selection(run_dir),
         inputs: replay.inputs,
+        passed: replay.passed,
     })
 }
 

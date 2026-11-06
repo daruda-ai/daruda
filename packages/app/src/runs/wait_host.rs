@@ -88,6 +88,11 @@ impl RunsHost {
         cx.try_global::<Self>()
             .is_some_and(|host| host.watch.covered(key))
     }
+    /// Start `key`'s next episode, as a resume of its run does.
+    #[cfg(test)]
+    pub(crate) fn reopen_run_for_test(key: &RunKey, cx: &mut App) {
+        cx.update_global::<Self, _>(|host, _| host.watch.reopen(key));
+    }
 }
 #[cfg(test)]
 mod tests;

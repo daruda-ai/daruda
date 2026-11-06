@@ -115,6 +115,7 @@ impl RunWatch {
             recorded: Some(recorded),
             snapshot,
             delivery: Delivery::Unreported,
+            superseded: false,
         };
         self.events.push(event.clone());
         self.announce(event);

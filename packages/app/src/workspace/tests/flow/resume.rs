@@ -52,9 +52,7 @@ impl Interrupted {
     }
 
     fn resume(&self) -> GatedCommand {
-        GatedCommand::FlowResume {
-            run_id: self.run_id.clone(),
-        }
+        GatedCommand::FlowResume { run: self.handle() }
     }
 }
 
@@ -62,6 +60,16 @@ impl Interrupted {
 /// it left into what a crash after `first` leaves: a log ending there, no
 /// marker, and a lock naming a pid that is gone (0 never lives).
 async fn interrupted_orchestrator_run(cx: &mut TestAppContext) -> Interrupted {
+    interrupted_run(CommandOrigin::Orchestrator, "first", cx).await
+}
+
+/// [`interrupted_orchestrator_run`], started by `origin` and cut off right
+/// after `last` passed.
+async fn interrupted_run(
+    origin: CommandOrigin,
+    last: &str,
+    cx: &mut TestAppContext,
+) -> Interrupted {
     let (lane, ws, _flow, _wh) = workspace_with_a_flow(cx, TWO_STEPS);
     let pane = crate::test_support::register_test_orchestrator(cx);
     let orchestrator = cx.update(|cx| {
@@ -87,7 +95,7 @@ async fn interrupted_orchestrator_run(cx: &mut TestAppContext) -> Interrupted {
                 profile: None,
                 inputs: Default::default(),
             }),
-            CommandOrigin::Orchestrator,
+            origin,
             cx,
         )
     });
@@ -108,8 +116,10 @@ async fn interrupted_orchestrator_run(cx: &mut TestAppContext) -> Interrupted {
     let text = std::fs::read_to_string(&log).expect("the run log");
     let cut = text
         .lines()
-        .position(|line| line.contains("\"attempt_passed\"") && line.contains("\"first\""))
-        .expect("`first` passed");
+        .position(|line| {
+            line.contains("\"attempt_passed\"") && line.contains(&format!("\"{last}\""))
+        })
+        .expect("`last` passed");
     // Dated a minute back: a resume right after the last record waits out
     // the engine's settle window for the dead run's orphans.
     let kept: String = text
@@ -301,7 +311,9 @@ async fn a_handle_no_open_worktree_holds_is_refused_before_the_card(cx: &mut Tes
     crate::test_support::register_test_orchestrator(cx);
     let error = refused_before_the_card(
         GatedCommand::FlowResume {
-            run_id: "never-was".into(),
+            run: RunHandle::Flow {
+                run_id: "never-was".into(),
+            },
         },
         cx,
     );
@@ -331,7 +343,9 @@ async fn a_run_that_never_started_a_step_is_refused_before_the_card(cx: &mut Tes
     write_lock(&ws, lane.path(), 0, "empty-run", cx);
     let error = refused_before_the_card(
         GatedCommand::FlowResume {
-            run_id: "empty-run".into(),
+            run: RunHandle::Flow {
+                run_id: "empty-run".into(),
+            },
         },
         cx,
     );
@@ -525,5 +539,235 @@ async fn a_run_owned_before_a_restart_is_resumed_through_the_ledger(cx: &mut Tes
             .collect();
         assert_eq!(completed.len(), 1, "the resumed episode's end");
         assert!(completed[0].solicited, "asked from the phone");
+    });
+}
+
+/// A live process that holds the worktree for this very run is the run
+/// going on, not another run in its way.
+#[gpui::test]
+async fn a_live_holder_of_the_same_run_is_refused_as_running(cx: &mut TestAppContext) {
+    let run = interrupted_orchestrator_run(cx).await;
+    write_lock(
+        &run.ws,
+        run.lane.path(),
+        std::process::id(),
+        &run.run_id,
+        cx,
+    );
+    assert_eq!(
+        refused_before_the_card(run.resume(), cx),
+        ControlError::FlowRunNotResumable {
+            name: run.run_id.clone(),
+            reason: NotResumableReason::Running,
+        }
+    );
+}
+
+/// A crash after the last step passed, before the run recorded its end:
+/// the card says nothing runs again rather than that a step starts over.
+#[gpui::test]
+async fn a_run_cut_off_after_its_last_step_says_nothing_runs_again(cx: &mut TestAppContext) {
+    let run = interrupted_run(CommandOrigin::Orchestrator, "second", cx).await;
+    let outcome =
+        deferred(cx.update(|cx| exec::run_gated(run.resume(), CommandOrigin::Orchestrator, cx)));
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|cx| approval::waiting_summaries_for_test(cx)),
+        vec![crate::surface::strings::control::approval_flow_resume_all_passed(&run.run_id, 2)]
+    );
+    cx.update(|cx| resolve_only_pending_for_test(ApprovalChoice::Refused, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        outcome.recv().await.expect("answered"),
+        Some(Err(ControlError::ApprovalRefused))
+    );
+}
+
+/// The desktop's Continue lands while the orchestrator's card waits: the
+/// check after approval finds the run going and refuses, so it is resumed
+/// once, by the desktop.
+#[gpui::test]
+async fn a_desktop_resume_while_the_card_waits_is_not_resumed_twice(cx: &mut TestAppContext) {
+    let run = interrupted_orchestrator_run(cx).await;
+    std::fs::remove_file(run.lane.path().join("go")).expect("hold `second` open");
+    let outcome =
+        deferred(cx.update(|cx| exec::run_gated(run.resume(), CommandOrigin::Orchestrator, cx)));
+    cx.run_until_parked();
+    let here = run.ws.read_with(cx, |ws, _| ws.active);
+    run.ws
+        .update(cx, |ws, cx| ws.resume_flow_run(here, &run.run_dir, cx));
+    assert!(
+        wait_for_run(cx, |cx| {
+            cx.update(|cx| {
+                RunsHost::flow_run(run.lane.path(), cx).is_some_and(|flow| {
+                    matches!(
+                        flow.view().node_state("second"),
+                        crate::runs::NodeRunState::Running { .. }
+                    )
+                })
+            })
+        })
+        .await,
+        "the desktop's resume never started `second`"
+    );
+    cx.update(|cx| resolve_only_pending_for_test(ApprovalChoice::Approved, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        outcome.recv().await.expect("answered"),
+        Some(Err(ControlError::FlowRunNotResumable {
+            name: run.run_id.clone(),
+            reason: NotResumableReason::Running,
+        }))
+    );
+    let submitter = cx.update(|cx| {
+        RunsHost::flow_run(run.lane.path(), cx)
+            .map(|flow| flow.submitter_for_test())
+            .expect("held")
+    });
+    assert_eq!(
+        submitter,
+        (StartedBy::Desktop, false),
+        "still the desktop's"
+    );
+
+    run.ws.update(cx, |ws, cx| ws.stop_flow_run_in(here, cx));
+    assert!(
+        wait_for_run(cx, |cx| !run_is_held(cx, run.lane.path())).await,
+        "the resumed run did not stop"
+    );
+    assert_eq!(run.lines("first.log"), 1, "`first` never ran again");
+}
+
+/// A crashed run a running Task started from the phone: only the Task the
+/// orchestrator holds is in its scope.
+async fn interrupted_task_run(
+    cx: &mut TestAppContext,
+) -> (Interrupted, daruda_store::tasks::ExecutionRef) {
+    use crate::runs::seed::{self, SeedEnd, SeedRun};
+    let run = interrupted_run(CommandOrigin::Phone, "first", cx).await;
+    let exec = run.ws.update(cx, |ws, cx| {
+        let seeded = SeedRun {
+            source: daruda_store::tasks::TaskExecutionSource::Flow {
+                run_id: run.run_id.clone(),
+                flow: "ship.yaml".into(),
+            },
+            ..SeedRun::chat(run.lane.path())
+        };
+        let task = seed::task(
+            seed::spec(ws.projects[0].uuid, "Ship"),
+            Some((&seeded, SeedEnd::Running)),
+            cx,
+        );
+        let exec = seeded.exec(&task);
+        RunsHost::register_run(RunKey::Task(exec.clone()), cx);
+        exec
+    });
+    cx.update(|cx| {
+        assert!(!RunsHost::run_scope(cx).contains(&RunKey::Flow(run.run_id.clone())));
+    });
+    (run, exec)
+}
+
+fn task_handle(exec: &daruda_store::tasks::ExecutionRef) -> RunHandle {
+    RunHandle::Task {
+        task_id: exec.task_id.clone(),
+        execution_id: exec.execution_id.clone(),
+    }
+}
+
+/// Approve the only card and answer what the resume said.
+async fn approved(
+    outcome: smol::channel::Receiver<Option<ControlOutcome>>,
+    cx: &mut TestAppContext,
+) -> ControlResult {
+    cx.run_until_parked();
+    cx.update(|cx| resolve_only_pending_for_test(ApprovalChoice::Approved, cx));
+    cx.run_until_parked();
+    match outcome.recv().await.expect("answered") {
+        Some(Ok(result)) => result,
+        other => panic!("not resumed: {other:?}"),
+    }
+}
+
+/// The Task's handle, the one its result carried, resumes the Task's run;
+/// the Task stays the run's only handle, so its end is told once.
+#[gpui::test]
+async fn a_tasks_handle_resumes_its_flow_under_the_tasks_handle(cx: &mut TestAppContext) {
+    let (run, exec) = interrupted_task_run(cx).await;
+    let command = GatedCommand::FlowResume {
+        run: task_handle(&exec),
+    };
+    let outcome =
+        deferred(cx.update(|cx| exec::run_gated(command, CommandOrigin::Orchestrator, cx)));
+    let ControlResult::FlowResuming { handle, name, .. } = approved(outcome, cx).await else {
+        panic!("not a resume");
+    };
+    assert_eq!(handle, task_handle(&exec));
+    assert_eq!(name, run.run_id);
+    assert!(
+        wait_for_run(cx, |cx| {
+            run.run_dir.join("DONE").exists() && !run_is_held(cx, run.lane.path())
+        })
+        .await,
+        "the resumed run did not finish"
+    );
+    assert_eq!((run.lines("first.log"), run.lines("second.log")), (1, 2));
+    let task = RunKey::Task(exec);
+    let flow = RunKey::Flow(run.run_id.clone());
+    assert!(
+        wait_for_run(cx, |cx| {
+            cx.update(|cx| {
+                RunsHost::unreported_run_events(cx).iter().any(|event| {
+                    event.snapshot.key == task
+                        && matches!(
+                            event.snapshot.state,
+                            RunState::Ended {
+                                ended_as: EndedAs::Completed,
+                                ..
+                            }
+                        )
+                })
+            })
+        })
+        .await,
+        "the Task's own end never came"
+    );
+    cx.update(|cx| {
+        let scope = RunsHost::run_scope(cx);
+        assert!(scope.contains(&task));
+        assert!(!scope.contains(&flow), "one handle per run");
+        assert!(
+            RunsHost::unreported_run_events(cx)
+                .iter()
+                .all(|event| event.snapshot.key != flow),
+            "the flow's end is not told beside the Task's"
+        );
+    });
+}
+
+/// The flow's own handle, for a run a Task the orchestrator holds runs as,
+/// resumes it as that Task's: no second key joins the scope.
+#[gpui::test]
+async fn a_tasks_flow_handle_resumes_it_as_the_tasks(cx: &mut TestAppContext) {
+    let (run, exec) = interrupted_task_run(cx).await;
+    let outcome =
+        deferred(cx.update(|cx| exec::run_gated(run.resume(), CommandOrigin::Orchestrator, cx)));
+    let ControlResult::FlowResuming { handle, .. } = approved(outcome, cx).await else {
+        panic!("not a resume");
+    };
+    assert_eq!(
+        handle,
+        task_handle(&exec),
+        "the handle the orchestrator holds"
+    );
+    assert!(
+        wait_for_run(cx, |cx| {
+            run.run_dir.join("DONE").exists() && !run_is_held(cx, run.lane.path())
+        })
+        .await,
+        "the resumed run did not finish"
+    );
+    cx.update(|cx| {
+        assert!(!RunsHost::run_scope(cx).contains(&RunKey::Flow(run.run_id.clone())));
     });
 }
