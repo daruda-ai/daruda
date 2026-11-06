@@ -81,6 +81,7 @@ fn fingerprint(lanes: &[(std::path::PathBuf, std::path::PathBuf)]) -> u64 {
 
 impl RunsEffects for WorkspaceEffects {
     fn run_event(&self, event: crate::runs::watch::RunEvent, cx: &mut App) {
+        crate::orchestrator::recovered::on_run_event(&event, cx);
         crate::control::notices::enqueue(event, cx);
     }
 

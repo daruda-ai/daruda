@@ -444,6 +444,22 @@ notices retain each channel's presence policy. Only direct Phone flow submission
 keep the direct flow outcome notice; Orchestrator flows answer through their
 notice turn. Phone starts do not join the omitted-handles scope.
 
+Notices reach only a running orchestrator, which starts lazily. After a
+restart, `orchestrator/recovered.rs` starts it at most once per process for
+results the phone is still owed. When the first Workspace registers
+(`WindowRegistry::register`), any solicited, unreported episode in the omitted
+scope starts it, whatever its origin: a carried Task that startup
+reconciliation settled is `Live` but predates this process. If nothing was
+owed then, only a later `Recovered` solicited announcement starts it, because
+`judge_restored` ends arrive after the first window; a live result in ordinary
+operation never does. Both checks are deferred out of the current update. The
+start goes through `orchestrator::ensure`, so a disabled feature starts
+nothing, and the notice turn arms `CompletionOnly` from the episode's
+solicitation, which the ledger restores. A failed start is logged and leaves
+the results unreported. Results the desktop asked for never start it; the next
+ordinary start delivers them. One info line records each decision (count and
+outcome only).
+
 An active Orchestrator-started Task's matching child chat suppresses its own
 completion/error relay, even before run-scope registration: TaskRecord
 provenance and the active execution establish ownership. Native completion

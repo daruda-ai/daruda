@@ -15,6 +15,7 @@
 
 pub(crate) mod briefing;
 pub(crate) mod config;
+pub(crate) mod recovered;
 pub(crate) mod window;
 
 use gpui::{App, AppContext as _, Global};

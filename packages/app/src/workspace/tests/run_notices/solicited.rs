@@ -192,6 +192,21 @@ fn notice_completion(solicited: bool, failed: bool, cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     assert_eq!(probe.drain().0, 1);
+    answer_reaches_phone_once(pane, &mut outbound, solicited, failed, cx);
+}
+
+/// After a notice was sent: no receipt ACK, no first-response relay or
+/// fallback, and the turn's end reaches each channel its solicitation allows
+/// exactly once.
+pub(super) fn answer_reaches_phone_once(
+    pane: crate::telegram::bridge::PaneRef,
+    outbound: &mut futures::channel::mpsc::UnboundedReceiver<
+        crate::remote_channel::global::Pending,
+    >,
+    solicited: bool,
+    failed: bool,
+    cx: &mut TestAppContext,
+) {
     assert!(outbound.next().now_or_never().is_none(), "no received ACK");
     let workspace = host(cx);
     workspace.update(cx, |ws, cx| {

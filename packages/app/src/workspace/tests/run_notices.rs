@@ -685,3 +685,6 @@ mod solicited;
 
 #[path = "run_notices/task_completion.rs"]
 mod task_completion;
+
+#[path = "run_notices/recovered_start.rs"]
+mod recovered_start;
