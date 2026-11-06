@@ -527,6 +527,15 @@ impl AgentChatView {
         self.begin_connect(None, cx);
     }
 
+    /// Drop the recap a switch owed this pane, and have the host save at once:
+    /// the saved layout keeps a pending recap, conversation text and all, and
+    /// must not hold it longer than it is owed.
+    pub(super) fn settle_handoff_recap(&mut self, cx: &mut Context<Self>) {
+        if self.handoff_recap.take().is_some() {
+            cx.emit(super::AgentChatEvent::HandoffDelivered);
+        }
+    }
+
     /// Whether the person spoke after the last switch divider — after which
     /// that switch's recap has gone out.
     pub(super) fn prompted_since_last_handoff(&self) -> bool {

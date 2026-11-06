@@ -1093,3 +1093,85 @@ fn a_second_switch_on_a_restored_pane_keeps_its_record(cx: &mut gpui::TestAppCon
         })
         .unwrap();
 }
+
+/// How many times `view` asked its host to save a delivered recap away.
+fn deliveries(
+    view: &gpui::Entity<crate::view::AgentChatView>,
+    cx: &mut gpui::TestAppContext,
+) -> std::rc::Rc<std::cell::Cell<usize>> {
+    let count = std::rc::Rc::new(std::cell::Cell::new(0));
+    let sink = count.clone();
+    cx.update(|cx| {
+        cx.subscribe(view, move |_, event: &crate::view::AgentChatEvent, _| {
+            if matches!(event, crate::view::AgentChatEvent::HandoffDelivered) {
+                sink.set(sink.get() + 1);
+            }
+        })
+        .detach();
+    });
+    count
+}
+
+/// The saved layout holds a pending recap with the conversation it records;
+/// once the recap is sent, the host is asked to save at once — and only then,
+/// and only once.
+#[gpui::test]
+fn sending_the_recap_asks_the_host_to_save_once(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::ChatItem;
+
+    let window = make_test_view(cx);
+    let view = window.root(cx).unwrap();
+    let saves = deliveries(&view, cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items.push(ChatItem::UserText("hi".into()));
+            switch_account(view, cx);
+            let (handle, _probe) = daruda_acp::AcpSessionHandle::detached_for_test();
+            view.status = crate::view::AgentSessionStatus::Connected;
+            view.attach_handle(handle);
+            view.send_prompt_text("first".into(), cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(saves.get(), 1, "the delivered recap is saved away");
+    assert!(view.read_with(cx, |v, _| v.pending_handoff().is_none()));
+}
+
+/// A restored recap the resumed session shows was already sent is dropped —
+/// and the saved copy with it.
+#[gpui::test]
+fn a_settled_restored_recap_asks_the_host_to_save(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::{AcpEvent, ChatItem};
+
+    let window = make_test_view(cx);
+    let view = window.root(cx).unwrap();
+    let saves = deliveries(&view, cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items.push(ChatItem::UserText("hi".into()));
+            switch_account(view, cx);
+            let saved = view.pending_handoff().unwrap().to_owned();
+            view.reset_for_new_session(cx);
+            view.restore_pending_handoff(saved);
+            view.replay = crate::view::Replay::Loading {
+                requested: "s".into(),
+            };
+            view.items.push(ChatItem::UserText("go".into()));
+            view.apply_event(
+                AcpEvent::Connected {
+                    program: None,
+                    session_id: "s".into(),
+                    modes: None,
+                    config_options: Vec::new(),
+                    capabilities: Default::default(),
+                    login_methods: Vec::new(),
+                },
+                "",
+                false,
+                cx,
+            );
+        })
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(saves.get(), 1);
+}

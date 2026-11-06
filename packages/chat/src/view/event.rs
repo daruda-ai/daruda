@@ -14,6 +14,10 @@ pub enum AgentChatEvent {
     ReportError(ErrorReport),
     /// A pane preference the saved layout carries changed.
     PrefsChanged,
+    /// The recap a switch owed this pane is no longer owed — sent, or found
+    /// already sent on a resume. The saved layout still holds it, with the
+    /// conversation text it records, until the host saves again.
+    HandoffDelivered,
     /// The status banner's retry after a failed connect.
     RetryConnect,
     /// "Sign in again": the session's account needs a fresh login.

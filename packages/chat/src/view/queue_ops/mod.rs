@@ -322,7 +322,7 @@ impl AgentChatView {
             self.fail_prompt_handoff(task, cx);
             return false;
         }
-        self.consume_briefings();
+        self.consume_briefings(cx);
         self.report_sent(task, origin, &text, cx);
         self.start_dispatched_turn();
         self.echo_attached_prompt(text, &attachments, cx);
@@ -626,7 +626,7 @@ impl AgentChatView {
             self.fail_prompt_handoff(drained.task, cx);
             return;
         }
-        self.consume_briefings();
+        self.consume_briefings(cx);
         self.activate_queued_prompt(&drained, cx);
         self.report_sent(drained.task, drained.origin, &drained.text, cx);
         cx.notify();
@@ -666,9 +666,9 @@ impl AgentChatView {
     }
 
     /// The first prompt reached the wire: what it carried is said.
-    fn consume_briefings(&mut self) {
-        self.handoff_recap = None;
+    fn consume_briefings(&mut self, cx: &mut Context<Self>) {
         self.briefing = None;
+        self.settle_handoff_recap(cx);
     }
 
     /// Arm the one-shot briefing. Called between inserting the orchestrator's
@@ -687,7 +687,8 @@ impl AgentChatView {
     #[cfg(test)]
     pub(super) fn wire_text_for_test(&mut self, text: &str) -> String {
         let wire = self.wire_text(text);
-        self.consume_briefings();
+        self.handoff_recap = None;
+        self.briefing = None;
         wire
     }
 

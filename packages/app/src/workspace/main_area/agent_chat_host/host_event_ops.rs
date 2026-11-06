@@ -64,7 +64,9 @@ impl Workspace {
     ) {
         match event {
             AgentChatEvent::ReportError(report) => self.report_error(report.clone(), cx),
-            AgentChatEvent::PrefsChanged => self.mutate_durable(cx, |_, _| {}),
+            AgentChatEvent::PrefsChanged | AgentChatEvent::HandoffDelivered => {
+                self.mutate_durable(cx, |_, _| {})
+            }
             AgentChatEvent::RetryConnect => self.retry_agent_chat_connect(pane_id, cx),
             AgentChatEvent::Reauthenticate => self.reauthenticate_pane_account(pane_id, cx),
             AgentChatEvent::OpenLink(target) => {

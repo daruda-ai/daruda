@@ -44,7 +44,7 @@ impl AgentChatView {
             // A prompt the session replays after the last switch carried
             // that switch's recap, so a restored pending one is already said.
             if self.prompted_since_last_handoff() {
-                self.handoff_recap = None;
+                self.settle_handoff_recap(cx);
             }
         } else {
             // Fresh session (`session/new`): clear stale plan/title so
