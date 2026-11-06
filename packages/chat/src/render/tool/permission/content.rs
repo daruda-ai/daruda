@@ -51,63 +51,74 @@ pub(super) fn request_details(
             card.raw_input_summary
                 .as_ref()
                 .filter(|text| !text.trim().is_empty())
-                .map(|summary| {
-                    let copy = daruda_ui::button_with_surface(
-                        daruda_ui::copy_button(
-                            SharedString::from(format!("agent-chat-permission-copy-{ix}")),
-                            summary.clone().into(),
-                            icons::icon(icons::COPY),
-                            s::agent_chat::permission_copy_summary().into(),
-                            icons::icon(icons::CHECK),
-                            s::agent_chat::code_copied().into(),
-                            window,
-                            cx,
-                        ),
-                        surface,
-                        cx,
-                    )
-                    .debug_selector(move || format!("agent-chat-permission-copy-{ix}"))
-                    .size(px(METRICS.copy_size))
-                    .p_0()
-                    .flex_none();
-                    div()
-                        .debug_selector(move || format!("agent-chat-permission-input-{ix}"))
-                        .w_full()
-                        .min_w_0()
-                        .min_h(px(METRICS.summary_min_height))
-                        .flex()
-                        .items_center()
-                        .gap(px(theme::GAP_LG))
-                        .px(px(METRICS.summary_pad_x))
-                        .py(px(theme::PAD_STANDARD))
-                        .text_size(px(theme::FONT_SIZE_SM))
-                        .line_height(relative(METRICS.line_height))
-                        .rounded(px(METRICS.summary_radius))
-                        .bg(surface.background)
-                        .border_1()
-                        .border_color(surface.border_tint)
-                        .child(permission_icon(
-                            "agent-chat-permission-input-icon",
-                            ix,
-                            input_icon(summary),
-                            surface.foreground_muted,
-                        ))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .font_family(theme::FONT_FAMILY_MONOSPACE)
-                                .child(
-                                    daruda_ui::selectable_text(
-                                        ("agent-chat-perm-input", ix),
-                                        SharedString::from(summary.clone()),
-                                    )
-                                    .color(surface.foreground),
-                                ),
-                        )
-                        .child(copy)
-                }),
+                .map(|summary| request_summary(ix, summary, surface, window, cx)),
         )
+}
+
+/// The adapter's one-line input summary in a bordered box: its kind's glyph,
+/// the selectable value in monospace, and a copy action. The settled record
+/// reuses it at the chat's type size.
+pub(super) fn request_summary(
+    ix: usize,
+    summary: &str,
+    surface: &PaneSurfaceTokens,
+    window: &mut Window,
+    cx: &mut Context<AgentChatView>,
+) -> Div {
+    let copy = daruda_ui::button_with_surface(
+        daruda_ui::copy_button(
+            SharedString::from(format!("agent-chat-permission-copy-{ix}")),
+            summary.to_owned().into(),
+            icons::icon(icons::COPY),
+            s::agent_chat::permission_copy_summary().into(),
+            icons::icon(icons::CHECK),
+            s::agent_chat::code_copied().into(),
+            window,
+            cx,
+        ),
+        surface,
+        cx,
+    )
+    .debug_selector(move || format!("agent-chat-permission-copy-{ix}"))
+    .size(px(METRICS.copy_size))
+    .p_0()
+    .flex_none();
+    div()
+        .debug_selector(move || format!("agent-chat-permission-input-{ix}"))
+        .w_full()
+        .min_w_0()
+        .min_h(px(METRICS.summary_min_height))
+        .flex()
+        .items_center()
+        .gap(px(theme::GAP_LG))
+        .px(px(METRICS.summary_pad_x))
+        .py(px(theme::PAD_STANDARD))
+        .text_size(px(theme::FONT_SIZE_SM))
+        .line_height(relative(METRICS.line_height))
+        .rounded(px(METRICS.summary_radius))
+        .bg(surface.background)
+        .border_1()
+        .border_color(surface.border_tint)
+        .child(permission_icon(
+            "agent-chat-permission-input-icon",
+            ix,
+            input_icon(summary),
+            surface.foreground_muted,
+        ))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .font_family(theme::FONT_FAMILY_MONOSPACE)
+                .child(
+                    daruda_ui::selectable_text(
+                        ("agent-chat-perm-input", ix),
+                        SharedString::from(summary.to_owned()),
+                    )
+                    .color(surface.foreground),
+                ),
+        )
+        .child(copy)
 }
 
 fn input_icon(summary: &str) -> &'static str {

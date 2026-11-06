@@ -1,4 +1,7 @@
+use super::record::{resolution_icon, resolution_label};
 use super::*;
+use crate::fold::FoldKey;
+use daruda_acp::PermissionResolution;
 
 fn request(kind: PermissionKindView) -> PermissionItem {
     PermissionItem {
@@ -117,6 +120,80 @@ fn permission_disclosure_defaults_closed_and_remeasures_its_own_row(cx: &mut gpu
             .size
             .height,
         collapsed.size.height
+    );
+}
+
+/// Opens settled request 0 and reports where its record title and input box
+/// landed relative to the row.
+fn open_settled(
+    cx: &mut gpui::TestAppContext,
+    card: PermissionItem,
+) -> (
+    gpui::Bounds<gpui::Pixels>,
+    gpui::Bounds<gpui::Pixels>,
+    Option<gpui::Bounds<gpui::Pixels>>,
+) {
+    let window = crate::view::tests::make_test_view(cx);
+    window
+        .update(cx, |view, window, cx| {
+            view.items = vec![daruda_acp::ChatItem::Permission(card)];
+            view.toggle_fold(FoldKey::Permission(0), window, cx);
+        })
+        .unwrap();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let row = visual.debug_bounds("agent-chat-permission-0").unwrap();
+    let title = visual
+        .debug_bounds("agent-chat-permission-record-title-0")
+        .expect("settled record shows the full title");
+    (
+        row,
+        title,
+        visual.debug_bounds("agent-chat-permission-input-0"),
+    )
+}
+
+#[gpui::test]
+fn settled_record_drops_a_summary_that_repeats_its_title(cx: &mut gpui::TestAppContext) {
+    let mut card = request(PermissionKindView::AllowOnce);
+    card.tool_title = Some("git status --short".into());
+    card.raw_input_summary = Some("command: git status --short".into());
+    let (row, title, input) = open_settled(cx, card);
+    assert!(input.is_none(), "the command would read twice");
+    assert!(
+        title.origin.x > row.origin.x,
+        "the body sits inside the card frame like a finished tool card's"
+    );
+}
+
+#[gpui::test]
+fn settled_record_keeps_a_summary_that_adds_detail(cx: &mut gpui::TestAppContext) {
+    let (_, title, input) = open_settled(cx, request(PermissionKindView::RejectOnce));
+    let input = input.expect("the path is not in the title");
+    assert!(input.origin.y >= title.bottom());
+}
+
+#[gpui::test]
+fn settled_record_keeps_the_choice_visible_beside_a_long_title(cx: &mut gpui::TestAppContext) {
+    let mut card = request(PermissionKindView::AllowOnce);
+    card.tool_title = Some("cargo test --workspace -- --nocapture ".repeat(20));
+    let window = crate::view::tests::make_test_view(cx);
+    window
+        .update(cx, |view, window, cx| {
+            view.items = vec![daruda_acp::ChatItem::Permission(card)];
+            view.toggle_fold(FoldKey::Permission(0), window, cx);
+        })
+        .unwrap();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    let row = visual.debug_bounds("agent-chat-permission-0").unwrap();
+    let choice = visual
+        .debug_bounds("agent-chat-permission-choice-0")
+        .expect("the chosen grant is named in the header");
+    assert!(choice.size.width > px(0.));
+    assert!(
+        choice.right() <= row.right(),
+        "a long title truncates before the choice, never over it"
     );
 }
 

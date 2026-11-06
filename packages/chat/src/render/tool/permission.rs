@@ -1,19 +1,18 @@
-//! Pane-local permission requests and their settled audit disclosure.
+//! Pane-local permission requests; a settled one becomes [`record`]'s summary bar.
 
-use daruda_acp::{PermissionChoice, PermissionItem, PermissionKindView, PermissionResolution};
+use daruda_acp::{PermissionChoice, PermissionItem, PermissionKindView};
 use daruda_ui::theme::{self, PaneSurfaceTokens};
 use gpui::{
     AnyElement, Context, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px,
     relative,
 };
 
-use crate::fold::FoldKey;
 use crate::render::card_frame::{CardFrame, CardTone};
-use crate::render::fold_header::{FoldHeader, FoldRow};
 use crate::strings as s;
 use crate::view::AgentChatView;
 
 mod content;
+mod record;
 use content::{permission_icon, request_details};
 
 /// Pixel geometry for permission cards and their decision controls.
@@ -26,7 +25,6 @@ struct Metrics {
     actions_space: f32,
     action_height: f32,
     action_line_height: f32,
-    record_pad_y: f32,
     line_height: f32,
     title_line_height: f32,
     icon_size: f32,
@@ -42,7 +40,6 @@ const METRICS: Metrics = Metrics {
     actions_space: 11.0,
     action_height: 27.0,
     action_line_height: 18.0,
-    record_pad_y: 9.0,
     line_height: 1.55,
     title_line_height: 1.6,
     icon_size: 14.0,
@@ -57,77 +54,18 @@ pub(in crate::render) fn permission_card(
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
+    if card.resolved.is_some() {
+        return record::permission_record(ix, card, expanded, dim, window, cx);
+    }
     let surface = PaneSurfaceTokens::agent_chat(cx).dimmed(dim);
-    let font = px(theme::FONT_SIZE_LG);
     let root = CardFrame::new(CardTone::Standard)
         .render(dim, cx)
         .debug_selector(move || format!("agent-chat-permission-{ix}"))
         .flex()
         .flex_col()
-        .text_size(font)
+        .text_size(px(theme::FONT_SIZE_LG))
         .line_height(relative(METRICS.line_height))
         .text_color(surface.foreground);
-
-    if card.resolved.is_some() {
-        let (status, choice) = resolution_label(card);
-        let (icon, color) = resolution_icon(card, &surface, dim);
-        let header = FoldHeader::with_title(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(theme::GAP_STANDARD))
-                .child(permission_icon(
-                    "agent-chat-permission-result-icon",
-                    ix,
-                    icon,
-                    color,
-                ))
-                .child(
-                    div()
-                        .flex_none()
-                        .font_weight(FontWeight::MEDIUM)
-                        .child(SharedString::from(status)),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_color(surface.foreground_muted)
-                        .font_family(theme::FONT_FAMILY_MONOSPACE)
-                        .text_size(px(theme::FONT_SIZE_XS))
-                        .child(SharedString::from(choice.map_or_else(
-                            || request_title(card),
-                            |choice| {
-                                s::agent_chat::permission_record_description(
-                                    request_title(card),
-                                    choice,
-                                )
-                            },
-                        ))),
-                )
-                .into_any_element(),
-        );
-        return root
-            .px_0()
-            .py(px(METRICS.record_pad_y))
-            .border_x_0()
-            .rounded_none()
-            .bg(surface.background)
-            .text_size(px(theme::FONT_SIZE_SM))
-            .child(
-                FoldRow::block(
-                    SharedString::from(format!("agent-chat-permission-record-{ix}")),
-                    FoldKey::Permission(ix),
-                    expanded,
-                    header,
-                    move |cx| request_details(ix, card, &surface, window, cx).into_any_element(),
-                )
-                .chrome(|row| row.min_h(px(theme::FONT_SIZE_SM * METRICS.line_height)))
-                .render(dim, cx),
-            )
-            .into_any_element();
-    }
-
     let warning = theme::dim_toward_gray(waiting_color(&surface), dim);
     let mut root = root
         .px(px(METRICS.card_pad_x))
@@ -219,66 +157,11 @@ fn permission_button(
         }))
 }
 
-fn resolution_label(card: &PermissionItem) -> (String, Option<String>) {
-    match &card.resolved {
-        Some(PermissionResolution::Chosen(id)) => {
-            let choice = card.options.iter().find(|choice| &choice.option_id == id);
-            let status = match choice.map(|choice| choice.kind) {
-                Some(PermissionKindView::AllowOnce | PermissionKindView::AllowAlways) => {
-                    s::agent_chat::permission_allowed()
-                }
-                Some(PermissionKindView::RejectOnce | PermissionKindView::RejectAlways) => {
-                    s::agent_chat::permission_denied()
-                }
-                None => s::agent_chat::permission_resolved(),
-            };
-            (
-                status,
-                Some(choice.map_or_else(|| id.clone(), |choice| choice.name.clone())),
-            )
-        }
-        Some(PermissionResolution::Cancelled) => (s::agent_chat::permission_cancelled(), None),
-        None => (s::agent_chat::permission_waiting(), None),
-    }
-}
-
 fn waiting_color(surface: &PaneSurfaceTokens) -> gpui::Hsla {
     if surface.syntax_is_light {
         theme::PANE_PERMISSION_WARNING_LIGHT
     } else {
         theme::PANE_PERMISSION_WARNING_DARK
-    }
-}
-
-fn resolution_icon(
-    card: &PermissionItem,
-    surface: &PaneSurfaceTokens,
-    dim: f32,
-) -> (&'static str, gpui::Hsla) {
-    use daruda_ui::icons;
-    let choice = match &card.resolved {
-        Some(PermissionResolution::Chosen(id)) => card.options.iter().find(|o| &o.option_id == id),
-        _ => None,
-    };
-    match choice.map(|choice| choice.kind) {
-        Some(PermissionKindView::AllowOnce | PermissionKindView::AllowAlways) => (
-            icons::CHECK,
-            theme::dim_toward_gray(
-                if surface.syntax_is_light {
-                    theme::AGENT_READING_LIGHT
-                } else {
-                    theme::AGENT_READING
-                },
-                dim,
-            ),
-        ),
-        Some(PermissionKindView::RejectOnce | PermissionKindView::RejectAlways) => {
-            (icons::CLOSE, surface.foreground_muted)
-        }
-        None if card.resolved == Some(PermissionResolution::Cancelled) => {
-            (icons::MINIMIZE, surface.foreground_muted)
-        }
-        None => (icons::INFO, surface.foreground_muted),
     }
 }
 

@@ -1013,6 +1013,23 @@ actions:   ghost Skip on the pane and primary Send
   `pane-fg-subtle`. Records fold with previous-response cleanup but are never
   filtered: they are the person's words.
 
+**Settled permission**
+
+A permission request belongs to a tool call, so it keeps the tool card's
+shape from asking to settled; only its content changes. Emphasis lives in
+the waiting card's content (amber status, title, actions), not in its frame.
+
+- **Same card, folded.** A decided request stays in the shared card frame,
+  folded to one header line at the chat font size like a finished tool card:
+  `✓ Allowed  <title>          <choice>` with the result icon, status in
+  `pane-fg`, the rest `pane-fg-muted`. The choice is trailing, where a tool
+  card shows its status, so a long title truncates before it. Never a
+  stripped frame with leftover hairlines.
+- **Opened, the request reads once.** The full title in regular weight, as
+  a tool card's body title. The input summary box joins it only when its
+  value adds to the title; a shell request's title is usually the command
+  itself.
+
 **BottomDock chip row (session controls, for reference)**
 
 The mode / model / effort chips under an agent pane live in the BottomDock, not
