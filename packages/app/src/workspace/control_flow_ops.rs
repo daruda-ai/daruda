@@ -21,7 +21,7 @@ use crate::control::result::{
 };
 use crate::workspace::Workspace;
 use crate::workspace::flow_declared::{declared_inputs, declared_profiles};
-use crate::workspace::flow_ops::FlowStartRefused;
+use crate::workspace::flow_ops::{FlowStartRefused, LaneBusy};
 use crate::workspace::flow_paths::{FlowOrigin, FoundFlow, flow_label, project_flows_dir};
 use crate::workspace::flow_request::{FlowSelection, FlowSubmitError};
 use daruda_control_types::runs::RunHandle;
@@ -111,10 +111,10 @@ impl Workspace {
         // The engine takes the on-disk lock only once the run has started, so
         // a lane another process holds is refused here, where it is still an
         // answer rather than a run that ends at once.
-        if self.lane_holder(&cwd).is_some() || self.is_flow_running_in(lane, cx) {
+        if let Some(busy) = self.lane_busy(lane, &cwd, cx) {
             return Err(ControlError::FlowLocked {
                 name: label,
-                held_by: self.flow_holder_in(lane, &cwd, cx),
+                held_by: self.busy_handle(lane, busy, cx),
             });
         }
         // Same check `Validate Flow…` runs: no lock, no run directory.
@@ -122,8 +122,7 @@ impl Workspace {
             Ok(issues) if issues.is_empty() => {}
             Ok(_) => return Err(ControlError::FlowRefused { name: label }),
             Err(e) => {
-                let held_by = self.flow_holder_in(lane, &cwd, cx);
-                return Err(refusal_answer(label, held_by, FlowStartRefused::Submit(e)));
+                return Err(self.control_refusal(lane, label, FlowStartRefused::Submit(e), cx));
             }
         }
         let inputs: daruda_flow::input::InputValues = inputs
@@ -156,10 +155,7 @@ impl Workspace {
         );
         let run_id = match submitted {
             Ok(run_id) => run_id,
-            Err(refused) => {
-                let held_by = self.flow_holder_in(lane, &cwd, cx);
-                return Err(refusal_answer(label, held_by, refused));
-            }
+            Err(refused) => return Err(self.control_refusal(lane, label, refused, cx)),
         };
         let entry = FlowEntry {
             name: label,
@@ -264,19 +260,36 @@ impl Workspace {
         RunHandle::flow(run.view().run_dir().file_name()?.to_str()?).ok()
     }
 
-    /// The run holding `lane`'s worktree: one this process hosts, else the
-    /// live lock holder another process left. `None` when neither names one.
-    pub(super) fn flow_holder_in(
+    /// The run `busy` says holds `lane`'s worktree: one this process hosts,
+    /// else the live lock holder another process left. `None` when it names
+    /// none.
+    pub(super) fn busy_handle(
         &self,
         lane: LaneRef,
-        cwd: &Path,
+        busy: LaneBusy,
         cx: &gpui::App,
     ) -> Option<RunHandle> {
-        self.hosted_flow_handle_in(lane, cx).or_else(|| {
+        match busy {
+            LaneBusy::Hosted => self.hosted_flow_handle_in(lane, cx),
             // An unreadable lock's empty run id names nothing.
-            self.lane_holder(cwd)
-                .and_then(|holder| RunHandle::flow(&holder.run_id).ok())
-        })
+            LaneBusy::Held(holder) => RunHandle::flow(&holder.run_id).ok(),
+        }
+    }
+
+    /// A start or resume's refusal in `lane` as the control caller's answer
+    /// about `name`, naming whatever holds the worktree now.
+    pub(super) fn control_refusal(
+        &self,
+        lane: LaneRef,
+        name: String,
+        refused: FlowStartRefused,
+        cx: &gpui::App,
+    ) -> ControlError {
+        let held_by = self.lane_for(lane).and_then(|l| {
+            self.lane_busy(lane, &l.path, cx)
+                .and_then(|busy| self.busy_handle(lane, busy, cx))
+        });
+        refusal_answer(name, held_by, refused)
     }
 
     /// This window's active worktree, if it can run `name`.
@@ -342,7 +355,7 @@ fn input_problem(issue: &daruda_flow::error::ValidationIssue) -> Option<FlowInpu
 /// is `FlowRefused`, a held worktree `FlowLocked`; anything else names its
 /// reason as a code, since this caller sees no toast and the toast's wording
 /// is localized desktop text that an MCP result must not carry.
-pub(super) fn refusal_answer(
+fn refusal_answer(
     name: String,
     held_by: Option<RunHandle>,
     refused: FlowStartRefused,

@@ -52,39 +52,30 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let submitter = (daruda_flow::request::StartedBy::Desktop, false);
-        if let Err(refused) = self.submit_flow_resume(lane_ref, run_dir, submitter, cx) {
+        let submitted = self
+            .read_flow_resume(lane_ref, run_dir)
+            .map_err(FlowStartRefused::Submit)
+            .and_then(|read| self.submit_flow_resume(lane_ref, run_dir, read, submitter, cx));
+        if let Err(refused) = submitted {
             self.answer_flow_start_refusal(lane_ref, refused, cx);
         }
     }
 
-    /// Continue the run in `run_dir` through the funnel a fresh submission
-    /// takes, so a resumed run is watched, stopped and listed like any other,
-    /// under its own id. `submitter` is who this episode answers to; the
-    /// run's log keeps who first started it. Says nothing on a refusal.
+    /// Continue the run `read` found in `run_dir` through the funnel a fresh
+    /// submission takes, so a resumed run is watched, stopped and listed
+    /// like any other, under its own id. `submitter` is who this episode
+    /// answers to; the run's log keeps who first started it. Says nothing on
+    /// a refusal.
     pub(in crate::workspace) fn submit_flow_resume(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
         run_dir: &Path,
+        read: crate::workspace::flow_request::ReadResume,
         submitter: (daruda_flow::request::StartedBy, bool),
         cx: &mut Context<Self>,
     ) -> Result<String, FlowStartRefused> {
         let submission = self
-            .build_resume_request(lane_ref, run_dir, cx)
-            .map_err(FlowStartRefused::Submit)?;
-        Self::start_flow_thread(submission, submitter, cx)
-    }
-
-    /// [`Self::submit_flow_resume`] for a run its caller just read.
-    pub(in crate::workspace) fn submit_read_flow_resume(
-        &mut self,
-        lane_ref: daruda_store::project::LaneRef,
-        run_dir: &Path,
-        resumed: daruda_flow::resume::Resumed,
-        submitter: (daruda_flow::request::StartedBy, bool),
-        cx: &mut Context<Self>,
-    ) -> Result<String, FlowStartRefused> {
-        let submission = self
-            .resume_request(lane_ref, run_dir, resumed, cx)
+            .resume_request(lane_ref, run_dir, read, cx)
             .map_err(FlowStartRefused::Submit)?;
         Self::start_flow_thread(submission, submitter, cx)
     }

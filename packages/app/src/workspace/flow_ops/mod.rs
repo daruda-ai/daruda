@@ -53,6 +53,16 @@ pub(in crate::workspace) enum FlowStartRefused {
     AlreadyRunning,
 }
 
+/// What already keeps a lane from starting a run, as
+/// [`Workspace::lane_busy`] finds it.
+#[derive(Debug)]
+pub(in crate::workspace) enum LaneBusy {
+    /// A run this process hosts, which it can stop.
+    Hosted,
+    /// The live process holding the lane's lock, out of this process's reach.
+    Held(daruda_flow::lock::LockHolder),
+}
+
 impl Workspace {
     // ---- Picker ----
 
@@ -119,18 +129,14 @@ impl Workspace {
         if !purpose.blocked_by_a_running_flow() {
             return true;
         }
-        // The host first: a run this process holds — for *this* worktree —
-        // is one we can stop, whether or not its thread has taken the lock
-        // yet. Between a start and its lock only the host knows of it, and a
-        // second start then would replace it with no stop switch left.
-        if self.is_flow_running_in(lane, cx) {
-            self.offer_to_stop_flow_in(lane, cx);
-            return false;
-        }
-        match self.lane_holder(&cwd) {
+        match self.lane_busy(lane, &cwd, cx) {
+            Some(LaneBusy::Hosted) => {
+                self.offer_to_stop_flow_in(lane, cx);
+                false
+            }
             // Offering "stop it" for a run we cannot reach would be a
             // button that does nothing.
-            Some(holder) => {
+            Some(LaneBusy::Held(holder)) => {
                 let lock_dir = super::flow_paths::lane_lock_dir(&self.lock_root, &cwd);
                 self.report_flow_refusal(
                     FlowSubmitError::LockHeld {
@@ -160,6 +166,22 @@ impl Workspace {
         };
         self.overlays.flow_picker = FlowPicker::Stopping { lane, run_dir };
         cx.notify();
+    }
+
+    /// What keeps `lane`, whose directory is `cwd`, from starting a run.
+    /// The host first: between a start and its lock only the host knows of
+    /// the run, whose thread may not hold the lock yet, and a second start
+    /// then would replace it with no stop switch left.
+    pub(in crate::workspace) fn lane_busy(
+        &self,
+        lane: daruda_store::project::LaneRef,
+        cwd: &Path,
+        cx: &gpui::App,
+    ) -> Option<LaneBusy> {
+        if self.is_flow_running_in(lane, cx) {
+            return Some(LaneBusy::Hosted);
+        }
+        self.lane_holder(cwd).map(LaneBusy::Held)
     }
 
     /// The live process holding this lane's run lock, if any. A lock left by

@@ -117,7 +117,7 @@ async fn a_lane_whose_folder_is_gone_is_refused_the_same_way_everywhere(cx: &mut
             ws.build_flow_request(ws.active, &flow_path, None, &FlowSelection::default(), cx)
                 .err(),
             ws.check_flow(ws.active, &flow_path, None, cx).err(),
-            ws.build_resume_request(ws.active, &run_dir, cx).err(),
+            ws.read_flow_resume(ws.active, &run_dir).err(),
         ]
     });
 
@@ -790,6 +790,21 @@ async fn the_chosen_profile_reaches_the_request(cx: &mut TestAppContext) {
     );
 }
 
+/// The request the Flows panel's Continue submits for `run_dir`: the run
+/// read once, and the request built from that read.
+fn resume_submission(
+    ws: &mut Workspace,
+    lane: daruda_store::project::LaneRef,
+    run_dir: &std::path::Path,
+    cx: &mut gpui::Context<Workspace>,
+) -> Result<
+    crate::workspace::flow_request::FlowSubmission,
+    crate::workspace::flow_request::FlowSubmitError,
+> {
+    let read = ws.read_flow_resume(lane, run_dir)?;
+    ws.resume_request(lane, run_dir, read, cx)
+}
+
 /// A killed run is picked up from its own directory: the same run id, the
 /// spec it recorded, and the journal saying what it had finished. Never the
 /// flow file on disk today — editing that between the crash and the resume
@@ -804,7 +819,7 @@ async fn a_killed_run_is_continued_from_its_own_directory(cx: &mut TestAppContex
 
     let request = ws.update(cx, |ws, cx| {
         let lane_ref = ws.active_ref();
-        ws.build_resume_request(lane_ref, &run_dir, cx)
+        resume_submission(ws, lane_ref, &run_dir, cx)
             .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"))
             .request
     });
@@ -861,7 +876,7 @@ async fn a_resume_request_uses_the_lane_that_owned_the_row(cx: &mut TestAppConte
     .expect("window exists");
 
     let submission = ws.update(cx, |ws, cx| {
-        ws.build_resume_request(original, &run_dir, cx)
+        resume_submission(ws, original, &run_dir, cx)
             .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"))
     });
 
@@ -880,7 +895,8 @@ async fn a_run_that_ended_on_purpose_is_not_continued(cx: &mut TestAppContext) {
     std::fs::write(run_dir.join("DONE"), "").expect("marker");
 
     let refused = ws.update(cx, |ws, cx| {
-        ws.build_resume_request(ws.active_ref(), &run_dir, cx).err()
+        let lane_ref = ws.active_ref();
+        resume_submission(ws, lane_ref, &run_dir, cx).err()
     });
     assert!(
         matches!(
@@ -908,7 +924,8 @@ async fn the_resumed_run_judges_the_stale_lock_the_same_way_it_judged_the_crash(
     let run_dir = killed_run_in(lane.path(), &lock_root);
 
     let request = ws.update(cx, |ws, cx| {
-        ws.build_resume_request(ws.active_ref(), &run_dir, cx)
+        let lane_ref = ws.active_ref();
+        resume_submission(ws, lane_ref, &run_dir, cx)
             .unwrap_or_else(|e| panic!("a killed run should be resumable: {e:?}"))
             .request
     });

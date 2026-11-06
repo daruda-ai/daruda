@@ -116,6 +116,15 @@ struct FlowAgentCatalog {
     accounts: HashMap<String, daruda_flow::session::SessionAccount>,
 }
 
+/// An interrupted run as [`Workspace::read_flow_resume`] found it, with the
+/// lane's directory and tree that read resolved, so the request built from
+/// it continues the run in the worktree its read named.
+pub(in crate::workspace) struct ReadResume {
+    pub cwd: PathBuf,
+    pub tree: daruda_flow::lock::CanonicalTree,
+    pub resumed: daruda_flow::resume::Resumed,
+}
+
 /// A request and the stream that narrates it. The receiver is handed back
 /// separately because the sender lives inside the request, and the two are
 /// created together exactly once.
@@ -293,20 +302,18 @@ impl Workspace {
         Ok(daruda_flow::request::check_request(&submission.request))
     }
 
-    /// Assemble a request that **continues** the run in `run_dir`, rather
-    /// than starting a new one.
+    /// Read the run in `run_dir`, kept by `lane_ref`, as a resume continues it.
     ///
-    /// The predicate that decides whether the earlier process is gone is
-    /// made **once, here**, and handed to both the question and the lock
-    /// that question implies. Two of them can disagree, and then the panel
-    /// offers a resume that the lock immediately refuses as held.
-    pub(in crate::workspace) fn build_resume_request(
-        &mut self,
+    /// The tree and the liveness predicate are decided **once, here**, for
+    /// the question, the lock it implies and the request built from it. Two
+    /// answers can disagree, and then the panel offers a resume that the
+    /// lock immediately refuses as held.
+    pub(in crate::workspace) fn read_flow_resume(
+        &self,
         lane_ref: daruda_store::project::LaneRef,
         run_dir: &Path,
-        cx: &mut Context<Self>,
-    ) -> Result<FlowSubmission, FlowSubmitError> {
-        let (_, tree) = self.lane_tree(lane_ref)?;
+    ) -> Result<ReadResume, FlowSubmitError> {
+        let (cwd, tree) = self.lane_tree(lane_ref)?;
         let is_alive: fn(u32) -> bool = process_is_alive;
         // Where this lane's lock lives, outside the tree. Told to look
         // anywhere else, `prepare` reads every run as `Unknown` — which is
@@ -314,19 +321,20 @@ impl Workspace {
         let lock_dir = daruda_flow::lock::lock_dir_for(&self.lock_root, &tree);
         let resumed = daruda_flow::resume::prepare(run_dir, Some(&lock_dir), &is_alive)
             .map_err(FlowSubmitError::Resume)?;
-        self.resume_request(lane_ref, run_dir, resumed, cx)
+        Ok(ReadResume { cwd, tree, resumed })
     }
 
-    /// [`Self::build_resume_request`] for a run `resume::prepare` already
-    /// read, with the same liveness predicate, [`process_is_alive`].
+    /// Assemble a request that **continues** the run `read` names, rather
+    /// than starting a new one, with the liveness predicate the read used,
+    /// [`process_is_alive`].
     pub(in crate::workspace) fn resume_request(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
         run_dir: &Path,
-        resumed: daruda_flow::resume::Resumed,
+        read: ReadResume,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
-        let (cwd, tree) = self.lane_tree(lane_ref)?;
+        let ReadResume { cwd, tree, resumed } = read;
         let is_alive: fn(u32) -> bool = process_is_alive;
         let catalog = self.flow_agent_catalog(
             lane_ref,

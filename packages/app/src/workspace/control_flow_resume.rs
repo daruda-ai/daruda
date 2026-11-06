@@ -10,7 +10,9 @@ use gpui::{App, Context};
 
 use crate::control::result::{ControlError, FlowNotStartedReason, LaneHandle, NotResumableReason};
 use crate::workspace::Workspace;
+use crate::workspace::flow_ops::FlowStartRefused;
 use crate::workspace::flow_paths;
+use crate::workspace::flow_request::{FlowSubmitError, ReadResume};
 use daruda_control_types::runs::RunHandle;
 use daruda_flow::marker::RunStatus;
 use daruda_flow::resume::ResumeError;
@@ -57,7 +59,8 @@ impl Workspace {
         run_dir: &Path,
         cx: &App,
     ) -> Result<FlowResumePlan, ControlError> {
-        let (name, resumed) = self.read_resumable(lane, run_dir, cx)?;
+        let (name, read) = self.read_resumable(lane, run_dir, cx)?;
+        let resumed = &read.resumed;
         let selected = match &resumed.until {
             Some(until) => resumed.loaded.graph().ancestors(until).len() + 1,
             None => resumed.loaded.flow().nodes.len(),
@@ -70,46 +73,48 @@ impl Workspace {
     }
 
     /// [`Self::control_flow_resume_check`]'s checks, answering the run's
-    /// name and what `resume::prepare` read of it.
+    /// name and the read a resume is built from.
     fn read_resumable(
         &self,
         lane: LaneRef,
         run_dir: &Path,
         cx: &App,
-    ) -> Result<(String, daruda_flow::resume::Resumed), ControlError> {
+    ) -> Result<(String, ReadResume), ControlError> {
         let cwd = self
             .lane_for(lane)
             .map(|lane| lane.path.clone())
             .ok_or(ControlError::FlowRunNotFound)?;
         let name = crate::runs::flow_run_name(run_dir);
+        let running = |name: String| ControlError::FlowRunNotResumable {
+            name,
+            reason: NotResumableReason::Running,
+        };
         if self
             .flow_run_in(lane, cx)
             .is_some_and(|run| daruda_core::path::same_path(run.view().run_dir(), run_dir))
         {
-            return Err(ControlError::FlowRunNotResumable {
-                name,
-                reason: NotResumableReason::Running,
-            });
+            return Err(running(name));
         }
-        if self.lane_holder(&cwd).is_some() || self.is_flow_running_in(lane, cx) {
-            let held_by = self.flow_holder_in(lane, &cwd, cx);
+        if let Some(busy) = self.lane_busy(lane, &cwd, cx) {
+            let held_by = self.busy_handle(lane, busy, cx);
             // A live process holding the lock for this very run is the run
             // still going, not another run in its way.
             if matches!(&held_by, Some(RunHandle::Flow { run_id })
                 if run_dir.file_name() == Some(std::ffi::OsStr::new(run_id)))
             {
-                return Err(ControlError::FlowRunNotResumable {
-                    name,
-                    reason: NotResumableReason::Running,
-                });
+                return Err(running(name));
             }
             return Err(ControlError::FlowLocked { held_by, name });
         }
-        let lock_dir = flow_paths::lane_lock_dir(&self.lock_root, &cwd);
-        let is_alive: fn(u32) -> bool = crate::workspace::flow_request::process_is_alive;
-        let resumed = daruda_flow::resume::prepare(run_dir, lock_dir.as_deref(), &is_alive)
-            .map_err(|error| resume_refusal(name.clone(), error))?;
-        Ok((name, resumed))
+        match self.read_flow_resume(lane, run_dir) {
+            Ok(read) => Ok((name, read)),
+            Err(FlowSubmitError::Resume(error)) => Err(resume_refusal(name, error)),
+            // A worktree that no longer resolves is refused as a start
+            // refuses it, before any card asks about the run.
+            Err(other) => {
+                Err(self.control_refusal(lane, name, FlowStartRefused::Submit(other), cx))
+            }
+        }
     }
 
     /// Resume the run in `run_dir` for `submitter`, the way the Flows panel
@@ -122,18 +127,10 @@ impl Workspace {
         submitter: (daruda_flow::request::StartedBy, bool),
         cx: &mut Context<Self>,
     ) -> Result<FlowResumed, ControlError> {
-        let (name, resumed) = self.read_resumable(lane, run_dir, cx)?;
-        let run_id = match self.submit_read_flow_resume(lane, run_dir, resumed, submitter, cx) {
+        let (name, read) = self.read_resumable(lane, run_dir, cx)?;
+        let run_id = match self.submit_flow_resume(lane, run_dir, read, submitter, cx) {
             Ok(run_id) => run_id,
-            Err(refused) => {
-                let held_by = self
-                    .lane_for(lane)
-                    .map(|l| l.path.clone())
-                    .and_then(|cwd| self.flow_holder_in(lane, &cwd, cx));
-                return Err(super::control_flow_ops::refusal_answer(
-                    name, held_by, refused,
-                ));
-            }
+            Err(refused) => return Err(self.control_refusal(lane, name, refused, cx)),
         };
         Ok(FlowResumed {
             name,

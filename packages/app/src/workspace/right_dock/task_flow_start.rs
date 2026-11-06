@@ -104,10 +104,8 @@ impl Workspace {
             TaskRunIn::ExistingLane { path } => {
                 let lane = self.prepare_existing_lane_start(path, reveal)?;
                 self.check_task_flow(lane.lane(), &target, cx)?;
-                if self.lane_holder(lane.root()).is_some()
-                    || self.is_flow_running_in(lane.lane(), cx)
-                {
-                    return Err(lane_busy());
+                if self.lane_busy(lane.lane(), lane.root(), cx).is_some() {
+                    return Err(lane_busy_refusal());
                 }
                 FlowPlace::Existing(lane)
             }
@@ -335,7 +333,7 @@ impl Workspace {
         )
         .map_err(|refused| match refused {
             FlowStartRefused::Submit(error) => submit_refused(error),
-            FlowStartRefused::AlreadyRunning => lane_busy(),
+            FlowStartRefused::AlreadyRunning => lane_busy_refusal(),
         })?;
         cx.notify();
         Ok(TaskStarted {
@@ -408,7 +406,7 @@ fn on_branch(target: &TaskFlowTarget, worktree: &Path) -> PathBuf {
         .unwrap_or_else(|| target.path.clone())
 }
 
-fn lane_busy() -> TaskStartError {
+fn lane_busy_refusal() -> TaskStartError {
     TaskStartError::FlowRefused {
         shown: crate::surface::strings::task::error_flow_lane_busy(),
         detail: "a flow is already running in the worktree".into(),

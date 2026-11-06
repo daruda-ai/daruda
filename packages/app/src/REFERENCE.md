@@ -447,11 +447,14 @@ picked against the scope as it then stands. It finds the run through
 whose lane keeps its directory. The run is read once before the card into the
 plan the card quotes (passed nodes come from `resume::prepare`'s replay; all
 passed has its own wording), and once more after approval, since the worktree
-can change while the card waits; that read is the one the resume request is
-built from. Refusals no answer can change come before the
-card: `flow_run_not_found`, `flow_locked` naming the holder (checked first,
-since another run's lock hides this run's status; a live holder of this same
-run is `running` instead), and `flow_run_not_resumable` with `running`,
+can change while the card waits; that read (`Workspace::read_flow_resume`,
+which resolves the lane's tree and lock once, as the Flows panel's Continue
+does) is the one the resume request is built from. Refusals no answer can
+change come before the card: `flow_run_not_found`, `flow_locked` naming the
+holder (checked first through `lane_busy`, the check a start makes, since
+another run's lock hides this run's status; a live holder of this same run is
+`running` instead), `flow_not_started` with `lane_unresolvable` for a worktree
+whose folder no longer resolves, and `flow_run_not_resumable` with `running`,
 `ended`, `never_started` or `unknown`. A profile is never asked for:
 `run.yaml` already folds the start's profile in. The approved resume goes
 through the Flows panel's `submit_flow_resume`, submitted by `Orchestrator`

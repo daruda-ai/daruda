@@ -363,6 +363,32 @@ async fn a_run_that_never_started_a_step_is_refused_before_the_card(cx: &mut Tes
     );
 }
 
+/// A worktree whose folder no longer resolves is refused the way a start
+/// refuses it, both before the card and in the check after it, rather than
+/// as a run the engine could not read.
+#[gpui::test]
+async fn a_worktree_that_no_longer_resolves_is_refused_as_a_start_is(cx: &mut TestAppContext) {
+    let (lane, ws, _flow, _wh) = workspace_with_a_flow(cx, TWO_STEPS);
+    let run_dir = flow_paths::runs_dir(lane.path()).join("01J");
+    std::fs::remove_dir_all(lane.path()).expect("delete the lane out from under the workspace");
+    let expected = ControlError::FlowNotStarted {
+        name: crate::runs::flow_run_name(&run_dir),
+        reason: crate::control::result::FlowNotStartedReason::LaneUnresolvable,
+    };
+
+    let (checked, resumed) = ws.update(cx, |ws, cx| {
+        let here = ws.active;
+        (
+            ws.control_flow_resume_check(here, &run_dir, cx).err(),
+            ws.control_flow_resume(here, &run_dir, (StartedBy::Orchestrator, false), cx)
+                .err(),
+        )
+    });
+
+    assert_eq!(checked, Some(expected.clone()));
+    assert_eq!(resumed, Some(expected));
+}
+
 /// Another live process holds the worktree: named like a start names it,
 /// so the caller can say which run is in the way.
 #[gpui::test]
