@@ -293,7 +293,7 @@ impl Workspace {
             window,
             cx,
         );
-        copy.update(cx, |state, cx| state.set_disabled(true, cx));
+        copy.update(cx, |state, cx| state.set_readonly(true, cx));
         if let Some(te) = self.task_editor_mut(editor_id) {
             te.disk_copy = Some(copy);
         }

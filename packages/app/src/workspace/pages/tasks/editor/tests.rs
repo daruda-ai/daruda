@@ -1578,9 +1578,10 @@ fn the_disk_version_shows_read_only_beside_the_prompt(cx: &mut TestAppContext) {
                 .clone()
                 .expect("shown");
             assert_eq!(copy.read(cx).value().as_ref(), "on disk");
+            let presentation = copy.read(cx).presentation();
             assert!(
-                copy.read(cx).presentation().is_disabled(),
-                "the disk version is read-only"
+                presentation.is_readonly() && !presentation.is_disabled(),
+                "the disk version is read-only, not dimmed or unselectable"
             );
             ws.close_prompt_disk_copy(editor, cx);
             let te = ws.task_editor(editor).unwrap();
