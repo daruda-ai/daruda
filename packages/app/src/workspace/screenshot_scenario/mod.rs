@@ -239,6 +239,11 @@ pub(crate) enum ScreenshotScenario {
     /// A seeded transcript continued under another account: the divider the
     /// switch pushes, which no settled seed reaches.
     AgentChatHandoff,
+    /// The same switch after a restart: the divider leads with the record of
+    /// the conversation before it, folded like a compaction — or open.
+    AgentChatHandoffRestored {
+        expanded: bool,
+    },
     /// The interrupted transcript under the banner an overage stop raises —
     /// reached only by a live billed `usage_update` with the setting on.
     AgentChatOverageStopped,
@@ -743,7 +748,7 @@ pub(crate) fn drive(
                         view.seed_transcript(items, window, cx);
                         view.set_session_id_for_shot("main");
                         view.set_fold_for_shot(
-                            daruda_chat::fold::FoldKey::Compaction(1),
+                            daruda_chat::fold::FoldKey::Retained(1),
                             true,
                             window,
                             cx,
@@ -904,6 +909,11 @@ pub(crate) fn drive(
         ScreenshotScenario::AgentChatHandoff => {
             workspace.update(cx, |ws, cx| {
                 ws.open_agent_chat_handoff_transcript_for_shot(window, cx)
+            });
+        }
+        ScreenshotScenario::AgentChatHandoffRestored { expanded } => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_agent_chat_handoff_restored_for_shot(expanded, window, cx)
             });
         }
         ScreenshotScenario::AgentChatOverageStopped => {

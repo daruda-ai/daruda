@@ -96,9 +96,9 @@ fn compaction_stays_visible_when_prose_is_filtered_or_responses_are_collapsed(
             assert_eq!(view.rows[row].indent, 0);
             assert!(
                 crate::rows::collect_foldable_keys(&view.items)
-                    .contains(&crate::fold::FoldKey::Compaction(1))
+                    .contains(&crate::fold::FoldKey::Retained(1))
             );
-            let key = crate::fold::FoldKey::Compaction(1);
+            let key = crate::fold::FoldKey::Retained(1);
             let context = crate::agent_chat_helpers::fold_context(
                 &key,
                 &view.items,
@@ -163,7 +163,7 @@ fn compaction_expands_without_a_height_cap_and_footer_recovers_header(
             value["summary"] =
                 json!([{"type":"text", "text":"Retained paragraph.\n\n".repeat(40)}]);
             view.apply_event(event("root", value), "", false, cx);
-            view.toggle_fold(crate::fold::FoldKey::Compaction(0), window, cx);
+            view.toggle_fold(crate::fold::FoldKey::Retained(0), window, cx);
         })
         .unwrap();
     let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
@@ -174,7 +174,7 @@ fn compaction_expands_without_a_height_cap_and_footer_recovers_header(
     assert!(body.size.height > gpui::px(800.));
     window
         .update(&mut visual, |view, window, cx| {
-            let key = crate::fold::FoldKey::Compaction(0);
+            let key = crate::fold::FoldKey::Retained(0);
             let row = crate::rows::item_row(&view.rows, 0).unwrap();
             view.list_state.scroll_to(gpui::ListOffset {
                 item_ix: row,
@@ -210,7 +210,7 @@ fn failure_without_summary_is_passive_and_shows_its_reason(cx: &mut gpui::TestAp
             view.apply_event(event("root", value), "", false, cx);
             assert!(
                 !crate::rows::collect_foldable_keys(&view.items)
-                    .contains(&crate::fold::FoldKey::Compaction(0))
+                    .contains(&crate::fold::FoldKey::Retained(0))
             );
         })
         .unwrap();
@@ -237,14 +237,14 @@ fn compaction_footer_click_recovers_the_rendered_header(cx: &mut gpui::TestAppCo
             value["summary"] =
                 json!([{"type":"text", "text":"Retained paragraph.\n\n".repeat(40)}]);
             view.apply_event(event("root", value), "", false, cx);
-            view.toggle_fold(FoldKey::Compaction(0), window, cx);
+            view.toggle_fold(FoldKey::Retained(0), window, cx);
             view.list_state.scroll_to_end();
         })
         .unwrap();
     let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();
     let footer = visual
-        .debug_bounds("fold-footer-Compaction(0)")
+        .debug_bounds("fold-footer-Retained(0)")
         .expect("footer painted");
     let click = gpui::point(footer.left() + gpui::px(12.), footer.center().y);
     visual.simulate_mouse_move(click, None, Default::default());
@@ -256,7 +256,7 @@ fn compaction_footer_click_recovers_the_rendered_header(cx: &mut gpui::TestAppCo
             assert!(
                 !view
                     .fold
-                    .is_expanded(&FoldKey::Compaction(0), FoldContext::last(false))
+                    .is_expanded(&FoldKey::Retained(0), FoldContext::last(false))
             );
             let row = crate::rows::item_row(&view.rows, 0).unwrap();
             let bounds = view

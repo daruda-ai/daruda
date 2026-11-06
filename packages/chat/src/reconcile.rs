@@ -116,7 +116,7 @@ impl AgentChatView {
     fn tool_body_on_screen(&self, ix: usize, item: &ChatItem, boundary: TurnBoundary) -> bool {
         let key = match item {
             ChatItem::ToolCall(tc) => tool_fold_key(tc),
-            ChatItem::Compaction(_) => crate::fold::FoldKey::Compaction(ix),
+            ChatItem::Compaction(_) => crate::fold::FoldKey::Retained(ix),
             _ => return false,
         };
         self.fold.is_expanded(

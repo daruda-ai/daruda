@@ -553,6 +553,32 @@ impl Workspace {
         );
     }
 
+    /// Open the switched transcript as a restart restores it, its record card
+    /// folded or open.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_agent_chat_handoff_restored_for_shot(
+        &mut self,
+        expanded: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_chat_pane_seeded(
+            None,
+            move |v, window, cx| {
+                v.seed_transcript(
+                    daruda_chat::shot_transcript::handoff_restored_transcript(),
+                    window,
+                    cx,
+                );
+                if expanded {
+                    v.set_fold_for_shot(daruda_chat::fold::FoldKey::Retained(0), true, window, cx);
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
     /// Open the interrupted transcript under the banner an overage stop
     /// leaves — set only by a live billed `usage_update`, so no seed reaches it.
     #[cfg(feature = "screenshot")]

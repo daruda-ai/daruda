@@ -741,6 +741,8 @@ async fn continuing_with_another_agent_keeps_the_conversation_in_place(cx: &mut 
                 view.items()
             );
         };
+        assert_eq!(mark.record, None, "live, the conversation itself is above");
+        let mark = &mark.mark;
         assert_eq!(mark.to.agent, view.agent_name());
         assert_eq!(mark.to.account, None);
         assert_eq!(
@@ -751,5 +753,77 @@ async fn continuing_with_another_agent_keeps_the_conversation_in_place(cx: &mut 
             view.session_id(),
             Some(format!("test-session-{pane_id}").as_str())
         );
+    });
+}
+
+/// A pane saved with a recap still owed — a restart before the first prompt
+/// after a switch — restores the divider with its record, and owes the recap
+/// still.
+#[gpui::test]
+async fn a_pending_handoff_survives_a_restore(cx: &mut TestAppContext) {
+    use daruda_acp::handoff::{HandoffParty, prepare};
+    use daruda_store::project::{
+        SerializedAgentChatContent, SerializedLayout, SerializedPaneContent,
+    };
+
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let recap = prepare(
+        &[daruda_acp::ChatItem::UserText(
+            "the earlier question".into(),
+        )],
+        HandoffParty {
+            agent: "Claude Code".into(),
+            account: None,
+        },
+        HandoffParty {
+            agent: "Codex".into(),
+            account: None,
+        },
+    )
+    .recap
+    .unwrap();
+    let layout = SerializedLayout::Leaf {
+        pane_id: 1,
+        content: SerializedPaneContent::AgentChat(SerializedAgentChatContent {
+            require_exact_resume: false,
+            access: Default::default(),
+            cwd: None,
+            session_id: Some("new-empty-session".into()),
+            pending_handoff: Some(recap.clone()),
+            title: None,
+            agent_id: Some(daruda_config::AgentDefinition::claude_default().id),
+            account_id: None,
+            picked_mode_id: None,
+            model_id: None,
+            content_width: None,
+            tail_window: None,
+            tail_window_calls: None,
+            display_filter: None,
+            visible_kinds: None,
+            fold_mode: None,
+        }),
+    };
+    let mut id_map = std::collections::HashMap::new();
+    let mut scratch = Vec::new();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.rebuild_layout(&layout, None, &mut id_map, &mut scratch, window, cx)
+                .expect("rebuild");
+        })
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let view = scratch[0].agent_chat_content().unwrap().view.clone();
+    view.read_with(cx, |view, _| {
+        let [daruda_acp::ChatItem::Handoff(divider)] = view.items() else {
+            panic!("{:?}", view.items());
+        };
+        assert_eq!(
+            divider.record.as_deref(),
+            Some("User:\nthe earlier question")
+        );
+        assert_eq!(view.pending_handoff(), Some(recap.as_str()));
     });
 }

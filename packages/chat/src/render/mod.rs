@@ -17,6 +17,7 @@ pub(crate) mod embed;
 mod filter;
 mod fold_header;
 mod fold_mode;
+mod handoff;
 mod host_cards;
 /// Reachable from `workspace::screenshot_scenario` so the
 /// `mermaid-lightbox` capture scenario can drive it directly.
@@ -109,7 +110,7 @@ use blocks::{
     failure_block, group_thought_block, message_copy, thinking_block, user_bubble,
 };
 use chrome::{ActivityBarProps, activity_bar, overage_banner, status_banner, working_indicator};
-use fold_header::{FoldHeader, FoldRow, SummaryLine, interrupted_row, rollup_glyph};
+use fold_header::{FoldHeader, FoldRow, SummaryLine, edge_row, rollup_glyph};
 use links::AgentChatMarkdownLinks;
 use plan::plan_region;
 use row::render_row;

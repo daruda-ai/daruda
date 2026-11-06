@@ -66,7 +66,11 @@ pub(crate) fn collect_foldable_keys(items: &[ChatItem]) -> Vec<FoldKey> {
             ChatItem::AssistantText { .. } => keys.push(FoldKey::Assistant(ix)),
             ChatItem::Thinking { .. } if group_thoughts.contains(&ix) => {}
             ChatItem::Thinking { .. } => keys.push(FoldKey::Thinking(ix)),
-            ChatItem::Compaction(c) if !c.summary.is_empty() => keys.push(FoldKey::Compaction(ix)),
+            ChatItem::Compaction(c) if !c.summary.is_empty() => keys.push(FoldKey::Retained(ix)),
+            // A restored divider's record discloses like a compaction summary.
+            ChatItem::Handoff(divider) if divider.record.is_some() => {
+                keys.push(FoldKey::Retained(ix))
+            }
             ChatItem::ToolCall(tc) => {
                 keys.push(tool_fold_key(tc));
                 for di in 0..tc.diffs.len() {

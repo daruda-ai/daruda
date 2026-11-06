@@ -302,6 +302,11 @@ agent_chat:
   # The marker row where the pane moved its conversation to another agent or
   # account. `to` is "Agent · account" or the agent alone.
   handoff: "Continued with %{to}"
+  # One side of a switch that names its account: the agent, then the account.
+  handoff_party: "%{agent} · %{account}"
+  # Leading label of the folded card holding the conversation before a switch,
+  # shown after a restart, when that conversation itself is no longer on screen.
+  handoff_record: "Earlier conversation"
   tail_more_show_one: "Show 1 earlier step"
   tail_more_show: "Show %{count} earlier steps"
   tail_more_collapse_one: "Collapse to the last step"

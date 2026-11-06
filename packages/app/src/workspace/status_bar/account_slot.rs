@@ -304,64 +304,7 @@ fn build_account_menu(
         header_state(slot.domain),
         super::menu::Tone::Plain,
     );
-    let menu = {
-        let workspace = slot.workspace.clone();
-        let pane_id = slot.pane_id;
-        let selected = slot.current == AccountSelection::SystemDefault;
-        let name = SharedString::from(system_label(slot.domain));
-        menu.item(
-            PopupMenuItem::element(move |_window, cx| {
-                super::menu::choice_row(name.clone(), None, selected, cx)
-            })
-            .on_click(move |_, window, app| {
-                if let Some(ws) = workspace.upgrade() {
-                    ws.update(app, |ws, cx| {
-                        ws.switch_pane_account(pane_id, AccountSelection::SystemDefault, window, cx)
-                    });
-                }
-            }),
-        )
-    };
-    let menu = slot.sections.iter().fold(menu, |menu, section| {
-        // The mark rides the section heading rather than each row: every row
-        // under it shares the domain, and the gutter is the selection dot's.
-        let recipe = section.recipe;
-        let heading = section.label.clone();
-        let menu = menu.separator().item(
-            PopupMenuItem::element(move |_window, cx| {
-                super::menu::section_row(Some(agent_mark(recipe, cx)), heading.clone(), cx)
-            })
-            .disabled(true),
-        );
-        section.accounts.iter().fold(menu, |m, account| {
-            let workspace = slot.workspace.clone();
-            let pane_id = slot.pane_id;
-            let account_id = account.id;
-            let selected = slot.current == AccountSelection::Managed(account_id);
-            let name = SharedString::from(
-                account_label(account.email.as_deref(), None)
-                    .unwrap_or_else(crate::surface::strings::settings::accounts_unknown_email),
-            );
-            let organization = account.organization.clone().map(SharedString::from);
-            m.item(
-                PopupMenuItem::element(move |_window, cx| {
-                    super::menu::choice_row(name.clone(), organization.clone(), selected, cx)
-                })
-                .on_click(move |_, window, app| {
-                    if let Some(ws) = workspace.upgrade() {
-                        ws.update(app, |ws, cx| {
-                            ws.switch_pane_account(
-                                pane_id,
-                                AccountSelection::Managed(account_id),
-                                window,
-                                cx,
-                            )
-                        });
-                    }
-                }),
-            )
-        })
-    });
+    let menu = account_entries(menu, slot, Pick::Switch);
     let menu = if offers_new_pane(slot, cx) {
         new_pane_submenu(slot, menu.separator(), window, cx)
     } else {
@@ -439,7 +382,72 @@ fn offers_new_pane(slot: &AccountSlot, cx: &App) -> bool {
     })
 }
 
-/// "Open in new pane ▸": the same choices, each opening a fresh pane and
+/// What picking an account in [`account_entries`] does to the pane.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pick {
+    /// Move this pane to the account (continuing its conversation, if any).
+    Switch,
+    /// Leave this pane alone and open a new one under the account.
+    NewPane,
+}
+
+/// The System entry and every switchable account, grouped under one heading
+/// per auth domain — the list both the menu and its "Open in new pane"
+/// submenu offer, so the two cannot drift. Only a [`Pick::Switch`] list marks
+/// the pane's own account: a new pane has none yet.
+fn account_entries(menu: PopupMenu, slot: &AccountSlot, pick: Pick) -> PopupMenu {
+    let item = |menu: PopupMenu,
+                selection: AccountSelection,
+                name: SharedString,
+                organization: Option<SharedString>| {
+        let workspace = slot.workspace.clone();
+        let pane_id = slot.pane_id;
+        let selected = pick == Pick::Switch && slot.current == selection;
+        menu.item(
+            PopupMenuItem::element(move |_window, cx| {
+                super::menu::choice_row(name.clone(), organization.clone(), selected, cx)
+            })
+            .on_click(move |_, window, app| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(app, |ws, cx| match pick {
+                        Pick::Switch => ws.switch_pane_account(pane_id, selection, window, cx),
+                        Pick::NewPane => ws.open_pane_with_account(pane_id, selection, window, cx),
+                    });
+                }
+            }),
+        )
+    };
+    let menu = item(
+        menu,
+        AccountSelection::SystemDefault,
+        SharedString::from(system_label(slot.domain)),
+        None,
+    );
+    slot.sections.iter().fold(menu, |menu, section| {
+        // The mark rides the section heading rather than each row: every row
+        // under it shares the domain, and the gutter is the selection dot's.
+        let recipe = section.recipe;
+        let heading = section.label.clone();
+        let menu = menu.separator().item(
+            PopupMenuItem::element(move |_window, cx| {
+                super::menu::section_row(Some(agent_mark(recipe, cx)), heading.clone(), cx)
+            })
+            .disabled(true),
+        );
+        section.accounts.iter().fold(menu, |menu, account| {
+            let name = account_label(account.email.as_deref(), None)
+                .unwrap_or_else(crate::surface::strings::settings::accounts_unknown_email);
+            item(
+                menu,
+                AccountSelection::Managed(account.id),
+                SharedString::from(name),
+                account.organization.clone().map(SharedString::from),
+            )
+        })
+    })
+}
+
+/// "Open in new pane ▸": the same list, each pick opening a fresh pane and
 /// leaving this pane's conversation on its own session.
 fn new_pane_submenu(
     slot: &AccountSlot,
@@ -447,41 +455,12 @@ fn new_pane_submenu(
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
-    let mut choices = vec![(
-        AccountSelection::SystemDefault,
-        SharedString::from(system_label(slot.domain)),
-    )];
-    choices.extend(slot.sections.iter().flat_map(|section| {
-        section.accounts.iter().map(|account| {
-            let name = account_label(account.email.as_deref(), None)
-                .unwrap_or_else(crate::surface::strings::settings::accounts_unknown_email);
-            (
-                AccountSelection::Managed(account.id),
-                SharedString::from(name),
-            )
-        })
-    }));
-    let workspace = slot.workspace.clone();
-    let pane_id = slot.pane_id;
+    let slot = slot.clone();
     menu.submenu(
         crate::surface::strings::settings::status_bar_account_open_in_new_pane(),
         window,
         cx,
-        move |sub, _window, _cx| {
-            choices.iter().fold(sub, |m, (selection, name)| {
-                let workspace = workspace.clone();
-                let selection = *selection;
-                m.item(
-                    PopupMenuItem::new(name.clone()).on_click(move |_, window, app| {
-                        if let Some(ws) = workspace.upgrade() {
-                            ws.update(app, |ws, cx| {
-                                ws.open_pane_with_account(pane_id, selection, window, cx)
-                            });
-                        }
-                    }),
-                )
-            })
-        },
+        move |sub, _window, _cx| account_entries(sub, &slot, Pick::NewPane),
     )
 }
 

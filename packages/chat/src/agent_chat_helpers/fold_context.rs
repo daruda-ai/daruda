@@ -90,11 +90,11 @@ pub(crate) fn fold_context_at(
     }
 }
 
-fn fold_key_index(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> Option<usize> {
+pub(crate) fn fold_key_index(key: &FoldKey, items: &[daruda_acp::ChatItem]) -> Option<usize> {
     match key {
         FoldKey::Assistant(ix)
         | FoldKey::Permission(ix)
-        | FoldKey::Compaction(ix)
+        | FoldKey::Retained(ix)
         | FoldKey::Thinking(ix)
         | FoldKey::ThinkingGroup(ix)
         | FoldKey::Response(ix)
@@ -175,7 +175,7 @@ fn fold_active_at(
         // A prompt's fold follows its turn's settle edge, not item liveness.
         FoldKey::Tail(_)
         | FoldKey::Permission(_)
-        | FoldKey::Compaction(_)
+        | FoldKey::Retained(_)
         | FoldKey::ToolGroupTail(_)
         | FoldKey::SubagentTail(_)
         | FoldKey::Filtered(_)
@@ -205,7 +205,7 @@ pub(crate) fn fold_key_item_index(key: &FoldKey, items: &[daruda_acp::ChatItem])
         FoldKey::Assistant(ix)
         | FoldKey::Thinking(ix)
         | FoldKey::Permission(ix)
-        | FoldKey::Compaction(ix)
+        | FoldKey::Retained(ix)
         | FoldKey::UserPrompt(ix) => Some(*ix),
         // `SubagentTail` belongs with these: its reveal changes which child
         // cards the parent's body holds — a height change in place, with no

@@ -15,8 +15,9 @@ use daruda_transcript::tool_category::ToolCategory;
 pub enum FoldKey {
     Assistant(usize),
     Thinking(usize),
-    /// Retained context is disclosed independently of response fold rules.
-    Compaction(usize),
+    /// Retained context, disclosed independently of response fold rules: a
+    /// compaction's summary, or the record a restored switch divider carries.
+    Retained(usize),
     /// Settled permission details, independent of transcript fold presets.
     Permission(usize),
     Tool(String),
@@ -56,7 +57,7 @@ impl FoldKey {
             FoldKey::Response(_) => Some(FoldBlock::Response),
             FoldKey::Tail(_)
             | FoldKey::Permission(_)
-            | FoldKey::Compaction(_)
+            | FoldKey::Retained(_)
             | FoldKey::ToolGroupTail(_)
             | FoldKey::SubagentTail(_)
             | FoldKey::Filtered(_)
@@ -240,6 +241,15 @@ impl FoldState {
     pub(super) fn toggle(&mut self, key: FoldKey, ctx: FoldContext) {
         let expanded = !self.is_expanded(&key, ctx);
         self.set_expanded(key, expanded, ctx);
+    }
+
+    /// Keep only the overrides `keep` accepts. The held response and settled
+    /// prompt are anchors into the turn being read, which a caller dropping
+    /// part of the transcript invalidates either way.
+    pub(super) fn retain_overrides(&mut self, mut keep: impl FnMut(&FoldKey) -> bool) {
+        self.overrides.retain(|key, _| keep(key));
+        self.held_response = None;
+        self.settled_prompt = None;
     }
 
     pub(super) fn clear_overrides(&mut self) {

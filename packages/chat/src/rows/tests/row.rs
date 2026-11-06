@@ -589,7 +589,7 @@ fn item_row_finds_every_kind_that_renders_one_item() {
 /// run: the reply before it belongs to the earlier session.
 #[test]
 fn the_handoff_divider_is_a_top_level_row_between_responses() {
-    use daruda_acp::handoff::{HandoffMark, HandoffParty};
+    use daruda_acp::handoff::{HandoffItem, HandoffMark, HandoffParty};
     let party = |agent: &str| HandoffParty {
         agent: agent.into(),
         account: None,
@@ -597,10 +597,10 @@ fn the_handoff_divider_is_a_top_level_row_between_responses() {
     let items = [
         ChatItem::UserText("q".into()),
         tool("a", ToolStatusView::Completed),
-        ChatItem::Handoff(HandoffMark {
+        ChatItem::Handoff(HandoffItem::live(HandoffMark {
             from: party("Claude Code"),
             to: party("Codex"),
-        }),
+        })),
         ChatItem::UserText("again".into()),
     ];
     let rows = project(
@@ -622,4 +622,34 @@ fn the_handoff_divider_is_a_top_level_row_between_responses() {
         rows.iter().any(|r| matches!(r.kind, RowKind::Handoff(2))),
         "the divider names its own item: {projected:?}"
     );
+}
+
+/// A restored divider's record card folds like a compaction summary, so its
+/// row is the one a fold toggle remeasures.
+#[test]
+fn a_restored_divider_owns_the_row_its_record_folds_in() {
+    use daruda_acp::handoff::{HandoffItem, HandoffMark, HandoffParty};
+    let party = |agent: &str| HandoffParty {
+        agent: agent.into(),
+        account: None,
+    };
+    let items = [
+        ChatItem::Handoff(HandoffItem {
+            mark: HandoffMark {
+                from: party("Claude Code"),
+                to: party("Codex"),
+            },
+            record: Some("User:\nq".into()),
+        }),
+        ChatItem::UserText("again".into()),
+    ];
+    let rows = project(
+        &items,
+        &FoldState::default(),
+        false,
+        &LiveSubagentUnits::of(&items),
+        StepWindow::uniform(TailWindow::All),
+        &DisplayFilter::default(),
+    );
+    assert_eq!(item_row(&rows, 0), Some(0));
 }

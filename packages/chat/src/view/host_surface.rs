@@ -101,6 +101,12 @@ impl AgentChatView {
         &self.items
     }
 
+    /// The recap a switch still owes the next prompt — what the pane must keep
+    /// across a restart, since nothing else holds the conversation before it.
+    pub fn pending_handoff(&self) -> Option<&str> {
+        self.handoff_recap.as_deref()
+    }
+
     pub fn session_config(&self) -> &SessionConfig {
         &self.session_config
     }

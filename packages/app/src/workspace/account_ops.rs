@@ -49,18 +49,35 @@ use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane::TabEntry;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
-/// What a pane would lose if the switch tore it down — so it doesn't. Also
-/// selects which pane constructor the new pane uses and which sentence the
-/// confirm dialog shows, keeping the two in lockstep (a Terminal cause can
-/// never draw an Agent chat body, or vice versa).
+/// Why a switch leaves the pane alone and opens a new one — the sentence the
+/// confirm dialog shows. Its [`NewPaneKind`] follows from it, so a Terminal
+/// cause can never build an Agent chat pane, or vice versa.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::workspace) enum NewPaneCause {
     /// Terminal pane: no safe in-place PTY respawn exists — see the module doc.
     Terminal,
     /// Agent chat mid-turn: a teardown would interrupt live work.
     AgentChatBusy,
-    /// Agent chat holding a transcript the new account's session can't carry.
-    AgentChatConversation,
+    /// Agent chat whose conversation is bound to its exact session — a
+    /// read-only mirror, or a task's chat whose delivery a teardown would fail.
+    AgentChatPinned,
+}
+
+impl NewPaneCause {
+    fn kind(self) -> NewPaneKind {
+        match self {
+            Self::Terminal => NewPaneKind::Terminal,
+            Self::AgentChatBusy | Self::AgentChatPinned => NewPaneKind::AgentChat,
+        }
+    }
+}
+
+/// Which constructor a new pane under another account goes through: the kind
+/// of the pane it is opened beside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NewPaneKind {
+    Terminal,
+    AgentChat,
 }
 
 /// Whether a pane-account switch reconnects the same pane or opens a new one.
@@ -84,7 +101,7 @@ pub(in crate::workspace) enum SwitchKind {
 pub(in crate::workspace) fn switch_kind(hold: ChatHold) -> SwitchKind {
     match hold {
         ChatHold::Busy => SwitchKind::NewPane(NewPaneCause::AgentChatBusy),
-        ChatHold::Pinned => SwitchKind::NewPane(NewPaneCause::AgentChatConversation),
+        ChatHold::Pinned => SwitchKind::NewPane(NewPaneCause::AgentChatPinned),
         ChatHold::Conversation => SwitchKind::Continue,
         ChatHold::Empty => SwitchKind::InPlace,
     }
@@ -159,12 +176,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let cause = if self.agent_chat_view(pane_id).is_some() {
-            NewPaneCause::AgentChatConversation
+        let kind = if self.agent_chat_view(pane_id).is_some() {
+            NewPaneKind::AgentChat
         } else {
-            NewPaneCause::Terminal
+            NewPaneKind::Terminal
         };
-        self.open_new_pane_with_account(pane_id, cause, selection, window, cx);
+        self.open_new_pane_with_account(pane_id, kind, selection, window, cx);
     }
 
     /// Record `selection` as `pane_id`'s account in both wrapper caches; the
@@ -227,9 +244,7 @@ impl Workspace {
         let body = match cause {
             NewPaneCause::Terminal => s::modal::switch_account_new_pane_body_terminal(),
             NewPaneCause::AgentChatBusy => s::modal::switch_account_new_pane_body_busy(),
-            NewPaneCause::AgentChatConversation => {
-                s::modal::switch_account_new_pane_body_conversation()
-            }
+            NewPaneCause::AgentChatPinned => s::modal::switch_account_new_pane_body_pinned(),
         };
         let weak = cx.weak_entity();
         open_confirm_dialog(
@@ -240,7 +255,13 @@ impl Workspace {
             move |_, window, app_cx| {
                 if let Some(ws) = weak.upgrade() {
                     ws.update(app_cx, |ws, cx| {
-                        ws.open_new_pane_with_account(source_pane_id, cause, selection, window, cx);
+                        ws.open_new_pane_with_account(
+                            source_pane_id,
+                            cause.kind(),
+                            selection,
+                            window,
+                            cx,
+                        );
                     });
                 }
             },
@@ -260,7 +281,7 @@ impl Workspace {
     fn open_new_pane_with_account(
         &mut self,
         source_pane_id: PaneId,
-        cause: NewPaneCause,
+        kind: NewPaneKind,
         selection: AccountSelection,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -268,8 +289,8 @@ impl Workspace {
         if self.active_lane_is_inaccessible() {
             return;
         }
-        let new_pane = match cause {
-            NewPaneCause::Terminal => {
+        let new_pane = match kind {
+            NewPaneKind::Terminal => {
                 let cwd = self.default_cwd_for_new_pane();
                 // Terminal pane: no agent, so no required auth domain —
                 // the account's own recipe decides the env.
@@ -286,7 +307,7 @@ impl Workspace {
                     }
                 }
             }
-            NewPaneCause::AgentChatBusy | NewPaneCause::AgentChatConversation => {
+            NewPaneKind::AgentChat => {
                 let (local_cwd, remote_cwd, session_host) = self.active_lane_cwds();
                 let agent_id = self
                     .agent_chat_view(source_pane_id)
@@ -321,7 +342,7 @@ impl Workspace {
         let last_tab = self.active_runtime().tabs.len() - 1;
         self.active_runtime_mut().active_tab_index = last_tab;
 
-        if !matches!(cause, NewPaneCause::Terminal) && !self.docks.bottom.read(cx).is_open {
+        if kind == NewPaneKind::AgentChat && !self.docks.bottom.read(cx).is_open {
             self.docks.bottom.update(cx, |d, cx| {
                 d.toggle();
                 cx.notify();
@@ -447,7 +468,7 @@ mod tests {
     fn switch_kind_keeps_a_pinned_conversation_on_its_session() {
         assert_eq!(
             switch_kind(ChatHold::Pinned),
-            SwitchKind::NewPane(NewPaneCause::AgentChatConversation)
+            SwitchKind::NewPane(NewPaneCause::AgentChatPinned)
         );
     }
 
@@ -458,5 +479,15 @@ mod tests {
             SwitchKind::NewPane(NewPaneCause::AgentChatBusy),
             "a busy pane is never torn down mid-work"
         );
+    }
+
+    /// The confirm's reason decides the pane it builds: only a terminal's
+    /// reason builds a terminal.
+    #[test]
+    fn a_new_pane_is_the_kind_of_the_pane_it_is_opened_beside() {
+        assert_eq!(NewPaneCause::Terminal.kind(), NewPaneKind::Terminal);
+        for cause in [NewPaneCause::AgentChatBusy, NewPaneCause::AgentChatPinned] {
+            assert_eq!(cause.kind(), NewPaneKind::AgentChat);
+        }
     }
 }

@@ -45,12 +45,20 @@ pub(super) fn render_row(
             }
             _ => gpui::Empty.into_any_element(),
         },
-        RowKind::Interrupted(ix) => {
-            interrupted_row(this.stop_marker_label(*ix), this.dim_amount, cx)
-        }
+        RowKind::Interrupted(ix) => edge_row(this.stop_marker_label(*ix), this.dim_amount, cx),
         RowKind::Handoff(ix) => match this.items.get(*ix) {
-            Some(ChatItem::Handoff(mark)) => {
-                interrupted_row(s::agent_chat::handoff(mark.to.label()), this.dim_amount, cx)
+            Some(ChatItem::Handoff(divider)) => {
+                let key = FoldKey::Retained(*ix);
+                let expanded = this.fold.is_expanded(
+                    &key,
+                    fold_context_at(&key, *ix, &this.items, this.turn_boundary, &this.live_units),
+                );
+                let markdown = MarkdownRender::new(
+                    &this.assets.mermaid_images,
+                    this.dim_amount,
+                    AgentChatMarkdownLinks::new(cx.weak_entity()),
+                );
+                super::handoff::handoff_row(*ix, divider, key, expanded, markdown, cx)
             }
             _ => gpui::Empty.into_any_element(),
         },
@@ -344,7 +352,7 @@ fn render_item(
             failure_block(ix, failure, can_continue, t, cx).into_any_element()
         }
         ChatItem::Compaction(item) => {
-            let key = FoldKey::Compaction(ix);
+            let key = FoldKey::Retained(ix);
             let expanded =
                 fold.is_expanded(&key, fold_context_at(&key, ix, items, boundary, live_units));
             super::compaction::compaction_block(

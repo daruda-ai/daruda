@@ -142,7 +142,7 @@ impl AgentChatView {
         // response and group folds only flip row visibility, leaving each card's
         // own state (and its embeds) untouched.
         let embed_scope = match &key {
-            FoldKey::Compaction(ix) => match self.items.get(*ix) {
+            FoldKey::Retained(ix) => match self.items.get(*ix) {
                 Some(daruda_acp::ChatItem::Compaction(c)) => Some(ReconcileScope::Tool(c.output_key())),
                 _ => None,
             },

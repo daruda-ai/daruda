@@ -418,12 +418,16 @@ impl AgentChatView {
             }
             TranscriptFate::Keep => {}
             TranscriptFate::KeepThrough(ix) => {
+                // Read against the whole transcript before it is cut: a key
+                // past `ix` names an item the replayed tail will reuse.
+                let items = &self.items;
+                self.fold.retain_overrides(|key| {
+                    super::super::agent_chat_helpers::fold_key_index(key, items)
+                        .is_some_and(|at| at <= ix)
+                });
                 self.items.truncate(ix + 1);
                 self.overage_stop_markers.retain(|&marker| marker <= ix);
                 self.activity.turn_records.retain(|&record, _| record <= ix);
-                // Overrides name items by index, and the replayed tail reuses
-                // the indices past `ix`.
-                self.fold.clear_overrides();
             }
         }
         let dropped = self.queue.discard_all();
@@ -496,31 +500,41 @@ impl AgentChatView {
         self.begin_connect(resume, cx);
     }
 
-    /// Move this pane's conversation to a fresh session — another account or
-    /// agent — keeping the transcript on screen. The divider marks the switch,
-    /// and `recap` goes once in front of the next prompt; see
-    /// [`daruda_acp::handoff`]. A divider still trailing the transcript is a
-    /// switch nobody spoke after, so this one replaces it (the host built
-    /// `mark` with [`daruda_acp::handoff::continue_mark`]). The caller connects
-    /// right after, as for [`Self::reset_for_new_session`].
+    /// Move this pane's conversation from `from` to `to` — another account or
+    /// agent — in a fresh session, keeping the transcript on screen. The
+    /// divider marks the switch, and the recap goes once in front of the next
+    /// prompt; see [`daruda_acp::handoff::prepare`], which also decides that a
+    /// divider nobody spoke after is replaced rather than stacked. The caller
+    /// connects right after, as for [`Self::reset_for_new_session`].
     pub fn begin_handoff(
         &mut self,
-        mark: daruda_acp::handoff::HandoffMark,
-        recap: Option<String>,
+        from: daruda_acp::handoff::HandoffParty,
+        to: daruda_acp::handoff::HandoffParty,
         cx: &mut Context<Self>,
     ) {
         if self.is_read_only() {
             return;
         }
+        let handoff = daruda_acp::handoff::prepare(&self.items, from, to);
         self.teardown_transient_session_state(TranscriptFate::Keep, cx);
         self.session_id = None;
         if matches!(self.items.last(), Some(ChatItem::Handoff(_))) {
             self.items.pop();
         }
-        self.items.push(ChatItem::Handoff(mark));
-        self.handoff_recap = recap;
+        self.items.push(ChatItem::Handoff(handoff.divider));
+        self.handoff_recap = handoff.recap;
         self.rebuild_rows();
         self.begin_connect(None, cx);
+    }
+
+    /// Whether the person spoke after the last switch divider — after which
+    /// that switch's recap has gone out.
+    pub(super) fn prompted_since_last_handoff(&self) -> bool {
+        self.items
+            .iter()
+            .rev()
+            .take_while(|item| !matches!(item, ChatItem::Handoff(_)))
+            .any(|item| matches!(item, ChatItem::UserText(_)))
     }
 
     /// Jump the conversation list to the bottom and re-engage `Tail` follow —

@@ -305,6 +305,7 @@ fn serialize_pane_content(
             access: v.access(),
             cwd: ac.cwd.clone(),
             session_id: v.session_id().map(str::to_owned),
+            pending_handoff: v.pending_handoff().map(str::to_owned),
             title: v.session_title().map(str::to_owned),
             agent_id: Some(v.agent_id().to_owned()),
             account_id: ac.account.to_persisted(),

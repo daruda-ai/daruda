@@ -8,7 +8,8 @@
 //! - [`agent_chat_connect_ops`] — the ACP connection lifecycle: lazy-connect,
 //!   manual retry, the background connect + event pump, and the `/clear` reset.
 //! - [`agent_chat_handoff_ops`] — continuing a conversation in the same pane
-//!   under another account or agent.
+//!   under another account or agent; [`agent_menu`] is the header menu that
+//!   offers it.
 //! - [`agent_chat_event_ops`] — folding one ACP event into a pane.
 //! - [`agent_chat_queue_ops`] — bottom-dock prompt send / queue / edit /
 //!   cancel routing.
@@ -22,6 +23,7 @@ pub(in crate::workspace) mod agent_chat_handoff_ops;
 pub(in crate::workspace) mod agent_chat_ops;
 pub(super) mod agent_chat_queue_ops;
 mod agent_default_writer;
+mod agent_menu;
 mod attachment_load;
 mod attachment_ops;
 mod host_event_ops;

@@ -41,11 +41,13 @@ pub(super) fn append_user_chunk(items: &mut Vec<ChatItem>, text: &str) {
         }
         return;
     }
-    if let Some((mark, prompt)) = crate::handoff::split_handoff(text) {
+    if let Some((divider, prompt)) = crate::handoff::split_handoff(text) {
         // The recap travelled in front of the first prompt after a switch:
-        // the divider it stands for, then what the person typed.
-        if !matches!(items.last(), Some(ChatItem::Handoff(prev)) if *prev == mark) {
-            items.push(ChatItem::Handoff(mark));
+        // the divider it stands for, then what the person typed. A divider
+        // still on screen from the same switch (a reconnect kept it) wins:
+        // the conversation it divides is right above it.
+        if !matches!(items.last(), Some(ChatItem::Handoff(prev)) if prev.mark == divider.mark) {
+            items.push(ChatItem::Handoff(divider));
         }
         if !prompt.trim().is_empty() {
             push_user_text(items, prompt);

@@ -477,13 +477,37 @@ fn replayed_handoff_prompt_becomes_the_divider_and_the_typed_text() {
     // After a restart, `session/load` replays the new session's first prompt
     // as it went on the wire — recap block in front. The block is the switch
     // divider, not something the person typed.
-    let recap = crate::handoff::recap(
+    let mark = handoff_mark();
+    let handoff = crate::handoff::prepare(
         &[ChatItem::UserText("fix the build".into())],
-        &handoff_mark(),
-    )
-    .unwrap();
+        mark.from,
+        mark.to,
+    );
+    let recap = handoff.recap.unwrap();
     let wire = format!("{recap}\n\n---\n\nnow run the tests");
     let mut items = Vec::new();
+    apply_update(
+        &mut items,
+        &SessionUpdate::UserMessageChunk(text_chunk(&wire)),
+    );
+    let [ChatItem::Handoff(divider), ChatItem::UserText(prompt)] = items.as_slice() else {
+        panic!("divider then prompt: {items:?}");
+    };
+    assert_eq!(divider.mark, handoff.divider.mark);
+    assert_eq!(divider.record.as_deref(), Some("User:\nfix the build"));
+    assert_eq!(prompt, "now run the tests");
+}
+
+#[test]
+fn a_replayed_divider_does_not_double_one_still_on_screen() {
+    // A reconnect keeps the conversation through the divider and lets the
+    // resumed session replay the rest; its first prompt carries the same
+    // switch, which the divider already on screen stands for.
+    let mark = handoff_mark();
+    let handoff = crate::handoff::prepare(&[ChatItem::UserText("q".into())], mark.from, mark.to);
+    let wire = format!("{}\n\n---\n\nnext", handoff.recap.unwrap());
+    let live = ChatItem::Handoff(crate::handoff::HandoffItem::live(handoff.divider.mark));
+    let mut items = vec![ChatItem::UserText("q".into()), live.clone()];
     apply_update(
         &mut items,
         &SessionUpdate::UserMessageChunk(text_chunk(&wire)),
@@ -491,8 +515,9 @@ fn replayed_handoff_prompt_becomes_the_divider_and_the_typed_text() {
     assert_eq!(
         items,
         vec![
-            ChatItem::Handoff(handoff_mark()),
-            ChatItem::UserText("now run the tests".into()),
+            ChatItem::UserText("q".into()),
+            live,
+            ChatItem::UserText("next".into()),
         ]
     );
 }

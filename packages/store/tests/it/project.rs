@@ -195,6 +195,7 @@ fn agent_chat_content_round_trip_preserves_account_id() {
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
+        pending_handoff: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
@@ -204,6 +205,25 @@ fn agent_chat_content_round_trip_preserves_account_id() {
     let legacy_json = r#"{"cwd":"/repo/lane"}"#;
     let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
     assert!(legacy.account_id.is_none());
+}
+
+/// A recap still owed survives a save; a file written before the field
+/// existed owes none, and an absent one is not written at all.
+#[test]
+fn agent_chat_pending_handoff_round_trips_and_legacy_owes_none() {
+    let mut content: SerializedAgentChatContent =
+        serde_json::from_str(r#"{"cwd":"/repo/lane","session_id":"new"}"#).unwrap();
+    assert_eq!(content.pending_handoff, None);
+    assert!(
+        !serde_json::to_string(&content)
+            .unwrap()
+            .contains("pending_handoff")
+    );
+
+    content.pending_handoff = Some("<conversation_handoff to-agent=\"Codex\">".into());
+    let json = serde_json::to_string(&content).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.pending_handoff, content.pending_handoff);
 }
 
 /// A CLI snapshot pane must come back read-only, naming the same run; a pane
@@ -245,6 +265,7 @@ fn agent_chat_content_round_trip_preserves_picked_mode_id() {
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
+        pending_handoff: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
@@ -281,6 +302,7 @@ fn agent_chat_content_round_trip_preserves_model_id() {
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
+        pending_handoff: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     assert!(
@@ -319,6 +341,7 @@ fn agent_chat_content_width_round_trips_and_an_absent_key_follows_config() {
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
+        pending_handoff: None,
     };
     for width in [
         SerializedChatContentWidth::Full,
@@ -370,6 +393,7 @@ fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
         display_filter: Some(vec!["tools".to_string(), "tool_edit".to_string()]),
         visible_kinds: None,
         fold_mode: None,
+        pending_handoff: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
@@ -421,6 +445,7 @@ fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
             "summary".to_string(),
             "last.tool=expanded".to_string(),
         ]),
+        pending_handoff: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
@@ -476,6 +501,7 @@ fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
+        pending_handoff: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
@@ -617,6 +643,7 @@ fn unset_view_preferences_are_left_out_of_the_json() {
         display_filter: None,
         visible_kinds: None,
         fold_mode: None,
+        pending_handoff: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     for key in [
@@ -652,6 +679,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             display_filter: None,
             visible_kinds: None,
             fold_mode: None,
+            pending_handoff: None,
         }),
     };
 
@@ -695,6 +723,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             display_filter: None,
             visible_kinds: None,
             fold_mode: None,
+            pending_handoff: None,
         }),
     };
 
@@ -1661,6 +1690,7 @@ fn a_pane_writes_the_new_visible_kinds_field_and_never_the_legacy_one() {
         display_filter: None,
         visible_kinds: Some(Vec::new()),
         fold_mode: None,
+        pending_handoff: None,
     };
     let json = serde_json::to_string(&content).unwrap();
     assert!(

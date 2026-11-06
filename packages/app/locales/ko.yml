@@ -628,7 +628,7 @@ modal:
   switch_account_new_pane_title: "계정 전환"
   switch_account_new_pane_body_terminal: "실행 중인 셸은 다른 계정으로 옮길 수 없습니다. 전환하면 이 터미널은 그대로 두고 선택한 계정으로 새 pane을 엽니다."
   switch_account_new_pane_body_busy: "이 pane은 작업 중입니다 — 계정을 전환하면 중단하는 대신 선택한 계정으로 새 pane을 엽니다."
-  switch_account_new_pane_body_conversation: "다른 계정은 별도의 세션이 필요해서 이 대화를 옮겨갈 수 없습니다. 전환하면 대화는 여기 그대로 두고 선택한 계정으로 새 pane을 엽니다. 이 pane을 그대로 쓰려면 먼저 /clear를 실행하세요."
+  switch_account_new_pane_body_pinned: "이 대화는 자기 세션에 묶여 있어(작업의 채팅 또는 읽기 전용 보기) 여기 그대로 둡니다. 전환하면 선택한 계정으로 새 pane을 엽니다."
   switch_account_new_pane_confirm: "새 Pane 열기"
 
 # Bottom dock

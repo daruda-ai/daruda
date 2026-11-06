@@ -628,6 +628,7 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
             display_filter: None,
             visible_kinds: None,
             fold_mode: None,
+            pending_handoff: None,
         }),
     };
     let layout = SerializedLayout::Split {

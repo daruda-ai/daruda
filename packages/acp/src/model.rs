@@ -88,8 +88,8 @@ pub enum ChatItem {
     /// the earlier session. Live, the host pushes it at the switch; on
     /// `session/load` the new session's first prompt arrives with its recap
     /// block in front, and [`crate::mapping`] folds that block back into this
-    /// variant. See [`crate::handoff`].
-    Handoff(crate::handoff::HandoffMark),
+    /// variant, with the record its recap carried. See [`crate::handoff`].
+    Handoff(crate::handoff::HandoffItem),
 }
 
 /// A tool call, updated in place as `ToolCallUpdate`s arrive.

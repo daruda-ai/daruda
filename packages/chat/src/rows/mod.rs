@@ -346,7 +346,10 @@ pub(crate) fn item_row(rows: &[RenderRow], ix: usize) -> Option<usize> {
     rows.iter().position(|r| {
         matches!(
             r.kind,
-            RowKind::AgentItem(i) | RowKind::GroupThought(i) | RowKind::ConclusionItem(i)
+            RowKind::AgentItem(i)
+                | RowKind::GroupThought(i)
+                | RowKind::ConclusionItem(i)
+                | RowKind::Handoff(i)
                 if i == ix
         )
     })

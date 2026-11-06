@@ -84,7 +84,7 @@ pub(in crate::render) fn prompt_fold_toggle(
 /// carrying no chevron and no click: nothing is folded away here, so there is
 /// nothing to open. Lives beside [`window_boundary_row`] so the two cannot
 /// drift apart on rule colour or label tone.
-pub(in crate::render) fn interrupted_row(
+pub(in crate::render) fn edge_row(
     label: String,
     dim: f32,
     cx: &mut Context<AgentChatView>,

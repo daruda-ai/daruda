@@ -482,6 +482,12 @@ pub struct SerializedAgentChatContent {
     /// starting a fresh session. `None` for a pane that never connected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// The recap block a switch to another account or agent still owes the
+    /// next prompt of the pane's new session: kept until that prompt carries
+    /// it, because until then nothing else holds the conversation before the
+    /// switch — the new session is empty, and the transcript is not stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_handoff: Option<String>,
     /// Agent-provided session title, cached so a restored dormant pane
     /// shows its label before the session loads. `None` = fallback label.
     #[serde(default, skip_serializing_if = "Option::is_none")]

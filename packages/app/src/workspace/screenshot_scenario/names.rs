@@ -100,6 +100,9 @@ const NAME_AGENT_CHAT_FOLD: &str = "agent-chat-fold";
 const NAME_AGENT_CHAT_INTERRUPTED: &str = "agent-chat-interrupted";
 /// CLI token for the account-switch divider.
 const NAME_AGENT_CHAT_HANDOFF: &str = "agent-chat-handoff";
+/// CLI tokens for the divider a restart restores, its record folded / open.
+const NAME_AGENT_CHAT_HANDOFF_RESTORED: &str = "agent-chat-handoff-restored";
+const NAME_AGENT_CHAT_HANDOFF_RESTORED_OPEN: &str = "agent-chat-handoff-restored-open";
 /// CLI token for a turn stopped to avoid extra-usage billing, banner raised.
 const NAME_AGENT_CHAT_OVERAGE_STOPPED: &str = "agent-chat-overage-stopped";
 /// CLI tokens for a CLI task's read-only transcript, running and exited.
@@ -349,6 +352,12 @@ impl ScreenshotScenario {
             NAME_AGENT_CHAT_FOLD => Some(Self::AgentChatFold),
             NAME_AGENT_CHAT_INTERRUPTED => Some(Self::AgentChatInterrupted),
             NAME_AGENT_CHAT_HANDOFF => Some(Self::AgentChatHandoff),
+            NAME_AGENT_CHAT_HANDOFF_RESTORED => {
+                Some(Self::AgentChatHandoffRestored { expanded: false })
+            }
+            NAME_AGENT_CHAT_HANDOFF_RESTORED_OPEN => {
+                Some(Self::AgentChatHandoffRestored { expanded: true })
+            }
             NAME_AGENT_CHAT_OVERAGE_STOPPED => Some(Self::AgentChatOverageStopped),
             NAME_AGENT_CHAT_CLI_RUNNING => Some(Self::AgentChatCliRunning),
             NAME_AGENT_CHAT_CLI_ENDED => Some(Self::AgentChatCliEnded),

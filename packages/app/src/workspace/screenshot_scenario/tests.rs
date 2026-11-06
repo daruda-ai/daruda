@@ -135,6 +135,10 @@ fn agent_chat_names_map_to_their_scenarios() {
         Some(ScreenshotScenario::AgentChatHandoff)
     );
     assert_eq!(
+        ScreenshotScenario::from_cli_name("agent-chat-handoff-restored-open"),
+        Some(ScreenshotScenario::AgentChatHandoffRestored { expanded: true })
+    );
+    assert_eq!(
         ScreenshotScenario::from_cli_name("agent-chat-queue-parked"),
         Some(ScreenshotScenario::AgentChatQueueParked)
     );

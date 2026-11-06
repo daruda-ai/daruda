@@ -59,6 +59,20 @@ impl AgentChatView {
         }
     }
 
+    /// Bring back a switch a restart interrupted before its recap was sent:
+    /// the divider, carrying the recap's record in place of the conversation
+    /// the new session cannot replay, and the recap itself, still owed. Called
+    /// on a restored pane before it connects; a recap that does not parse is
+    /// dropped rather than sent as text the agent would read as a prompt.
+    pub fn restore_pending_handoff(&mut self, recap: String) {
+        let Some((divider, _)) = daruda_acp::handoff::split_handoff(&recap) else {
+            return;
+        };
+        self.items.push(ChatItem::Handoff(divider));
+        self.handoff_recap = Some(recap);
+        self.rebuild_rows();
+    }
+
     /// Point the pane at another agent. The program belongs to the agent
     /// that reported it; keeping it would read the incoming agent's
     /// traffic in the outgoing one's dialect until the next connect.

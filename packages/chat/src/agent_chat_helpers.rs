@@ -17,7 +17,9 @@ pub(crate) use diff::{
 };
 mod fold_context;
 use super::view::AgentChatView;
-pub(crate) use fold_context::{TurnBoundary, fold_context, fold_context_at, fold_key_item_index};
+pub(crate) use fold_context::{
+    TurnBoundary, fold_context, fold_context_at, fold_key_index, fold_key_item_index,
+};
 #[cfg(test)]
 pub(crate) use fold_context::{fold_active, fold_turn};
 

@@ -139,6 +139,14 @@ impl Workspace {
                             content
                                 .view
                                 .update(cx, |view, _| view.set_access(ac.access.clone()));
+                            // A recap names the agent it was written for; a pane
+                            // restored under another agent starts fresh instead.
+                            if let Some(recap) = ac.pending_handoff.clone().filter(|_| keep_session)
+                            {
+                                content
+                                    .view
+                                    .update(cx, |view, _| view.restore_pending_handoff(recap));
+                            }
                             content.account = account;
                             let content_width =
                                 ac.content_width.map(deserialize_chat_content_width);

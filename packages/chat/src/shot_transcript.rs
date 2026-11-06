@@ -329,9 +329,33 @@ pub fn interrupted_transcript() -> Vec<ChatItem> {
 /// answers from a recap. A divider is pushed by the switch, never by the agent,
 /// so no settled seed reaches it.
 pub fn handoff_transcript() -> Vec<ChatItem> {
-    use daruda_acp::handoff::{HandoffMark, HandoffParty};
+    use daruda_acp::handoff::HandoffItem;
     let mut items = sample_transcript();
-    items.push(ChatItem::Handoff(HandoffMark {
+    items.push(ChatItem::Handoff(HandoffItem::live(shot_handoff_mark())));
+    items.push(ChatItem::UserText(HANDOFF_PROMPT.to_string()));
+    items
+}
+
+/// The same switch after a restart: the replay restores only the new
+/// session, so the divider leads, carrying the record its recap sent — built
+/// through the real recap and replay split, not hand-written.
+pub fn handoff_restored_transcript() -> Vec<ChatItem> {
+    let mark = shot_handoff_mark();
+    let recap = daruda_acp::handoff::prepare(&sample_transcript(), mark.from, mark.to)
+        .recap
+        .expect("the sample conversation has something to carry");
+    let wire = format!("{recap}\n\n---\n\n{HANDOFF_PROMPT}");
+    let (divider, prompt) =
+        daruda_acp::handoff::split_handoff(&wire).expect("a recap splits back into its divider");
+    vec![
+        ChatItem::Handoff(divider),
+        ChatItem::UserText(prompt.to_string()),
+    ]
+}
+
+fn shot_handoff_mark() -> daruda_acp::handoff::HandoffMark {
+    use daruda_acp::handoff::{HandoffMark, HandoffParty};
+    HandoffMark {
         from: HandoffParty {
             agent: "Claude Code".into(),
             account: Some("work@example.com".into()),
@@ -340,9 +364,7 @@ pub fn handoff_transcript() -> Vec<ChatItem> {
             agent: "Claude Code".into(),
             account: Some("personal@example.com".into()),
         },
-    }));
-    items.push(ChatItem::UserText(HANDOFF_PROMPT.to_string()));
-    items
+    }
 }
 
 /// The prompt after the switch — the usual reason is a spent session limit.
