@@ -51,10 +51,7 @@ pub(in crate::workspace) fn deliver_flow_change(change: &FlowChange, cx: &mut Ap
 fn answer_remote_caller(ended: &FlowEnded, cx: &App) {
     let refusal = end_refusal(&ended.end);
     let notice = flow_outcome_notice(&ended.end, refusal, ended.overage.as_ref());
-    crate::remote_channel::global::RemoteChannels::send_notice(notice.clone(), cx);
-    if let Some(bridge) = cx.try_global::<crate::telegram::global::TelegramBridge>() {
-        bridge.send_notice(notice, cx);
-    }
+    crate::remote_channel::send_notice_everywhere(notice, cx);
 }
 
 fn lead_window_for(worktree: &CanonicalTree, cx: &mut App) -> Option<gpui::EntityId> {

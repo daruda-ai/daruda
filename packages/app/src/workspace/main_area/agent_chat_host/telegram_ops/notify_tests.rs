@@ -272,3 +272,41 @@ async fn a_terminal_hook_notice_reaches_the_phone_without_buttons(cx: &mut gpui:
     };
     assert!(text.contains("needs permission"), "{text}");
 }
+
+/// A permission no channel accepted is not one the phone was told: once a
+/// channel can take it, the sweep offers it — whether the phone's own turn or
+/// presence decided the delivery.
+#[gpui::test]
+async fn a_permission_no_channel_took_is_offered_once_one_can(cx: &mut gpui::TestAppContext) {
+    let (mut outbound, workspace, pane) = bridged_pane(cx);
+    let options = vec![PermissionChoice {
+        option_id: "allow_once".into(),
+        name: "Allow".into(),
+        kind: PermissionKindView::AllowOnce,
+    }];
+    for (id, phone_turn) in [(7, false), (8, true)] {
+        workspace.update(cx, |ws, cx| {
+            let view = ws.agent_chat_view(pane).cloned().expect("view");
+            if phone_turn {
+                view.update(cx, |v, _| {
+                    v.start_phone_turn_for_test(std::time::Instant::now())
+                });
+            }
+            let request = prompt(id, &options, Some("Write x.rs"));
+            view.update(cx, |v, cx| {
+                v.hold_permission_card_for_test(request.clone(), cx)
+            });
+            let take_back = crate::telegram::global::lend_bot_elsewhere_for_test(cx);
+            ws.relay_permission_wait_to_telegram(pane, &request, cx);
+            assert!(outbound.next().now_or_never().is_none());
+
+            take_back(cx);
+            ws.relay_outstanding_permissions(cx);
+            assert_eq!(
+                sent(&mut outbound).permission().map(|p| p.perm_id),
+                Some(id),
+                "phone_turn={phone_turn}"
+            );
+        });
+    }
+}

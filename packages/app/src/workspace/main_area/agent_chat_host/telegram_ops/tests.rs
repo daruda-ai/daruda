@@ -1174,6 +1174,13 @@ pub(super) fn make_window(
     gpui::Entity<super::Workspace>,
 ) {
     crate::test_support::init_gpui_component(cx);
+    // The workspace mirrors live Settings, and the phone channels read them
+    // directly; a window built from `config` must find the same values there.
+    cx.update(|cx| {
+        crate::settings_store::SettingsStore::init(cx);
+        cx.global_mut::<crate::settings_store::SettingsStore>()
+            .set_user_for_testing(config.clone());
+    });
     // A pane's phone pings name the project that owns it, so the workspace
     // opens one — a plain directory under the test's own data dir.
     let data_dir = test_data_dir();

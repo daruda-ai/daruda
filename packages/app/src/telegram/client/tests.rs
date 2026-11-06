@@ -89,8 +89,8 @@ fn a_transport_error_never_carries_the_bot_token() {
     let token = "123456789:AA-this-is-not-a-real-bot-token-000";
     let raw = format!("{}: connection timed out", base_url(token, "getUpdates"));
 
-    let ClientError::Http(message) = http_error(token, raw) else {
-        panic!("http_error builds an Http error");
+    let ClientError::Transport(message) = http_error(token, raw) else {
+        panic!("http_error builds a transport error");
     };
 
     assert!(!message.contains(token), "the token leaked: {message}");
@@ -336,13 +336,16 @@ fn multiple_updates_preserve_update_id_order() {
 }
 
 #[test]
-fn endpoint_envelope_parsers_handle_ok_and_http_errors() {
+fn endpoint_envelope_parsers_handle_ok_and_api_errors() {
     fn assert_http_contains<T: std::fmt::Debug>(result: Result<T, ClientError>, needle: &str) {
         match result.expect_err("should error") {
-            ClientError::Http(msg) => {
-                assert!(msg.contains(needle), "{msg:?} should contain {needle:?}")
+            ClientError::Api { description, .. } => {
+                assert!(
+                    description.contains(needle),
+                    "{description:?} should contain {needle:?}"
+                )
             }
-            other => panic!("expected Http error, got {other:?}"),
+            other => panic!("expected an API error, got {other:?}"),
         }
     }
 
@@ -352,12 +355,12 @@ fn endpoint_envelope_parsers_handle_ok_and_http_errors() {
     );
 
     assert_eq!(
-        parse_send_message_response(r#"{ "ok": true, "result": { "message_id": 44 } }"#)
+        parse_send_message_response(200, r#"{ "ok": true, "result": { "message_id": 44 } }"#)
             .expect("parse ok"),
         44
     );
     assert_http_contains(
-        parse_send_message_response(r#"{ "ok": false, "description": "chat not found" }"#),
+        parse_send_message_response(400, r#"{ "ok": false, "description": "chat not found" }"#),
         "chat not found",
     );
 
@@ -374,7 +377,7 @@ fn endpoint_envelope_parsers_handle_ok_and_http_errors() {
 
 #[test]
 fn client_error_display_includes_inner() {
-    let e = ClientError::Http("connection refused".to_string());
+    let e = ClientError::Transport("connection refused".to_string());
     assert!(e.to_string().contains("connection refused"));
     let e = ClientError::Parse("missing field".to_string());
     assert!(e.to_string().contains("missing field"));
@@ -464,4 +467,70 @@ fn edit_responses_classify_into_success_gone_or_transient() {
         ),
         other => panic!("expected Gone, got {other:?}"),
     }
+}
+
+/// Telegram answers 401 to a revoked token and 404 to one it does not know.
+/// Neither is retryable: a new token is another card owner, and that owner
+/// cannot edit the old messages, so the card is gone either way.
+#[test]
+fn an_edit_refused_for_the_token_is_gone_but_a_slow_reply_is_retried() {
+    use crate::remote_channel::cards::EditFailure;
+
+    for (status, body) in [
+        (
+            401,
+            r#"{"ok":false,"error_code":401,"description":"Unauthorized"}"#,
+        ),
+        (
+            404,
+            r#"{"ok":false,"error_code":404,"description":"Not Found"}"#,
+        ),
+    ] {
+        assert!(
+            matches!(
+                classify_edit_response(status, body),
+                Err(EditFailure::Gone(_))
+            ),
+            "status {status}"
+        );
+    }
+    assert!(matches!(
+        classify_edit_response(
+            408,
+            r#"{"ok":false,"error_code":408,"description":"Request Timeout"}"#
+        ),
+        Err(EditFailure::Transient(_))
+    ));
+}
+
+/// A refused send keeps Telegram's code and reason, so the send loop can tell
+/// refused markup — which posted nothing — from a failure that may have posted.
+#[test]
+fn a_refused_send_keeps_telegrams_code_and_reason() {
+    let markup = parse_send_message_response(
+        400,
+        r#"{"ok":false,"error_code":400,"description":"Bad Request: can't parse entities: Can't find end tag corresponding to start tag \"b\""}"#,
+    )
+    .expect_err("refused");
+    assert!(markup.is_markup_refusal(), "{markup:?}");
+
+    for (status, body) in [
+        (
+            400,
+            r#"{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}"#,
+        ),
+        (
+            429,
+            r#"{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 3"}"#,
+        ),
+        (502, "<html>Bad Gateway</html>"),
+    ] {
+        let error = parse_send_message_response(status, body).expect_err("refused");
+        assert!(!error.is_markup_refusal(), "{error:?}");
+        match error {
+            ClientError::Api { code, .. } => assert_eq!(code, i64::from(status)),
+            other => panic!("expected an API error for {status}, got {other:?}"),
+        }
+    }
+    assert!(!ClientError::Transport("can't parse entities".into()).is_markup_refusal());
 }

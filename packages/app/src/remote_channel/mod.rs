@@ -130,6 +130,25 @@ pub(crate) fn announce_chat_created(
     }
 }
 
+/// Send a pane's ping to every channel `delivery` reaches, each under its own
+/// `only_when_away`. Whether any channel took it.
+pub(crate) fn send_ping(
+    ping: bridge::BridgePing,
+    delivery: global::Delivery,
+    cx: &gpui::App,
+) -> bool {
+    let telegram = crate::telegram::global::TelegramBridge::send_ping(ping.clone(), delivery, cx);
+    global::RemoteChannels::send_ping(ping, delivery, cx) || telegram
+}
+
+/// Send a pane-less notice to every channel `delivery` reaches. Whether any
+/// channel took it.
+pub(crate) fn send_notice(text: String, delivery: global::Delivery, cx: &gpui::App) -> bool {
+    let telegram =
+        crate::telegram::global::TelegramBridge::notify_with_delivery(text.clone(), delivery, cx);
+    global::RemoteChannels::send_notice_with_delivery(text, delivery, cx) || telegram
+}
+
 /// Tell every channel that can hear it something owed to a command the phone
 /// sent earlier. Best effort, like [`announce_chat_created`].
 pub(crate) fn send_notice_everywhere(text: String, cx: &gpui::App) {
@@ -137,13 +156,7 @@ pub(crate) fn send_notice_everywhere(text: String, cx: &gpui::App) {
         error_report::{ErrorReport, ErrorSeverity},
         log_writer::LogWriter,
     };
-    let remote = global::RemoteChannels::send_notice_with_delivery(
-        text.clone(),
-        global::Delivery::Explicit,
-        cx,
-    );
-    let telegram = crate::telegram::global::TelegramBridge::notify(text, cx);
-    if !telegram && !remote {
+    if !send_notice(text, global::Delivery::Explicit, cx) {
         LogWriter::log(
             ErrorReport::new("Notice not sent: no remote channel can deliver it")
                 .severity(ErrorSeverity::Warning)

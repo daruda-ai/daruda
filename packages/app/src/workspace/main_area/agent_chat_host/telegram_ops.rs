@@ -341,8 +341,7 @@ impl Workspace {
             },
         ));
         let told = if is_telegram_first_response {
-            self.relay_to_telegram(pane_id, header, tail, permission, cx);
-            true
+            self.relay_to_telegram(pane_id, header, tail, permission, cx)
         } else {
             self.relay_when_presence_allows(pane_id, header, tail, permission, cx)
         };
@@ -420,8 +419,9 @@ impl Workspace {
     /// [`PhoneTurn`] ledger is open, every relay here is solicited too, and
     /// goes out the same way. Presence decides only the unsolicited.
     ///
-    /// Returns whether the ping went out, so a caller tracking a live state
-    /// (an outstanding permission) knows whether the phone has been told.
+    /// Returns whether a channel took the ping, so a caller tracking a live
+    /// state (an outstanding permission) knows whether the phone has been
+    /// told — a refused send leaves it for the next sweep.
     pub(super) fn relay_when_presence_allows(
         &mut self,
         pane_id: PaneId,
@@ -442,40 +442,23 @@ impl Workspace {
             trace::delivery("relay.solicited", || {
                 format!("pane={pane_id} text={}", trace::tail_digest(&tail))
             });
-            self.relay_to_telegram(pane_id, header, tail, prompt, cx);
-            return true;
+            return self.relay_ping(pane_id, header, tail, prompt, delivery, cx);
         }
-        // `relay_to_telegram` asks this too, but asking here first keeps a
-        // disabled/unpaired bridge out of the presence trace below, where it
-        // would read as a presence decision it never was.
-        let remote_sent = crate::remote_channel::global::RemoteChannels::send_ping(
-            self.remote_ping(pane_id, header.clone(), tail.clone(), prompt.clone()),
-            delivery,
-            cx,
-        );
-        if self.telegram_bridge(cx).is_none() {
-            trace::delivery("relay.gated", || {
-                format!("pane={pane_id} entry=presence reason=bridge")
-            });
-            return remote_sent;
-        }
-        // Asked unconditionally, not short-circuited by the opt-out, so the
-        // trace records what presence actually was even when it did not
-        // decide — the alternative logs a sample from the last pump tick.
-        let send = away || !self.mirrors.telegram.only_when_away;
+        // Asked unconditionally, so the trace records what presence actually
+        // was even where a channel's opt-out decided — the alternative logs a
+        // sample from the last pump tick.
         let state = crate::app_presence::snapshot(cx);
         let away_secs = state.away_secs(Instant::now());
-        // `relay.send` belongs to `relay_to_telegram`; this line is the
-        // verdict that precedes it, and the only record of a drop. The rule is
-        // logged alongside the readings because it is read live from config —
-        // a log reader has no other way to recover what they were compared to.
+        // The verdict that precedes `relay.send`, and the only record of a
+        // presence drop. The rule is logged alongside the readings because it
+        // is read live from config — a log reader has no other way to recover
+        // what they were compared to.
         let rule = crate::app_presence::rule(cx);
         trace::delivery("relay.presence", || {
             format!(
-                "pane={pane_id} send={send} away={away} only_when_away={} \
+                "pane={pane_id} away={away} \
                  away_secs={away_secs:?} idle_secs={} away_grace_secs={} \
                  away_idle_secs={} away_idle_foreground_secs={} {} text={}",
-                self.mirrors.telegram.only_when_away,
                 trace::opt(state.idle().map(|i| i.as_secs())),
                 rule.grace.as_secs(),
                 rule.idle_bar.as_secs(),
@@ -488,10 +471,7 @@ impl Workspace {
                 trace::tail_digest(&tail)
             )
         });
-        if send {
-            self.relay_telegram_only(pane_id, header, tail, prompt, cx);
-        }
-        send || remote_sent
+        self.relay_ping(pane_id, header, tail, prompt, delivery, cx)
     }
 
     /// Whether the pane's in-flight turn was started from the phone. Any
@@ -505,17 +485,8 @@ impl Workspace {
             .is_some_and(|view| view.read(cx).phone_turn().is_some())
     }
 
-    /// Relay a ping to the Telegram bridge, if the bridge is configured to
-    /// receive one. Gated on BOTH `enabled` (the user turned the feature on)
-    /// AND `authorized_chat_id.is_some()` (someone has actually paired) — an
-    /// enabled-but-unpaired bridge has nowhere to send, and skipping here
-    /// avoids `BridgeCore::build_ping`'s debug-assert/zero-chat_id fallback
-    /// path for the common "just turned it on, haven't paired yet" state.
-    ///
-    /// `cx.try_global` (not `cx.global`, which panics if missing) because
-    /// `main.rs` opens the first window before calling
-    /// `telegram::global::install` — a `Workspace` can theoretically exist
-    /// for a brief window before the `TelegramBridge` global is registered.
+    /// Relay a ping every channel hears, whatever presence says: the phone
+    /// asked for it. Returns whether any channel took the ping.
     pub(super) fn relay_to_telegram(
         &self,
         pane_id: PaneId,
@@ -523,61 +494,32 @@ impl Workspace {
         tail: TelegramTail,
         prompt: Option<crate::telegram::bridge::PingPrompt>,
         cx: &Context<Self>,
-    ) {
-        crate::remote_channel::global::RemoteChannels::send_ping(
-            self.remote_ping(pane_id, header.clone(), tail.clone(), prompt.clone()),
-            crate::remote_channel::global::Delivery::Explicit,
-            cx,
-        );
-        self.relay_telegram_only(pane_id, header, tail, prompt, cx);
-    }
-
-    fn remote_ping(
-        &self,
-        pane_id: PaneId,
-        header: String,
-        tail: TelegramTail,
-        prompt: Option<crate::remote_channel::bridge::PingPrompt>,
-    ) -> crate::remote_channel::bridge::BridgePing {
-        crate::remote_channel::bridge::BridgePing {
-            pane: crate::remote_channel::bridge::PaneRef {
-                workspace: self.uuid(),
-                pane: pane_id,
-            },
+    ) -> bool {
+        self.relay_ping(
+            pane_id,
             header,
             tail,
             prompt,
-        }
+            crate::remote_channel::global::Delivery::Explicit,
+            cx,
+        )
     }
 
-    fn relay_telegram_only(
+    /// Hand a pane's ping to the remote-channel facade, which applies each
+    /// channel's own `only_when_away` and pairing. Whether any channel took it.
+    fn relay_ping(
         &self,
         pane_id: PaneId,
         header: String,
         tail: TelegramTail,
         prompt: Option<crate::remote_channel::bridge::PingPrompt>,
+        delivery: crate::remote_channel::global::Delivery,
         cx: &Context<Self>,
-    ) {
-        let Some(bridge) = self.telegram_bridge(cx) else {
-            trace::delivery("relay.gated", || {
-                format!("pane={pane_id} entry=direct reason=bridge")
-            });
-            return;
-        };
-        trace::delivery("relay.send", || {
-            format!(
-                "pane={pane_id} {} text={}",
-                trace::presence(
-                    crate::platform::attention::is_app_active(),
-                    self.lane_ref_for_pane(pane_id),
-                    self.active_ref()
-                ),
-                trace::tail_digest(&tail)
-            )
-        });
-        bridge.send(
-            crate::telegram::bridge::BridgePing {
-                pane: crate::telegram::bridge::PaneRef {
+    ) -> bool {
+        let text = trace::is_on().then(|| trace::tail_digest(&tail));
+        let sent = crate::remote_channel::send_ping(
+            crate::remote_channel::bridge::BridgePing {
+                pane: crate::remote_channel::bridge::PaneRef {
                     workspace: self.uuid(),
                     pane: pane_id,
                 },
@@ -585,25 +527,21 @@ impl Workspace {
                 tail,
                 prompt,
             },
+            delivery,
             cx,
         );
-    }
-
-    /// The live bridge, or `None` when nothing may be sent — the feature is
-    /// off, no chat is paired, or the global is not installed yet (early
-    /// startup, tests).
-    ///
-    /// The one place that question is answered. Every relay below asks it, so
-    /// they cannot come to different conclusions about the same three
-    /// conditions, and a fourth relay inherits the rule instead of copying it.
-    fn telegram_bridge<'a>(
-        &self,
-        cx: &'a Context<Self>,
-    ) -> Option<&'a crate::telegram::global::TelegramBridge> {
-        if !(self.mirrors.telegram.enabled && self.mirrors.telegram.authorized_chat_id.is_some()) {
-            return None;
-        }
-        cx.try_global::<crate::telegram::global::TelegramBridge>()
+        trace::delivery("relay.send", || {
+            format!(
+                "pane={pane_id} delivery={delivery:?} sent={sent} {} text={}",
+                trace::presence(
+                    crate::platform::attention::is_app_active(),
+                    self.lane_ref_for_pane(pane_id),
+                    self.active_ref()
+                ),
+                trace::opt(text)
+            )
+        });
+        sent
     }
 
     /// Relay an unsolicited, pane-less notice under each channel's presence
@@ -615,30 +553,15 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let away = crate::app_presence::is_away(cx);
-        crate::remote_channel::global::RemoteChannels::send_notice_with_delivery(
-            text.clone(),
+        let digest = trace::is_on().then(|| trace::digest(&text));
+        let sent = crate::remote_channel::send_notice(
+            text,
             crate::remote_channel::global::Delivery::Presence { away },
             cx,
         );
-        let Some(bridge) = self.telegram_bridge(cx) else {
-            trace::delivery("relay.gated", || {
-                format!(
-                    "entry=presence_notice reason=bridge text={}",
-                    trace::digest(&text)
-                )
-            });
-            return;
-        };
-        if !away && self.mirrors.telegram.only_when_away {
-            trace::delivery("relay.gated", || {
-                format!(
-                    "entry=presence_notice reason=presence text={}",
-                    trace::digest(&text)
-                )
-            });
-            return;
-        }
-        bridge.send_notice(text, cx);
+        trace::delivery("relay.presence_notice", || {
+            format!("away={away} sent={sent} text={}", trace::opt(digest))
+        });
     }
 
     /// The ping a turn that ended in an error sends: the usual who-is-this

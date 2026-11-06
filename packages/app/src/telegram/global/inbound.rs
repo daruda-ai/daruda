@@ -38,11 +38,10 @@ enum ClaimOutcome {
     Retry,
 }
 
-/// The inbound long-poll loop. Every iteration re-syncs `enabled` /
+/// The inbound long-poll loop. Every iteration reads `enabled` /
 /// `authorized_chat_id` from the live `SettingsStore` so a
-/// Settings-window toggle takes effect without any extra plumbing —
-/// the same pattern `workspace/sync/limits.rs` uses for its poll
-/// cadence.
+/// Settings-window toggle takes effect at the next poll — the same pattern
+/// `workspace/sync/limits.rs` uses for its poll cadence.
 pub(super) fn spawn_poll_task(cx: &mut App) {
     let answers = spawn_answer_task(cx);
     cx.spawn(async move |cx| {
@@ -53,12 +52,7 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
         loop {
             let (enabled, chat_id) = cx.update(|cx| {
                 let cfg = SettingsStore::global(cx).user_arc();
-                let bridge = cx.global_mut::<TelegramBridge>();
-                bridge.core.set_enabled(cfg.telegram.enabled);
-                bridge
-                    .core
-                    .set_authorized_chat_id(cfg.telegram.authorized_chat_id);
-                (bridge.core.is_enabled(), cfg.telegram.authorized_chat_id)
+                (cfg.telegram.enabled, cfg.telegram.authorized_chat_id)
             });
             let token = cx
                 .background_executor()
@@ -436,10 +430,7 @@ fn dispatch_update(
         client::UpdateKind::Callback { data, .. } => Some(data.clone()),
         _ => None,
     };
-    let config = SettingsStore::global(cx).user_arc();
     let core = &mut cx.global_mut::<TelegramBridge>().core;
-    core.set_enabled(config.telegram.enabled);
-    core.set_authorized_chat_id(config.telegram.authorized_chat_id);
     let update_id = update.update_id;
     let RouteResult {
         action,
@@ -463,6 +454,9 @@ fn dispatch_update(
                 &error,
                 "telegram.pair.persist",
             );
+            // `route` paired the core ahead of Settings; with the pairing
+            // unsaved, the core follows Settings again.
+            TelegramBridge::sync_from_settings(cx);
         }
         dispatch::Effect::None
     } else {

@@ -7,7 +7,7 @@ use super::pairing::Pairing;
 use super::runtime::{self, BotSession, Status, Worker, WorkerEvent};
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
-use daruda_config::remote::ChannelConfig;
+use daruda_config::remote::{ChannelConfig, RemoteRecipient};
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{App, Global};
 use std::cell::RefCell;
@@ -69,6 +69,29 @@ impl Connection {
         self.bot.as_ref().is_some_and(|bot| bot.is_live())
             && self.config.recipient.is_some()
             && self.status.holds_claim()
+    }
+
+    /// Whether this connection still runs the session `generation` and `bot`
+    /// started: a replaced worker or bot, or a revoked session, does not.
+    pub(super) fn runs(&self, generation: uuid::Uuid, bot: &Arc<BotSession>) -> bool {
+        bot.is_live()
+            && self.generation == generation
+            && self
+                .bot
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, bot))
+    }
+
+    /// Whether that session may still send to `recipient` on this connection.
+    pub(super) fn serves(
+        &self,
+        generation: uuid::Uuid,
+        bot: &Arc<BotSession>,
+        recipient: &RemoteRecipient,
+    ) -> bool {
+        self.runs(generation, bot)
+            && self.can_send()
+            && self.config.recipient.as_ref() == Some(recipient)
     }
 
     /// Serve with the bot the worker published. The one place `bot` gains a
@@ -149,16 +172,12 @@ impl RemoteChannels {
         let Some(bridge) = cx.try_global::<Self>() else {
             return false;
         };
-        let away = match delivery {
-            Delivery::Explicit => true,
-            Delivery::Presence { away } => away,
-        };
         let mut queued = false;
         for id in bridge.connections.keys() {
             let Some(connection) = bridge.live(id, cx) else {
                 continue;
             };
-            if !away && connection.config.only_when_away {
+            if !delivery.reaches(connection.config.only_when_away) {
                 continue;
             }
             queued |= bridge.enqueue(connection, Outbound::Ping(ping.clone()));
@@ -210,10 +229,6 @@ impl RemoteChannels {
         )
     }
 
-    pub fn send_notice(text: String, cx: &App) {
-        Self::send_notice_with_delivery(text, Delivery::Explicit, cx);
-    }
-
     pub(crate) fn send_flow_ask(
         prompt: super::bridge::FlowAskPrompt,
         delivery: Delivery,
@@ -225,9 +240,7 @@ impl RemoteChannels {
         let mut queued = false;
         for id in bridge.connections.keys() {
             if let Some(connection) = bridge.live(id, cx) {
-                if matches!(delivery, Delivery::Presence { away: false })
-                    && connection.config.only_when_away
-                {
+                if !delivery.reaches(connection.config.only_when_away) {
                     continue;
                 }
                 queued |= bridge.enqueue(connection, Outbound::FlowAsk(prompt.clone()));
@@ -242,14 +255,10 @@ impl RemoteChannels {
         let Some(bridge) = cx.try_global::<Self>() else {
             return false;
         };
-        let away = match delivery {
-            Delivery::Explicit => true,
-            Delivery::Presence { away } => away,
-        };
         let mut queued = false;
         for id in bridge.connections.keys() {
             if let Some(connection) = bridge.live(id, cx) {
-                if !away && connection.config.only_when_away {
+                if !delivery.reaches(connection.config.only_when_away) {
                     continue;
                 }
                 queued |= bridge.enqueue(connection, Outbound::Notice(text.clone()));
@@ -311,9 +320,7 @@ impl RemoteChannels {
             .keys()
             .filter(|key| {
                 bridge.live(key, cx).is_some_and(|connection| {
-                    connection.can_send()
-                        && (!matches!(delivery, Delivery::Presence { away: false })
-                            || !connection.config.only_when_away)
+                    connection.can_send() && delivery.reaches(connection.config.only_when_away)
                 })
             })
             .cloned()

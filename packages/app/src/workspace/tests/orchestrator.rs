@@ -158,7 +158,7 @@ async fn asking_the_orchestrator_makes_it_the_conversation(cx: &mut TestAppConte
     });
 
     let mut async_cx = cx.to_async();
-    crate::remote_channel::dispatch::handle(
+    crate::remote_channel::dispatch::tests::handle(
         crate::remote_channel::dispatch::target::Aimed {
             action: InboundAction::RunCommand {
                 command: ControlCommand::Ask {

@@ -135,17 +135,12 @@ fn prepare(queued: QueuedOutbound, cx: &mut App) -> Option<Prepared> {
         discard(&queued, cx);
         return None;
     }
-    let cfg = SettingsStore::global(cx).user_arc();
     let bridge = cx.global_mut::<TelegramBridge>();
     if let Some(card) = &queued.card
         && !bridge.cards.get_mut().ledger_mut().begin(card)
     {
         return None;
     }
-    bridge.core.set_enabled(cfg.telegram.enabled);
-    bridge
-        .core
-        .set_authorized_chat_id(cfg.telegram.authorized_chat_id);
     let (pane, body) = match queued.outbound {
         Outbound::Ping(ping) => {
             let pane = ping.pane;
@@ -227,9 +222,15 @@ fn release(card: &SendClaim, cx: &mut App) {
     }
 }
 
-/// The bot that may edit `receipt`'s message: the one serving its identity now.
+/// The bot that may edit `receipt`'s message now: the one serving its
+/// identity, with the token the keychain still holds. A rewritten token waits
+/// for the bridge to serve it; the same bot can still edit afterwards.
 fn editor(receipt: &Receipt, cx: &App) -> Option<Arc<ReadyBot>> {
-    serving(&receipt.owner, cx)
+    current_editor(&receipt.owner, cx)
+}
+
+fn current_editor(owner: &CardOwner, cx: &App) -> Option<Arc<ReadyBot>> {
+    serving(owner, cx).filter(|bot| bot.token.revision == keychain::revision())
 }
 
 /// The bot serving `owner` now, if any.
@@ -314,8 +315,8 @@ pub(super) fn flush_edits(cx: &mut App) {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    // A rewritten token waits for the bridge to serve it; the
-                    // same bot can still edit the message afterwards.
+                    // Asked again off the foreground: the keychain can be
+                    // rewritten between the check above and this send.
                     if bot.token.revision != keychain::revision() {
                         return None;
                     }
@@ -359,9 +360,7 @@ impl TelegramBridge {
         else {
             return Vec::new();
         };
-        let Some(bot) =
-            serving(&owner, cx).filter(|bot| bot.token.revision == keychain::revision())
-        else {
+        let Some(bot) = current_editor(&owner, cx) else {
             return Vec::new();
         };
         let cards = cx.global_mut::<Self>().cards.get_mut();
@@ -517,9 +516,8 @@ fn finish(
     }
 }
 
-/// Telegram's client folds transport failures, unreadable replies and API
-/// refusals into one error, so a failed `sendMessage` is unconfirmed: only a
-/// send that never started is known not to have posted.
+/// A failed `sendMessage` is unconfirmed, as a Slack or Discord send is: only
+/// a send that never started is known not to have posted.
 fn send(prepared: Prepared) -> Result<SendOutcome<i64>, client::ClientError> {
     if prepared.bot.token.revision != keychain::revision() {
         return Ok(SendOutcome::NotSent);
@@ -543,31 +541,44 @@ fn send(prepared: Prepared) -> Result<SendOutcome<i64>, client::ClientError> {
             });
             sent
         }
-        Body::Ping(OutboundMsg {
-            chat_id,
-            header,
-            tail,
-            keyboard,
-        }) => {
-            let html = html_body(&header, &tail);
-            match client::send_message(token, chat_id, &html, Some("HTML"), keyboard.clone()) {
-                Ok(id) => Ok(id),
-                Err(error) => {
-                    trace::delivery("send.html_rejected", || {
-                        format!("chat_id={chat_id} error={error}")
-                    });
-                    client::send_message(
-                        token,
-                        chat_id,
-                        &plain_body(&header, &tail),
-                        None,
-                        keyboard,
-                    )
-                }
-            }
+        Body::Ping(message) => {
+            let chat_id = message.chat_id;
+            post_ping(message, |text, parse_mode, keyboard| {
+                client::send_message(token, chat_id, text, parse_mode, keyboard)
+            })
         }
     };
     sent.map(SendOutcome::Delivered)
+}
+
+/// Post a ping as Telegram HTML, resending it as plain text only when Telegram
+/// refused the markup. Any other failure may have posted the message — a
+/// timeout can land after Telegram took it — and a second copy would offer the
+/// same buttons while only one copy is ever edited when the card settles.
+fn post_ping(
+    message: OutboundMsg,
+    mut post: impl FnMut(
+        &str,
+        Option<&str>,
+        Option<client::InlineKeyboard>,
+    ) -> Result<i64, client::ClientError>,
+) -> Result<i64, client::ClientError> {
+    let OutboundMsg {
+        chat_id,
+        header,
+        tail,
+        keyboard,
+    } = message;
+    let html = html_body(&header, &tail);
+    match post(&html, Some("HTML"), keyboard.clone()) {
+        Err(error) if error.is_markup_refusal() => {
+            trace::delivery("send.html_rejected", || {
+                format!("chat_id={chat_id} error={error}")
+            });
+            post(&plain_body(&header, &tail), None, keyboard)
+        }
+        sent => sent,
+    }
 }
 
 pub(super) fn spawn_send_task(

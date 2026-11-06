@@ -114,14 +114,10 @@ impl TelegramBridge {
                 prompt: None,
             },
             cx,
-        );
-        true
+        )
     }
-    /// Queue a notice that answers the phone. `false` when nothing can send.
-    pub(crate) fn notify(text: String, cx: &App) -> bool {
-        Self::notify_with_delivery(text, Delivery::Explicit, cx)
-    }
-
+    /// Queue a notice if `delivery` reaches Telegram. `false` when nothing
+    /// can send.
     pub(crate) fn notify_with_delivery(text: String, delivery: Delivery, cx: &App) -> bool {
         if !Self::allows_delivery(delivery, cx) || !Self::deliverable(cx) {
             return false;
@@ -134,39 +130,60 @@ impl TelegramBridge {
     }
 
     fn allows_delivery(delivery: Delivery, cx: &App) -> bool {
-        match delivery {
-            Delivery::Explicit => true,
-            Delivery::Presence { away } => {
-                away || !SettingsStore::global(cx).user().telegram.only_when_away
-            }
-        }
+        delivery.reaches(SettingsStore::global(cx).user().telegram.only_when_away)
     }
 
-    /// Queue a pane-attributed ping for the outbound send loop.
-    pub(crate) fn send(&self, ping: BridgePing, cx: &App) {
+    /// Queue a pane's ping if `delivery` reaches Telegram and a message can go
+    /// out. Whether it was queued.
+    pub(crate) fn send_ping(ping: BridgePing, delivery: Delivery, cx: &App) -> bool {
+        let deliverable = Self::deliverable(cx);
+        let allowed = Self::allows_delivery(delivery, cx);
+        if !(deliverable && allowed) {
+            trace::delivery("send.gated", || {
+                format!(
+                    "pane={} deliverable={deliverable} presence_allows={allowed}",
+                    trace::pane(ping.pane)
+                )
+            });
+            return false;
+        }
+        cx.try_global::<Self>()
+            .is_some_and(|bridge| bridge.send(ping, cx))
+    }
+
+    /// Queue a pane-attributed ping for the outbound send loop. Whether it
+    /// was queued: a bot held elsewhere or a card already claimed takes
+    /// nothing.
+    pub(crate) fn send(&self, ping: BridgePing, cx: &App) -> bool {
         if !self.bot.serves() {
             trace::delivery("send.dropped", || {
                 format!("reason=bot_held_elsewhere pane={}", trace::pane(ping.pane))
             });
-            return;
+            return false;
         }
         let (pane, prompt) = (ping.pane, ping.prompt.is_some());
         let text = trace::is_on().then(|| trace::tail_digest(&ping.tail));
         match self.enqueue(Outbound::Ping(ping), cx) {
-            Ok(()) => trace::delivery("queue.ping", || {
-                format!(
-                    "{} pane={} prompt={prompt} text={}",
-                    trace::enqueue_slot(),
-                    trace::pane(pane),
-                    trace::opt(text)
-                )
-            }),
-            // Only reachable once the send loop is gone, which is to say once
-            // nothing will ever be delivered again — worth a line of its own
-            // rather than the silent drop this used to be.
-            Err(_) => trace::delivery("queue.closed", || {
-                format!("kind=ping pane={}", trace::pane(pane))
-            }),
+            Ok(()) => {
+                trace::delivery("queue.ping", || {
+                    format!(
+                        "{} pane={} prompt={prompt} text={}",
+                        trace::enqueue_slot(),
+                        trace::pane(pane),
+                        trace::opt(text)
+                    )
+                });
+                true
+            }
+            // Reached with no recipient, a card another send already claimed,
+            // or a send loop that is gone — worth a line of its own rather
+            // than a silent drop.
+            Err(_) => {
+                trace::delivery("queue.closed", || {
+                    format!("kind=ping pane={}", trace::pane(pane))
+                });
+                false
+            }
         }
     }
 
@@ -393,6 +410,15 @@ pub(crate) fn hold_bot_elsewhere_for_test(cx: &mut App) {
     cx.global_mut::<TelegramBridge>().bot = Ownership::HeldElsewhere;
 }
 
+/// Hand the claim to another daruda for a while; the returned call takes it
+/// back, as the poll loop does once the other daruda lets go.
+#[cfg(test)]
+pub(crate) fn lend_bot_elsewhere_for_test(cx: &mut App) -> impl FnOnce(&mut App) + use<> {
+    let bridge = cx.global_mut::<TelegramBridge>();
+    let bot = std::mem::replace(&mut bridge.bot, Ownership::HeldElsewhere);
+    move |cx: &mut App| cx.global_mut::<TelegramBridge>().bot = bot
+}
+
 #[cfg(test)]
 pub(crate) fn install_for_test(
     enabled: bool,
@@ -470,9 +496,25 @@ pub fn install(cx: &mut App) {
 }
 
 fn observe_settings(cx: &mut App) {
-    TelegramBridge::sync_card_owner(cx);
-    cx.observe_global::<SettingsStore>(TelegramBridge::sync_card_owner)
+    TelegramBridge::sync_from_settings(cx);
+    cx.observe_global::<SettingsStore>(TelegramBridge::sync_from_settings)
         .detach();
+}
+
+impl TelegramBridge {
+    /// Bring the bridge in line with the live Telegram settings: the core's
+    /// gate and paired chat, then the card ledger's owner. The one place a
+    /// settings change reaches the bridge, run on every change.
+    fn sync_from_settings(cx: &mut App) {
+        if !cx.has_global::<Self>() {
+            return;
+        }
+        let config = SettingsStore::global(cx).user_arc();
+        let core = &mut cx.global_mut::<Self>().core;
+        core.set_enabled(config.telegram.enabled);
+        core.set_authorized_chat_id(config.telegram.authorized_chat_id);
+        Self::sync_card_owner(cx);
+    }
 }
 
 /// The plain-text fallback body for `header`/`tail`: verbatim, no escaping

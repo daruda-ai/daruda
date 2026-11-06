@@ -89,6 +89,7 @@ impl BridgeCore {
         self.enabled = enabled;
     }
 
+    #[cfg(test)]
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
@@ -96,8 +97,8 @@ impl BridgeCore {
     /// Syncs a Settings-window-initiated pairing change (including an
     /// "unpair" that clears it) back into the live `BridgeCore`.
     /// `route()`'s own `Paired` branch still directly mutates the field
-    /// for the pairing-success path — this setter is for the poll
-    /// loop's per-iteration config resync (`global.rs`).
+    /// for the pairing-success path — this setter is for
+    /// `TelegramBridge::sync_from_settings`, run on every settings change.
     ///
     /// The adapter also checks live Settings before claiming and dispatching
     /// each update, so a stale poll snapshot cannot authorize revoked chats.

@@ -16,22 +16,40 @@ use ureq::Body;
 use crate::remote_channel::cards::EditFailure;
 use ureq::http::Response;
 
-/// Failure surface for the Bot API calls, mirroring
-/// `daruda_agent::http::FetchError`'s transport-vs-parse split.
+/// Failure surface for the Bot API calls. Telegram's own refusal is kept
+/// apart from a transport fault so a caller can tell "Telegram took nothing"
+/// from "Telegram may have taken it".
 #[derive(Debug)]
 pub enum ClientError {
-    /// Transport, TLS, non-2xx status, or a Telegram `"ok": false` reply.
-    /// One variant because the caller's recourse is the same for all of them.
-    Http(String),
+    /// No usable answer: transport or TLS failure, a body that could not be
+    /// read, or a bare error status on a call that does not read its body.
+    Transport(String),
+    /// Telegram refused the call: its `error_code` and `description`.
+    Api { code: i64, description: String },
     /// JSON that would not decode, or decoded to a shape this module does
     /// not expect.
     Parse(String),
 }
 
+impl ClientError {
+    /// Whether Telegram refused the `parse_mode` markup itself, which it does
+    /// before posting anything; any other failure may have posted the message.
+    pub fn is_markup_refusal(&self) -> bool {
+        matches!(
+            self,
+            ClientError::Api { code: 400, description }
+                if description.contains("can't parse entities")
+        )
+    }
+}
+
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ClientError::Http(e) => write!(f, "telegram HTTP error: {e}"),
+            ClientError::Transport(e) => write!(f, "telegram HTTP error: {e}"),
+            ClientError::Api { code, description } => {
+                write!(f, "telegram API error {code}: {description}")
+            }
             ClientError::Parse(e) => write!(f, "telegram parse error: {e}"),
         }
     }
@@ -209,7 +227,7 @@ const REDACTED_TOKEN: &str = "<redacted>";
 /// URL it failed on into its `Display`, so the raw string is a live bot
 /// credential — and `crate::telegram::global` writes these to the on-disk log.
 fn http_error(token: &str, e: impl std::fmt::Display) -> ClientError {
-    ClientError::Http(e.to_string().replace(token, REDACTED_TOKEN))
+    ClientError::Transport(e.to_string().replace(token, REDACTED_TOKEN))
 }
 
 /// Long-poll for updates after `offset`. `timeout_s` goes straight to
@@ -241,9 +259,9 @@ pub fn get_updates(token: &str, offset: i64, timeout_s: u64) -> Result<Vec<Updat
 /// Send a text message, optionally with a `parse_mode` (see
 /// `crate::telegram::markdown`) and an inline keyboard.
 ///
-/// Text that is malformed for its `parse_mode` — an unclosed tag — makes
-/// Telegram reject the call outright. Retrying without the `parse_mode` is
-/// `global`'s send loop's job, not this function's.
+/// Markup Telegram cannot parse is refused outright
+/// ([`ClientError::is_markup_refusal`]); retrying without the `parse_mode` is
+/// `global`'s send loop's job.
 pub fn send_message(
     token: &str,
     chat_id: i64,
@@ -268,10 +286,10 @@ pub fn send_message(
         payload["reply_markup"] = inline_keyboard_json(&keyboard);
     }
 
-    let response = post_json(token, "sendMessage", payload, Statuses::AsError)?;
-
+    let response = post_json(token, "sendMessage", payload, Statuses::AsResponse)?;
+    let status = response.status().as_u16();
     let body = read_body(response)?;
-    parse_send_message_response(&body)
+    parse_send_message_response(status, &body)
 }
 
 /// Upper bound Telegram documents for `answerCallbackQuery`'s `text`. A longer
@@ -342,28 +360,40 @@ fn read_body(response: Response<Body>) -> Result<String, ClientError> {
         // never carries the request URL, which is the only place the token
         // appears.
         .read_to_string(&mut body)
-        .map_err(|e| ClientError::Http(e.to_string()))?;
+        .map_err(|e| ClientError::Transport(e.to_string()))?;
     Ok(body)
 }
 
 /// Top-level Telegram API envelope for a reply whose `result` is unused:
-/// `{"ok": bool, "result": ..., "description": "..."}`. `description`
-/// is only present when `ok` is `false`.
+/// `{"ok": bool, "result": ..., "error_code": n, "description": "..."}`.
+/// `error_code` and `description` are only present when `ok` is `false`.
 #[derive(Debug, Deserialize)]
 struct RawEnvelope {
     ok: bool,
+    error_code: Option<i64>,
     description: Option<String>,
 }
 
-/// Shared `"ok": false` → [`ClientError::Http`] check. `fallback` covers the
-/// rare reply that sets `ok: false` and omits `description`.
-fn require_ok(ok: bool, description: Option<String>, fallback: &str) -> Result<(), ClientError> {
+/// HTTP status of a body read from a call that fails on any error status, so
+/// an `ok: false` there is a 2xx reply.
+const OK_STATUS: u16 = 200;
+
+/// Shared `"ok": false` → [`ClientError::Api`] check. `status` stands in for
+/// a missing `error_code`, `fallback` for a missing `description`.
+fn require_ok(
+    ok: bool,
+    status: u16,
+    error_code: Option<i64>,
+    description: Option<String>,
+    fallback: &str,
+) -> Result<(), ClientError> {
     if ok {
         Ok(())
     } else {
-        Err(ClientError::Http(
-            description.unwrap_or_else(|| fallback.to_string()),
-        ))
+        Err(ClientError::Api {
+            code: error_code.unwrap_or(i64::from(status)),
+            description: description.unwrap_or_else(|| fallback.to_string()),
+        })
     }
 }
 
@@ -372,6 +402,7 @@ struct GetUpdatesEnvelope {
     ok: bool,
     #[serde(default)]
     result: Vec<RawUpdate>,
+    error_code: Option<i64>,
     description: Option<String>,
 }
 
@@ -432,7 +463,13 @@ struct RawCallbackMessage {
 fn parse_updates(body: &str) -> Result<Vec<Update>, ClientError> {
     let envelope: GetUpdatesEnvelope =
         serde_json::from_str(body).map_err(|e| ClientError::Parse(e.to_string()))?;
-    require_ok(envelope.ok, envelope.description, "getUpdates failed")?;
+    require_ok(
+        envelope.ok,
+        OK_STATUS,
+        envelope.error_code,
+        envelope.description,
+        "getUpdates failed",
+    )?;
 
     // `map`, never `filter_map`: every update Telegram sent must reach the
     // routing layer so its id can advance the offset. See [`UpdateKind`].
@@ -485,6 +522,7 @@ struct SendMessageEnvelope {
     ok: bool,
     #[serde(default)]
     result: Option<SendMessageResult>,
+    error_code: Option<i64>,
     description: Option<String>,
 }
 
@@ -493,10 +531,26 @@ struct SendMessageResult {
     message_id: i64,
 }
 
-fn parse_send_message_response(body: &str) -> Result<i64, ClientError> {
-    let envelope: SendMessageEnvelope =
-        serde_json::from_str(body).map_err(|e| ClientError::Parse(e.to_string()))?;
-    require_ok(envelope.ok, envelope.description, "sendMessage failed")?;
+/// Decode a `sendMessage` reply. An error status whose body is not Telegram's
+/// envelope — a proxy's 502 page — is still a refusal with that status.
+fn parse_send_message_response(status: u16, body: &str) -> Result<i64, ClientError> {
+    let envelope: SendMessageEnvelope = match serde_json::from_str(body) {
+        Ok(envelope) => envelope,
+        Err(_) if !(200..300).contains(&status) => {
+            return Err(ClientError::Api {
+                code: i64::from(status),
+                description: format!("sendMessage returned HTTP {status}"),
+            });
+        }
+        Err(e) => return Err(ClientError::Parse(e.to_string())),
+    };
+    require_ok(
+        envelope.ok,
+        status,
+        envelope.error_code,
+        envelope.description,
+        "sendMessage failed",
+    )?;
     envelope
         .result
         .map(|r| r.message_id)
@@ -509,6 +563,8 @@ fn parse_answer_callback_response(body: &str) -> Result<(), ClientError> {
         serde_json::from_str(body).map_err(|e| ClientError::Parse(e.to_string()))?;
     require_ok(
         envelope.ok,
+        OK_STATUS,
+        envelope.error_code,
         envelope.description,
         "answerCallbackQuery failed",
     )
@@ -521,10 +577,11 @@ struct EditEnvelope {
     description: Option<String>,
 }
 
-/// Classify an `editMessageText` reply by whether a retry could succeed.
-/// Telegram refuses an edit to identical text, which means the card already
-/// shows its settlement; a 400 or 403 names a message, chat or bot access
-/// that is gone, or a request that stays malformed.
+/// Classify an `editMessageText` reply by whether a retry could succeed, as
+/// Slack and Discord edits are; an edit to identical text already shows the
+/// settlement. 400/403 name a gone message, chat or access, or a request that
+/// stays malformed; 401/404 a token Telegram revoked or never knew, and a new
+/// token is another card owner that cannot edit these messages anyway.
 fn classify_edit_response(status: u16, body: &str) -> Result<(), EditFailure> {
     let envelope: EditEnvelope = serde_json::from_str(body).map_err(|e| {
         EditFailure::Transient(format!(
@@ -542,9 +599,10 @@ fn classify_edit_response(status: u16, body: &str) -> Result<(), EditFailure> {
         return Ok(());
     }
     let reason = format!("editMessageText error {code}: {description}");
-    match code {
-        400 | 403 => Err(EditFailure::Gone(reason)),
-        _ => Err(EditFailure::Transient(reason)),
+    if u16::try_from(code).is_ok_and(crate::remote_channel::transport::http::retryable_status) {
+        Err(EditFailure::Transient(reason))
+    } else {
+        Err(EditFailure::Gone(reason))
     }
 }
 

@@ -45,19 +45,7 @@ pub(super) struct Prepared {
 }
 
 pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
-    let valid = cx
-        .global::<RemoteChannels>()
-        .live(&pending.id, cx)
-        .is_some_and(|connection| {
-            connection.generation == pending.generation
-                && connection.can_send()
-                && connection.config.recipient.as_ref() == Some(&pending.recipient)
-                && connection
-                    .bot
-                    .as_ref()
-                    .is_some_and(|bot| Arc::ptr_eq(bot, &pending.bot))
-        });
-    if !valid {
+    if !current(pending, cx) {
         discard(pending, cx);
         return None;
     }
@@ -118,13 +106,7 @@ fn current(pending: &Pending, cx: &App) -> bool {
     cx.global::<RemoteChannels>()
         .live(&pending.id, cx)
         .is_some_and(|connection| {
-            connection.generation == pending.generation
-                && connection.can_send()
-                && connection.config.recipient.as_ref() == Some(&pending.recipient)
-                && connection
-                    .bot
-                    .as_ref()
-                    .is_some_and(|bot| Arc::ptr_eq(bot, &pending.bot))
+            connection.serves(pending.generation, &pending.bot, &pending.recipient)
         })
 }
 
@@ -182,6 +164,10 @@ fn flush_connection(id: &str, cx: &mut App) {
     }
     let pending = connection.cards.get_mut().edits.claim();
     for (attempt, receipt, label) in pending {
+        if editor(&receipt, cx).is_none() {
+            finish_edit(&receipt, attempt, EditOutcome::Transient, cx);
+            continue;
+        }
         #[cfg(test)]
         if let Some(result) = crate::remote_channel::cards::tests::capture(
             &receipt.id,
@@ -321,6 +307,9 @@ impl RemoteChannels {
         }
         let mut edits = Vec::new();
         for (receipt, label) in owed {
+            let Some((kind, bot)) = editor(&receipt, cx) else {
+                continue;
+            };
             #[cfg(test)]
             if let Some(result) = crate::remote_channel::cards::tests::capture(
                 &receipt.id,
@@ -336,9 +325,7 @@ impl RemoteChannels {
                 ));
                 continue;
             }
-            if let Some((kind, bot)) = editor(&receipt, cx) {
-                edits.push(quit_edit(kind, bot, receipt, label));
-            }
+            edits.push(quit_edit(kind, bot, receipt, label));
         }
         edits
     }

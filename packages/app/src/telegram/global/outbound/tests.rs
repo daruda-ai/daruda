@@ -559,3 +559,61 @@ fn a_telegram_bot_that_is_not_serving_keeps_its_cards_at_quit(cx: &mut gpui::Tes
         assert_eq!(edits[0].ids, ["75"]);
     });
 }
+
+/// Each call `post_ping` makes, answered from `replies` in order.
+fn posted_with(
+    replies: Vec<Result<i64, client::ClientError>>,
+) -> (Result<i64, client::ClientError>, Vec<Option<String>>) {
+    let mut replies = replies.into_iter();
+    let mut calls = Vec::new();
+    let message = OutboundMsg {
+        chat_id: 42,
+        header: "header".into(),
+        tail: crate::telegram::bridge::TelegramTail::Markdown("**tail**".into()),
+        keyboard: Some(client::InlineKeyboard {
+            rows: vec![vec![("Allow".into(), "token".into())]],
+        }),
+    };
+    let result = post_ping(message, |_, parse_mode, keyboard| {
+        assert!(keyboard.is_some(), "every attempt carries the buttons");
+        calls.push(parse_mode.map(str::to_owned));
+        replies.next().expect("no call beyond the scripted replies")
+    });
+    (result, calls)
+}
+
+/// A failure that may have posted the card must not post it again: a second
+/// copy would offer the same buttons, and only one copy is ever edited.
+#[test]
+fn a_ping_whose_html_send_may_have_landed_is_not_resent_as_plain_text() {
+    for error in [
+        client::ClientError::Transport("timed out".into()),
+        client::ClientError::Api {
+            code: 502,
+            description: "Bad Gateway".into(),
+        },
+        client::ClientError::Api {
+            code: 400,
+            description: "Bad Request: chat not found".into(),
+        },
+        client::ClientError::Parse("expected value".into()),
+    ] {
+        let (result, calls) = posted_with(vec![Err(error)]);
+        assert!(result.is_err());
+        assert_eq!(calls, [Some("HTML".to_owned())]);
+    }
+}
+
+/// Telegram refusing the HTML markup is the one failure known to have posted
+/// nothing, so the plain-text copy is the card's only copy.
+#[test]
+fn a_ping_whose_html_telegram_refused_is_resent_as_plain_text() {
+    let refused = client::ClientError::Api {
+        code: 400,
+        description:
+            "Bad Request: can't parse entities: Unsupported start tag \"x\" at byte offset 7".into(),
+    };
+    let (result, calls) = posted_with(vec![Err(refused), Ok(9)]);
+    assert_eq!(result.ok(), Some(9));
+    assert_eq!(calls, [Some("HTML".to_owned()), None]);
+}

@@ -45,7 +45,7 @@ impl From<TransportError> for Failure {
 /// stay malformed.
 pub(crate) fn edit_failure(failure: Failure) -> EditFailure {
     let retryable = match failure {
-        Failure::Status(status) => matches!(status, 408 | 429 | 500..),
+        Failure::Status(status) => retryable_status(status),
         Failure::Transport(_) => true,
     };
     let reason = TransportError::from(failure).to_string();
@@ -54,6 +54,12 @@ pub(crate) fn edit_failure(failure: Failure) -> EditFailure {
     } else {
         EditFailure::Gone(reason)
     }
+}
+
+/// Whether an error status may pass on a later attempt: a rate limit, a
+/// timeout, or a server error. Shared with Telegram's edit classification.
+pub(crate) fn retryable_status(status: u16) -> bool {
+    matches!(status, 408 | 429 | 500..)
 }
 
 pub fn request(

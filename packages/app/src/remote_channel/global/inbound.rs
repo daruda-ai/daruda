@@ -41,17 +41,9 @@ fn live_generation(id: &str, generation: uuid::Uuid, cx: &App) -> bool {
 }
 
 fn live_session(id: &str, generation: uuid::Uuid, bot: &Arc<BotSession>, cx: &App) -> bool {
-    bot.is_live()
-        && cx
-            .global::<RemoteChannels>()
-            .live(id, cx)
-            .is_some_and(|connection| {
-                connection.generation == generation
-                    && connection
-                        .bot
-                        .as_ref()
-                        .is_some_and(|current| Arc::ptr_eq(current, bot))
-            })
+    cx.global::<RemoteChannels>()
+        .live(id, cx)
+        .is_some_and(|connection| connection.runs(generation, bot))
 }
 
 async fn claim_incoming<F: Future<Output = ClaimResult>>(
