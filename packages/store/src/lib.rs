@@ -9,6 +9,7 @@
 //! - [`panels`] — bottom dock panel tabs and widgets (`panels.json`)
 //! - [`project`] — workspace session state and recent list (`projects/`, `recent.json`)
 //! - [`tasks`] — right-panel task queue (`tasks.json`; the `task-log/` run log)
+//! - [`run_ledger`] — orchestrator run delivery kept across restarts (`run-ledger/`)
 //! - [`observability`] — error reports, NDJSON log writer, system info
 //!   summary used by the toast / modal / log-file pipeline
 
@@ -22,6 +23,7 @@ pub mod persistence;
 pub(crate) mod profile;
 pub mod project;
 pub mod remote_channels;
+pub mod run_ledger;
 mod storage;
 pub mod tasks;
 pub mod telegram;

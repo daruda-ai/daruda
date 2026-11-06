@@ -28,11 +28,15 @@ pub(super) fn run() {
             );
         }
     };
-    // Only the primary instance holds `desktop.lock`, the task log's single
-    // writer guarantee; a forwarded launch returned above without opening it.
+    // Only the primary instance holds `desktop.lock`, the single-writer
+    // guarantee of the task log and the run ledger; a forwarded launch
+    // returned above without opening either.
     let runs = crate::runs::RunsHost::open(daruda_store::tasks::TaskStore::open_current(
         env!("CARGO_PKG_VERSION"),
         crate::runs::no_hook(),
+    ))
+    .with_run_ledger(daruda_store::run_ledger::RunLedgerStore::open_current(
+        env!("CARGO_PKG_VERSION"),
     ));
     let app = bootstrap::new_application();
     app.run(move |cx: &mut App| {

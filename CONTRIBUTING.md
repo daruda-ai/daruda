@@ -272,6 +272,7 @@ Task state uses the profile data directory:
 | Current tasks | `<data_dir>/task-log/` | TaskStore's single-writer run log, opened by the primary desktop process. |
 | Legacy tasks | `<data_dir>/tasks.json` | One-time migration input, preserved byte-for-byte and never rewritten. |
 | Startup reconciliation marker | `<data_dir>/task-log/.reconciling` | Present only while a start settles the runs the last session left. |
+| Orchestrator run delivery | `<data_dir>/run-ledger/` | Run ledger of the orchestrator's scope and unreported results, kept across restarts; an unreadable one is left untouched and delivery stays memory-only. |
 
 Task edits and app-quit flushing write only the run log. Older builds still
 read the preserved, potentially stale legacy file; automatic downgrade

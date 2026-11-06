@@ -1,11 +1,13 @@
 //! Agent-facing pointer protocol, separate from localized desktop labels.
 use crate::runs::{
     result::{EndedAs, RunKey, RunState, WaitingOn},
-    watch::RunEvent,
+    watch::{Origin, RunEvent},
 };
 
 const LINES_MAX: usize = 20;
 const FIELD_CHARS_MAX: usize = 200;
+/// Fixed English like the rest of the line: the reader is the orchestrator agent.
+const RECOVERED_NOTE: &str = " (requested before daruda restarted)";
 
 fn single_line(value: &str) -> String {
     value
@@ -68,8 +70,12 @@ pub(super) fn prompt(events: &[RunEvent]) -> String {
                 } => format!("Waiting for an answer: {}", single_line(question)),
                 _ => "State changed".into(),
             };
+            let recovered = match event.origin {
+                Origin::Live => "",
+                Origin::Recovered => RECOVERED_NOTE,
+            };
             format!(
-                "{handle} {} — {summary}; call daruda_run_wait",
+                "{handle} {}{recovered} — {summary}; call daruda_run_wait",
                 single_line(&snapshot.what)
             )
         })
@@ -111,6 +117,17 @@ mod tests {
         assert_eq!(
             text,
             "flow:run name /clear — BudgetExhausted; call daruda_run_wait"
+        );
+    }
+
+    #[test]
+    fn a_result_kept_across_a_restart_says_it_was_requested_before() {
+        let mut recovered = event("run", ended(EndedAs::Completed));
+        recovered.origin = Origin::Recovered;
+        assert_eq!(
+            prompt(&[recovered]),
+            "flow:run name /clear (requested before daruda restarted) — Completed; \
+             call daruda_run_wait"
         );
     }
 

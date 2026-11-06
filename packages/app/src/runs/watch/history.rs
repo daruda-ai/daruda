@@ -1,5 +1,5 @@
 //! Task end history projected into the ledger, one change at a time.
-use super::state::RunWatch;
+use super::state::{Membership, RunWatch};
 use crate::runs::result::{self, RunKey};
 use daruda_store::tasks::TasksBook;
 
@@ -29,7 +29,10 @@ impl RunWatch {
         next: &TasksBook,
     ) {
         for key in carried {
-            self.register(key);
+            // A restored ledger entry already holds this key's solicitation.
+            if self.membership(&key) != Membership::Scoped {
+                self.register(key);
+            }
         }
         self.sync_task_history(previous, next);
     }

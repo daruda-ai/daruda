@@ -112,11 +112,33 @@ fn result_states_round_trip_without_losing_ending_or_pointers() {
             what: "Task".into(),
             why: Some("Prompt".into()),
             state,
+            recovered: false,
         };
         let value = serde_json::to_value(&result).unwrap();
         assert_eq!(value["handle"], "task:t/e");
         assert_eq!(serde_json::from_value::<RunResult>(value).unwrap(), result);
     }
+}
+
+/// A result kept across a restart says so; every other result reads as before.
+#[test]
+fn only_a_recovered_result_carries_the_recovered_flag() {
+    use daruda_control_types::runs::{RunResult, RunState};
+    let mut result = RunResult {
+        handle: "flow:run".parse().unwrap(),
+        what: "Flow".into(),
+        why: None,
+        state: RunState::Gone,
+        recovered: false,
+    };
+    let value = serde_json::to_value(&result).unwrap();
+    assert!(value.get("recovered").is_none());
+    assert_eq!(serde_json::from_value::<RunResult>(value).unwrap(), result);
+
+    result.recovered = true;
+    let value = serde_json::to_value(&result).unwrap();
+    assert_eq!(value["recovered"], true);
+    assert_eq!(serde_json::from_value::<RunResult>(value).unwrap(), result);
 }
 
 #[test]

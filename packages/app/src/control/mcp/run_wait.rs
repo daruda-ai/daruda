@@ -153,8 +153,14 @@ impl PreparedWait {
     }
 
     fn payload(self, result: WaitAnswer) -> serde_json::Value {
+        let recovered = result.recovered;
         let convert = |runs: Vec<crate::runs::result::RunSnapshot>| -> Vec<wire::RunResult> {
-            runs.into_iter().map(super::runs::convert).collect()
+            runs.into_iter()
+                .map(|run| wire::RunResult {
+                    recovered: recovered.contains(&run.key),
+                    ..super::runs::convert(run)
+                })
+                .collect()
         };
         let mut answer = wire::WaitAnswer {
             outcome: match result.outcome {

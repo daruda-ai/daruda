@@ -38,15 +38,15 @@ pub(super) struct Block {
 #[derive(Default)]
 pub(super) struct RunEntry {
     pub(super) membership: Membership,
-    solicited: bool,
+    pub(super) solicited: bool,
     pub(super) snapshot: Option<RunSnapshot>,
     pub(super) end: EndState,
     pub(super) block: Option<Block>,
     /// Allocated from the watch's clock so forgotten keys cannot reuse revisions.
     pub(super) revision: u64,
-    episode: u64,
+    pub(super) episode: u64,
     /// The last issued event number while this key is retained.
-    last_sequence: u64,
+    pub(super) last_sequence: u64,
     /// The first episode number of the current run; lower ones are history.
     pub(super) floor: u64,
     pub(super) disk_episode: Option<u64>,
@@ -88,14 +88,28 @@ pub(crate) struct RunWatch {
     pub(super) retirements: u64,
     pub(super) revisions: u64,
     pub(super) next_sweep: usize,
+    /// What must outlive the process: scope, unreported ends and their reports.
+    pub(in crate::runs) ledger: crate::runs::ledger::Ledger,
 }
+/// Whether an episode arose in this process or was restored from the ledger.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Origin {
+    #[default]
+    Live,
+    /// Requested before the app restarted and not yet handed to an agent.
+    Recovered,
+}
+
 /// A process-local episode with a stable per-key identity.
 /// The channel may announce it again when waiter coverage is withdrawn.
 #[derive(Clone, Debug)]
 pub(crate) struct RunEvent {
     pub(crate) sequence: u64,
     pub(crate) solicited: bool,
-    episode: u64,
+    pub(crate) origin: Origin,
+    pub(super) episode: u64,
+    /// The ledger's episode for a recorded end, which its report names.
+    pub(super) recorded: Option<u64>,
     pub(crate) snapshot: RunSnapshot,
     pub(super) delivery: Delivery,
 }
@@ -105,7 +119,9 @@ impl RunEvent {
         Self {
             sequence,
             solicited: false,
+            origin: Origin::Live,
             episode: 0,
+            recorded: None,
             snapshot,
             delivery: Delivery::Unreported,
         }
@@ -165,6 +181,10 @@ impl RunWatch {
         entry.floor = entry.last_sequence + 1;
         entry.end = EndState::Open;
         entry.snapshot = None;
+        if entry.membership == Membership::Scoped {
+            // A resumed run is owned again, even after its last end was released.
+            self.record_owned(key);
+        }
         self.clear_waiting(key);
         self.wake();
     }
@@ -208,10 +228,17 @@ impl RunWatch {
             });
             block.sequence = Some(sequence);
         }
+        let recorded = if entry.membership == Membership::Scoped {
+            self.ledger.ended(&snapshot, entry.solicited)
+        } else {
+            None
+        };
         let event = RunEvent {
             sequence,
             solicited: entry.solicited,
+            origin: Origin::Live,
             episode: entry.episode,
+            recorded,
             snapshot,
             delivery: Delivery::Unreported,
         };
@@ -278,10 +305,35 @@ impl RunWatch {
     pub(crate) fn register_solicited(&mut self, key: RunKey, solicited: bool) {
         let was = self.membership(&key);
         let entry = self.entry(&key);
+        let changed = was != Membership::Scoped || entry.solicited != solicited;
         entry.membership = Membership::Scoped;
         entry.solicited = solicited;
-        if was == Membership::Outside {
-            self.announce_cached(&key);
+        if changed {
+            self.record_owned(&key);
+        }
+        match was {
+            Membership::Outside => self.announce_cached(&key),
+            Membership::Enrolled => self.record_scoped_ends(&key),
+            Membership::Scoped => {}
+        }
+    }
+    fn record_owned(&mut self, key: &RunKey) {
+        let solicited = self.entries.get(key).is_some_and(|entry| entry.solicited);
+        let location = match key {
+            RunKey::Flow(id) => self.locations.get(id),
+            RunKey::Task(_) => None,
+        };
+        self.ledger.owned(key, solicited, location);
+    }
+    /// Ends an explicit waiter enrolled before the key joined the scope.
+    fn record_scoped_ends(&mut self, key: &RunKey) {
+        for event in &mut self.events {
+            if &event.snapshot.key == key
+                && event.recorded.is_none()
+                && event.delivery != Delivery::Reported
+            {
+                event.recorded = self.ledger.ended(&event.snapshot, event.solicited);
+            }
         }
     }
     pub(super) fn enroll(&mut self, key: RunKey) {
@@ -378,6 +430,10 @@ impl RunWatch {
                 } = &mut event.snapshot.state
             {
                 *current_text = Some(text.clone());
+                if let Some(episode) = event.recorded {
+                    self.ledger
+                        .rerecord(episode, &event.snapshot, event.solicited);
+                }
             }
         }
     }
@@ -488,6 +544,10 @@ impl RunWatch {
                 } = &mut event.snapshot.state
             {
                 *current = Some(text.clone());
+                if let Some(episode) = event.recorded {
+                    self.ledger
+                        .rerecord(episode, &event.snapshot, event.solicited);
+                }
             }
         }
     }

@@ -144,6 +144,11 @@ pub(crate) struct OpenedRuns {
     carried: Vec<super::result::RunKey>,
     host: RunsHost,
     projection: GlobalTasks,
+    /// The run ledger and the entries it replayed, restored at install.
+    ledger: Option<(
+        super::ledger::Ledger,
+        Vec<daruda_store::run_ledger::RunLedgerEntry>,
+    )>,
 }
 
 fn settled_tail() -> smol::channel::Receiver<()> {
@@ -211,6 +216,7 @@ impl RunsHost {
         };
         OpenedRuns {
             carried,
+            ledger: None,
             host: RunsHost {
                 access,
                 delivery: Default::default(),
@@ -389,9 +395,10 @@ impl RunsHost {
         Self::shut_down_flows(cx);
     }
 
-    /// Quit, second phase: make queued task commits and terminal history
-    /// durable by `until`.
-    pub(crate) fn quit_flush(until: std::time::Instant, cx: &App) {
+    /// Quit, second phase: make queued task commits, run ledger records and
+    /// terminal history durable by `until`.
+    pub(crate) fn quit_flush(until: std::time::Instant, cx: &mut App) {
+        cx.update_global::<RunsHost, _>(|host, _| host.watch.ledger.flush(until));
         if let Access::Writable(store) = &cx.global::<RunsHost>().access
             && let Err(error) =
                 store.flush(until.saturating_duration_since(std::time::Instant::now()))
@@ -450,6 +457,13 @@ impl RunsHost {
             opened.host.flows = flows;
             opened.host.watch = watch;
             opened.host.effects = opened.host.effects.take().or(effects);
+        }
+        if let Some((mut ledger, entries)) = opened.ledger.take() {
+            // An unreadable task log cannot tell a deleted task from a lost one.
+            let book = (!matches!(opened.host.access, Access::Unavailable))
+                .then_some(&opened.projection.book);
+            let restored = ledger.restore(entries, book);
+            opened.host.watch.attach_ledger(ledger, restored);
         }
         opened.host.watch.adopt_log(
             std::mem::take(&mut opened.carried),
@@ -553,9 +567,17 @@ impl RunsHost {
 }
 
 impl OpenedRuns {
+    /// Keep orchestrator delivery across restarts in `opened`; a ledger that
+    /// could not be opened leaves delivery memory-only, with one warning.
+    pub(crate) fn with_run_ledger(mut self, opened: super::ledger::OpenedLedger) -> Self {
+        self.ledger = Some(super::ledger::Ledger::open(opened));
+        self
+    }
+
     fn unavailable() -> Self {
         Self {
             carried: Vec::new(),
+            ledger: None,
             host: RunsHost {
                 access: Access::Unavailable,
                 delivery: Default::default(),

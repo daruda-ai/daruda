@@ -79,6 +79,11 @@ impl RunsHost {
             .map(|host| host.watch.unreported())
             .unwrap_or_default()
     }
+    /// Whether `key`'s current result was requested before the app restarted.
+    pub(crate) fn run_recovered(key: &RunKey, cx: &App) -> bool {
+        cx.try_global::<Self>()
+            .is_some_and(|host| host.watch.recovered(key))
+    }
     pub(crate) fn run_wait_covers(key: &RunKey, cx: &App) -> bool {
         cx.try_global::<Self>()
             .is_some_and(|host| host.watch.covered(key))

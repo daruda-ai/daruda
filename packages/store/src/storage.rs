@@ -104,6 +104,11 @@ impl StorageLayout {
         self.data.join("task-log")
     }
 
+    /// Profile-scoped like the task log; the opener creates its directory.
+    pub(crate) fn run_ledger(&self) -> PathBuf {
+        self.data.join("run-ledger")
+    }
+
     pub(crate) fn node_install(&self) -> PathBuf {
         self.shared.join("node")
     }

@@ -102,6 +102,10 @@ pub struct RunResult {
     pub what: String,
     pub why: Option<String>,
     pub state: RunState,
+    /// The run was requested before daruda restarted, and this result was kept
+    /// for delivery across that restart. Omitted when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub recovered: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

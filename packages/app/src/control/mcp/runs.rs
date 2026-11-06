@@ -4,7 +4,8 @@ use daruda_control_types::runs as wire;
 use gpui::App;
 
 enum StatusItem {
-    Query(crate::runs::result_host::RunQuery),
+    /// A staged read, and whether its result was kept across a restart.
+    Query(crate::runs::result_host::RunQuery, bool),
     Ready(wire::RunResult),
 }
 pub(crate) struct StatusQuery {
@@ -41,6 +42,7 @@ pub(super) fn resolve(
                             what: String::new(),
                             why: None,
                             state: wire::RunState::Gone,
+                            recovered: false,
                         });
                         None
                     })
@@ -64,10 +66,10 @@ pub(super) fn resolve(
 pub(crate) fn prepare(handles: Option<Vec<String>>, cx: &mut App) -> StatusQuery {
     let (keys, ready, errors) = resolve(handles, cx);
     let mut runs: Vec<_> = ready.into_iter().map(StatusItem::Ready).collect();
-    runs.extend(
-        keys.into_iter()
-            .map(|key| StatusItem::Query(RunsHost::run_query(key, cx))),
-    );
+    runs.extend(keys.into_iter().map(|key| {
+        let recovered = RunsHost::run_recovered(&key, cx);
+        StatusItem::Query(RunsHost::run_query(key, cx), recovered)
+    }));
     StatusQuery { runs, errors }
 }
 
@@ -77,7 +79,10 @@ impl StatusQuery {
             .runs
             .into_iter()
             .map(|item| match item {
-                StatusItem::Query(query) => convert(query.read()),
+                StatusItem::Query(query, recovered) => wire::RunResult {
+                    recovered,
+                    ..convert(query.read())
+                },
                 StatusItem::Ready(result) => result,
             })
             .collect();
@@ -147,6 +152,7 @@ pub(super) fn convert(snapshot: domain::RunSnapshot) -> wire::RunResult {
         what: snapshot.what,
         why: snapshot.why,
         state,
+        recovered: false,
     }
 }
 #[cfg(test)]

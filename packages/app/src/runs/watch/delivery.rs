@@ -1,5 +1,5 @@
 //! Reservation and acknowledgement of process-local delivery episodes.
-use super::state::{EndState, Membership, RunEvent, RunWatch};
+use super::state::{EndState, Membership, Origin, RunEvent, RunWatch};
 use crate::runs::result::{RunKey, RunSnapshot, RunState};
 use std::collections::HashSet;
 
@@ -51,6 +51,8 @@ pub(crate) struct WaitAnswer {
     pub not_running: Vec<RunSnapshot>,
     pub pending: Vec<RunSnapshot>,
     pub more: usize,
+    /// Keys among `ended` and `blocked` restored from before a restart.
+    pub recovered: Vec<RunKey>,
 }
 impl RunWatch {
     pub(crate) fn open_wait(
@@ -93,6 +95,15 @@ impl RunWatch {
             WaiterScope::Explicit(keys) => keys.contains(key),
         })
     }
+    /// Whether the key's current episode was restored from before a restart.
+    pub(crate) fn recovered(&self, key: &RunKey) -> bool {
+        let floor = self.floor(key);
+        self.events.iter().any(|event| {
+            &event.snapshot.key == key
+                && event.sequence >= floor
+                && event.origin == Origin::Recovered
+        })
+    }
     pub(crate) fn unreported(&self) -> Vec<RunEvent> {
         self.events
             .iter()
@@ -114,13 +125,17 @@ impl RunWatch {
                     Delivery::Unreported
                 };
                 if delivered && matches!(event.snapshot.state, RunState::Ended { .. }) {
-                    reported.push((event.snapshot.key.clone(), event.sequence));
+                    reported.push((event.snapshot.key.clone(), event.sequence, event.recorded));
                 }
             }
         }
-        for (key, sequence) in reported {
-            if sequence >= self.floor(&key) {
+        for (key, sequence, recorded) in reported {
+            let current = sequence >= self.floor(&key);
+            if current {
                 self.entry(&key).end = EndState::Reported;
+            }
+            if let Some(episode) = recorded {
+                self.ledger.reported(&key, episode, current);
             }
         }
         // A closed block or a terminal supersedes only an unreported blocked episode.
@@ -231,6 +246,7 @@ impl RunWatch {
             not_running: vec![],
             pending: vec![],
             more,
+            recovered: vec![],
         };
         let selected: HashSet<_> = eligible
             .iter()
@@ -295,6 +311,9 @@ impl RunWatch {
         for (i, blocked) in eligible.into_iter().take(BATCH_MAX) {
             let event = &mut self.events[i];
             event.delivery = Delivery::InFlight(id);
+            if event.origin == Origin::Recovered {
+                answer.recovered.push(event.snapshot.key.clone());
+            }
             if blocked {
                 answer.blocked.push(event.snapshot.clone());
             } else {

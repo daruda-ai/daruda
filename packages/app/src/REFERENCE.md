@@ -305,14 +305,33 @@ existing surface. Status reads progress or results without consuming events.
 Both tools accept explicit handles from any origin, including older persisted
 runs. Omitting handles selects successful orchestrator starts in this process
 plus unfinished orchestrator Task executions captured before startup
-reconciliation, including Running CLI executions. Already-terminal Tasks and
-flows from earlier processes do not enter that omitted scope. Older flows
-remain explicitly queryable; flow startup carry is outside this contract.
+reconciliation, including Running CLI executions, plus the runs the durable
+run ledger restores. Other already-terminal Tasks and flows from earlier
+processes do not enter that omitted scope. Older flows remain explicitly
+queryable; judging a restored flow that has no recorded end is outside this
+contract.
 
 `RunWatch`, inside `RunsHost`, owns that process-wide scope, snapshots, waiters
 and delivery ledger. It survives orchestrator pane or session replacement and
-gate-token rotation, but has no durable delivery acknowledgment across app
-restart. Each end or waiting episode has a `(RunKey, sequence)` identity.
+gate-token rotation. Each end or waiting episode has a `(RunKey, sequence)` identity.
+
+The run ledger (`daruda_store::run_ledger`, `<data_dir>/run-ledger/`, written
+through `runs/ledger.rs`) keeps that scope and its unreported ends across a
+restart. The watch queues `Owned` when a key joins the scope or a scoped run
+resumes, `Ended` with a ledger-wide episode for each scoped end (again when its
+text is read), and `Reported` once a socket receipt confirms it, followed by
+`Released` when that was the key's current end. In-flight reservations are never
+written, so a result whose receipt never came is unreported after a restart.
+Writes are queued without waiting and flushed at quit; open or write failures
+leave delivery memory-only with one deduplicated warning and never affect tasks.
+At most 200 unreported ends are kept; a newer end evicts the oldest, and the
+`Ended` record names what it evicted. At install, before task history is
+compared, restored keys rejoin the scope with their saved solicitation (a
+carried Task takes it from there), and unreported ends return as `Recovered`
+episodes. A Task whose end was already reported, or whose execution is gone
+with nothing to deliver, is released instead. Recovered results carry
+`recovered: true` in `daruda_run_wait`/`daruda_run_status`, and their notice
+line says they were requested before daruda restarted.
 Flow questions and level comparisons of the exact Running AgentChat Task's
 permission state produce waiting episodes. Closing a block or ending the run
 supersedes an unreported block; a resumed flow can produce a new end episode

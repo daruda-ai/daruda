@@ -18,6 +18,8 @@ fn data_and_resource_locations_remain_backward_compatible() {
     assert_eq!(release.data(), PathBuf::from("config/daruda"));
     assert_eq!(debug.data(), PathBuf::from("config/daruda-debug"));
     assert_eq!(release.node_install(), debug.node_install());
+    assert_eq!(release.run_ledger(), release.data().join("run-ledger"));
+    assert_ne!(release.run_ledger(), debug.run_ledger());
     assert_eq!(release.flow_locks(), debug.flow_locks());
     assert_eq!(release.remote_locks(), debug.remote_locks());
     assert_ne!(release.logs(), debug.logs());
