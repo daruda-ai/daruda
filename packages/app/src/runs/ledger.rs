@@ -48,14 +48,27 @@ pub(crate) struct Restored {
     pub(crate) key: RunKey,
     pub(crate) solicited: bool,
     pub(crate) location: Option<FlowRunLocation>,
-    /// An end from before the run resumed, still unreported.
-    pub(crate) owed: Option<OwedEnd>,
+    /// Ends from before the run resumed, still unreported, oldest first.
+    pub(crate) owed: Vec<OwedEnd>,
     pub(crate) end: RestoredEnd,
 }
 
 pub(crate) struct OwedEnd {
     pub(crate) episode: u64,
     pub(crate) snapshot: RunSnapshot,
+}
+
+impl OwedEnd {
+    /// What stands for the run itself when only `state` is known of it,
+    /// named as its latest owed end names it.
+    fn stand_in(&self, state: RunState) -> RunSnapshot {
+        RunSnapshot {
+            key: self.snapshot.key.clone(),
+            what: self.snapshot.what.clone(),
+            why: None,
+            state,
+        }
+    }
 }
 
 pub(crate) enum RestoredEnd {
@@ -73,6 +86,10 @@ pub(crate) enum RestoredEnd {
     /// log): it stays owned for a later one, and only what it owes is
     /// delivered. The snapshot says its state is unknown.
     Unjudged(RunSnapshot),
+    /// A Task the log no longer holds, with ends it still owes: nothing more
+    /// can end, so it is let go once those are reported. The snapshot says
+    /// it is gone.
+    Gone(RunSnapshot),
 }
 
 impl Ledger {
@@ -97,10 +114,10 @@ impl Ledger {
 
     /// Turn replayed entries into what the watch restores. A reported end
     /// owing nothing means its release never landed: released now, unless a
-    /// Task's flow interruption whose execution the log holds (its own end is
-    /// still to come). A task gone with nothing to deliver is released too.
-    /// Without `book` (an unreadable task log) no task entry is judged; an
-    /// open one is restored only for the end it owes.
+    /// Task's flow interruption the log holds (its own end is still to come).
+    /// A gone task is released, or restored gone while it owes ends. Without
+    /// `book` (an unreadable task log) no task entry is judged; an open one
+    /// is restored only for the ends it owes.
     pub(crate) fn restore(
         &mut self,
         entries: Vec<RunLedgerEntry>,
@@ -110,10 +127,14 @@ impl Ledger {
         let mut restored = Vec::new();
         for entry in entries {
             let key = key_of(&entry.key);
-            let owed = entry.owed().map(|owed| OwedEnd {
-                episode: owed.episode,
-                snapshot: snapshot_of(key.clone(), &owed.end),
-            });
+            let owed: Vec<_> = entry
+                .owed()
+                .iter()
+                .map(|owed| OwedEnd {
+                    episode: owed.episode,
+                    snapshot: snapshot_of(key.clone(), &owed.end),
+                })
+                .collect();
             let end = match &entry.state {
                 EntryState::Unreported { end, .. } => RestoredEnd::Unreported {
                     episode: end.episode,
@@ -122,7 +143,7 @@ impl Ledger {
                 EntryState::Reported { end, .. } => {
                     let snapshot = snapshot_of(key.clone(), &end.end);
                     match (&key, book) {
-                        _ if owed.is_some() => RestoredEnd::Reported(snapshot),
+                        _ if !owed.is_empty() => RestoredEnd::Reported(snapshot),
                         (RunKey::Task(_), None) => RestoredEnd::Reported(snapshot),
                         (RunKey::Task(exec), Some(book))
                             if is_interruption(&snapshot) && holds(book, exec) =>
@@ -136,20 +157,18 @@ impl Ledger {
                     }
                 }
                 EntryState::Open { since_ms, .. } => match (&key, book) {
-                    (RunKey::Task(_), None) => match &owed {
-                        Some(owed) => RestoredEnd::Unjudged(RunSnapshot {
-                            key: key.clone(),
-                            what: owed.snapshot.what.clone(),
-                            why: None,
-                            state: RunState::Unknown,
-                        }),
+                    (RunKey::Task(_), None) => match owed.last() {
+                        Some(owed) => RestoredEnd::Unjudged(owed.stand_in(RunState::Unknown)),
                         None => continue,
                     },
-                    (RunKey::Task(exec), Some(book)) if !holds(book, exec) && owed.is_none() => {
-                        self.release(&entry.key, ReleaseReason::Expired);
-                        continue;
-                    }
-                    (RunKey::Flow(_), _) if owed.is_none() && lapsed(*since_ms, now) => {
+                    (RunKey::Task(exec), Some(book)) if !holds(book, exec) => match owed.last() {
+                        Some(owed) => RestoredEnd::Gone(owed.stand_in(RunState::Gone)),
+                        None => {
+                            self.release(&entry.key, ReleaseReason::Expired);
+                            continue;
+                        }
+                    },
+                    (RunKey::Flow(_), _) if owed.is_empty() && lapsed(*since_ms, now) => {
                         self.lapse(&entry.key);
                         RestoredEnd::Open
                     }

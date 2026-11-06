@@ -32,16 +32,19 @@ impl RunWatch {
 
     /// Take what disk says about an owned run this process has not seen. An
     /// end becomes a recovered episode: it was asked for before the restart.
-    /// A flow whose directory is gone can never deliver and leaves the
-    /// ledger. Anything else is left to later reads, unless the ledger has
-    /// kept the flow open past the directory hold: then it is let go.
+    /// A run that is gone can never end again: it leaves the ledger now, or,
+    /// while ends it reached are still owed, once they are reported.
+    /// Anything else is left to later reads, unless the ledger has kept the
+    /// flow open past the directory hold: then it is let go.
     pub(crate) fn judge_restored(&mut self, snapshot: RunSnapshot, disk_episode: Option<u64>) {
         let key = snapshot.key.clone();
         match snapshot.state {
             RunState::Ended { .. } => self.settle(snapshot, Origin::Recovered),
-            RunState::Gone if matches!(key, RunKey::Flow(_)) => {
+            RunState::Gone => {
                 self.retain(snapshot);
-                self.ledger.expired(&key);
+                if !self.owes(&key) {
+                    self.ledger.expired(&key);
+                }
             }
             _ => {
                 if self.ledger.release_if_lapsed(&key) {
@@ -75,8 +78,9 @@ impl RunWatch {
         let entry = self.entry(&run.key);
         entry.membership = Membership::Scoped;
         entry.solicited = run.solicited;
-        if let Some(OwedEnd { episode, snapshot }) = run.owed {
-            // An end from before the run resumed: history beside the current run.
+        // Ends from before the run resumed, each its own episode of history
+        // beside the current run.
+        for OwedEnd { episode, snapshot } in run.owed {
             self.push_recovered(episode, snapshot);
             self.close_episode(&run.key);
         }
@@ -84,7 +88,9 @@ impl RunWatch {
         match run.end {
             RestoredEnd::Open => {}
             // Known, so no startup read judges it and no wait waits on it.
-            RestoredEnd::Unjudged(snapshot) => entry.snapshot = Some(snapshot),
+            RestoredEnd::Unjudged(snapshot) | RestoredEnd::Gone(snapshot) => {
+                entry.snapshot = Some(snapshot)
+            }
             RestoredEnd::Reported(snapshot) => {
                 entry.end = if is_interruption(&snapshot) {
                     EndState::Interrupted { reported: true }

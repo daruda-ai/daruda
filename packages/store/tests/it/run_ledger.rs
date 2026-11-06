@@ -113,28 +113,33 @@ fn replay(events: &[RunLedgerEvent]) -> RunLedgerState {
 }
 
 /// Every reopened ledger must satisfy this, whatever write a crash cut short:
-/// an owed end is older than its run's current one, and every recorded end
-/// was numbered before the next episode.
+/// owed ends are oldest first and older than their run's current one, and
+/// every recorded end was numbered before the next episode.
 fn assert_ends_in_order(state: &RunLedgerState) {
     for entry in state.entries() {
-        if let (
-            EntryState::Unreported {
-                end,
-                owed: Some(owed),
-            }
-            | EntryState::Reported {
-                end,
-                owed: Some(owed),
-            },
-            key,
-        ) = (&entry.state, &entry.key)
+        let key = &entry.key;
+        let episodes: Vec<_> = entry.owed().iter().map(|end| end.episode).collect();
+        assert!(
+            episodes.windows(2).all(|pair| pair[0] < pair[1]),
+            "{key:?} owes ends out of order: {episodes:?}"
+        );
+        if let EntryState::Unreported { end, owed } | EntryState::Reported { end, owed } =
+            &entry.state
         {
-            assert!(owed.episode < end.episode, "{key:?} owes a newer end");
+            assert!(
+                owed.iter().all(|owed| owed.episode < end.episode),
+                "{key:?} owes a newer end"
+            );
         }
         for end in entry.latest().into_iter().chain(entry.owed()) {
-            assert!(end.episode < state.next_episode(), "{:?}", entry.key);
+            assert!(end.episode < state.next_episode(), "{key:?}");
         }
     }
+}
+
+fn owed_episodes(state: &RunLedgerState, key: &LedgerKey) -> Vec<u64> {
+    let entry = state.get(key).unwrap();
+    entry.owed().iter().map(|end| end.episode).collect()
 }
 
 #[test]
@@ -182,7 +187,7 @@ fn a_reopened_run_keeps_its_unreported_end_owed() {
     assert!(entry.solicited, "a reopen carries the run's solicitation");
     assert!(matches!(
         &entry.state,
-        EntryState::Open { owed: Some(owed), since_ms: Some(7) } if owed.episode == 0
+        EntryState::Open { owed, since_ms: Some(7) } if owed.len() == 1 && owed[0].episode == 0
     ));
     assert_eq!(held(&state, u64::MAX), ["f"], "an open run is held");
 
@@ -190,12 +195,12 @@ fn a_reopened_run_keeps_its_unreported_end_owed() {
     let state = replay(&events);
     let entry = state.get(&key).unwrap();
     assert_eq!(entry.unreported().unwrap().episode, 1);
-    assert_eq!(entry.owed().unwrap().episode, 0);
+    assert_eq!(owed_episodes(&state, &key), [0]);
 
     let mut older = events.clone();
     older.push(reported(key.clone(), 0));
     let entry = replay(&older).get(&key).unwrap().clone();
-    assert!(entry.owed().is_none());
+    assert!(entry.owed().is_empty());
     assert_eq!(entry.unreported().unwrap().episode, 1);
 
     events.push(reported(key.clone(), 1));
@@ -204,10 +209,11 @@ fn a_reopened_run_keeps_its_unreported_end_owed() {
     assert!(
         matches!(
             &entry.state,
-            EntryState::Reported { end, owed: Some(owed) } if end.episode == 1 && owed.episode == 0
+            EntryState::Reported { end, .. } if end.episode == 1
         ),
         "the newer report leaves the owed end owed: {entry:?}"
     );
+    assert_eq!(owed_episodes(&state, &key), [0]);
     assert_eq!(entry.unreported().unwrap().episode, 0);
     assert_eq!(held(&state, u64::MAX), ["f"], "an owed end keeps its hold");
 
@@ -215,25 +221,27 @@ fn a_reopened_run_keeps_its_unreported_end_owed() {
     resumed.push(reopened(key.clone()));
     assert!(matches!(
         &replay(&resumed).get(&key).unwrap().state,
-        EntryState::Open { owed: Some(owed), .. } if owed.episode == 0
+        EntryState::Open { .. }
     ));
+    assert_eq!(owed_episodes(&replay(&resumed), &key), [0]);
     resumed.push(ended(key.clone(), 2));
     assert!(matches!(
         &replay(&resumed).get(&key).unwrap().state,
-        EntryState::Unreported { end, owed: Some(owed) } if end.episode == 2 && owed.episode == 0
+        EntryState::Unreported { end, .. } if end.episode == 2
     ));
+    assert_eq!(owed_episodes(&replay(&resumed), &key), [0]);
 
     events.push(reported(key.clone(), 0));
     let state = replay(&events);
     assert!(matches!(
         &state.get(&key).unwrap().state,
-        EntryState::Reported { end, owed: None } if end.episode == 1
+        EntryState::Reported { end, owed } if end.episode == 1 && owed.is_empty()
     ));
     assert!(state.get(&key).unwrap().unreported().is_none());
     events.push(reopened(key.clone()));
     assert!(matches!(
         replay(&events).get(&key).unwrap().state,
-        EntryState::Open { owed: None, .. }
+        EntryState::Open { ref owed, .. } if owed.is_empty()
     ));
 }
 
@@ -253,7 +261,7 @@ fn an_eviction_drops_only_the_owed_end_of_an_open_run() {
     let state = replay(&events);
     let entry = state.get(&open).expect("the open run stays owned");
     assert!(
-        matches!(entry.state, EntryState::Open { owed: None, .. }),
+        matches!(&entry.state, EntryState::Open { owed, .. } if owed.is_empty()),
         "{entry:?}"
     );
     assert!(entry.solicited);
@@ -337,9 +345,9 @@ fn a_schema_2_log_replays_into_the_current_state() {
     assert!(matches!(
         state.get(&flow("g")).unwrap().state,
         EntryState::Open {
-            owed: None,
+            ref owed,
             since_ms: None
-        }
+        } if owed.is_empty()
     ));
     assert_eq!(state.next_episode(), 2);
 }
@@ -375,7 +383,7 @@ fn re_recording_an_owed_end_replaces_its_text() {
             ended_at_ms: None,
         },
     ]);
-    assert_eq!(state.get(&key).unwrap().owed().unwrap().end, enriched);
+    assert_eq!(state.get(&key).unwrap().owed()[0].end, enriched);
     assert_eq!(state.next_episode(), 1);
 }
 
@@ -617,7 +625,10 @@ fn a_crash_at_any_write_keeps_owed_ends_older_than_current_ones() {
         reopened(flow("f")),
         ended(flow("f"), 2),
         reopened(flow("f")),
+        ended(flow("f"), 3),
         reported(flow("f"), 1),
+        reported(flow("f"), 3),
+        reopened(flow("f")),
         reported(flow("f"), 2),
     ];
     let summary = enumerate_crashes_with::<RunLedgerMachine>(scenario, |case| {
@@ -782,4 +793,155 @@ fn a_store_stops_holding_a_directory_once_its_end_is_released() {
     store.record(released(flow("f"), ReleaseReason::Reported));
     store.flush(Duration::from_secs(5)).unwrap();
     assert!(store.held_run_dirs(0).is_empty());
+}
+
+/// Two resumes with neither earlier end reported: both stay owed, oldest
+/// first, and each report marks only its own end.
+#[test]
+fn every_end_a_run_owes_across_resumes_is_kept_until_its_own_report() {
+    let key = flow("f");
+    let mut events = vec![
+        owned(key.clone(), true),
+        ended(key.clone(), 0),
+        reopened(key.clone()),
+        ended(key.clone(), 1),
+        reopened(key.clone()),
+    ];
+    let state = replay(&events);
+    assert_eq!(owed_episodes(&state, &key), [0, 1]);
+    assert_eq!(state.get(&key).unwrap().unreported().unwrap().episode, 1);
+    assert_ends_in_order(&state);
+
+    events.push(ended(key.clone(), 2));
+    let state = replay(&events);
+    let entry = state.get(&key).unwrap();
+    let unreported: Vec<_> = entry.unreported_ends().map(|end| end.episode).collect();
+    assert_eq!(unreported, [0, 1, 2]);
+
+    events.push(reported(key.clone(), 1));
+    events.push(reported(key.clone(), 2));
+    let state = replay(&events);
+    assert_eq!(owed_episodes(&state, &key), [0], "only the named ends");
+    assert!(matches!(
+        state.get(&key).unwrap().state,
+        EntryState::Reported { .. }
+    ));
+    events.push(reported(key.clone(), 0));
+    let state = replay(&events);
+    assert!(state.get(&key).unwrap().unreported().is_none());
+}
+
+/// The cap counts every owed end and drops the oldest of them first, a run's
+/// own included, recording each drop so none is lost silently.
+#[test]
+fn the_cap_evicts_owed_ends_oldest_first_and_records_each() {
+    let key = flow("f");
+    let mut events = vec![
+        owned(key.clone(), true),
+        ended(key.clone(), 0),
+        reopened(key.clone()),
+        ended(key.clone(), 1),
+        reopened(key.clone()),
+    ];
+    // Two owed ends and these fill the cap exactly.
+    for n in 2..UNREPORTED_MAX as u64 {
+        events.push(ended(task(&n.to_string()), n));
+    }
+    assert_eq!(owed_episodes(&replay(&events), &key), [0, 1]);
+    events.push(ended(task("next"), UNREPORTED_MAX as u64));
+    let state = replay(&events);
+    assert_eq!(owed_episodes(&state, &key), [1], "the oldest owed end went");
+    assert!(state.get(&key).is_some(), "the running flow stays owned");
+
+    // The run's own earlier ends are dropped too when they are the oldest.
+    events.push(ended(key.clone(), UNREPORTED_MAX as u64 + 1));
+    let state = replay(&events);
+    assert!(owed_episodes(&state, &key).is_empty(), "{state:?}");
+    assert_eq!(
+        state.get(&key).unwrap().unreported().unwrap().episode,
+        UNREPORTED_MAX as u64 + 1
+    );
+    let count: usize = state
+        .entries()
+        .iter()
+        .map(|entry| entry.unreported_ends().count())
+        .sum();
+    assert_eq!(count, UNREPORTED_MAX);
+
+    let dir = tempfile::tempdir().unwrap();
+    let (store, _) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+    for event in &events {
+        store.record(event.clone());
+    }
+    store.flush(Duration::from_secs(5)).unwrap();
+    let answered = store.take_answered();
+    assert!(answered.failure.is_none() && answered.rejected.is_none());
+    assert_eq!(answered.evicted, vec![key.clone(), key.clone()]);
+    drop(store);
+    let (_, reopened) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+    assert_eq!(reopened, state);
+}
+
+/// A schema 4 snapshot kept one owed end per entry, as `null` or an end, and
+/// a schema 3 `reported` state had none: each reads as today's owed list.
+#[test]
+fn a_schema_4_state_reads_its_single_owed_end_as_a_list() {
+    let end = r#"{"episode":0,"end":{"what":"work","why":"because","ended_as":"completed","text":"answer","pointers":{"run_dir":"/run","report":null,"outputs":[],"chat":null,"transcript":null}},"ended_at_ms":5}"#;
+    let later = end.replace(r#""episode":0"#, r#""episode":1"#);
+    let flow_f = r#"{"kind":"flow","run_id":"f"}"#;
+    let flow_g = r#"{"kind":"flow","run_id":"g"}"#;
+    let task_t = r#"{"kind":"task","task_id":"t","execution_id":"e1"}"#;
+    let json = format!(
+        r#"{{"next_episode":2,"entries":[
+            {{"key":{flow_f},"solicited":true,"location":null,"state":{{"kind":"open","owed":{end},"since_ms":7}}}},
+            {{"key":{flow_g},"solicited":false,"location":null,"state":{{"kind":"reported","end":{later},"owed":null}}}},
+            {{"key":{task_t},"solicited":false,"state":{{"kind":"reported","end":{later}}}}}
+        ]}}"#
+    );
+    let state: RunLedgerState = serde_json::from_str(&json).unwrap();
+    assert_eq!(owed_episodes(&state, &flow("f")), [0]);
+    assert!(matches!(
+        state.get(&flow("f")).unwrap().state,
+        EntryState::Open {
+            since_ms: Some(7),
+            ..
+        }
+    ));
+    assert!(owed_episodes(&state, &flow("g")).is_empty());
+    assert!(owed_episodes(&state, &task("t")).is_empty());
+    let expected = replay(&[
+        ended_at(flow("f"), 0, 5),
+        RunLedgerEvent::Reopened {
+            key: flow("f"),
+            solicited: true,
+            location: None,
+            at_ms: Some(7),
+        },
+    ]);
+    assert_eq!(state.get(&flow("f")), expected.get(&flow("f")));
+}
+
+/// A flow owing several ends holds its directory until the newest of their
+/// holds ends, and for as long as any of them is undated.
+#[test]
+fn every_owed_end_of_a_flow_holds_its_directory() {
+    let at = 100 * DAY_MS;
+    let state = replay(&[
+        ended_at(flow("dated"), 0, at),
+        reopened(flow("dated")),
+        ended_at(flow("dated"), 1, at + 3 * DAY_MS),
+        reported(flow("dated"), 0),
+        reopened(flow("dated")),
+        ended_at(flow("dated"), 2, at + 5 * DAY_MS),
+        reported(flow("dated"), 2),
+        ended(flow("undated"), 3),
+        reopened(flow("undated")),
+        ended_at(flow("undated"), 4, at),
+    ]);
+    assert_eq!(owed_episodes(&state, &flow("dated")), [1]);
+    assert_eq!(
+        held(&state, at + 3 * DAY_MS + HOLD_MS - 1),
+        ["dated", "undated"]
+    );
+    assert_eq!(held(&state, at + 3 * DAY_MS + HOLD_MS), ["undated"]);
 }

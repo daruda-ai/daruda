@@ -94,6 +94,19 @@ impl RunEntry {
     pub(super) fn blocked_sequence(&self) -> Option<u64> {
         self.block.as_ref().and_then(|block| block.sequence)
     }
+
+    /// Whether nothing of the run is left to end: its end was reported, or
+    /// the run no longer exists.
+    pub(super) fn is_over(&self) -> bool {
+        match self.end {
+            EndState::Reported => true,
+            EndState::Open => self
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| matches!(snapshot.state, RunState::Gone)),
+            EndState::Held | EndState::Ended | EndState::Interrupted { .. } => false,
+        }
+    }
 }
 
 /// The token a held end is released with; a later episode makes it stale.

@@ -34,7 +34,8 @@ pub struct Answered {
     pub rejected: Option<LedgerRejected>,
     /// The first failure that stopped the log: every later record fails too.
     pub failure: Option<CommitError<LedgerRejected>>,
-    /// Entries the committed ends evicted to stay under the cap, in commit order.
+    /// The key of each end the committed ends evicted to stay under the cap,
+    /// in commit order.
     pub evicted: Vec<LedgerKey>,
 }
 

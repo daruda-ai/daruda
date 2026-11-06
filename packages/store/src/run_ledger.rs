@@ -103,16 +103,17 @@ pub struct RunLedgerEntry {
     pub state: EntryState,
 }
 
-/// Where a run stands, and what of it no agent has been handed yet. Ends
-/// are boxed so an open entry stays small.
+/// Where a run stands, and what of it no agent has been handed yet. Each
+/// `owed` list holds the run's earlier ends no agent has been handed, oldest
+/// first and all older than its current end; the cap bounds them ledger-wide.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EntryState {
     /// Running with no end recorded since it was owned or reopened.
     Open {
-        /// An end of the run before it resumed, still owed to an agent.
-        #[serde(default)]
-        owed: Option<Box<RecordedEnd>>,
+        /// Ends of the run before it resumed, still owed to an agent.
+        #[serde(default, deserialize_with = "owed_ends")]
+        owed: Vec<RecordedEnd>,
         /// When it was owned or reopened, in Unix milliseconds; absent when
         /// the proposer gave no time.
         #[serde(default)]
@@ -121,42 +122,63 @@ pub enum EntryState {
     /// Ended, and no agent has been handed this end yet.
     Unreported {
         end: Box<RecordedEnd>,
-        /// The newest earlier end, also unreported.
-        #[serde(default)]
-        owed: Option<Box<RecordedEnd>>,
+        #[serde(default, deserialize_with = "owed_ends")]
+        owed: Vec<RecordedEnd>,
     },
     /// Its latest end was handed to an agent.
     Reported {
         end: Box<RecordedEnd>,
-        /// An earlier end, still unreported.
-        #[serde(default)]
-        owed: Option<Box<RecordedEnd>>,
+        #[serde(default, deserialize_with = "owed_ends")]
+        owed: Vec<RecordedEnd>,
     },
+}
+
+/// Schema 4 snapshots kept at most one owed end, as `null` or an end.
+fn owed_ends<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<RecordedEnd>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Owed {
+        Ends(Vec<RecordedEnd>),
+        One(RecordedEnd),
+    }
+    Ok(match Option::<Owed>::deserialize(deserializer)? {
+        None => Vec::new(),
+        Some(Owed::Ends(ends)) => ends,
+        Some(Owed::One(end)) => vec![end],
+    })
 }
 
 impl RunLedgerEntry {
     /// The run's latest recorded end, reported or not.
     pub fn latest(&self) -> Option<&RecordedEnd> {
         match &self.state {
-            EntryState::Open { owed, .. } => owed.as_deref(),
+            EntryState::Open { owed, .. } => owed.last(),
             EntryState::Unreported { end, .. } | EntryState::Reported { end, .. } => Some(end),
         }
     }
 
     /// The newest end no agent has been handed.
     pub fn unreported(&self) -> Option<&RecordedEnd> {
-        match &self.state {
-            EntryState::Open { owed, .. } | EntryState::Reported { owed, .. } => owed.as_deref(),
-            EntryState::Unreported { end, .. } => Some(end),
-        }
+        self.unreported_ends().last()
     }
 
-    /// An earlier end of the run still owed beside its current state.
-    pub fn owed(&self) -> Option<&RecordedEnd> {
+    /// Every end no agent has been handed, oldest first.
+    pub fn unreported_ends(&self) -> impl Iterator<Item = &RecordedEnd> {
+        let current = match &self.state {
+            EntryState::Unreported { end, .. } => Some(&**end),
+            EntryState::Open { .. } | EntryState::Reported { .. } => None,
+        };
+        self.owed().iter().chain(current)
+    }
+
+    /// The run's earlier ends still owed beside its current state, oldest first.
+    pub fn owed(&self) -> &[RecordedEnd] {
         match &self.state {
             EntryState::Open { owed, .. }
             | EntryState::Unreported { owed, .. }
-            | EntryState::Reported { owed, .. } => owed.as_deref(),
+            | EntryState::Reported { owed, .. } => owed,
         }
     }
 
@@ -174,81 +196,91 @@ impl RunLedgerEntry {
         std::mem::replace(
             &mut self.state,
             EntryState::Open {
-                owed: None,
+                owed: Vec::new(),
                 since_ms: None,
             },
         )
     }
 
-    /// The run ended again: an unreported current end becomes the owed one.
-    fn end(&mut self, end: RecordedEnd) {
-        let owed = match self.take_state() {
+    /// What the run still owes once its current state gives way: an
+    /// unreported current end joins the owed ends as the newest.
+    fn take_owed(&mut self) -> Vec<RecordedEnd> {
+        match self.take_state() {
             EntryState::Open { owed, .. } | EntryState::Reported { owed, .. } => owed,
-            EntryState::Unreported { end: previous, .. } => Some(previous),
-        };
+            EntryState::Unreported { end, mut owed } => {
+                owed.push(*end);
+                owed
+            }
+        }
+    }
+
+    /// The run ended again.
+    fn end(&mut self, end: RecordedEnd) {
+        let owed = self.take_owed();
         self.state = EntryState::Unreported {
             end: Box::new(end),
             owed,
         };
     }
 
-    /// The run started again; an unreported end stays owed.
+    /// The run started again; every unreported end stays owed.
     fn reopen(&mut self, since_ms: Option<u64>) {
-        let owed = match self.take_state() {
-            EntryState::Open { owed, .. } | EntryState::Reported { owed, .. } => owed,
-            EntryState::Unreported { end, .. } => Some(end),
-        };
+        let owed = self.take_owed();
         self.state = EntryState::Open { owed, since_ms };
     }
 
     /// Mark the recorded end numbered `episode`, and only that one, handed
     /// to an agent; any other number changes nothing.
     fn report(&mut self, episode: u64) {
-        let unless_reported =
-            |owed: Option<Box<RecordedEnd>>| owed.filter(|owed| owed.episode != episode);
-        self.state = match self.take_state() {
-            EntryState::Open { owed, since_ms } => EntryState::Open {
-                owed: unless_reported(owed),
-                since_ms,
-            },
+        let state = match self.take_state() {
             EntryState::Unreported { end, owed } if end.episode == episode => {
                 EntryState::Reported { end, owed }
             }
-            EntryState::Unreported { end, owed } => EntryState::Unreported {
-                end,
-                owed: unless_reported(owed),
-            },
-            EntryState::Reported { end, owed } => EntryState::Reported {
-                end,
-                owed: unless_reported(owed),
-            },
+            mut state => {
+                let (EntryState::Open { owed, .. }
+                | EntryState::Unreported { owed, .. }
+                | EntryState::Reported { owed, .. }) = &mut state;
+                owed.retain(|owed| owed.episode != episode);
+                state
+            }
         };
+        self.state = state;
     }
 
-    /// The cap dropped this entry's unreported ends. An open run stays
-    /// owned, and its directory held; an ended one is let go. Whether the
-    /// entry is kept.
-    fn evict(&mut self) -> bool {
+    /// The cap dropped this entry's oldest unreported end. An open run stays
+    /// owned, and its directory held; a run whose only unreported end was
+    /// its current one is let go. Whether the entry is kept.
+    fn evict_oldest(&mut self) -> bool {
         match &mut self.state {
-            EntryState::Open { owed, .. } | EntryState::Reported { owed, .. } => {
-                *owed = None;
+            EntryState::Unreported { owed, .. } if owed.is_empty() => false,
+            EntryState::Open { owed, .. }
+            | EntryState::Unreported { owed, .. }
+            | EntryState::Reported { owed, .. } => {
+                if !owed.is_empty() {
+                    owed.remove(0);
+                }
                 true
             }
-            EntryState::Unreported { .. } => false,
         }
     }
 
     /// The recorded end numbered `episode`, current or owed.
     fn recorded_mut(&mut self, episode: u64) -> Option<&mut RecordedEnd> {
         let (current, owed) = match &mut self.state {
-            EntryState::Open { owed, .. } => (None, owed.as_deref_mut()),
-            EntryState::Unreported { end, owed } => (Some(&mut **end), owed.as_deref_mut()),
-            EntryState::Reported { end, owed } => (Some(&mut **end), owed.as_deref_mut()),
+            EntryState::Open { owed, .. } => (None, owed),
+            EntryState::Unreported { end, owed } | EntryState::Reported { end, owed } => {
+                (Some(&mut **end), owed)
+            }
         };
         current
             .into_iter()
-            .chain(owed)
+            .chain(owed.iter_mut())
             .find(|recorded| recorded.episode == episode)
+    }
+
+    fn records(&self, episode: u64) -> bool {
+        self.latest().is_some_and(|end| end.episode == episode)
+            || self.owed().iter().any(|end| end.episode == episode)
     }
 }
 
@@ -287,15 +319,16 @@ impl RunLedgerState {
                 let LedgerKey::Flow { run_id } = &entry.key else {
                     return None;
                 };
+                // The newest owed deadline; an undated end holds until release.
                 let until = match &entry.state {
                     EntryState::Open { .. } => None,
-                    EntryState::Unreported { end, .. } => {
-                        end.ended_at_ms.map(|at| at.saturating_add(hold_ms))
+                    EntryState::Reported { owed, .. } if owed.is_empty() => return None,
+                    EntryState::Unreported { .. } | EntryState::Reported { .. } => {
+                        entry.unreported_ends().try_fold(0, |until: u64, end| {
+                            end.ended_at_ms
+                                .map(|at| until.max(at.saturating_add(hold_ms)))
+                        })
                     }
-                    EntryState::Reported {
-                        owed: Some(owed), ..
-                    } => owed.ended_at_ms.map(|at| at.saturating_add(hold_ms)),
-                    EntryState::Reported { owed: None, .. } => return None,
                 };
                 Some((run_id.clone(), until))
             })
@@ -318,25 +351,25 @@ impl RunLedgerState {
         if episode >= self.next_episode {
             return Landing::New;
         }
-        let recorded = self.get(key).is_some_and(|entry| {
-            entry.latest().map(|end| end.episode) == Some(episode)
-                || entry.owed().map(|end| end.episode) == Some(episode)
-        });
-        if recorded {
+        if self.get(key).is_some_and(|entry| entry.records(episode)) {
             Landing::Rerecord
         } else {
             Landing::Stale
         }
     }
 
-    /// The entries whose oldest unreported ends to drop so `key`'s new end
-    /// fits the cap.
-    fn evictions(&self, key: &LedgerKey) -> Vec<LedgerKey> {
+    /// The entries whose oldest unreported ends to drop so a new end fits
+    /// the cap, one mention per end. The ending key's own ends count too:
+    /// they stay owed beside its new one.
+    fn evictions(&self) -> Vec<LedgerKey> {
         let mut unreported: Vec<_> = self
             .entries
             .iter()
-            .filter(|entry| &entry.key != key)
-            .filter_map(|entry| Some((entry.unreported()?.episode, &entry.key)))
+            .flat_map(|entry| {
+                entry
+                    .unreported_ends()
+                    .map(move |end| (end.episode, &entry.key))
+            })
             .collect();
         let excess = (unreported.len() + 1).saturating_sub(UNREPORTED_MAX);
         unreported.sort_unstable_by_key(|(episode, _)| *episode);
@@ -413,7 +446,8 @@ pub enum RunLedgerEvent {
         solicited: bool,
         episode: u64,
         end: LedgerEnd,
-        /// Filled by `assign`: the oldest unreported ends this one displaced.
+        /// Filled by `assign`: the entries whose oldest unreported end this
+        /// one displaced, once per end, so a key can appear more than once.
         #[serde(default)]
         evicts: Vec<LedgerKey>,
         /// The proposer's clock, in Unix milliseconds, so replay never reads one.
@@ -433,7 +467,7 @@ pub enum RunLedgerEvent {
 pub enum LedgerRejected {
     #[error("run {key:?} was reported at episode {episode}, which no end has used")]
     Unassigned { key: LedgerKey, episode: u64 },
-    #[error("a run end may only evict other recorded runs")]
+    #[error("a run end may only evict the ends of recorded runs")]
     InvalidEviction,
 }
 
@@ -445,18 +479,15 @@ impl Machine for RunLedgerMachine {
     type Rejected = LedgerRejected;
     // Bump with any change to how `RunLedgerEvent` or `RunLedgerState`
     // serializes, so an older build refuses the log as too new.
-    const SCHEMA: u32 = 4;
+    const SCHEMA: u32 = 5;
 
     fn check(state: &RunLedgerState, event: &RunLedgerEvent) -> Result<(), LedgerRejected> {
         match event {
             RunLedgerEvent::Owned { .. }
             | RunLedgerEvent::Reopened { .. }
             | RunLedgerEvent::Released { .. } => Ok(()),
-            RunLedgerEvent::Ended { key, evicts, .. } => {
-                if evicts
-                    .iter()
-                    .any(|evicted| evicted == key || state.get(evicted).is_none())
-                {
+            RunLedgerEvent::Ended { evicts, .. } => {
+                if evicts.iter().any(|evicted| state.get(evicted).is_none()) {
                     return Err(LedgerRejected::InvalidEviction);
                 }
                 // A stale end is accepted and changes nothing: an evicted or
@@ -488,7 +519,7 @@ impl Machine for RunLedgerMachine {
         } = event
             && matches!(state.landing(key, *episode), Landing::New)
         {
-            *evicts = state.evictions(key);
+            *evicts = state.evictions();
         }
     }
 
@@ -501,7 +532,7 @@ impl Machine for RunLedgerMachine {
                 at_ms,
             } => {
                 let entry = state.entry_or(key, *solicited, || EntryState::Open {
-                    owed: None,
+                    owed: Vec::new(),
                     since_ms: *at_ms,
                 });
                 entry.solicited = *solicited;
@@ -516,7 +547,7 @@ impl Machine for RunLedgerMachine {
                 at_ms,
             } => {
                 let entry = state.entry_or(key, *solicited, || EntryState::Open {
-                    owed: None,
+                    owed: Vec::new(),
                     since_ms: *at_ms,
                 });
                 entry.solicited = *solicited;
@@ -534,9 +565,6 @@ impl Machine for RunLedgerMachine {
                 ended_at_ms,
             } => {
                 let landing = state.landing(key, *episode);
-                state
-                    .entries
-                    .retain_mut(|entry| !evicts.contains(&entry.key) || entry.evict());
                 let recorded = RecordedEnd {
                     episode: *episode,
                     end: end.clone(),
@@ -552,7 +580,7 @@ impl Machine for RunLedgerMachine {
                                 *solicited,
                                 EntryState::Unreported {
                                     end: Box::new(recorded),
-                                    owed: None,
+                                    owed: Vec::new(),
                                 },
                             )),
                         }
@@ -567,6 +595,11 @@ impl Machine for RunLedgerMachine {
                         }
                     }
                     Landing::Stale => {}
+                }
+                // After the new end lands, so an earlier end of the same key
+                // it displaced is already owed beside it.
+                for evicted in evicts {
+                    state.evict_oldest(evicted);
                 }
             }
             // Episodes are ledger-wide, so a number the key no longer holds
@@ -584,6 +617,14 @@ impl Machine for RunLedgerMachine {
 }
 
 impl RunLedgerState {
+    fn evict_oldest(&mut self, key: &LedgerKey) {
+        if let Some(index) = self.entries.iter().position(|entry| &entry.key == key)
+            && !self.entries[index].evict_oldest()
+        {
+            self.entries.remove(index);
+        }
+    }
+
     /// The key's entry; a new one takes `solicited` and `state()`.
     fn entry_or(
         &mut self,

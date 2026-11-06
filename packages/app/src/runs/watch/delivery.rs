@@ -1,5 +1,5 @@
 //! Reservation and acknowledgement of process-local delivery episodes.
-use super::state::{EndState, Membership, Origin, RunEvent, RunWatch};
+use super::state::{EndState, Membership, Origin, RunEntry, RunEvent, RunWatch};
 use crate::runs::result::{RunKey, RunSnapshot, RunState};
 use std::collections::HashSet;
 
@@ -325,18 +325,20 @@ impl RunWatch {
     }
 }
 impl RunWatch {
-    /// Whether the key's run is over, its end handed to an agent, and no end
-    /// it recorded is still waiting for a receipt. A Task's flow
-    /// interruption leaves the Task's own end still to come.
+    /// Whether the key's run is over (its end handed to an agent, or the run
+    /// gone) and no end it recorded is still waiting for a receipt. A Task's
+    /// flow interruption leaves the Task's own end still to come.
     fn settled(&self, key: &RunKey) -> bool {
-        self.entries
-            .get(key)
-            .is_some_and(|entry| entry.end == EndState::Reported)
-            && !self.events.iter().any(|event| {
-                &event.snapshot.key == key
-                    && event.recorded.is_some()
-                    && event.delivery != Delivery::Reported
-            })
+        self.entries.get(key).is_some_and(RunEntry::is_over) && !self.owes(key)
+    }
+
+    /// Whether an end the key recorded has not been handed to an agent.
+    pub(super) fn owes(&self, key: &RunKey) -> bool {
+        self.events.iter().any(|event| {
+            &event.snapshot.key == key
+                && event.recorded.is_some()
+                && event.delivery != Delivery::Reported
+        })
     }
 }
 

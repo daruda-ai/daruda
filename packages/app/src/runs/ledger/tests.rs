@@ -1347,7 +1347,128 @@ fn an_unreadable_task_log_still_delivers_a_resumed_tasks_owed_end(cx: &mut TestA
     let (_, state) = RunLedgerStore::in_directory(dirs.ledger.path(), "test").unwrap();
     let entry = state.get(&ledger_key(&key)).expect("the run stays owned");
     assert!(
-        matches!(entry.state, EntryState::Open { owed: None, .. }),
+        matches!(&entry.state, EntryState::Open { owed, .. } if owed.is_empty()),
         "{entry:?}"
     );
+}
+
+/// A Task key the task log never held, resumed after an end it still owes.
+fn owed_unlisted_task(dirs: &Dirs, cx: &mut App) -> RunKey {
+    dirs.start(cx);
+    let spec = seed::spec(Default::default(), "deleted");
+    let id = spec.id.clone();
+    seed::commit_now(seed::created(spec), cx);
+    let key = RunKey::Task(daruda_store::tasks::ExecutionRef {
+        task_id: id,
+        execution_id: "gone".into(),
+    });
+    RunsHost::register_run_solicited(key.clone(), true, cx);
+    on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Completed, "owed")));
+    on_watch(cx, |w| w.begin(&key));
+    key
+}
+
+/// The entry the ledger on disk keeps for `key`, once this process is gone.
+fn entry_on_disk(dirs: &Dirs, key: &RunKey, cx: &mut App) -> Option<RunLedgerEntry> {
+    RunsHost::quit_flush(Instant::now() + Duration::from_secs(5), cx);
+    drop(cx.remove_global::<RunsHost>());
+    drop(cx.remove_global::<GlobalTasks>());
+    let (_, state) = RunLedgerStore::in_directory(dirs.ledger.path(), "test").unwrap();
+    state.get(&ledger_key(key)).cloned()
+}
+
+/// A Task gone from the task log still owes the end it reached before its
+/// resume: that end is delivered once, the gone run holds no wait, and its
+/// entry is released once the end is reported.
+#[gpui::test]
+fn a_gone_task_delivers_what_it_owes_and_never_holds_a_wait(cx: &mut TestAppContext) {
+    let dirs = Dirs::new();
+    let key = cx.update(|cx| owed_unlisted_task(&dirs, cx));
+    cx.update(|cx| dirs.restart(cx));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].snapshot.what, "owed");
+        assert_eq!(pending[0].origin, Origin::Recovered);
+        assert_eq!(whats(&report(None, cx)), ["owed"]);
+
+        let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
+        let answer = RunsHost::poll_run_wait(id, false, cx).expect("the gone run holds no wait");
+        assert_eq!(answer.outcome, WaitOutcome::Nothing);
+        RunsHost::finish_run_wait(id, true, cx);
+        let (id, _) = RunsHost::open_run_wait(Some(vec![key.clone()]), cx).unwrap();
+        let answer = RunsHost::poll_run_wait(id, false, cx).expect("an explicit wait is answered");
+        assert_eq!(answer.outcome, WaitOutcome::Settled);
+        RunsHost::finish_run_wait(id, true, cx);
+        assert!(entry_on_disk(&dirs, &key, cx).is_none(), "released");
+    });
+}
+
+/// A flow whose directory is gone still owes the end it reached before its
+/// resume: a crash before that end is reported must not lose it.
+#[gpui::test]
+fn a_gone_flow_keeps_what_it_owes_until_it_is_reported(cx: &mut TestAppContext) {
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let run_dir = crate::runs::runs_dir(&lane.path()).join("swept");
+    let key = cx.update(|cx| {
+        lane.start(&dirs, cx);
+        let key = own_flow(lane.location(&run_dir), cx);
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Crashed, "owed")));
+        on_watch(cx, |w| w.begin(&key));
+        key
+    });
+    cx.update(|cx| lane.restart(&dirs, cx));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(RunsHost::unreported_run_events(cx).len(), 1);
+        RunsHost::flush_run_ledger_for_test(cx);
+        // Crash before anyone is handed the owed end.
+        lane.start(&dirs, cx);
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].snapshot.what, "owed");
+        assert_eq!(pending[0].origin, Origin::Recovered);
+        assert_eq!(whats(&report(None, cx)), ["owed"]);
+        let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
+        let answer = RunsHost::poll_run_wait(id, false, cx).expect("the gone run holds no wait");
+        assert_eq!(answer.outcome, WaitOutcome::Nothing);
+        RunsHost::finish_run_wait(id, true, cx);
+        assert!(entry_on_disk(&dirs, &key, cx).is_none(), "released");
+    });
+}
+
+/// Two resumes with neither earlier end reported: a restart owes both, each
+/// delivered once, oldest first.
+#[gpui::test]
+fn every_end_owed_across_two_resumes_survives_a_restart(cx: &mut TestAppContext) {
+    let dirs = Dirs::new();
+    let key = RunKey::Flow("f".into());
+    cx.update(|cx| {
+        dirs.start(cx);
+        RunsHost::register_run_solicited(key.clone(), true, cx);
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Crashed, "first")));
+        on_watch(cx, |w| w.begin(&key));
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Crashed, "second")));
+        on_watch(cx, |w| w.begin(&key));
+    });
+    cx.update(|cx| dirs.restart(cx));
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        let whats: Vec<_> = pending
+            .iter()
+            .map(|end| end.snapshot.what.as_str())
+            .collect();
+        assert_eq!(whats, ["first", "second"], "{pending:?}");
+        assert!(pending.iter().all(|end| end.origin == Origin::Recovered));
+        assert_eq!(report(None, cx).ended.len(), 2);
+    });
+    cx.update(|cx| dirs.restart(cx));
+    cx.update(|cx| {
+        assert!(RunsHost::unreported_run_events(cx).is_empty());
+        assert_eq!(RunsHost::run_scope(cx), vec![key.clone()], "still running");
+    });
 }
