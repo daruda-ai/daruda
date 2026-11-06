@@ -59,6 +59,16 @@ impl FlowSubmitter {
             daruda_store::tasks::StartedBy::Orchestrator => Self::Orchestrator { solicited },
         }
     }
+
+    /// The task's record of who started it, for a task started for this
+    /// submitter.
+    pub(crate) fn task_started_by(self) -> daruda_store::tasks::StartedBy {
+        match self {
+            Self::Desktop => daruda_store::tasks::StartedBy::Desktop,
+            Self::Phone => daruda_store::tasks::StartedBy::Phone,
+            Self::Orchestrator { .. } => daruda_store::tasks::StartedBy::Orchestrator,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -122,5 +132,11 @@ mod tests {
             FlowSubmitter::of_task(Task::Orchestrator, true),
             FlowSubmitter::Orchestrator { solicited: true }
         );
+        for started_by in [Task::Desktop, Task::Phone, Task::Orchestrator] {
+            for solicited in [true, false] {
+                let submitter = FlowSubmitter::of_task(started_by, solicited);
+                assert_eq!(submitter.task_started_by(), started_by, "{submitter:?}");
+            }
+        }
     }
 }

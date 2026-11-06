@@ -436,7 +436,7 @@ pub(crate) fn begin_task_start(
     let (workspace, answer) = in_task_window(&task, cx, |ws, window, cx| {
         Ok((
             ws.uuid(),
-            ws.control_task_start(&task, caller.task_started_by(), window, cx),
+            ws.control_task_start(&task, caller.flow_submitter(), window, cx),
         ))
     })?;
     Ok(PendingTaskStart {

@@ -152,7 +152,10 @@ async fn task_completion(
     cx.run_until_parked();
     let (execution, child) = fixture.workspace.read_with(cx, |ws, cx| {
         let task = cx.global::<crate::runs::GlobalTasks>().get(&task).unwrap();
-        assert_eq!(task.started_by, Some(caller.task_started_by()));
+        assert_eq!(
+            task.started_by,
+            Some(caller.flow_submitter().task_started_by())
+        );
         let execution = task.current_exec().unwrap().clone();
         assert!(RunsHost::run_scope(cx).is_empty());
         let pane = ws

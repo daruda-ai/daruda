@@ -8,7 +8,7 @@
 use gpui::{Context, Window};
 
 use daruda_store::project::{LaneRef, ProjectId, ProjectUuid};
-use daruda_store::tasks::{ExecutionRef, Lifecycle, StartedBy, TaskSpec};
+use daruda_store::tasks::{ExecutionRef, Lifecycle, TaskSpec};
 
 use crate::control::result::{ControlError, TaskProject};
 use crate::control::spec::NewTask;
@@ -162,16 +162,16 @@ impl Workspace {
     }
 
     /// Start `task`, answering on the returned channel. A refusal is on it
-    /// before this returns, as with [`Self::begin_task_start`].
+    /// before this returns, as with [`Self::begin_task_start_for`].
     pub(crate) fn control_task_start(
         &mut self,
         task: &str,
-        started_by: StartedBy,
+        submitter: crate::runs::FlowSubmitter,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<ControlTaskStart> {
         let (tx, rx) = smol::channel::bounded(1);
-        let started = self.begin_task_start(task, started_by, window, cx);
+        let started = self.begin_task_start_for(task, submitter, window, cx);
         // SILENT-OK on each send below: a caller that stopped listening
         // has nothing left to tell.
         if let Ok(outcome) = started.try_recv() {

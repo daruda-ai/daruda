@@ -14,8 +14,7 @@ use chrono::Utc;
 use daruda_flow::input::InputValues;
 use daruda_store::project::LaneRef;
 use daruda_store::tasks::{
-    ExecutionRef, Lifecycle, StartedBy, TaskEvent, TaskExecutionSource, TaskFlow, TaskRecord,
-    TaskRunIn,
+    ExecutionRef, Lifecycle, TaskEvent, TaskExecutionSource, TaskFlow, TaskRecord, TaskRunIn,
 };
 use gpui::{Context, Window};
 
@@ -73,7 +72,7 @@ impl Workspace {
         task: &TaskRecord,
         flow: &TaskFlow,
         reveal: LaneReveal,
-        started_by: StartedBy,
+        submitter: FlowSubmitter,
         cx: &mut Context<Self>,
     ) -> Result<TaskFlowStart, TaskStartError> {
         let spec = &task.spec;
@@ -122,7 +121,7 @@ impl Workspace {
             target,
             inputs,
             run_id: self.next_run_id(cx),
-            submitter: FlowSubmitter::of_task(started_by, false),
+            submitter,
             place,
         })
     }

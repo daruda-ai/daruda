@@ -252,6 +252,20 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<TaskStartOutcome> {
+        let submitter = crate::runs::FlowSubmitter::of_task(started_by, false);
+        self.begin_task_start_for(task_id, submitter, window, cx)
+    }
+
+    /// [`Self::begin_task_start`] for `submitter`, whose solicitation a
+    /// flow-backed task's run carries: a control start captured it before
+    /// its card, and the run's questions follow it as the task's end does.
+    pub(crate) fn begin_task_start_for(
+        &mut self,
+        task_id: &str,
+        submitter: crate::runs::FlowSubmitter,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> smol::channel::Receiver<TaskStartOutcome> {
         let (answer, rx) = smol::channel::bounded(1);
         let started = cx
             .global::<GlobalTasks>()
@@ -262,7 +276,7 @@ impl Workspace {
             return rx;
         }
         if RunsHost::settled(cx) {
-            if let Err(e) = self.start_task_into(task_id, started_by, answer.clone(), window, cx) {
+            if let Err(e) = self.start_task_into(task_id, submitter, answer.clone(), window, cx) {
                 self.finish_task_start(Err(e), None, &answer, cx);
             }
             return rx;
@@ -272,7 +286,7 @@ impl Workspace {
         cx.spawn_in(window, async move |ws, cx| {
             barrier.await;
             let entered = ws.update_in(cx, |ws, window, cx| {
-                if let Err(e) = ws.start_task_into(&id, started_by, answer.clone(), window, cx) {
+                if let Err(e) = ws.start_task_into(&id, submitter, answer.clone(), window, cx) {
                     ws.finish_task_start(Err(e), None, &answer, cx);
                 }
             });
@@ -313,11 +327,12 @@ impl Workspace {
     fn start_task_into(
         &mut self,
         task_id: &str,
-        started_by: StartedBy,
+        submitter: crate::runs::FlowSubmitter,
         answer: Answer,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(), TaskStartError> {
+        let started_by = submitter.task_started_by();
         let task = cx
             .global::<GlobalTasks>()
             .get(task_id)
@@ -329,7 +344,7 @@ impl Workspace {
         let reveal = reveal_for(started_by);
         let route = match &task.spec.flow {
             Some(flow) => StartRoute::Flow(Box::new(
-                self.prepare_task_flow_start(&task, flow, reveal, started_by, cx)?,
+                self.prepare_task_flow_start(&task, flow, reveal, submitter, cx)?,
             )),
             // An existing lane needs no git repo, lock or checkout.
             None => match &task.spec.run_in {

@@ -180,7 +180,11 @@ orchestrator start or resume scopes its run key with that solicitation. A flow
 episode is submitted as the run-owned `runs::FlowSubmitter` (`Desktop`,
 `Phone`, `Orchestrator { solicited }`): its questions use `solicited()`, the
 run key takes `solicitation()` (`Desktop` keeps the key's), and only `Phone`
-is owed the end as a remote answer. Task registration installs the
+is owed the end as a remote answer. A flow-backed Task's run submits as the
+Task start's submitter (`Workspace::begin_task_start_for`), so an
+orchestrator's Task started during a phone turn asks its questions on the
+phone; a start that names only a `StartedBy` is unsolicited
+(`FlowSubmitter::of_task`). Task registration installs the
 solicitation before replaying a fast cached completion. Every `RunEvent` stamps
 its own solicitation so a desktop resume cannot relabel an earlier held end.
 

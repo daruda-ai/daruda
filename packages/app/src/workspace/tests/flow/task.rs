@@ -317,3 +317,36 @@ async fn a_desktop_flow_task_answers_to_the_desktop(cx: &mut TestAppContext) {
         crate::runs::FlowSubmitter::Desktop
     );
 }
+
+/// An orchestrator's flow task started during a phone turn carries that
+/// turn's solicitation into its flow, so the flow's questions reach the
+/// phone that asked, as the task's own results do.
+#[gpui::test]
+async fn an_orchestrator_flow_task_started_from_the_phone_asks_the_phone(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let (lane, ws, _path, _wh) = workspace_with_a_flow(cx, SLOW);
+    let id = flow_task(&ws, lane.path(), "anything", cx);
+    let pending = cx.update(|cx| {
+        crate::control::exec::begin_task_start(
+            id.clone(),
+            crate::control::exec::Caller::Orchestrator { solicited: true },
+            cx,
+        )
+    });
+    let _pending = pending.expect("the start is under way");
+    assert!(
+        wait_for_run(cx, |cx| run_is_held(cx, lane.path())).await,
+        "the run started"
+    );
+    let submitter = cx.update(|cx| {
+        crate::runs::RunsHost::flow_run(lane.path(), cx)
+            .map(|run| run.submitter_for_test())
+            .expect("held")
+    });
+    cx.update(|cx| crate::runs::RunsHost::stop_flow(lane.path(), cx));
+    assert!(wait_for_run(cx, |cx| !run_is_held(cx, lane.path())).await);
+    assert_eq!(
+        submitter,
+        crate::runs::FlowSubmitter::Orchestrator { solicited: true }
+    );
+}

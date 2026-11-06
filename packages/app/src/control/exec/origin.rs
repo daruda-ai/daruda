@@ -51,13 +51,6 @@ impl Caller {
         }
     }
 
-    pub(crate) fn task_started_by(self) -> daruda_store::tasks::StartedBy {
-        match self {
-            Self::Phone => daruda_store::tasks::StartedBy::Phone,
-            Self::Orchestrator { .. } => daruda_store::tasks::StartedBy::Orchestrator,
-        }
-    }
-
     pub(crate) fn flow_submitter(self) -> crate::runs::FlowSubmitter {
         match self {
             Self::Phone => crate::runs::FlowSubmitter::Phone,
@@ -85,15 +78,12 @@ impl Caller {
 mod tests {
     use super::Caller;
 
-    /// Two unrelated domain enums with the same variants: a swapped arm
-    /// would compile, so the mapping is pinned here.
+    /// The caller and the submitter its runs answer to are separate enums
+    /// with matching variants: a swapped arm would compile, so it is pinned.
     #[test]
-    fn every_caller_maps_to_the_same_starter_at_both_boundaries() {
+    fn every_caller_submits_as_itself_with_its_solicitation() {
         use crate::runs::FlowSubmitter;
-        use daruda_store::tasks::StartedBy as Task;
         let orchestrator = |solicited| Caller::Orchestrator { solicited };
-        assert_eq!(Caller::Phone.task_started_by(), Task::Phone);
-        assert_eq!(orchestrator(true).task_started_by(), Task::Orchestrator);
         assert_eq!(Caller::Phone.flow_submitter(), FlowSubmitter::Phone);
         for solicited in [true, false] {
             assert_eq!(
