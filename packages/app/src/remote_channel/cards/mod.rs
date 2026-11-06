@@ -3,9 +3,14 @@ use std::collections::{HashMap, VecDeque};
 use crate::control::approval::ApprovalId;
 use crate::remote_channel::bridge::PaneRef;
 
+mod desk;
 mod edits;
 pub(crate) mod quit;
+mod tokens;
+pub(crate) use desk::{Begun, CardDesk, CardScope, QuestionCard};
 pub(crate) use edits::{EditFailure, EditOutcome, EditQueue, RETRY_INTERVAL};
+#[cfg(test)]
+pub(crate) use tokens::{APPROVAL_TOKEN_PREFIX, TOKENS_PER_KIND_CAP};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum CardId {
@@ -310,11 +315,6 @@ impl<Owner: PartialEq, Receipt, Message: PartialEq> OwnedCards<Owner, Receipt, M
 
     pub(crate) fn owner(&self) -> Option<&Owner> {
         self.owner.as_ref()
-    }
-
-    /// The ledger, only while it belongs to `owner`.
-    pub(crate) fn ledger_for(&mut self, owner: &Owner) -> Option<&mut CardLedger<Receipt>> {
-        (self.owner.as_ref() == Some(owner)).then_some(&mut self.ledger)
     }
 
     pub(crate) fn ledger(&self) -> &CardLedger<Receipt> {

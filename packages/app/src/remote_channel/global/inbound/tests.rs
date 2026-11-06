@@ -629,7 +629,7 @@ fn callbacks_before_send_completion_cannot_schedule_a_stale_edit(cx: &mut TestAp
                 dispatch_claimed(&pending.id, pending.generation, &pending.bot, &incoming, cx)
                     .unwrap();
             let connection = &cx.global::<RemoteChannels>().connections[&pending.id];
-            assert!(!connection.cards.borrow().untracked(&"early-message".into()));
+            assert!(!connection.desk.borrow().untracked(&"early-message".into()));
             assert!(!matches!(
                 feedback_for(effect, incoming.kind, Tap::Settled),
                 Feedback::Edit { .. }
@@ -751,7 +751,7 @@ fn tap_card(
     let effect =
         dispatch_claimed(&pending.id, pending.generation, &pending.bot, &incoming, cx).unwrap();
     let connection = &cx.global::<RemoteChannels>().connections[&pending.id];
-    let tap = if connection.cards.borrow().untracked(&message_id.into()) {
+    let tap = if connection.desk.borrow().untracked(&message_id.into()) {
         Tap::Untracked
     } else {
         Tap::Settled
@@ -823,18 +823,17 @@ fn settling_a_remote_card_without_a_receipt_leaves_its_buttons_to_a_stale_tap(
             );
         }
         for connection in cx.global::<RemoteChannels>().connections.values() {
-            assert_eq!(connection.core.pending_approval_token_count(), 2);
+            assert_eq!(connection.desk.borrow().approval_token_count(), 2);
         }
 
         assert!(approval::resolve_desktop(id.0, "approve", cx));
         assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Approved));
         for connection in cx.global::<RemoteChannels>().connections.values() {
-            assert_eq!(connection.core.pending_approval_token_count(), 0);
+            assert_eq!(connection.desk.borrow().approval_token_count(), 0);
             assert!(
                 !connection
-                    .cards
+                    .desk
                     .borrow()
-                    .ledger()
                     .contains(&crate::remote_channel::cards::CardId::Approval(id))
             );
         }
@@ -874,12 +873,11 @@ fn a_remote_card_that_never_left_is_offered_once_more(cx: &mut TestAppContext) {
             );
         }
         for connection in cx.global::<RemoteChannels>().connections.values() {
-            assert_eq!(connection.core.pending_approval_token_count(), 0);
+            assert_eq!(connection.desk.borrow().approval_token_count(), 0);
             assert!(
                 !connection
-                    .cards
+                    .desk
                     .borrow()
-                    .ledger()
                     .contains(&crate::remote_channel::cards::CardId::Approval(id))
             );
         }

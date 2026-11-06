@@ -2,7 +2,7 @@ use super::RemoteChannels;
 use crate::remote_channel::{
     bridge::{InlineKeyboard, MessageTail, Outbound, PaneRef},
     cards::{
-        CardCompletion, CardId, EditOutcome, SendClaim, SendOutcome, Settlement, quit::QuitEdit,
+        Begun, CardId, CardScope, EditOutcome, SendClaim, SendOutcome, Settlement, quit::QuitEdit,
     },
     runtime::BotSession,
     transport::{self, Message},
@@ -53,19 +53,18 @@ pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
         .global_mut::<RemoteChannels>()
         .connections
         .get_mut(&pending.id)?;
-    if let Some(card) = &pending.card
-        && !connection.cards.get_mut().ledger_mut().begin(card)
-    {
-        return None;
-    }
     let kind = connection.config.kind;
-    let (message, pane) = match &pending.outbound {
-        Outbound::Ping(ping) => (connection.core.build_ping(ping.clone()), Some(ping.pane)),
-        Outbound::Notice(text) => (Message::plain(text.clone(), None), None),
-        Outbound::FlowAsk(prompt) => (connection.core.build_flow_ask(prompt.clone()), None),
-        Outbound::Approval(prompt) => (
+    let begun = connection
+        .desk
+        .get_mut()
+        .begin(pending.card.as_ref(), pending.outbound.clone())?;
+    let (message, pane) = match begun {
+        Begun::Ping { pane, message } => (message, Some(pane)),
+        Begun::Notice(text) => (Message::plain(text, None), None),
+        Begun::FlowAsk(message) => (message, None),
+        Begun::Approval(prompt) => (
             Message::plain(
-                prompt.summary.clone(),
+                prompt.summary,
                 Some(InlineKeyboard::single_row(prompt.buttons.to_vec())),
             ),
             None,
@@ -95,9 +94,8 @@ fn discard(pending: &Pending, cx: &mut App) {
             .global_mut::<RemoteChannels>()
             .connections
             .get_mut(&pending.id)
-        && connection.cards.get_mut().ledger_mut().release(card)
     {
-        connection.core.forget_card(&card.card);
+        connection.desk.get_mut().abandon(card);
     }
 }
 
@@ -116,7 +114,7 @@ fn editor(receipt: &Receipt, cx: &App) -> Option<(ChannelKind, Arc<BotSession>)>
     let connection = cx.global::<RemoteChannels>().live(&receipt.id, cx)?;
     let serves = connection.can_send()
         && connection.config.recipient.as_ref() == Some(&receipt.recipient)
-        && connection.cards.borrow().owner() == Some(&receipt.owner);
+        && connection.desk.borrow().owner() == Some(&receipt.owner);
     if !serves {
         return None;
     }
@@ -131,15 +129,15 @@ pub(super) fn edit(receipt: Receipt, label: String, cx: &mut App) {
     else {
         return;
     };
-    let cards = connection.cards.get_mut();
-    if cards.owner() != Some(&receipt.owner) {
+    let desk = connection.desk.get_mut();
+    if desk.owner() != Some(&receipt.owner) {
         return;
     }
     for id in &receipt.ids {
-        cards.note_settled(id.clone());
+        desk.note_settled(id.clone());
     }
     let id = receipt.id.clone();
-    cards.edits.push(receipt, label);
+    desk.edits_mut().push(receipt, label);
     flush_connection(&id, cx);
 }
 
@@ -162,7 +160,7 @@ fn flush_connection(id: &str, cx: &mut App) {
     if !connection.can_send() {
         return;
     }
-    let pending = connection.cards.get_mut().edits.claim();
+    let pending = connection.desk.get_mut().edits_mut().claim();
     for (attempt, receipt, label) in pending {
         if editor(&receipt, cx).is_none() {
             finish_edit(&receipt, attempt, EditOutcome::Transient, cx);
@@ -187,7 +185,7 @@ fn flush_connection(id: &str, cx: &mut App) {
             for message_id in &receipt.ids {
                 let serving = cx.update(|cx| {
                     let connection = cx.global::<RemoteChannels>().connections.get(&receipt.id)?;
-                    if !connection.cards.borrow().edits.contains(attempt) {
+                    if !connection.desk.borrow().edits().contains(attempt) {
                         return None;
                     }
                     editor(&receipt, cx)
@@ -270,7 +268,11 @@ fn finish_edit(receipt: &Receipt, attempt: uuid::Uuid, outcome: EditOutcome, cx:
         .connections
         .get_mut(&receipt.id)
     {
-        connection.cards.get_mut().edits.finish(attempt, outcome);
+        connection
+            .desk
+            .get_mut()
+            .edits_mut()
+            .finish(attempt, outcome);
     }
 }
 
@@ -297,10 +299,10 @@ impl RemoteChannels {
             let Some(connection) = cx.global_mut::<Self>().connections.get_mut(&id) else {
                 continue;
             };
-            let cards = connection.cards.get_mut();
-            for (receipt, label) in cards.close_for_quit(cancelled) {
+            let desk = connection.desk.get_mut();
+            for (receipt, label) in desk.close_for_quit(cancelled) {
                 for message in &receipt.ids {
-                    cards.note_settled(message.clone());
+                    desk.note_settled(message.clone());
                 }
                 owed.push((receipt, label));
             }
@@ -336,18 +338,10 @@ impl RemoteChannels {
         }
         let mut edits = Vec::new();
         for connection in cx.global_mut::<Self>().connections.values_mut() {
-            match connection
-                .cards
-                .get_mut()
-                .ledger_mut()
-                .settle(card, label.to_owned())
+            if let Settlement::Edit { receipt, label } =
+                connection.desk.get_mut().settle(card, label.to_owned())
             {
-                Settlement::Edit { receipt, label } => {
-                    connection.core.settle_card(card);
-                    edits.push((receipt, label));
-                }
-                Settlement::Unreceipted => connection.core.forget_card(card),
-                Settlement::Recorded => connection.core.settle_card(card),
+                edits.push((receipt, label));
             }
         }
         for (receipt, label) in edits {
@@ -356,21 +350,7 @@ impl RemoteChannels {
     }
 
     pub(crate) fn settle_permissions(pane: PaneRef, session: u64, label: &str, cx: &mut App) {
-        let cards: Vec<_> = cx
-            .try_global::<Self>()
-            .into_iter()
-            .flat_map(|bridge| bridge.connections.values())
-            .flat_map(|connection| {
-                connection
-                    .cards
-                    .borrow()
-                    .ledger()
-                    .permissions(pane, session)
-            })
-            .collect();
-        for card in cards {
-            Self::settle_card(&card, label, cx);
-        }
+        Self::settle_open(CardScope::Permissions { pane, session }, label, cx);
     }
 
     pub(crate) fn settle_questions(
@@ -380,17 +360,20 @@ impl RemoteChannels {
         label: &str,
         cx: &mut App,
     ) {
+        let scope = CardScope::Questions {
+            pane,
+            session,
+            question_id,
+        };
+        Self::settle_open(scope, label, cx);
+    }
+
+    fn settle_open(scope: CardScope, label: &str, cx: &mut App) {
         let cards: Vec<_> = cx
             .try_global::<Self>()
             .into_iter()
             .flat_map(|bridge| bridge.connections.values())
-            .flat_map(|connection| {
-                connection
-                    .cards
-                    .borrow()
-                    .ledger()
-                    .questions(pane, session, question_id)
-            })
+            .flat_map(|connection| connection.desk.borrow().open(scope))
             .collect();
         for card in cards {
             Self::settle_card(&card, label, cx);
@@ -422,25 +405,21 @@ pub(super) fn finish(
         SendOutcome::Delivered(ids) => ids,
         SendOutcome::Unconfirmed | SendOutcome::NotSent => &[],
     };
-    if live && let Some(pane) = pane {
-        let question = match pending.card.as_ref().map(|claim| &claim.card) {
-            Some(CardId::Question { question, step, .. }) => Some((*question, *step)),
-            _ => None,
-        };
-        for id in ids {
-            connection
-                .core
-                .record_delivered(id.clone(), pane, orchestrator);
-            if let Some((question, step)) = question {
+    // Only the live session's messages take a reply.
+    let replies = match (live, pane) {
+        (true, Some(pane)) => {
+            for id in ids {
                 connection
                     .core
-                    .record_question_sent(id.clone(), pane, question, step);
+                    .record_delivered(id.clone(), pane, orchestrator);
             }
+            ids.to_vec()
         }
-    }
+        _ => Vec::new(),
+    };
     if let Some(card) = &pending.card {
-        let cards = connection.cards.get_mut();
-        let outcome = match (outcome, cards.owner()) {
+        let desk = connection.desk.get_mut();
+        let outcome = match (outcome, desk.owner()) {
             (SendOutcome::Delivered(ids), Some(owner)) => SendOutcome::Delivered(Receipt {
                 id: pending.id.clone(),
                 owner: owner.clone(),
@@ -453,10 +432,7 @@ pub(super) fn finish(
             (SendOutcome::Unconfirmed, _) => SendOutcome::Unconfirmed,
             (SendOutcome::NotSent, _) => SendOutcome::NotSent,
         };
-        let completion = cards.ledger_mut().complete(card, outcome);
-        if matches!(completion, CardCompletion::Released) {
-            connection.core.forget_card(&card.card);
-        }
+        let completion = desk.complete(card, outcome, replies);
         crate::remote_channel::apply_card_completion(&card.card, completion, edit, cx);
     }
 }

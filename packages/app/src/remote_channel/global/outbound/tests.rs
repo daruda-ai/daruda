@@ -87,12 +87,10 @@ fn a_desktop_approval_settles_every_channel_using_its_delivered_ids(cx: &mut gpu
             cx.global::<RemoteChannels>()
                 .connections
                 .values()
-                .all(|connection| !connection
-                    .cards
-                    .borrow()
-                    .ledger()
-                    .contains(&CardId::Approval(id))
-                    && connection.core.pending_approval_token_count() == 0)
+                .all(
+                    |connection| !connection.desk.borrow().contains(&CardId::Approval(id))
+                        && connection.desk.borrow().approval_token_count() == 0
+                )
         );
         assert_eq!(
             crate::telegram::global::pending_approval_tokens_for_test(cx),
@@ -124,11 +122,7 @@ fn withdrawing_while_sending_settles_all_late_receipts(cx: &mut gpui::TestAppCon
             cx.global::<RemoteChannels>()
                 .connections
                 .values()
-                .all(|connection| !connection
-                    .cards
-                    .borrow()
-                    .ledger()
-                    .contains(&CardId::Approval(id)))
+                .all(|connection| !connection.desk.borrow().contains(&CardId::Approval(id)))
         );
     });
 }
@@ -148,7 +142,7 @@ fn settlement_before_preparation_drops_queued_cards_and_tokens(cx: &mut gpui::Te
             cx.global::<RemoteChannels>()
                 .connections
                 .values()
-                .all(|connection| connection.core.pending_approval_token_count() == 0)
+                .all(|connection| connection.desk.borrow().approval_token_count() == 0)
         );
         assert_eq!(
             crate::telegram::global::pending_approval_tokens_for_test(cx),
@@ -207,11 +201,7 @@ fn failed_edits_keep_the_first_decision_and_retire_live_card_entries(
             cx.global::<RemoteChannels>()
                 .connections
                 .values()
-                .all(|connection| !connection
-                    .cards
-                    .borrow()
-                    .ledger()
-                    .contains(&CardId::Approval(id)))
+                .all(|connection| !connection.desk.borrow().contains(&CardId::Approval(id)))
         );
     });
 }
@@ -234,7 +224,7 @@ fn a_retired_card_send_cannot_forget_the_replacements_tokens(cx: &mut gpui::Test
             .connections
             .get_mut(&old.id)
             .unwrap();
-        connection.cards = Default::default();
+        connection.desk = Default::default();
         connection.generation = uuid::Uuid::new_v4();
         connection.publish_bot(crate::remote_channel::global::tests::ready_bot());
         assert!(RemoteChannels::send_approval(
@@ -254,8 +244,7 @@ fn a_retired_card_send_cannot_forget_the_replacements_tokens(cx: &mut gpui::Test
                 .connections
                 .get_mut(&new.id)
                 .unwrap()
-                .core
-                .route_callback(token),
+                .route_tap(&token),
             crate::remote_channel::bridge::InboundAction::ResolveApproval { .. }
         ));
     });
@@ -296,8 +285,7 @@ fn a_duplicate_send_failure_does_not_forget_delivered_card_tokens(cx: &mut gpui:
                 .connections
                 .get_mut(&pending.id)
                 .unwrap()
-                .core
-                .route_callback(token),
+                .route_tap(&token),
             crate::remote_channel::bridge::InboundAction::ResolveApproval { .. }
         ));
     });
@@ -367,7 +355,7 @@ fn an_old_remote_owner_cannot_extend_a_replacement_attempt(cx: &mut gpui::TestAp
             .connections
             .get_mut(&old.id)
             .unwrap();
-        connection.cards = Default::default();
+        connection.desk = Default::default();
         connection.generation = uuid::Uuid::new_v4();
         connection.publish_bot(crate::remote_channel::global::tests::ready_bot());
         assert!(RemoteChannels::send_approval(
@@ -392,9 +380,8 @@ fn an_old_remote_owner_cannot_extend_a_replacement_attempt(cx: &mut gpui::TestAp
         );
         assert!(
             cx.global::<RemoteChannels>().connections[&replacement.id]
-                .cards
+                .desk
                 .borrow()
-                .ledger()
                 .is_sending(replacement.card.as_ref().unwrap())
         );
     });
@@ -497,7 +484,7 @@ fn a_same_bot_recovery_keeps_its_cards_and_settles_them(cx: &mut gpui::TestAppCo
             "the recovered channels already show this card"
         );
         for connection in cx.global::<RemoteChannels>().connections.values() {
-            assert_eq!(connection.core.pending_approval_token_count(), 2);
+            assert_eq!(connection.desk.borrow().approval_token_count(), 2);
         }
 
         assert!(approval::resolve_desktop(id.0, "approve", cx));
@@ -530,8 +517,8 @@ fn a_different_bot_forgets_old_cards_and_is_offered_once(cx: &mut gpui::TestAppC
                 "another-bot",
             ));
         let work = &cx.global::<RemoteChannels>().connections["work"];
-        assert_eq!(work.core.pending_approval_token_count(), 0);
-        assert!(!work.cards.borrow().ledger().contains(&CardId::Approval(id)));
+        assert_eq!(work.desk.borrow().approval_token_count(), 0);
+        assert!(!work.desk.borrow().contains(&CardId::Approval(id)));
 
         approval::relay_outstanding(cx);
         let offered = remote.next().now_or_never().flatten().unwrap();

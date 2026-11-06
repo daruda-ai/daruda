@@ -49,7 +49,7 @@ pub struct TelegramBridge {
     // `cx.try_global::<TelegramBridge>()`.
     outbound_tx: UnboundedSender<QueuedOutbound>,
     bot: Ownership,
-    cards: RefCell<outbound::OwnedCards>,
+    desk: RefCell<outbound::Desk>,
 }
 
 impl Global for TelegramBridge {}
@@ -206,43 +206,12 @@ impl TelegramBridge {
     }
 
     fn enqueue(&self, outbound: Outbound, cx: &App) -> Result<(), ()> {
-        let bot = self.bot.ready().filter(|_| self.bot.serves()).ok_or(())?;
-        let config = SettingsStore::global(cx).user_arc();
-        let chat_id = config
-            .telegram
-            .enabled
-            .then_some(config.telegram.authorized_chat_id)
-            .flatten()
-            .ok_or(())?;
-        // The ledger is bound to the serving identity by `sync_card_owner`; a
-        // card for another identity is refused rather than recorded where its
-        // receipt could not be edited.
+        let (bot, chat_id) = self.addressee(cx).ok_or(())?;
         let card = match outbound.card_id() {
-            Some(id) => Some(
-                self.cards
-                    .borrow_mut()
-                    .ledger_for(&outbound::CardOwner::of(bot, chat_id))
-                    .ok_or(())?
-                    .claim(id)
-                    .ok_or(())?,
-            ),
+            Some(id) => Some(self.desk_for(bot, chat_id).ok_or(())?.claim(id).ok_or(())?),
             None => None,
         };
-        let result = self
-            .outbound_tx
-            .unbounded_send(QueuedOutbound {
-                bot: bot.clone(),
-                chat_id,
-                outbound,
-                card: card.clone(),
-            })
-            .map_err(|_| ());
-        if result.is_err()
-            && let Some(claim) = card
-        {
-            self.cards.borrow_mut().ledger_mut().release(&claim);
-        }
-        result
+        self.queue(bot, chat_id, outbound, card)
     }
 
     pub(crate) fn send_flow_ask(
@@ -257,12 +226,10 @@ impl TelegramBridge {
             .is_some_and(|bridge| bridge.enqueue(Outbound::FlowAsk(prompt), cx).is_ok())
     }
 
-    /// Mint an approval card's callback tokens, build it, and queue it.
-    ///
-    /// All three together so the tokens are registered before the message that
-    /// redeems them can be sent, and so nothing outside this module has to
-    /// know `BridgeCore` holds the table. `false` when there is no bridge to
-    /// ask through.
+    /// Claim an approval card, mint its callback tokens, build it, and queue
+    /// it, so the tokens are registered before the message that redeems them
+    /// can be sent. `false` when nothing can be sent or the card is already
+    /// offered.
     pub(crate) fn send_approval_card(
         id: crate::control::approval::ApprovalId,
         summary: String,
@@ -287,42 +254,17 @@ impl TelegramBridge {
             return false;
         }
         Self::sync_card_owner(cx);
-        let bridge = cx.global_mut::<TelegramBridge>();
+        let bridge = cx.global::<TelegramBridge>();
         if bridge
-            .cards
+            .desk
             .borrow()
-            .ledger()
             .contains(&crate::remote_channel::cards::CardId::Approval(id))
         {
             return false;
         }
-        let (approve, refuse) = bridge.core.record_pending_approval(id);
-        let prompt = crate::telegram::bridge::ApprovalPrompt {
-            id,
-            summary,
-            buttons: [
-                (s::control::approval_allow(), approve),
-                (s::control::approval_refuse(), refuse),
-            ],
-        };
-        trace::state("approval.tokens", || format!("id={id:?} minted=2"));
-        let digest = trace::is_on().then(|| trace::digest(&prompt.summary));
-        match cx
-            .global::<TelegramBridge>()
-            .enqueue(Outbound::Approval(prompt), cx)
-        {
-            Ok(()) => {
-                trace::delivery("queue.approval", || {
-                    format!(
-                        "{} id={id:?} text={}",
-                        trace::enqueue_slot(),
-                        trace::opt(digest)
-                    )
-                });
-                true
-            }
+        match bridge.queue_approval(id, summary, cx) {
+            Ok(()) => true,
             Err(()) => {
-                Self::forget_approval(id, cx);
                 crate::remote_channel::log_error(
                     "Telegram approval queue closed",
                     &"outgoing queue closed",
@@ -331,6 +273,41 @@ impl TelegramBridge {
                 false
             }
         }
+    }
+
+    /// Claim an approval card for the serving identity, minting its tokens,
+    /// and queue it.
+    fn queue_approval(
+        &self,
+        id: crate::control::approval::ApprovalId,
+        summary: String,
+        cx: &App,
+    ) -> Result<(), ()> {
+        let (bot, chat_id) = self.addressee(cx).ok_or(())?;
+        let (claim, (approve, refuse)) = self
+            .desk_for(bot, chat_id)
+            .ok_or(())?
+            .claim_approval(id)
+            .ok_or(())?;
+        trace::state("approval.tokens", || format!("id={id:?} minted=2"));
+        let prompt = crate::telegram::bridge::ApprovalPrompt {
+            id,
+            summary,
+            buttons: [
+                (s::control::approval_allow(), approve),
+                (s::control::approval_refuse(), refuse),
+            ],
+        };
+        let digest = trace::is_on().then(|| trace::digest(&prompt.summary));
+        self.queue(bot, chat_id, Outbound::Approval(prompt), Some(claim))?;
+        trace::delivery("queue.approval", || {
+            format!(
+                "{} id={id:?} text={}",
+                trace::enqueue_slot(),
+                trace::opt(digest)
+            )
+        });
+        Ok(())
     }
 
     /// Take or renew this daruda's claim on the bot `token` names, answering
@@ -378,28 +355,24 @@ impl TelegramBridge {
         self.bot = Ownership::Idle;
     }
 
-    /// Drop an approval's callback tokens once it has been decided.
-    ///
-    /// Settle-time cleanup, not tap-time: while a card is live, tapping twice
-    /// is ordinary use, so the tokens have to survive a tap. Once the request
-    /// is answered they are dead weight — and the table is bounded, so leaving
-    /// them would eventually evict a *live* card's tokens and leave the user
-    /// tapping a button that resolves nothing.
-    pub(crate) fn forget_approval(id: crate::control::approval::ApprovalId, cx: &mut App) {
-        if cx.try_global::<TelegramBridge>().is_some() {
-            trace::state("approval.forgotten", || format!("id={id:?}"));
-            cx.global_mut::<TelegramBridge>()
-                .core
-                .forget_pending_approval(id);
-        }
-    }
-
     /// Generate a fresh Settings pairing code; only one pairing flow is active.
     pub(crate) fn generate_pair_code(cx: &mut App) -> String {
         // The value is deliberately absent: it authorizes a chat, and this
         // file is plain text that outlives the pairing window.
         trace::state("pair_code.minted", || "replaced=pending".to_string());
         cx.global_mut::<TelegramBridge>().core.new_pair_code()
+    }
+}
+
+#[cfg(test)]
+impl TelegramBridge {
+    /// What a button tap answers, without the chat gate `BridgeCore::route_with`
+    /// applies first.
+    pub(crate) fn route_tap(&mut self, data: &str) -> crate::remote_channel::bridge::InboundAction {
+        self.desk
+            .get_mut()
+            .route_tap(data)
+            .unwrap_or_else(|| self.core.routing.route_listing(data))
     }
 }
 
@@ -451,7 +424,7 @@ pub(crate) fn install_for_test(
         core,
         outbound_tx,
         bot,
-        cards: RefCell::default(),
+        desk: RefCell::default(),
     });
     observe_settings(cx);
     TestOutbox {
@@ -465,7 +438,7 @@ pub(crate) fn install_for_test(
 #[cfg(test)]
 pub(crate) fn pending_approval_tokens_for_test(cx: &App) -> usize {
     cx.try_global::<TelegramBridge>()
-        .map_or(0, |b| b.core.pending_approval_token_count())
+        .map_or(0, |b| b.desk.borrow().approval_token_count())
 }
 
 /// Register the Telegram bridge global and spawn its poll + send
@@ -487,7 +460,7 @@ pub fn install(cx: &mut App) {
         core,
         outbound_tx,
         bot: Ownership::Idle,
-        cards: RefCell::default(),
+        desk: RefCell::default(),
     });
     observe_settings(cx);
 

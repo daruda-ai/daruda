@@ -3,8 +3,34 @@
 
 use super::*;
 // Shapes only the tests build; `core` itself never names them.
-use crate::telegram::bridge::{PermissionPromptRef, TelegramTail};
+use crate::remote_channel::cards::Begun;
+use crate::telegram::bridge::{Outbound, PermissionPromptRef, TelegramTail};
 use daruda_store::project::WorkspaceUuid;
+
+type Desk = CardDesk<i64, (), ()>;
+
+/// Begin sending `ping` with no card claimed, minting its buttons' tokens.
+fn begin_ping(desk: &mut Desk, ping: BridgePing) -> PreparedPing {
+    match desk.begin(None, Outbound::Ping(ping)) {
+        Some(Begun::Ping { message, .. }) => message,
+        _ => panic!("a ping begins as a ping"),
+    }
+}
+
+fn permission_ping(perm_id: u64, buttons: Vec<(String, PermissionDecision)>) -> BridgePing {
+    BridgePing {
+        pane: pane(1, 1),
+        header: "Approve this?".to_string(),
+        tail: TelegramTail::Plain(String::new()),
+        prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
+            PermissionPromptRef {
+                session: 1,
+                perm_id,
+                buttons,
+            },
+        )),
+    }
+}
 
 fn pane(workspace_seed: u128, id: u64) -> PaneRef {
     PaneRef {
@@ -357,13 +383,14 @@ fn no_reply_to_and_no_last_pinged_reports_no_target() {
 fn an_approval_token_survives_repeated_taps() {
     use crate::control::approval::{ApprovalChoice, ApprovalId};
     let mut bridge = BridgeCore::new(true, Some(42), 0);
-    let (approve, refuse) = bridge.record_pending_approval(ApprovalId(1));
+    let mut desk = Desk::default();
+    let (_, (approve, refuse)) = desk.claim_approval(ApprovalId(1)).unwrap();
     assert_ne!(approve, refuse, "one token per button");
 
     for _ in 0..2 {
         assert_eq!(
             bridge
-                .route(callback(1, 42, "cbq-1", &approve))
+                .route_with(callback(1, 42, "cbq-1", &approve), &mut desk)
                 .action
                 .ready(),
             InboundAction::ResolveApproval {
@@ -374,7 +401,7 @@ fn an_approval_token_survives_repeated_taps() {
     }
     assert_eq!(
         bridge
-            .route(callback(2, 42, "cbq-2", &refuse))
+            .route_with(callback(2, 42, "cbq-2", &refuse), &mut desk)
             .action
             .ready(),
         InboundAction::ResolveApproval {
@@ -388,10 +415,11 @@ fn an_approval_token_survives_repeated_taps() {
 fn an_approval_tap_from_an_unauthorized_chat_is_ignored() {
     use crate::control::approval::ApprovalId;
     let mut bridge = BridgeCore::new(true, Some(42), 0);
-    let (approve, _refuse) = bridge.record_pending_approval(ApprovalId(1));
+    let mut desk = Desk::default();
+    let (_, (approve, _refuse)) = desk.claim_approval(ApprovalId(1)).unwrap();
     assert_eq!(
         bridge
-            .route(callback(1, 99, "cbq-1", &approve))
+            .route_with(callback(1, 99, "cbq-1", &approve), &mut desk)
             .action
             .ready(),
         InboundAction::Ignore
@@ -404,13 +432,16 @@ fn an_approval_tap_from_an_unauthorized_chat_is_ignored() {
 #[test]
 fn an_approval_token_from_another_process_does_not_resolve() {
     use crate::control::approval::ApprovalId;
-    let mut before = BridgeCore::new(true, Some(42), 0);
-    let (stale, _) = before.record_pending_approval(ApprovalId(1));
+    let (_, (stale, _)) = Desk::default().claim_approval(ApprovalId(1)).unwrap();
 
     let mut after = BridgeCore::new(true, Some(42), 0);
-    let _ = after.record_pending_approval(ApprovalId(1));
+    let mut desk = Desk::default();
+    desk.claim_approval(ApprovalId(1)).unwrap();
     assert_eq!(
-        after.route(callback(1, 42, "cbq-1", &stale)).action.ready(),
+        after
+            .route_with(callback(1, 42, "cbq-1", &stale), &mut desk)
+            .action
+            .ready(),
         InboundAction::StaleApproval
     );
 }
@@ -421,25 +452,25 @@ fn an_approval_token_from_another_process_does_not_resolve() {
 fn the_three_token_namespaces_do_not_collide() {
     use crate::control::approval::ApprovalId;
     let mut bridge = BridgeCore::new(true, Some(42), 0);
-    let target = pane(1, 3);
-    bridge.routing.pending_permissions.insert(
-        "abcdef0123456789".to_string(),
-        (
-            target,
-            1,
+    let mut desk = Desk::default();
+    let permission = begin_ping(
+        &mut desk,
+        permission_ping(
             55,
-            PermissionDecision::Allow("opt_yes".to_string()),
+            vec![("Allow".into(), PermissionDecision::Allow("opt_yes".into()))],
         ),
     );
-    let (approve, _) = bridge.record_pending_approval(ApprovalId(1));
+    let permission = only_row(permission.keyboard.as_ref().unwrap())[0].1.clone();
+    let (_, (approve, _)) = desk.claim_approval(ApprovalId(1)).unwrap();
 
     assert!(approve.starts_with(APPROVAL_TOKEN_PREFIX));
     assert!(!approve.starts_with(crate::telegram::command::LISTING_TOKEN_PREFIX));
     // A permission token is a bare `Uuid::simple`, so it carries neither
     // prefix and still reaches the permission table.
+    assert!(!permission.contains(':'));
     assert!(matches!(
         bridge
-            .route(callback(1, 42, "cbq-1", "abcdef0123456789"))
+            .route_with(callback(1, 42, "cbq-1", &permission), &mut desk)
             .action
             .ready(),
         InboundAction::RespondPermission { .. }
@@ -449,22 +480,21 @@ fn the_three_token_namespaces_do_not_collide() {
 #[test]
 fn callback_with_known_token_responds_and_consumes_it() {
     let mut bridge = BridgeCore::new(true, Some(1), 0);
-    let target = pane(1, 3);
-    bridge.routing.pending_permissions.insert(
-        "tok-a".to_string(),
-        (
-            target,
-            1,
+    let mut desk = Desk::default();
+    let message = begin_ping(
+        &mut desk,
+        permission_ping(
             55,
-            PermissionDecision::Allow("opt_yes".to_string()),
+            vec![("Allow".into(), PermissionDecision::Allow("opt_yes".into()))],
         ),
     );
+    let token = only_row(message.keyboard.as_ref().unwrap())[0].1.clone();
 
-    let result = bridge.route(callback(1, 1, "cbq-1", "tok-a"));
+    let result = bridge.route_with(callback(1, 1, "cbq-1", &token), &mut desk);
     assert_eq!(
         result.action.ready(),
         InboundAction::RespondPermission {
-            pane: target,
+            pane: pane(1, 1),
             session: 1,
             perm_id: 55,
             decision: PermissionDecision::Allow("opt_yes".to_string()),
@@ -473,7 +503,7 @@ fn callback_with_known_token_responds_and_consumes_it() {
     assert_eq!(result.answer_callback_id, Some("cbq-1".to_string()));
 
     // Second tap on the same (now-consumed) token is a no-op.
-    let result = bridge.route(callback(2, 1, "cbq-2", "tok-a"));
+    let result = bridge.route_with(callback(2, 1, "cbq-2", &token), &mut desk);
     assert_eq!(result.action.ready(), InboundAction::Ignore);
     assert_eq!(result.answer_callback_id, Some("cbq-2".to_string()));
 }
@@ -557,44 +587,43 @@ fn sent_pings_bound_evicts_oldest_entries() {
 
 #[test]
 fn build_ping_plain_completion_has_no_keyboard() {
-    let mut bridge = BridgeCore::new(true, Some(1), 0);
-    let msg = bridge.build_ping(BridgePing {
-        pane: pane(1, 1),
-        header: "Turn finished".to_string(),
-        tail: TelegramTail::Plain(String::new()),
-        prompt: None,
-    });
+    let bridge = BridgeCore::new(true, Some(1), 0);
+    let mut desk = Desk::default();
+    let msg = bridge.address(begin_ping(
+        &mut desk,
+        BridgePing {
+            pane: pane(1, 1),
+            header: "Turn finished".to_string(),
+            tail: TelegramTail::Plain(String::new()),
+            prompt: None,
+        },
+    ));
 
     assert_eq!(msg.chat_id, 1);
     assert_eq!(msg.header, "Turn finished");
     assert!(msg.keyboard.is_none());
-    assert!(bridge.routing.pending_permissions.is_empty());
+    assert_eq!(desk.live_token_count(), 0);
 }
 
 #[test]
 fn build_ping_permission_registers_two_distinct_tokens() {
-    let mut bridge = BridgeCore::new(true, Some(1), 0);
-    let msg = bridge.build_ping(BridgePing {
-        pane: pane(1, 1),
-        header: "Approve this?".to_string(),
-        tail: TelegramTail::Plain(String::new()),
-        prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
-            PermissionPromptRef {
-                session: 1,
-                perm_id: 7,
-                buttons: vec![
-                    (
-                        "Allow".to_string(),
-                        PermissionDecision::Allow("opt_allow".to_string()),
-                    ),
-                    (
-                        "Reject".to_string(),
-                        PermissionDecision::Reject("opt_reject".to_string()),
-                    ),
-                ],
-            },
-        )),
-    });
+    let mut desk = Desk::default();
+    let msg = begin_ping(
+        &mut desk,
+        permission_ping(
+            7,
+            vec![
+                (
+                    "Allow".to_string(),
+                    PermissionDecision::Allow("opt_allow".to_string()),
+                ),
+                (
+                    "Reject".to_string(),
+                    PermissionDecision::Reject("opt_reject".to_string()),
+                ),
+            ],
+        ),
+    );
 
     let keyboard = msg.keyboard.expect("keyboard present");
     assert_eq!(only_row(&keyboard).len(), 2);
@@ -602,26 +631,26 @@ fn build_ping_permission_registers_two_distinct_tokens() {
     assert_eq!(only_row(&keyboard)[1].0, "Reject");
     assert_ne!(only_row(&keyboard)[0].1, only_row(&keyboard)[1].1);
 
-    assert_eq!(bridge.routing.pending_permissions.len(), 2);
+    assert_eq!(desk.live_token_count(), 2);
     let allow_token = &only_row(&keyboard)[0].1;
     let reject_token = &only_row(&keyboard)[1].1;
     assert_eq!(
-        bridge.routing.pending_permissions.get(allow_token),
-        Some(&(
-            pane(1, 1),
-            1,
-            7,
-            PermissionDecision::Allow("opt_allow".to_string())
-        ))
+        desk.route_tap(allow_token),
+        Some(InboundAction::RespondPermission {
+            pane: pane(1, 1),
+            session: 1,
+            perm_id: 7,
+            decision: PermissionDecision::Allow("opt_allow".to_string()),
+        })
     );
     assert_eq!(
-        bridge.routing.pending_permissions.get(reject_token),
-        Some(&(
-            pane(1, 1),
-            1,
-            7,
-            PermissionDecision::Reject("opt_reject".to_string())
-        ))
+        desk.route_tap(reject_token),
+        Some(InboundAction::RespondPermission {
+            pane: pane(1, 1),
+            session: 1,
+            perm_id: 7,
+            decision: PermissionDecision::Reject("opt_reject".to_string()),
+        })
     );
 }
 
@@ -632,36 +661,31 @@ fn build_ping_permission_registers_one_token_per_button_beyond_two() {
     // execpolicy-amendment allow) alongside Reject. Every option the
     // agent offers must become its own button + token, not collapse
     // to a single Allow/Reject pair.
-    let mut bridge = BridgeCore::new(true, Some(1), 0);
-    let msg = bridge.build_ping(BridgePing {
-        pane: pane(1, 1),
-        header: "Approve this?".to_string(),
-        tail: TelegramTail::Plain(String::new()),
-        prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
-            PermissionPromptRef {
-                session: 1,
-                perm_id: 9,
-                buttons: vec![
-                    (
-                        "Allow Once".to_string(),
-                        PermissionDecision::Allow("allow_once".to_string()),
-                    ),
-                    (
-                        "Allow for Session".to_string(),
-                        PermissionDecision::Allow("allow_always".to_string()),
-                    ),
-                    (
-                        "Allow Commands Starting With …".to_string(),
-                        PermissionDecision::Allow("accept_execpolicy_amendment".to_string()),
-                    ),
-                    (
-                        "Reject".to_string(),
-                        PermissionDecision::Reject("reject_once".to_string()),
-                    ),
-                ],
-            },
-        )),
-    });
+    let mut desk = Desk::default();
+    let msg = begin_ping(
+        &mut desk,
+        permission_ping(
+            9,
+            vec![
+                (
+                    "Allow Once".to_string(),
+                    PermissionDecision::Allow("allow_once".to_string()),
+                ),
+                (
+                    "Allow for Session".to_string(),
+                    PermissionDecision::Allow("allow_always".to_string()),
+                ),
+                (
+                    "Allow Commands Starting With …".to_string(),
+                    PermissionDecision::Allow("accept_execpolicy_amendment".to_string()),
+                ),
+                (
+                    "Reject".to_string(),
+                    PermissionDecision::Reject("reject_once".to_string()),
+                ),
+            ],
+        ),
+    );
 
     let keyboard = msg.keyboard.expect("keyboard present");
     assert_eq!(only_row(&keyboard).len(), 4);
@@ -682,91 +706,61 @@ fn build_ping_permission_registers_one_token_per_button_beyond_two() {
     let tokens: std::collections::HashSet<&String> =
         only_row(&keyboard).iter().map(|(_, t)| t).collect();
     assert_eq!(tokens.len(), 4, "every button gets its own distinct token");
-    assert_eq!(bridge.routing.pending_permissions.len(), 4);
+    assert_eq!(desk.live_token_count(), 4);
 
     let execpolicy_token = &only_row(&keyboard)[2].1;
     assert_eq!(
-        bridge.routing.pending_permissions.get(execpolicy_token),
-        Some(&(
-            pane(1, 1),
-            1,
-            9,
-            PermissionDecision::Allow("accept_execpolicy_amendment".to_string())
-        ))
+        desk.route_tap(execpolicy_token),
+        Some(InboundAction::RespondPermission {
+            pane: pane(1, 1),
+            session: 1,
+            perm_id: 9,
+            decision: PermissionDecision::Allow("accept_execpolicy_amendment".to_string()),
+        })
     );
 }
 
 #[test]
 fn pending_permissions_bound_evicts_oldest_entries() {
     let mut bridge = BridgeCore::new(true, Some(1), 0);
-    let prompt = || PermissionPromptRef {
-        session: 1,
-        perm_id: 1,
-        buttons: vec![
-            (
-                "Allow".to_string(),
-                PermissionDecision::Allow("opt_allow".to_string()),
-            ),
-            (
-                "Reject".to_string(),
-                PermissionDecision::Reject("opt_reject".to_string()),
-            ),
-        ],
+    let mut desk = Desk::default();
+    let ping = || {
+        permission_ping(
+            1,
+            vec![
+                (
+                    "Allow".to_string(),
+                    PermissionDecision::Allow("opt_allow".to_string()),
+                ),
+                (
+                    "Reject".to_string(),
+                    PermissionDecision::Reject("opt_reject".to_string()),
+                ),
+            ],
+        )
     };
 
-    let first_msg = bridge.build_ping(BridgePing {
-        pane: pane(1, 1),
-        header: "first".to_string(),
-        tail: TelegramTail::Plain(String::new()),
-        prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
-            prompt(),
-        )),
-    });
+    let first_msg = begin_ping(&mut desk, ping());
     let first_keyboard = first_msg.keyboard.expect("keyboard present");
     let first_allow_token = only_row(&first_keyboard)[0].1.clone();
     let first_reject_token = only_row(&first_keyboard)[1].1.clone();
 
     // Each call below registers 2 more tokens; enough calls to push
     // well past the cap (mirrors `sent_pings_bound_evicts_oldest_entries`).
-    for _ in 0..PENDING_PERMISSIONS_CAP {
-        bridge.build_ping(BridgePing {
-            pane: pane(1, 1),
-            header: "more".to_string(),
-            tail: TelegramTail::Plain(String::new()),
-            prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
-                prompt(),
-            )),
-        });
+    for _ in 0..TOKENS_PER_KIND_CAP {
+        begin_ping(&mut desk, ping());
     }
 
-    assert_eq!(
-        bridge.routing.pending_permissions.len(),
-        PENDING_PERMISSIONS_CAP
-    );
-    assert_eq!(
-        bridge.routing.pending_permissions_order.len(),
-        PENDING_PERMISSIONS_CAP
-    );
+    assert_eq!(desk.live_token_count(), TOKENS_PER_KIND_CAP);
 
     // The oldest tokens (from the very first ping) were evicted —
     // a callback tap against one of them is unresolvable, same as
     // any other unknown/consumed token.
-    assert!(
-        !bridge
-            .routing
-            .pending_permissions
-            .contains_key(&first_allow_token)
-    );
-    assert!(
-        !bridge
-            .routing
-            .pending_permissions
-            .contains_key(&first_reject_token)
-    );
-
-    let result = bridge.route(callback(1, 1, "cbq-evicted", &first_allow_token));
-    assert_eq!(result.action.ready(), InboundAction::Ignore);
-    assert_eq!(result.answer_callback_id, Some("cbq-evicted".to_string()));
+    for token in [&first_reject_token, &first_allow_token] {
+        let result = bridge.route_with(callback(1, 1, "cbq-evicted", token), &mut desk);
+        assert_eq!(result.action.ready(), InboundAction::Ignore);
+        assert_eq!(result.answer_callback_id, Some("cbq-evicted".to_string()));
+    }
 }
 
 /// The pair is built forwards, never by subtracting from `now`: an `Instant`

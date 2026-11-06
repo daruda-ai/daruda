@@ -2,7 +2,7 @@
 
 use super::backoff::ErrorBackoff;
 use super::bridge::{ApprovalPrompt, BridgePing, MessageTail, Outbound, PaneRef, RoutingCore};
-use super::cards::OwnedCards;
+use super::cards::CardDesk;
 use super::pairing::Pairing;
 use super::runtime::{self, BotSession, Status, Worker, WorkerEvent};
 use crate::settings_store::SettingsStore;
@@ -22,7 +22,7 @@ pub struct Connection {
     pub config: ChannelConfig,
     pub generation: uuid::Uuid,
     pub core: RoutingCore<String>,
-    cards: RefCell<OwnedCards<String, outbound::Receipt, String>>,
+    desk: RefCell<CardDesk<String, String, outbound::Receipt>>,
     pub status: Status,
     pub bot: Option<Arc<BotSession>>,
     pairing: Option<Pairing>,
@@ -110,14 +110,18 @@ impl Connection {
         if let Some(previous) = self.bot.take() {
             previous.revoke();
         }
-        let owner = super::lock::digest_of(&bot.credentials.bot);
-        if self.cards.get_mut().owner() != Some(&owner) {
-            self.core.clear_settled_callbacks();
-        }
-        for card in self.cards.get_mut().bind(owner) {
-            self.core.forget_card(&card);
-        }
+        self.desk
+            .get_mut()
+            .bind(super::lock::digest_of(&bot.credentials.bot));
         self.bot = Some(bot);
+    }
+
+    /// What a button tap answers: a card's, or else a listing row's.
+    pub(crate) fn route_tap(&mut self, data: &str) -> super::bridge::InboundAction {
+        self.desk
+            .get_mut()
+            .route_tap(data)
+            .unwrap_or_else(|| self.core.route_listing(data))
     }
 
     /// Withdraw the bot without forgetting its cards: the same bot may serve
@@ -279,7 +283,7 @@ impl RemoteChannels {
             return false;
         };
         let card = match outbound.card_id() {
-            Some(id) => match connection.cards.borrow_mut().ledger_mut().claim(id) {
+            Some(id) => match connection.desk.borrow_mut().claim(id) {
                 Some(claim) => Some(claim),
                 None => return false,
             },
@@ -295,7 +299,7 @@ impl RemoteChannels {
         });
         if let Err(error) = &result {
             if let Some(claim) = card {
-                connection.cards.borrow_mut().ledger_mut().release(&claim);
+                connection.desk.borrow_mut().abandon(&claim);
             }
             super::log_error(
                 "Remote outgoing queue closed",
@@ -338,15 +342,9 @@ impl RemoteChannels {
             else {
                 continue;
             };
-            let Some(card) = connection
-                .cards
-                .get_mut()
-                .ledger_mut()
-                .claim(super::cards::CardId::Approval(id))
-            else {
+            let Some((card, (allow, refuse))) = connection.desk.get_mut().claim_approval(id) else {
                 continue;
             };
-            let (allow, refuse) = connection.core.record_pending_approval(id);
             let pending = Pending {
                 id: key.clone(),
                 generation: connection.generation,
@@ -366,8 +364,7 @@ impl RemoteChannels {
                 Ok(()) => queued = true,
                 Err(error) => {
                     if let Some(connection) = bridge.connections.get_mut(&key) {
-                        connection.core.forget_pending_approval(id);
-                        connection.cards.get_mut().ledger_mut().release(&card);
+                        connection.desk.get_mut().abandon(&card);
                     }
                     super::log_error(
                         "Remote approval queue closed",
@@ -412,18 +409,18 @@ impl RemoteChannels {
                 old.config.kind,
                 old.config.recipient.clone(),
                 std::mem::take(&mut old.core),
-                std::mem::take(&mut old.cards),
+                std::mem::take(&mut old.desk),
             )
         });
         bridge.applied = None;
         reconcile(cx);
-        if let Some((kind, recipient, core, cards)) = carried
+        if let Some((kind, recipient, core, desk)) = carried
             && let Some(connection) = cx.global_mut::<Self>().connections.get_mut(id)
             && connection.config.kind == kind
             && connection.config.recipient == recipient
         {
             connection.core = core;
-            connection.cards = cards;
+            connection.desk = desk;
         }
     }
 
@@ -491,7 +488,7 @@ impl RemoteChannels {
                 config: config.clone(),
                 generation: uuid::Uuid::new_v4(),
                 core: RoutingCore::default(),
-                cards: RefCell::default(),
+                desk: RefCell::default(),
                 status: Status::Connecting,
                 bot: None,
                 pairing: None,
@@ -589,7 +586,7 @@ pub(crate) fn reconcile(cx: &mut App) {
                 config: config.clone(),
                 generation,
                 core: RoutingCore::default(),
-                cards: RefCell::default(),
+                desk: RefCell::default(),
                 status,
                 bot: None,
                 pairing: None,

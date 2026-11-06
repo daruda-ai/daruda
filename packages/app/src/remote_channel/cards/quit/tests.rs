@@ -13,7 +13,7 @@ fn approval(id: u64) -> CardId {
 fn every_state() -> (OwnedCards<&'static str, &'static str, i64>, SendClaim) {
     let mut owned = OwnedCards::default();
     owned.bind("bot");
-    let ledger = owned.ledger_for(&"bot").unwrap();
+    let ledger = owned.ledger_mut();
     let sent = ledger.claim(approval(1)).unwrap();
     assert!(ledger.begin(&sent));
     ledger.complete(&sent, SendOutcome::Delivered("sent"));

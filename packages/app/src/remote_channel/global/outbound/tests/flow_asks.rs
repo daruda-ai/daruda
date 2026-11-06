@@ -112,8 +112,7 @@ fn a_phone_flow_answer_closes_the_modal_and_settles_all_channels(cx: &mut gpui::
             .connections
             .get_mut(&pending.id)
             .unwrap()
-            .core
-            .route_callback(buttons[1].1.clone())
+            .route_tap(&buttons[1].1.clone())
     });
     let losing_action = cx.update(|cx| {
         let (pending, prepared) = &sending[1];
@@ -121,9 +120,8 @@ fn a_phone_flow_answer_closes_the_modal_and_settles_all_channels(cx: &mut gpui::
             .connections
             .get_mut(&pending.id)
             .unwrap()
-            .core
-            .route_callback(
-                prepared.message.keyboard.as_ref().unwrap().rows[0][2]
+            .route_tap(
+                &prepared.message.keyboard.as_ref().unwrap().rows[0][2]
                     .1
                     .clone(),
             )
@@ -170,7 +168,7 @@ fn a_phone_flow_answer_closes_the_modal_and_settles_all_channels(cx: &mut gpui::
         );
         for connection in cx.global_mut::<RemoteChannels>().connections.values_mut() {
             assert!(matches!(
-                connection.core.route_text("hello".into(), None),
+                connection.core.route_text("hello".into(), None, None),
                 crate::remote_channel::bridge::Routed::NeedsTarget(_)
             ));
         }
@@ -216,7 +214,7 @@ fn a_desktop_flow_answer_settles_delivered_cards_and_keeps_sibling_questions(
                 .is_some()
         );
         assert!(second.is_empty());
-        let action = cx.global_mut::<RemoteChannels>().connections.get_mut("work").unwrap().core.route_callback(token);
+        let action = cx.global_mut::<RemoteChannels>().connections.get_mut("work").unwrap().route_tap(&token);
         assert!(matches!(action, crate::remote_channel::bridge::InboundAction::ResolveFlowAsk { ask_id: 1, .. }));
         let effect = dispatch::handle_in_app(Aimed { action, adopted: None }, &Target::Remote("work".into()), cx);
         assert!(matches!(effect, Effect::Feedback { label, .. } if label == crate::surface::strings::flow::ask_already_answered()));
@@ -259,7 +257,7 @@ fn a_retired_flow_send_cannot_forget_a_new_owners_callback_tokens(cx: &mut gpui:
             .connections
             .get_mut(&old.id)
             .unwrap();
-        connection.cards = Default::default();
+        connection.desk = Default::default();
         connection.generation = uuid::Uuid::new_v4();
         connection.publish_bot(crate::remote_channel::global::tests::ready_bot());
         let Outbound::FlowAsk(prompt) = &old.outbound else {
@@ -288,8 +286,7 @@ fn a_retired_flow_send_cannot_forget_a_new_owners_callback_tokens(cx: &mut gpui:
                 .connections
                 .get_mut(&pending.id)
                 .unwrap()
-                .core
-                .route_callback(token),
+                .route_tap(&token),
             crate::remote_channel::bridge::InboundAction::ResolveFlowAsk { .. }
         ));
     });
@@ -308,9 +305,8 @@ fn a_flow_tap_with_no_window_still_reaches_the_process_owned_run(cx: &mut gpui::
             .connections
             .get_mut(&pending.id)
             .unwrap()
-            .core
-            .route_callback(
-                prepared.message.keyboard.as_ref().unwrap().rows[0][1]
+            .route_tap(
+                &prepared.message.keyboard.as_ref().unwrap().rows[0][1]
                     .1
                     .clone(),
             )
@@ -345,9 +341,8 @@ fn old_run_phone_tokens_cannot_answer_a_replacement_with_the_same_question_numbe
             .connections
             .get_mut(&pending.id)
             .unwrap()
-            .core
-            .route_callback(
-                prepared.message.keyboard.as_ref().unwrap().rows[0][1]
+            .route_tap(
+                &prepared.message.keyboard.as_ref().unwrap().rows[0][1]
                     .1
                     .clone(),
             )

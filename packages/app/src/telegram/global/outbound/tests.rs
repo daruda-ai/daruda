@@ -36,14 +36,14 @@ fn a_telegram_flow_callback_keeps_original_options_and_never_adopts_a_target(
         let token = keyboard.rows[0][1].1.clone();
         assert!(token.len() <= 64);
         assert!(!token.contains("worktree"));
-        let action = cx.global_mut::<TelegramBridge>().core.routing.route_callback(token.clone());
+        let action = cx.global_mut::<TelegramBridge>().route_tap(&token.clone());
         assert!(matches!(action, InboundAction::ResolveFlowAsk { ask_id: 4, decision: PermissionDecision::Allow(ref id), .. } if id == "original-always"));
         finish(&prepared.bot, prepared.chat_id, prepared.pane, prepared.card, SendOutcome::Delivered(41), prepared.original, cx);
-        assert!(matches!(cx.global_mut::<TelegramBridge>().core.routing.route_text("hello".into(), None), Routed::NeedsTarget(_)));
+        assert!(matches!(cx.global_mut::<TelegramBridge>().core.routing.route_text("hello".into(), None, None), Routed::NeedsTarget(_)));
         cx.set_global(crate::remote_channel::cards::tests::EditCapture::default());
         TelegramBridge::settle_card(&CardId::FlowAsk { run_dir: "/worktree/with/a/long/path/.daruda/flow-runs/run".into(), ask_id: 4 }, "Done", cx);
         assert_eq!(cx.global::<crate::remote_channel::cards::tests::EditCapture>().edits.len(), 1);
-        assert!(matches!(cx.global_mut::<TelegramBridge>().core.routing.route_callback(token), InboundAction::ResolveFlowAsk { ask_id: 4, .. }));
+        assert!(matches!(cx.global_mut::<TelegramBridge>().route_tap(&token), InboundAction::ResolveFlowAsk { ask_id: 4, .. }));
     });
 }
 
@@ -124,10 +124,7 @@ fn a_retired_card_send_cannot_forget_the_replacements_tokens(cx: &mut gpui::Test
         let token = prompt.buttons[0].1.clone();
         assert!(prepare(old, cx).is_none());
         assert!(matches!(
-            cx.global_mut::<TelegramBridge>()
-                .core
-                .routing
-                .route_callback(token),
+            cx.global_mut::<TelegramBridge>().route_tap(&token),
             crate::remote_channel::bridge::InboundAction::ResolveApproval { .. }
         ));
     });
@@ -168,10 +165,7 @@ fn a_duplicate_send_failure_does_not_forget_delivered_card_tokens(cx: &mut gpui:
             cx,
         );
         assert!(matches!(
-            cx.global_mut::<TelegramBridge>()
-                .core
-                .routing
-                .route_callback(token),
+            cx.global_mut::<TelegramBridge>().route_tap(&token),
             crate::remote_channel::bridge::InboundAction::ResolveApproval { .. }
         ));
     });
@@ -276,9 +270,8 @@ fn an_old_telegram_owner_cannot_extend_a_replacement_attempt(cx: &mut gpui::Test
         );
         assert!(
             cx.global::<TelegramBridge>()
-                .cards
+                .desk
                 .borrow()
-                .ledger()
                 .is_sending(replacement.card.as_ref().unwrap())
         );
     });
@@ -311,13 +304,7 @@ fn telegram_settings_changes_retire_cards_without_a_workspace(cx: &mut gpui::Tes
     });
     cx.run_until_parked();
     cx.read(|cx| {
-        assert!(
-            cx.global::<TelegramBridge>()
-                .cards
-                .borrow()
-                .ledger()
-                .owns(&claim)
-        );
+        assert!(cx.global::<TelegramBridge>().desk.borrow().owns(&claim));
     });
     for recipient in [Some(99), None, Some(42)] {
         cx.update(|cx| {
@@ -330,9 +317,8 @@ fn telegram_settings_changes_retire_cards_without_a_workspace(cx: &mut gpui::Tes
         cx.read(|cx| {
             assert!(
                 cx.global::<TelegramBridge>()
-                    .cards
+                    .desk
                     .borrow()
-                    .ledger()
                     .owns(&claim)
                     .not()
             );

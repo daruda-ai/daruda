@@ -301,7 +301,7 @@ fn a_stale_tap_strips_only_a_card_no_settlement_owns(cx: &mut TestAppContext) {
         let bot = cx.global::<TelegramBridge>().bot.ready().unwrap().clone();
         let stale = format!(
             "{}:{}",
-            crate::remote_channel::bridge::core::APPROVAL_TOKEN_PREFIX,
+            crate::remote_channel::cards::APPROVAL_TOKEN_PREFIX,
             "0".repeat(32)
         );
         let (effect, tapped) = dispatch_update(&bot, Some(42), tap(7, &stale), cx).unwrap();
@@ -318,7 +318,7 @@ fn a_stale_tap_strips_only_a_card_no_settlement_owns(cx: &mut TestAppContext) {
         assert_eq!(label, s::control::approval_already_answered());
 
         cx.global::<TelegramBridge>()
-            .cards
+            .desk
             .borrow_mut()
             .note_settled(8);
         let (effect, tapped) = dispatch_update(&bot, Some(42), tap(8, &stale), cx).unwrap();
@@ -487,9 +487,8 @@ fn settling_a_card_without_a_receipt_leaves_its_buttons_to_a_stale_tap(cx: &mut 
         assert_eq!(super::super::pending_approval_tokens_for_test(cx), 0);
         assert!(
             !cx.global::<TelegramBridge>()
-                .cards
+                .desk
                 .borrow()
-                .ledger()
                 .contains(&crate::remote_channel::cards::CardId::Approval(id))
         );
 
@@ -517,10 +516,7 @@ fn a_card_that_never_left_is_offered_once_more(cx: &mut TestAppContext) {
             .unwrap()(cx);
         assert_eq!(super::super::pending_approval_tokens_for_test(cx), 0);
         assert!(matches!(
-            cx.global_mut::<TelegramBridge>()
-                .core
-                .routing
-                .route_callback(approve),
+            cx.global_mut::<TelegramBridge>().route_tap(&approve),
             InboundAction::StaleApproval
         ));
 

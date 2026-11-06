@@ -269,7 +269,7 @@ fn a_presence_preference_keeps_routing_but_a_new_recipient_invalidates_it(
             .unwrap();
         assert_eq!(connection.generation, generation);
         assert!(matches!(
-            connection.core.route_text("hello".into(), None),
+            connection.core.route_text("hello".into(), None, None),
             super::super::bridge::Routed::Ready(
                 super::super::bridge::InboundAction::InjectPrompt { .. }
             )
@@ -289,7 +289,7 @@ fn a_presence_preference_keeps_routing_but_a_new_recipient_invalidates_it(
             .unwrap();
         assert_ne!(connection.generation, generation);
         assert!(matches!(
-            connection.core.route_text("hello".into(), None),
+            connection.core.route_text("hello".into(), None, None),
             super::super::bridge::Routed::NeedsTarget(_)
         ));
     });
@@ -308,7 +308,7 @@ async fn a_shared_approval_settles_once_and_invalidates_every_channels_buttons(
     assert_ne!(first.id, second.id);
     cx.update(|cx| {
         for connection in cx.global::<RemoteChannels>().connections.values() {
-            assert_eq!(connection.core.pending_approval_token_count(), 2);
+            assert_eq!(connection.desk.borrow().approval_token_count(), 2);
         }
         assert!(crate::control::approval::resolve(
             id,
@@ -323,7 +323,7 @@ async fn a_shared_approval_settles_once_and_invalidates_every_channels_buttons(
             cx
         ));
         for connection in cx.global::<RemoteChannels>().connections.values() {
-            assert_eq!(connection.core.pending_approval_token_count(), 0);
+            assert_eq!(connection.desk.borrow().approval_token_count(), 0);
         }
     });
     assert_eq!(
@@ -357,7 +357,7 @@ fn approval_cards_respect_each_connections_presence_policy(cx: &mut gpui::TestAp
             assert_eq!(delivered, expected);
             for (key, connection) in &cx.global::<RemoteChannels>().connections {
                 assert_eq!(
-                    connection.core.pending_approval_token_count(),
+                    connection.desk.borrow().approval_token_count(),
                     if expected.contains(&key.as_str()) {
                         2
                     } else {
@@ -382,7 +382,7 @@ fn approval_cards_respect_each_connections_presence_policy(cx: &mut gpui::TestAp
             cx.global::<RemoteChannels>()
                 .connections
                 .values()
-                .all(|connection| connection.core.pending_approval_token_count() == 0)
+                .all(|connection| connection.desk.borrow().approval_token_count() == 0)
         );
     });
 }

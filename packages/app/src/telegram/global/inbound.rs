@@ -430,12 +430,12 @@ fn dispatch_update(
         client::UpdateKind::Callback { data, .. } => Some(data.clone()),
         _ => None,
     };
-    let core = &mut cx.global_mut::<TelegramBridge>().core;
+    let bridge = cx.global_mut::<TelegramBridge>();
     let update_id = update.update_id;
     let RouteResult {
         action,
         answer_callback_id,
-    } = core.route(update);
+    } = bridge.core.route_with(update, bridge.desk.get_mut());
     trace::delivery("routed", || {
         format!(
             "update_id={update_id} action={} target={} answers_callback={}",
@@ -465,27 +465,26 @@ fn dispatch_update(
         }
         dispatch::handle_in_app(aimed, &dispatch::Target::Telegram, cx)
     };
-    if let Some(message) = &tapped_message {
-        let bridge = cx.global_mut::<TelegramBridge>();
-        if matches!(
+    if let Some((message, data)) = tapped_message.as_ref().zip(callback_data.as_ref()) {
+        let managed = matches!(
             &effect,
             dispatch::Effect::Feedback {
                 edit: dispatch::Edit::ManagedCard,
                 ..
             }
-        ) || callback_data
-            .as_ref()
-            .is_some_and(|data| bridge.core.routing.is_settled_callback(data))
-        {
-            // A tap can identify a sent message before its send response arrives.
-            bridge.cards.get_mut().note_settled(message.message_id);
-        }
+        );
+        // A tap can identify a sent message before its send response arrives.
+        cx.global_mut::<TelegramBridge>().desk.get_mut().note_tap(
+            data,
+            message.message_id,
+            managed,
+        );
     }
     let tapped = answer_callback_id.map(|callback_id| Tapped {
         callback_id,
         untracked: tapped_message.filter(|message| {
             cx.global::<TelegramBridge>()
-                .cards
+                .desk
                 .borrow()
                 .untracked(&message.message_id)
         }),

@@ -250,7 +250,7 @@ pub struct RouteResult {
 /// order the in-app card renders them — never collapsed to a single
 /// Allow/Reject pair, so richer option sets stay fully choosable from
 /// the phone. Labels arrive pre-localized (this file does not touch
-/// i18n); `BridgeCore` uses them only to route a later tap.
+/// i18n); the card desk uses them only to route a later tap.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionPromptRef {
     pub session: u64,
@@ -391,7 +391,7 @@ impl BridgePing {
 }
 
 /// A pending approval, ready to send. The two tokens are already registered
-/// with [`BridgeCore`], so a tap on either resolves without a second lookup.
+/// with the card desk, so a tap on either resolves without a second lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApprovalPrompt {
     pub id: crate::control::approval::ApprovalId,

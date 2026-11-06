@@ -1,21 +1,22 @@
 //! Bridge routing core — a pure, GPUI-free state machine that turns parsed
 //! `Update`s into routing decisions and shapes outbound pings into
 //! `OutboundMsg`s. All bridge policy (auth gate, pairing, reply-to
-//! resolution, permission-token routing, offset bookkeeping) lives here and
-//! is unit-tested with plain function calls.
+//! resolution, offset bookkeeping) lives here and is unit-tested with plain
+//! function calls; card buttons resolve through the caller's `CardDesk`.
 //!
 //! The vocabulary it decides in lives in [`super`]; this file is the rules.
 
 use uuid::Uuid;
 
-use super::{BridgePing, InboundAction, OutboundMsg, PaneRef, RouteResult, Routed};
+use super::{InboundAction, OutboundMsg, PaneRef, PreparedPing, RouteResult, Routed};
 use crate::remote_channel::bridge::RoutingCore;
 #[cfg(test)]
-use crate::remote_channel::bridge::core::APPROVAL_TOKEN_PREFIX;
+use crate::remote_channel::bridge::core::SENT_PINGS_CAP;
 #[cfg(test)]
-use crate::remote_channel::bridge::core::{PENDING_PERMISSIONS_CAP, SENT_PINGS_CAP};
+use crate::remote_channel::bridge::{BridgePing, InlineKeyboard, PermissionDecision, Unaimed};
+use crate::remote_channel::cards::CardDesk;
 #[cfg(test)]
-use crate::remote_channel::bridge::{InlineKeyboard, PermissionDecision, Unaimed};
+use crate::remote_channel::cards::{APPROVAL_TOKEN_PREFIX, TOKENS_PER_KIND_CAP};
 use crate::telegram::client::{Update, UpdateKind};
 
 #[cfg(test)]
@@ -53,9 +54,10 @@ fn pair_code_expired(
 }
 
 /// Pure routing state machine for the Telegram bridge. Owns the
-/// `getUpdates` offset, the pairing flow, the reply-to/last-pinged
-/// resolution table, and the set of live permission-prompt callback
-/// tokens. No network calls, no GPUI — see module docs.
+/// `getUpdates` offset, the pairing flow and the reply-to/last-pinged
+/// resolution table; card buttons and replies resolve through the
+/// [`CardDesk`] the caller passes in. No network calls, no GPUI — see module
+/// docs.
 pub struct BridgeCore {
     enabled: bool,
     authorized_chat_id: Option<i64>,
@@ -140,7 +142,11 @@ impl BridgeCore {
     /// 2. Every `Callback` update gets `answer_callback_id: Some(..)`
     ///    regardless of the resulting action — otherwise the phone
     ///    shows a stuck loading spinner on the tapped button.
-    pub fn route(&mut self, update: Update) -> RouteResult {
+    pub(crate) fn route_with<Owner: PartialEq, Receipt>(
+        &mut self,
+        update: Update,
+        desk: &mut CardDesk<i64, Owner, Receipt>,
+    ) -> RouteResult {
         self.update_offset = self.update_offset.max(update.update_id.saturating_add(1));
 
         // Handled before the `enabled` gate, and before anything else: the
@@ -172,7 +178,7 @@ impl BridgeCore {
                 text,
                 reply_to_message_id,
             } => {
-                let action = self.route_message(chat_id, text, reply_to_message_id);
+                let action = self.route_message(chat_id, text, reply_to_message_id, desk);
                 RouteResult {
                     action,
                     answer_callback_id: None,
@@ -192,7 +198,7 @@ impl BridgeCore {
             } => {
                 // A callback names its pane through the token it carries, so
                 // it never reaches the target question.
-                let action = Routed::Ready(self.route_callback(chat_id, data));
+                let action = Routed::Ready(self.route_callback(chat_id, data, desk));
                 RouteResult {
                     action,
                     answer_callback_id: Some(callback_id),
@@ -201,11 +207,18 @@ impl BridgeCore {
         }
     }
 
-    fn route_message(
+    /// Route with no card on record: commands, pairing and plain text.
+    #[cfg(test)]
+    pub fn route(&mut self, update: Update) -> RouteResult {
+        self.route_with(update, &mut CardDesk::<i64, (), ()>::default())
+    }
+
+    fn route_message<Owner: PartialEq, Receipt>(
         &mut self,
         chat_id: i64,
         text: String,
         reply_to_message_id: Option<i64>,
+        desk: &CardDesk<i64, Owner, Receipt>,
     ) -> Routed {
         if self.authorized_chat_id.is_none()
             && let Some(code) = text.strip_prefix("/pair ")
@@ -248,36 +261,27 @@ impl BridgeCore {
             return Routed::Ready(InboundAction::Ignore);
         }
 
-        self.routing.route_text(text, reply_to_message_id)
+        let card = desk.question_reply(reply_to_message_id.as_ref());
+        self.routing.route_text(text, reply_to_message_id, card)
     }
 
-    fn route_callback(&mut self, chat_id: i64, data: String) -> InboundAction {
+    fn route_callback<Owner: PartialEq, Receipt>(
+        &mut self,
+        chat_id: i64,
+        data: String,
+        desk: &mut CardDesk<i64, Owner, Receipt>,
+    ) -> InboundAction {
         if self.authorized_chat_id != Some(chat_id) {
             return InboundAction::Ignore;
         }
 
-        self.routing.route_callback(data)
+        desk.route_tap(&data)
+            .unwrap_or_else(|| self.routing.route_listing(&data))
     }
 
-    pub fn record_pending_approval(
-        &mut self,
-        id: crate::control::approval::ApprovalId,
-    ) -> (String, String) {
-        self.routing.record_pending_approval(id)
-    }
-
-    #[cfg(test)]
-    pub fn pending_approval_token_count(&self) -> usize {
-        self.routing.pending_approval_token_count()
-    }
-
-    pub fn forget_pending_approval(&mut self, id: crate::control::approval::ApprovalId) {
-        self.routing.forget_pending_approval(id);
-    }
-
-    pub fn build_ping(&mut self, ping: BridgePing) -> OutboundMsg {
+    /// Address a prepared ping to the paired chat.
+    pub fn address(&self, prepared: PreparedPing) -> OutboundMsg {
         debug_assert!(self.authorized_chat_id.is_some());
-        let prepared = self.routing.build_ping(ping);
         OutboundMsg {
             chat_id: self.authorized_chat_id.unwrap_or_default(),
             header: prepared.header,

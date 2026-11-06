@@ -119,11 +119,12 @@ fn dispatch_claimed(
             let text = text
                 .strip_prefix('!')
                 .map_or_else(|| text.clone(), |command| format!("/{command}"));
-            connection.core.route_text(text, reply_to.clone())
+            let card = connection.desk.get_mut().question_reply(reply_to.as_ref());
+            connection.core.route_text(text, reply_to.clone(), card)
         }
-        IncomingKind::Callback { data, .. } => crate::remote_channel::bridge::Routed::Ready(
-            connection.core.route_callback(data.clone()),
-        ),
+        IncomingKind::Callback { data, .. } => {
+            crate::remote_channel::bridge::Routed::Ready(connection.route_tap(data))
+        }
     };
     let aimed = dispatch::target::aim_in_app(routed, cx);
     let effect = dispatch::handle_in_app(aimed, &dispatch::Target::Remote(id.into()), cx);
@@ -132,17 +133,18 @@ fn dispatch_claimed(
     } = &incoming.kind
     {
         let connection = cx.global_mut::<RemoteChannels>().connections.get_mut(id)?;
-        if matches!(
+        let managed = matches!(
             &effect,
             Effect::Feedback {
                 edit: Edit::ManagedCard,
                 ..
             }
-        ) || connection.core.is_settled_callback(data)
-        {
-            // The callback identifies the message before the send response does.
-            connection.cards.get_mut().note_settled(message_id.clone());
-        }
+        );
+        // The callback identifies the message before the send response does.
+        connection
+            .desk
+            .get_mut()
+            .note_tap(data, message_id.clone(), managed);
     }
     Some(effect)
 }
@@ -259,7 +261,7 @@ async fn serve<F: Future<Output = ClaimResult>>(
         }
         let tap = match &incoming.kind {
             IncomingKind::Callback { message_id, .. } => {
-                if connection.cards.borrow().untracked(message_id) {
+                if connection.desk.borrow().untracked(message_id) {
                     Tap::Untracked
                 } else {
                     Tap::Settled

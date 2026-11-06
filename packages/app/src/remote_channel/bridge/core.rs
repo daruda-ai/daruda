@@ -1,80 +1,20 @@
-//! Channel-independent reply routing, target selection, and callback tokens.
+//! Channel-independent reply routing and target selection. Card buttons and
+//! replies to cards are [`crate::remote_channel::cards::CardDesk`]'s.
 
-use super::{
-    BridgePing, InboundAction, InlineKeyboard, PaneRef, PermissionDecision, PingPrompt,
-    PreparedPing, QuestionButton, QuestionPromptRef, QuestionReply, Routed, Unaimed,
-};
+use super::{InboundAction, PaneRef, QuestionReply, Routed, Unaimed};
+use crate::remote_channel::cards::QuestionCard;
 use std::collections::{HashMap, VecDeque};
-use uuid::Uuid;
 
 /// Upper bound on `(message_id -> PaneRef)` entries in `sent_pings`.
 /// Oldest entries are evicted first; a reply-to lookup for an evicted
 /// message_id falls back to `last_pinged`.
 pub(crate) const SENT_PINGS_CAP: usize = 64;
 
-/// Upper bound on outstanding permission-callback tokens in
-/// `pending_permissions`. Tokens whose permission is resolved in-app
-/// (never tapped on the phone) are never consumed and would otherwise
-/// accumulate forever; oldest are evicted first, and an evicted token
-/// routes to `Ignore` on a later tap like any unknown one.
-pub(crate) const PENDING_PERMISSIONS_CAP: usize = 64;
-
-/// Callback-data prefix for an approval button. Distinct from the listing
-/// prefix and from a permission token (bare `Uuid::simple`, no `:`), so the
-/// three namespaces cannot collide structurally.
-pub(crate) const APPROVAL_TOKEN_PREFIX: &str = "apv";
-const FLOW_ASK_TOKEN_PREFIX: &str = "faq";
-/// Callback-data prefix for a question card's button.
-const QUESTION_TOKEN_PREFIX: &str = "qst";
-
-/// Question-button tokens kept before the oldest is evicted. A card is
-/// settled, and its tokens forgotten, as soon as its field is answered.
-const PENDING_QUESTIONS_CAP: usize = 64;
-
-/// Approval tokens kept before the oldest is evicted. Two per card, and a
-/// card the user never answers times out on the app side — so this only
-/// bounds a pathological run of unanswered ones.
-const PENDING_APPROVALS_CAP: usize = 64;
-const SETTLED_CALLBACKS_CAP: usize = 64;
-
 /// One recipient's routing state. Native message IDs remain lossless.
 pub struct RoutingCore<M = i64> {
     pub(crate) last_pinged: Option<PaneRef>,
     pub(crate) sent_pings: HashMap<M, PaneRef>,
     pub(crate) sent_pings_order: VecDeque<M>,
-    pub(crate) pending_permissions: HashMap<String, (PaneRef, u64, u64, PermissionDecision)>,
-    pub(crate) pending_permissions_order: VecDeque<String>,
-    /// Approval tokens. Deliberately *not* consumed on a tap, unlike
-    /// `pending_permissions`: the card stays on screen, and tapping the same
-    /// button twice is ordinary use rather than a second decision. The
-    /// approval store discards the redundant answer.
-    pending_approvals: HashMap<
-        String,
-        (
-            crate::control::approval::ApprovalId,
-            crate::control::approval::ApprovalChoice,
-        ),
-    >,
-    pending_approvals_order: VecDeque<String>,
-    pending_flow_asks: HashMap<
-        String,
-        (
-            std::path::PathBuf,
-            std::path::PathBuf,
-            u64,
-            PermissionDecision,
-        ),
-    >,
-    pending_questions: HashMap<String, (PaneRef, QuestionPromptRef, u64, QuestionButton)>,
-    pending_questions_order: VecDeque<String>,
-    /// Question cards a text reply answers, with the step each carried.
-    /// Kept after the card settles, so a late reply is refused rather than
-    /// sent as a prompt.
-    sent_questions: HashMap<M, (PaneRef, QuestionPromptRef, u64)>,
-    sent_questions_order: VecDeque<M>,
-    /// Question cards settled or superseded; a reply to one is stale.
-    settled_questions: VecDeque<(PaneRef, QuestionPromptRef, u64)>,
-    settled_callbacks: VecDeque<(String, InboundAction)>,
     command_state: crate::remote_channel::command::CommandState,
 }
 
@@ -84,17 +24,6 @@ impl<M: Eq + std::hash::Hash + Clone> Default for RoutingCore<M> {
             last_pinged: None,
             sent_pings: HashMap::new(),
             sent_pings_order: VecDeque::new(),
-            pending_permissions: HashMap::new(),
-            pending_permissions_order: VecDeque::new(),
-            pending_approvals: HashMap::new(),
-            pending_approvals_order: VecDeque::new(),
-            pending_flow_asks: HashMap::new(),
-            pending_questions: HashMap::new(),
-            pending_questions_order: VecDeque::new(),
-            sent_questions: HashMap::new(),
-            sent_questions_order: VecDeque::new(),
-            settled_questions: VecDeque::new(),
-            settled_callbacks: VecDeque::new(),
             command_state: crate::remote_channel::command::CommandState::default(),
         }
     }
@@ -125,7 +54,13 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
     }
 
     /// Called only after the adapter authenticates both sender and conversation.
-    pub fn route_text(&mut self, text: String, reply_to_message_id: Option<M>) -> Routed {
+    /// `card` is the question card `reply_to_message_id` names, if any.
+    pub(crate) fn route_text(
+        &mut self,
+        text: String,
+        reply_to_message_id: Option<M>,
+        card: Option<QuestionCard>,
+    ) -> Routed {
         // Parsing sits behind the gate on purpose: a listing names projects,
         // lanes, and session titles, so an unauthorized chat must not reach it.
         // A name we do not own is held back rather than answered: the agent's
@@ -143,19 +78,16 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
 
         // A reply to a question card answers it, slash or not: only a
         // command daruda owns, parsed above, outranks the card.
-        if let Some(card) = reply_to_message_id
-            .as_ref()
-            .and_then(|id| self.sent_questions.get(id))
-        {
-            if self.settled_questions.contains(card) {
-                return Routed::Ready(InboundAction::StaleQuestion);
+        match card {
+            Some(QuestionCard::Settled) => return Routed::Ready(InboundAction::StaleQuestion),
+            Some(QuestionCard::Live { pane, question }) => {
+                return Routed::Ready(InboundAction::RespondQuestion {
+                    pane,
+                    question,
+                    reply: QuestionReply::Text(text),
+                });
             }
-            let (pane, question, _) = *card;
-            return Routed::Ready(InboundAction::RespondQuestion {
-                pane,
-                question,
-                reply: QuestionReply::Text(text),
-            });
+            None => {}
         }
 
         let reply_to = reply_to_message_id
@@ -189,344 +121,12 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
         }
     }
 
-    pub fn route_callback(&mut self, data: String) -> InboundAction {
-        if let Some((_, action)) = self
-            .settled_callbacks
-            .iter()
-            .find(|(token, _)| token == &data)
-        {
-            return action.clone();
-        }
-        if let Some((worktree, run_dir, ask_id, decision)) = self.pending_flow_asks.get(&data) {
-            return InboundAction::ResolveFlowAsk {
-                worktree: worktree.clone(),
-                run_dir: run_dir.clone(),
-                ask_id: *ask_id,
-                decision: decision.clone(),
-            };
-        }
-        // Listing tokens are tried first and are never consumed — tapping the
-        // same row twice is ordinary use. Permission tokens below are.
-        if data.starts_with(crate::remote_channel::command::LISTING_TOKEN_PREFIX) {
-            return match self.command_state.resolve_token(&data) {
-                Some(pane) => InboundAction::SelectTarget { pane },
-                None => InboundAction::StaleListing,
-            };
-        }
-
-        if data.starts_with(QUESTION_TOKEN_PREFIX) {
-            // Consumed, as a permission token is: the card is settled the
-            // moment its field moves on, and a second tap must not toggle
-            // or answer twice.
-            return match self.pending_questions.remove(&data) {
-                Some((pane, question, _, button)) => InboundAction::RespondQuestion {
-                    pane,
-                    question,
-                    reply: QuestionReply::Button(button),
-                },
-                None => InboundAction::Ignore,
-            };
-        }
-
-        if data.starts_with(APPROVAL_TOKEN_PREFIX) {
-            return match self.pending_approvals.get(&data) {
-                Some((id, choice)) => InboundAction::ResolveApproval {
-                    id: *id,
-                    choice: *choice,
-                },
-                None => InboundAction::StaleApproval,
-            };
-        }
-
-        match self.pending_permissions.remove(&data) {
-            Some((pane, session, perm_id, decision)) => InboundAction::RespondPermission {
-                pane,
-                session,
-                perm_id,
-                decision,
-            },
-            None => InboundAction::Ignore,
-        }
-    }
-
-    /// Mint the two callback tokens one approval card needs and remember what
-    /// each means. Returns them in `(approve, refuse)` order.
-    pub fn record_pending_approval(
-        &mut self,
-        id: crate::control::approval::ApprovalId,
-    ) -> (String, String) {
-        use crate::control::approval::ApprovalChoice;
-        let approve = self.insert_pending_approval(id, ApprovalChoice::Approved);
-        let refuse = self.insert_pending_approval(id, ApprovalChoice::Refused);
-        (approve, refuse)
-    }
-
-    #[cfg(test)]
-    pub fn pending_approval_token_count(&self) -> usize {
-        self.pending_approvals.len()
-    }
-
-    /// Drop both of `id`'s tokens. Called when the request settles, so the
-    /// bounded table holds only cards that can still be answered.
-    pub fn forget_pending_approval(&mut self, id: crate::control::approval::ApprovalId) {
-        self.pending_approvals.retain(|_, (held, _)| *held != id);
-        self.pending_approvals_order
-            .retain(|token| self.pending_approvals.contains_key(token));
-    }
-
-    fn insert_pending_approval(
-        &mut self,
-        id: crate::control::approval::ApprovalId,
-        choice: crate::control::approval::ApprovalChoice,
-    ) -> String {
-        // Random rather than derived from `id`: a card survives a restart in
-        // the user's chat history while this table does not, and a derived
-        // token would let a stale button resolve a *new* request that happens
-        // to reuse the number.
-        let token = format!(
-            "{APPROVAL_TOKEN_PREFIX}:{}",
-            uuid::Uuid::new_v4().as_simple()
-        );
-        self.pending_approvals.insert(token.clone(), (id, choice));
-        self.pending_approvals_order.push_back(token.clone());
-        if self.pending_approvals_order.len() > PENDING_APPROVALS_CAP
-            && let Some(oldest) = self.pending_approvals_order.pop_front()
-        {
-            self.pending_approvals.remove(&oldest);
-        }
-        token
-    }
-
-    pub fn build_ping(&mut self, ping: BridgePing) -> PreparedPing {
-        let keyboard = ping.prompt.map(|prompt| match prompt {
-            PingPrompt::Permission(prompt) => {
-                let buttons: Vec<(String, String)> = prompt
-                    .buttons
-                    .into_iter()
-                    .map(|(label, decision)| {
-                        let token = Uuid::new_v4().simple().to_string();
-                        self.insert_pending_permission(
-                            token.clone(),
-                            (ping.pane, prompt.session, prompt.perm_id, decision),
-                        );
-                        (label, token)
-                    })
-                    .collect();
-                InlineKeyboard::single_row(buttons)
-            }
-            PingPrompt::Question(prompt) => InlineKeyboard {
-                rows: prompt
-                    .rows
-                    .into_iter()
-                    .map(|row| {
-                        row.into_iter()
-                            .map(|(label, button)| {
-                                let token =
-                                    format!("{QUESTION_TOKEN_PREFIX}:{}", Uuid::new_v4().simple());
-                                self.insert_pending_question(
-                                    token.clone(),
-                                    (ping.pane, prompt.question, prompt.step, button),
-                                );
-                                (label, token)
-                            })
-                            .collect()
-                    })
-                    .collect(),
-            },
-        });
-
-        PreparedPing {
-            header: ping.header,
-            tail: ping.tail,
-            keyboard,
-        }
-    }
-
-    pub(crate) fn build_flow_ask(&mut self, prompt: super::FlowAskPrompt) -> PreparedPing {
-        let buttons = prompt
-            .buttons
-            .into_iter()
-            .map(|(label, decision)| {
-                let token = format!("{FLOW_ASK_TOKEN_PREFIX}:{}", Uuid::new_v4().simple());
-                self.pending_flow_asks.insert(
-                    token.clone(),
-                    (
-                        prompt.worktree.clone(),
-                        prompt.run_dir.clone(),
-                        prompt.ask_id,
-                        decision,
-                    ),
-                );
-                (label, token)
-            })
-            .collect();
-        PreparedPing {
-            header: String::new(),
-            tail: super::MessageTail::Plain(prompt.summary),
-            keyboard: Some(InlineKeyboard::single_row(buttons)),
-        }
-    }
-
-    /// Registers one permission-callback token, enforcing the
-    /// `PENDING_PERMISSIONS_CAP` bound by evicting the oldest token
-    /// (from both the map and its companion order queue) once
-    /// exceeded — mirrors `record_sent`'s eviction shape. `build_ping`
-    /// calls this once per button in the permission-wait ping's
-    /// `PermissionPromptRef::buttons`.
-    fn insert_pending_permission(
-        &mut self,
-        token: String,
-        value: (PaneRef, u64, u64, PermissionDecision),
-    ) {
-        self.pending_permissions.insert(token.clone(), value);
-        self.pending_permissions_order.push_back(token);
-
-        if self.pending_permissions_order.len() > PENDING_PERMISSIONS_CAP
-            && let Some(oldest) = self.pending_permissions_order.pop_front()
-        {
-            self.pending_permissions.remove(&oldest);
-        }
-    }
-
-    fn insert_pending_question(
-        &mut self,
-        token: String,
-        value: (PaneRef, QuestionPromptRef, u64, QuestionButton),
-    ) {
-        self.pending_questions.insert(token.clone(), value);
-        self.pending_questions_order.push_back(token);
-        if self.pending_questions_order.len() > PENDING_QUESTIONS_CAP
-            && let Some(oldest) = self.pending_questions_order.pop_front()
-        {
-            self.pending_questions.remove(&oldest);
-        }
-    }
-
-    /// Record that `message_id` is card `step` for `question`, so a text
-    /// reply to it answers that field while the card is live.
-    pub fn record_question_sent(
-        &mut self,
-        message_id: M,
-        pane: PaneRef,
-        question: QuestionPromptRef,
-        step: u64,
-    ) {
-        self.sent_questions
-            .insert(message_id.clone(), (pane, question, step));
-        self.sent_questions_order.push_back(message_id);
-        if self.sent_questions_order.len() > SENT_PINGS_CAP
-            && let Some(oldest) = self.sent_questions_order.pop_front()
-        {
-            self.sent_questions.remove(&oldest);
-        }
-    }
-
-    /// Keep a bounded routing tombstone: a late flow tap still names its
-    /// original question, and other settled taps cannot compete with edits.
-    pub(crate) fn settle_card(&mut self, card: &crate::remote_channel::cards::CardId) {
-        use crate::remote_channel::cards::CardId;
-        let callbacks: Vec<_> = match card {
-            CardId::Approval(id) => self
-                .pending_approvals
-                .iter()
-                .filter(|(_, (held, _))| held == id)
-                .map(|(token, _)| (token.clone(), InboundAction::StaleApproval))
-                .collect(),
-            CardId::FlowAsk { run_dir, ask_id } => self
-                .pending_flow_asks
-                .iter()
-                .filter(|(_, (_, held, id, _))| held == run_dir && id == ask_id)
-                .map(|(token, (worktree, run_dir, ask_id, decision))| {
-                    (
-                        token.clone(),
-                        InboundAction::ResolveFlowAsk {
-                            worktree: worktree.clone(),
-                            run_dir: run_dir.clone(),
-                            ask_id: *ask_id,
-                            decision: decision.clone(),
-                        },
-                    )
-                })
-                .collect(),
-            CardId::Permission {
-                pane,
-                session,
-                request,
-            } => self
-                .pending_permissions
-                .iter()
-                .filter(|(_, (held, scope, id, _))| {
-                    (*held, *scope, *id) == (*pane, *session, *request)
-                })
-                .map(|(token, _)| (token.clone(), InboundAction::Ignore))
-                .collect(),
-            CardId::Question {
-                pane,
-                question,
-                step,
-            } => {
-                self.settled_questions.push_back((*pane, *question, *step));
-                if self.settled_questions.len() > SETTLED_CALLBACKS_CAP {
-                    self.settled_questions.pop_front();
-                }
-                self.pending_questions
-                    .iter()
-                    .filter(|(_, (held, asked, sent, _))| {
-                        (held, asked, sent) == (pane, question, step)
-                    })
-                    .map(|(token, _)| (token.clone(), InboundAction::Ignore))
-                    .collect()
-            }
-        };
-        self.forget_card(card);
-        for callback in callbacks {
-            self.settled_callbacks.push_back(callback);
-            if self.settled_callbacks.len() > SETTLED_CALLBACKS_CAP {
-                self.settled_callbacks.pop_front();
-            }
-        }
-    }
-
-    pub(crate) fn is_settled_callback(&self, data: &str) -> bool {
-        self.settled_callbacks
-            .iter()
-            .any(|(token, _)| token == data)
-    }
-
-    pub(crate) fn clear_settled_callbacks(&mut self) {
-        self.settled_callbacks.clear();
-    }
-
-    pub(crate) fn forget_card(&mut self, card: &crate::remote_channel::cards::CardId) {
-        use crate::remote_channel::cards::CardId;
-        match card {
-            CardId::Approval(id) => self.forget_pending_approval(*id),
-            CardId::FlowAsk { run_dir, ask_id } => {
-                self.pending_flow_asks
-                    .retain(|_, (_, held, id, _)| held != run_dir || id != ask_id);
-            }
-            CardId::Permission {
-                pane,
-                session,
-                request,
-            } => {
-                self.pending_permissions.retain(|_, (held, scope, id, _)| {
-                    (*held, *scope, *id) != (*pane, *session, *request)
-                });
-                self.pending_permissions_order
-                    .retain(|token| self.pending_permissions.contains_key(token));
-            }
-            CardId::Question {
-                pane,
-                question,
-                step,
-            } => {
-                self.pending_questions.retain(|_, (held, asked, sent, _)| {
-                    (&*held, &*asked, &*sent) != (pane, question, step)
-                });
-                self.pending_questions_order
-                    .retain(|token| self.pending_questions.contains_key(token));
-            }
+    /// A listing button tap. Never consumed: tapping the same row twice is
+    /// ordinary use, and a superseded listing answers as stale.
+    pub(crate) fn route_listing(&self, data: &str) -> InboundAction {
+        match self.command_state.resolve_token(data) {
+            Some(pane) => InboundAction::SelectTarget { pane },
+            None => InboundAction::StaleListing,
         }
     }
 
