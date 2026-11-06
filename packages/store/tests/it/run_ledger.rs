@@ -3,12 +3,12 @@
 
 use std::time::Duration;
 
+use daruda_runlog::Machine as _;
 use daruda_runlog::testing::{assert_machine_laws, enumerate_crashes, enumerate_crashes_with};
-use daruda_runlog::{CommitError, Machine as _};
 use daruda_store::run_ledger::{
-    DIRECTORY_HOLD, LedgerEnd, LedgerEndedAs, LedgerKey, LedgerPointers, LedgerRejected,
-    ReleaseReason, RunLedgerEvent, RunLedgerMachine, RunLedgerState, RunLedgerStore, RunLocation,
-    UNREPORTED_MAX,
+    DIRECTORY_HOLD, EntryState, LedgerEnd, LedgerEndedAs, LedgerKey, LedgerPointers,
+    LedgerRejected, ReleaseReason, RunLedgerEvent, RunLedgerMachine, RunLedgerState,
+    RunLedgerStore, RunLocation, UNREPORTED_MAX,
 };
 use daruda_store::tasks::ExecutionRef;
 
@@ -43,6 +43,16 @@ fn owned(key: LedgerKey, solicited: bool) -> RunLedgerEvent {
         key,
         solicited,
         location: None,
+        at_ms: None,
+    }
+}
+
+fn reopened(key: LedgerKey) -> RunLedgerEvent {
+    RunLedgerEvent::Reopened {
+        key,
+        solicited: true,
+        location: None,
+        at_ms: None,
     }
 }
 
@@ -102,16 +112,23 @@ fn replay(events: &[RunLedgerEvent]) -> RunLedgerState {
     state
 }
 
-/// Every reopened ledger must satisfy this, whatever write a crash cut short.
-fn assert_no_report_without_end(state: &RunLedgerState) {
+/// Every reopened ledger must satisfy this, whatever write a crash cut short:
+/// an owed end is older than its run's current one, and every recorded end
+/// was numbered before the next episode.
+fn assert_ends_in_order(state: &RunLedgerState) {
     for entry in state.entries() {
-        if let Some(reported) = entry.reported {
-            let ended = entry.ended.as_ref().map(|ended| ended.episode);
-            assert!(
-                ended.is_some_and(|ended| ended >= reported),
-                "{:?} reports episode {reported} but ended {ended:?}",
-                entry.key
-            );
+        if let (
+            EntryState::Unreported {
+                end,
+                owed: Some(owed),
+            },
+            key,
+        ) = (&entry.state, &entry.key)
+        {
+            assert!(owed.episode < end.episode, "{key:?} owes a newer end");
+        }
+        for end in entry.latest().into_iter().chain(entry.owed()) {
+            assert!(end.episode < state.next_episode(), "{:?}", entry.key);
         }
     }
 }
@@ -122,7 +139,7 @@ fn owning_ending_and_reporting_one_run_walks_its_entry_to_release() {
     let state = replay(&[owned(key.clone(), true)]);
     let entry = state.get(&key).unwrap();
     assert!(entry.solicited);
-    assert!(entry.ended.is_none());
+    assert!(entry.latest().is_none());
     assert!(entry.unreported().is_none());
 
     let state = replay(&[owned(key.clone(), true), ended(key.clone(), 0)]);
@@ -144,6 +161,87 @@ fn owning_ending_and_reporting_one_run_walks_its_entry_to_release() {
     assert!(replay(&all).get(&key).is_none());
 }
 
+/// A resume opens the entry again; the end it had not delivered stays owed
+/// beside the resumed run, and a report of the newer end covers both.
+#[test]
+fn a_reopened_run_keeps_its_unreported_end_owed() {
+    let key = flow("f");
+    let mut events = vec![owned(key.clone(), false), ended(key.clone(), 0)];
+    events.push(RunLedgerEvent::Reopened {
+        key: key.clone(),
+        solicited: true,
+        location: None,
+        at_ms: Some(7),
+    });
+    let state = replay(&events);
+    let entry = state.get(&key).unwrap();
+    assert!(entry.solicited, "a reopen carries the run's solicitation");
+    assert!(matches!(
+        &entry.state,
+        EntryState::Open { owed: Some(owed), since_ms: Some(7) } if owed.episode == 0
+    ));
+    assert_eq!(held(&state, u64::MAX), ["f"], "an open run is held");
+
+    events.push(ended(key.clone(), 1));
+    let state = replay(&events);
+    let entry = state.get(&key).unwrap();
+    assert_eq!(entry.unreported().unwrap().episode, 1);
+    assert_eq!(entry.owed().unwrap().episode, 0);
+
+    let mut older = events.clone();
+    older.push(reported(key.clone(), 0));
+    let entry = replay(&older).get(&key).unwrap().clone();
+    assert!(entry.owed().is_none());
+    assert_eq!(entry.unreported().unwrap().episode, 1);
+
+    events.push(reported(key.clone(), 1));
+    let state = replay(&events);
+    assert!(
+        matches!(&state.get(&key).unwrap().state, EntryState::Reported { end } if end.episode == 1),
+        "the newer report covers the owed end too"
+    );
+    events.push(reopened(key.clone()));
+    assert!(matches!(
+        replay(&events).get(&key).unwrap().state,
+        EntryState::Open { owed: None, .. }
+    ));
+}
+
+#[test]
+fn reopening_a_released_run_owns_it_again() {
+    let key = task("t");
+    let state = replay(&[
+        ended(key.clone(), 0),
+        reported(key.clone(), 0),
+        released(key.clone(), ReleaseReason::Reported),
+        reopened(key.clone()),
+    ]);
+    let entry = state.get(&key).unwrap();
+    assert!(entry.solicited);
+    assert!(entry.latest().is_none());
+}
+
+#[test]
+fn re_recording_an_owed_end_replaces_its_text() {
+    let key = flow("f");
+    let mut enriched = end("work");
+    enriched.text = Some("the full report".into());
+    let state = replay(&[
+        ended(key.clone(), 0),
+        reopened(key.clone()),
+        RunLedgerEvent::Ended {
+            key: key.clone(),
+            solicited: false,
+            episode: 0,
+            end: enriched.clone(),
+            evicts: Vec::new(),
+            ended_at_ms: None,
+        },
+    ]);
+    assert_eq!(state.get(&key).unwrap().owed().unwrap().end, enriched);
+    assert_eq!(state.next_episode(), 1);
+}
+
 #[test]
 fn an_older_episode_report_leaves_a_newer_end_unreported() {
     let key = flow("f");
@@ -158,20 +256,41 @@ fn an_older_episode_report_leaves_a_newer_end_unreported() {
 }
 
 #[test]
-fn a_report_of_an_end_never_recorded_is_rejected() {
+fn a_report_of_an_episode_no_end_has_used_is_rejected() {
     let key = task("t");
     let state = replay(&[owned(key.clone(), false)]);
     assert!(matches!(
         RunLedgerMachine::check(&state, &reported(key.clone(), 0)),
-        Err(LedgerRejected::NotEnded { .. })
+        Err(LedgerRejected::Unassigned { .. })
     ));
     let state = replay(&[owned(key.clone(), false), ended(key.clone(), 0)]);
     assert!(RunLedgerMachine::check(&state, &reported(key.clone(), 1)).is_err());
 }
 
+/// A report names its key's ends by episode: one of a generation the ledger
+/// already let go (released, evicted, or resumed past) is a stale no-op, so
+/// a receipt that lands after a release or a resume never stops the ledger.
+#[test]
+fn a_late_report_of_an_older_generation_is_accepted_and_changes_nothing() {
+    let key = flow("f");
+    let resumed = [
+        owned(key.clone(), true),
+        ended(key.clone(), 0),
+        ended(key.clone(), 1),
+        reported(key.clone(), 1),
+        released(key.clone(), ReleaseReason::Reported),
+        owned(key.clone(), true),
+    ];
+    let state = replay(&resumed);
+    RunLedgerMachine::check(&state, &reported(key.clone(), 0)).unwrap();
+    let mut after = state.clone();
+    RunLedgerMachine::apply(&mut after, &reported(key, 0));
+    assert_eq!(after, state);
+}
+
 #[test]
 fn reports_and_releases_of_forgotten_keys_change_nothing() {
-    let state = replay(&[owned(task("kept"), false)]);
+    let state = replay(&[owned(task("kept"), false), ended(task("other"), 4)]);
     for event in [
         reported(task("gone"), 4),
         released(task("gone"), ReleaseReason::Expired),
@@ -309,21 +428,26 @@ fn events_and_states_round_trip_and_obey_the_machine_laws() {
             run_dir: "/tree/.daruda/flow-runs/f".into(),
             lock_dir: Some("/locks".into()),
         }),
+        at_ms: Some(1),
     };
     let events = vec![
         located,
         owned(task("t"), false),
         ended(key.clone(), 0),
+        reopened(key.clone()),
         ended(task("t"), 1),
+        ended(key.clone(), 2),
         reported(key.clone(), 0),
-        reported(task("t"), 0),
+        reported(task("t"), 1),
         released(key.clone(), ReleaseReason::Reported),
         released(task("t"), ReleaseReason::Expired),
     ];
     let states = vec![
         RunLedgerState::default(),
         replay(&events[..3]),
-        replay(&events[..5]),
+        replay(&events[..4]),
+        replay(&events[..6]),
+        replay(&events[..8]),
     ];
     for state in &states {
         let bytes = serde_json::to_vec(state).unwrap();
@@ -344,7 +468,7 @@ fn events_and_states_round_trip_and_obey_the_machine_laws() {
 }
 
 #[test]
-fn a_crash_at_any_write_never_leaves_a_report_without_its_end() {
+fn a_crash_at_any_write_keeps_owed_ends_older_than_current_ones() {
     let key = task("t");
     let scenario = vec![
         owned(key.clone(), true),
@@ -353,10 +477,14 @@ fn a_crash_at_any_write_never_leaves_a_report_without_its_end() {
         released(key.clone(), ReleaseReason::Reported),
         owned(flow("f"), false),
         ended(flow("f"), 1),
+        reopened(flow("f")),
+        ended(flow("f"), 2),
+        reopened(flow("f")),
         reported(flow("f"), 1),
+        reported(flow("f"), 2),
     ];
     let summary = enumerate_crashes_with::<RunLedgerMachine>(scenario, |case| {
-        assert_no_report_without_end(case.reopened.state());
+        assert_ends_in_order(case.reopened.state());
     });
     assert!(summary.cases > 0);
 }
@@ -385,10 +513,15 @@ fn a_refused_record_is_reported_once_by_the_store() {
     store.record(owned(task("t"), false));
     store.record(reported(task("t"), 0));
     store.flush(Duration::from_secs(5)).unwrap();
+    let answered = store.take_answered();
     assert!(matches!(
-        store.take_answered().failure,
-        Some(CommitError::Rejected(LedgerRejected::NotEnded { .. }))
+        answered.rejected,
+        Some(LedgerRejected::Unassigned { .. })
     ));
+    assert!(answered.failure.is_none(), "a refusal leaves the log open");
+    assert!(store.take_answered().rejected.is_none());
+    store.record(owned(task("later"), false));
+    store.flush(Duration::from_secs(5)).unwrap();
     assert!(store.take_answered().failure.is_none());
 }
 

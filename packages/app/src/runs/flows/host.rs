@@ -135,8 +135,12 @@ impl RunsHost {
             solicited,
             finished: Some(finished),
         };
+        // A desktop start brings no solicitation of its own; a resume keeps the
+        // run's, while a phone or orchestrator start answers to its caller.
+        let solicitation =
+            (run.submitted_by != daruda_flow::request::StartedBy::Desktop).then_some(run.solicited);
         cx.update_global::<RunsHost, _>(|host, _| {
-            host.watch.begin_solicited(&run.snapshot.key, run.solicited);
+            host.watch.begin_with(&run.snapshot.key, solicitation);
             host.flows.insert(tree.clone(), run)?;
             host.watch.locate(location);
             Ok(())

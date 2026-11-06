@@ -156,16 +156,17 @@ impl RunsHost {
     /// closed is reported then, not only when a wait happens to read it.
     pub(super) fn judge_restored(cx: &mut App) {
         let keys = cx.global::<Self>().watch.unjudged();
-        let reads: Vec<_> = keys
-            .into_iter()
-            .filter_map(|key| {
-                let revision = Self::run_revision(&key, cx);
-                match Self::run_query(key, cx) {
-                    RunQuery::Ready(_) => None,
-                    query => Some((query, revision)),
+        let mut reads = Vec::new();
+        for key in keys {
+            let revision = Self::run_revision(&key, cx);
+            match Self::run_query(key, cx) {
+                // Nothing on disk to read: what the process knows is the judgment.
+                RunQuery::Ready(snapshot) => {
+                    cx.update_global::<Self, _>(|host, _| host.watch.judge_restored(snapshot, None))
                 }
-            })
-            .collect();
+                query => reads.push((query, revision)),
+            }
+        }
         if reads.is_empty() {
             return;
         }

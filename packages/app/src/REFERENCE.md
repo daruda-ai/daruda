@@ -316,13 +316,23 @@ gate-token rotation. Each end or waiting episode has a `(RunKey, sequence)` iden
 
 The run ledger (`daruda_store::run_ledger`, `<data_dir>/run-ledger/`, written
 through `runs/ledger.rs`) keeps that scope and its unreported ends across a
-restart. The watch queues `Owned` when a key joins the scope or a scoped run
-resumes, `Ended` with a ledger-wide episode for each scoped end (again when its
-text is read), and `Reported` once a socket receipt confirms it, followed by
-`Released` when that was the key's current end. In-flight reservations are never
-written, so a result whose receipt never came is unreported after a restart.
-Writes are queued without waiting and flushed at quit; open or write failures
-leave delivery memory-only with one deduplicated warning and never affect tasks.
+restart. Each entry is `Open { owed }` (running), `Unreported { end, owed }` or
+`Reported { end }`; `owed` is the newest end from before the run resumed that
+no agent was handed, so a report can never precede its end. The watch queues
+`Owned` when a key joins the scope, `Reopened` when a scoped run resumes (an
+unreported end becomes `owed`), `Ended` with a ledger-wide episode for each
+scoped end (again when its text is read), and, once per key after a socket
+receipt, one `Reported` naming the newest end it confirmed, which covers every
+earlier one, followed by `Released` when that settled the key's current run.
+A report of an episode the key no longer has (released, evicted or resumed
+past) is a stale no-op; only one no end has used is refused. In-flight
+reservations are never written, so a result whose receipt never came is
+unreported after a restart. Writes are queued without waiting and flushed at
+quit; open or write failures leave delivery memory-only with one deduplicated
+warning and never affect tasks, and the committed directory holds stay in
+force. A refused record is logged as an error (`run_ledger.rejected`) and the
+ledger keeps writing. The ledger compacts itself once its log passes the
+runlog's budget.
 At most 200 unreported ends are kept; a newer end evicts the oldest, and the
 `Ended` record names what it evicted. Each evicting commit logs one warning
 (`run_ledger.evicted`) with counts by kind, never run ids. `Ended` carries the proposer's clock
@@ -334,18 +344,20 @@ A flow is held while it is owned with no end, or its latest end is unreported
 and under `DIRECTORY_HOLD` (7 days) old, judged against the clock at each
 start; nothing is written when a hold lapses. A lapsed hold frees only the
 directory: the end stays in the ledger until reported, and a release
-or eviction ends the hold. Task ends are kept by the ledger alone. At install, before task history is
+or eviction ends the hold. A restored flow open longer than `DIRECTORY_HOLD`
+(dated by `Owned`/`Reopened`) that the startup read still cannot judge is
+released `Expired` with one warning (`run_ledger.unjudgeable`), deleting
+nothing. Task ends are kept by the ledger alone. At install, before task history is
 compared, restored keys rejoin the scope with their saved solicitation (a
-carried Task takes it from there), and unreported ends return as `Recovered`
-episodes, as do the ends task history adds for a restored or carried key, such
-as a carried Task startup reconciliation settled. An entry whose latest end was
-already reported (a crash came before its `Released`) is released, unless it is
-a Task its log shows still running: that end was its flow's interruption, so it
-stays in scope for the real one. A Task whose execution is gone with nothing to
+carried Task takes it from there), and unreported ends, owed ones included,
+return as `Recovered` episodes, as do the ends task history adds for a restored
+or carried key, such as a carried Task startup reconciliation settled. A
+reopened entry is judged from disk like any open one. An entry whose latest end
+was already reported (a crash came before its `Released`) is released, unless
+it is a Task's flow interruption whose execution the log still holds: the
+Task's own end is still to come. A Task whose execution is gone with nothing to
 deliver is released too. When the task log cannot be read, no Task entry is
-judged or released. An earlier episode reported after its run resumed, with no
-newer end recorded, writes `Released` then `Owned`, so the resumed run stays
-owned with no end rather than reading as reported. Recovered results carry
+judged or released. Recovered results carry
 `recovered: true` in `daruda_run_wait`/`daruda_run_status`, and their notice
 line says they were requested before daruda restarted.
 After install, each scoped run with no end and nothing observed is read once
@@ -371,10 +383,13 @@ holder is alive stays pending for wait refreshes; a missing run directory is
 retained as `Gone` and released `Expired`. A running Task whose flow no process
 here runs reads its result through the run directory and the profile's flow
 lock root (`RunQuery::TaskFlow`): a resumable flow end is the Task's end while
-the Task stays `Running`. Reporting it does not release the Task's ledger entry,
-a restart keeps it in scope while the Task runs, and a resume (or `start_flow`)
-reopens the Task key, so `flow_task_ended` settles the Task and that end is
-delivered as a new episode. A live `Stalled` end gives the Task the same result.
+the Task stays `Running`. The watch keeps it as an `Interrupted` end: reporting
+it does not release the Task's ledger entry, a restart keeps it in scope, and
+the Task's own end, whether a resume (or `start_flow`) settles it or the Task
+is canceled or abandoned without one, is delivered as a new episode. A live
+`Stalled` end gives the Task the same result. Resumes, including a desktop one
+and one seen on disk, keep the key's solicitation; only an orchestrator or
+phone start brings its own.
 Flow questions and level comparisons of the exact Running AgentChat Task's
 permission state produce waiting episodes. Closing a block or ending the run
 supersedes an unreported block; a resumed flow can produce a new end episode

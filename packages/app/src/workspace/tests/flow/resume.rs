@@ -437,6 +437,7 @@ async fn a_run_owned_before_a_restart_is_resumed_through_the_ledger(cx: &mut Tes
                 run_dir: run.run_dir.clone(),
                 lock_dir: flow_paths::lane_lock_dir(&lock_root, run.lane.path()),
             }),
+            at_ms: None,
         });
         store.flush(std::time::Duration::from_secs(5)).unwrap();
         assert!(store.take_answered().failure.is_none());

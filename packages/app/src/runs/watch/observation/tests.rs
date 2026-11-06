@@ -35,3 +35,17 @@ fn a_resume_past_the_recorded_local_end_starts_a_new_episode() {
         "the disk now speaks for the run"
     );
 }
+
+#[test]
+fn a_resume_seen_on_disk_keeps_the_runs_solicitation() {
+    let mut watch = RunWatch::default();
+    let key = RunKey::Flow("asked".into());
+    watch.register_solicited(key.clone(), true);
+    watch.observe_disk(ended(key.clone()), 1);
+    let mut again = ended(key.clone());
+    again.what = "again".into();
+    watch.observe_disk(again, 2);
+    let latest = watch.pending(&key).unwrap();
+    assert_eq!(latest.snapshot.what, "again");
+    assert!(latest.solicited);
+}

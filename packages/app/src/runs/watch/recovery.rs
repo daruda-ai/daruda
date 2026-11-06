@@ -2,8 +2,8 @@
 //! and judges the owned runs that ended, or stopped, while it was away.
 use super::delivery::Delivery;
 use super::state::{EndState, Membership, Origin, RunEvent, RunWatch};
-use crate::runs::ledger::{Ledger, Restored, RestoredEnd};
-use crate::runs::result::{RunKey, RunSnapshot, RunState};
+use crate::runs::ledger::{Ledger, OwedEnd, Restored, RestoredEnd};
+use crate::runs::result::{RunKey, RunSnapshot, RunState, is_interruption};
 
 impl RunWatch {
     /// Write to `ledger` from now on and rejoin what it restored, before task
@@ -33,7 +33,8 @@ impl RunWatch {
     /// Take what disk says about an owned run this process has not seen. An
     /// end becomes a recovered episode: it was asked for before the restart.
     /// A flow whose directory is gone can never deliver and leaves the
-    /// ledger. Anything still running is left to later reads.
+    /// ledger. Anything else is left to later reads, unless the ledger has
+    /// kept the flow open past the directory hold: then it is let go.
     pub(crate) fn judge_restored(&mut self, snapshot: RunSnapshot, disk_episode: Option<u64>) {
         let key = snapshot.key.clone();
         match snapshot.state {
@@ -42,7 +43,13 @@ impl RunWatch {
                 self.retain(snapshot);
                 self.ledger.expired(&key);
             }
-            _ => return,
+            _ => {
+                if self.ledger.release_if_lapsed(&key) {
+                    // Let go here too, so no wait over the scope waits on it.
+                    self.entry(&key).membership = Membership::Outside;
+                }
+                return;
+            }
         }
         if let Some(episode) = disk_episode {
             self.entry(&key).disk_episode = Some(episode);
@@ -52,30 +59,12 @@ impl RunWatch {
     /// A run that ended resumable started again: its key takes a new episode,
     /// keeping its solicitation, so the run's real end is reported too.
     pub(crate) fn reopen(&mut self, key: &RunKey) {
-        if let Some(entry) = self.entries.get(key)
-            && entry.end != EndState::Open
+        if self
+            .entries
+            .get(key)
+            .is_some_and(|entry| entry.end != EndState::Open)
         {
-            let solicited = entry.solicited;
-            self.begin_solicited(key, solicited);
-        }
-    }
-
-    /// An earlier episode's end was reported after its run resumed. With no
-    /// newer end recorded, the ledger's entry would read as reported and be
-    /// released at the next start, so it starts over as owned with no end.
-    pub(super) fn reown_resumed(&mut self, key: &RunKey) {
-        let resumed = self.entries.get(key).is_some_and(|entry| {
-            entry.membership == Membership::Scoped
-                && matches!(entry.end, EndState::Open | EndState::Held)
-        });
-        let outstanding = self.events.iter().any(|event| {
-            &event.snapshot.key == key
-                && event.recorded.is_some()
-                && event.delivery != Delivery::Reported
-        });
-        if resumed && !outstanding {
-            self.ledger.release_reported(key);
-            self.record_owned(key);
+            self.begin(key);
         }
     }
 
@@ -86,29 +75,49 @@ impl RunWatch {
         let entry = self.entry(&run.key);
         entry.membership = Membership::Scoped;
         entry.solicited = run.solicited;
+        if let Some(OwedEnd { episode, snapshot }) = run.owed {
+            // An end from before the run resumed: history beside the current run.
+            self.push_recovered(episode, snapshot);
+            self.close_episode(&run.key);
+        }
+        let entry = self.entry(&run.key);
         match run.end {
             RestoredEnd::Open => {}
             RestoredEnd::Reported(snapshot) => {
-                entry.end = EndState::Reported;
+                entry.end = if is_interruption(&snapshot) {
+                    EndState::Interrupted { reported: true }
+                } else {
+                    EndState::Reported
+                };
                 entry.snapshot = Some(snapshot);
             }
             RestoredEnd::Unreported { episode, snapshot } => {
-                entry.end = EndState::Ended;
-                entry.snapshot = Some(snapshot.clone());
-                entry.last_sequence += 1;
-                let event = RunEvent {
-                    sequence: entry.last_sequence,
-                    solicited: run.solicited,
-                    origin: Origin::Recovered,
-                    episode: entry.episode,
-                    recorded: Some(episode),
-                    snapshot,
-                    delivery: Delivery::Unreported,
+                entry.end = if is_interruption(&snapshot) {
+                    EndState::Interrupted { reported: false }
+                } else {
+                    EndState::Ended
                 };
-                self.events.push(event.clone());
-                self.announce(event);
+                entry.snapshot = Some(snapshot.clone());
+                self.push_recovered(episode, snapshot);
             }
         }
+    }
+
+    /// Queue a restored, unreported end as a recovered episode of its key.
+    fn push_recovered(&mut self, recorded: u64, snapshot: RunSnapshot) {
+        let entry = self.entry(&snapshot.key);
+        entry.last_sequence += 1;
+        let event = RunEvent {
+            sequence: entry.last_sequence,
+            solicited: entry.solicited,
+            origin: Origin::Recovered,
+            episode: entry.episode,
+            recorded: Some(recorded),
+            snapshot,
+            delivery: Delivery::Unreported,
+        };
+        self.events.push(event.clone());
+        self.announce(event);
     }
 }
 

@@ -190,6 +190,15 @@ fn task_pointers(execution: Option<&TaskExecution>) -> Pointers {
     }
 }
 
+/// Whether `snapshot` is a Task's flow interruption: the end [`through_flow`]
+/// gives a still-running Task, whose own end is a later episode.
+pub(super) fn is_interruption(snapshot: &RunSnapshot) -> bool {
+    matches!(
+        (&snapshot.key, &snapshot.state),
+        (RunKey::Task(_), RunState::Ended { ended_as, .. }) if ended_as.resumable()
+    )
+}
+
 /// A running task's result, read through its flow run: a flow interrupted
 /// where it can be resumed is the task's end until a resume reopens it. The
 /// task itself stays running, so the person's resume settles it later.

@@ -116,7 +116,7 @@ impl RunWatch {
         let Some(waiter) = self.waiters.remove(&id) else {
             return;
         };
-        let mut reported = Vec::new();
+        let mut reported: Vec<Receipt> = Vec::new();
         for event in &mut self.events {
             if event.delivery == Delivery::InFlight(id) {
                 event.delivery = if delivered {
@@ -125,25 +125,23 @@ impl RunWatch {
                     Delivery::Unreported
                 };
                 if delivered && matches!(event.snapshot.state, RunState::Ended { .. }) {
-                    reported.push((
-                        event.snapshot.key.clone(),
-                        event.sequence,
-                        event.recorded,
-                        settles(&event.snapshot),
-                    ));
+                    Receipt::add(&mut reported, event);
                 }
             }
         }
-        for (key, sequence, recorded, settles) in reported {
-            let current = sequence >= self.floor(&key);
+        // Once per key, after the whole batch: a report names the newest
+        // recorded end, which covers every earlier one of the key.
+        for receipt in reported {
+            let floor = self.floor(&receipt.key);
+            let current = receipt.newest_sequence >= floor;
+            let entry = self.entry(&receipt.key);
             if current {
-                self.entry(&key).end = EndState::Reported;
+                entry.end = entry.end.reported();
             }
-            if let Some(episode) = recorded {
-                self.ledger.reported(&key, episode, current && settles);
-                if !current {
-                    self.reown_resumed(&key);
-                }
+            // A Task's flow interruption leaves its own end still to come.
+            let settled = current && !matches!(entry.end, EndState::Interrupted { .. });
+            if let Some(episode) = receipt.newest_recorded {
+                self.ledger.reported(&receipt.key, episode, settled);
             }
         }
         // A closed block or a terminal supersedes only an unreported blocked episode.
@@ -188,7 +186,7 @@ impl RunWatch {
         for key in keys {
             if !self.events.iter().any(|e| e.snapshot.key == key)
                 && let Some(entry) = self.entries.get_mut(&key)
-                && entry.end == EndState::Reported
+                && entry.end.is_reported()
             {
                 entry.snapshot = None;
             }
@@ -197,7 +195,7 @@ impl RunWatch {
         let mut reported_snapshots: Vec<_> = self
             .entries
             .iter()
-            .filter(|(_, entry)| entry.snapshot.is_some() && entry.end == EndState::Reported)
+            .filter(|(_, entry)| entry.snapshot.is_some() && entry.end.is_reported())
             .filter_map(|(key, _)| {
                 let last = self
                     .events
@@ -279,7 +277,7 @@ impl RunWatch {
                 continue;
             }
             if !omitted
-                && end == EndState::Reported
+                && end.is_reported()
                 && let Some(snapshot) = snapshot
                 && matches!(snapshot.state, RunState::Ended { .. })
             {
@@ -298,7 +296,7 @@ impl RunWatch {
                     }
                     _ => {}
                 }
-            } else if end != EndState::Reported {
+            } else if !end.is_reported() {
                 // A registered start may be observed before its first projection.
                 in_flight = true;
             }
@@ -331,14 +329,28 @@ impl RunWatch {
         Some(answer)
     }
 }
-/// Whether reporting this end leaves its key nothing more to deliver. A
-/// task's resumable end is its flow's interruption while the task runs on:
-/// the ledger keeps it in scope for the end a resume brings.
-fn settles(snapshot: &RunSnapshot) -> bool {
-    !matches!(
-        (&snapshot.key, &snapshot.state),
-        (RunKey::Task(_), RunState::Ended { ended_as, .. }) if ended_as.resumable()
-    )
+/// The ends one receipt confirmed for a key.
+struct Receipt {
+    key: RunKey,
+    newest_sequence: u64,
+    newest_recorded: Option<u64>,
+}
+
+impl Receipt {
+    fn add(receipts: &mut Vec<Self>, event: &RunEvent) {
+        let key = &event.snapshot.key;
+        match receipts.iter_mut().find(|receipt| &receipt.key == key) {
+            Some(receipt) => {
+                receipt.newest_sequence = receipt.newest_sequence.max(event.sequence);
+                receipt.newest_recorded = receipt.newest_recorded.max(event.recorded);
+            }
+            None => receipts.push(Self {
+                key: key.clone(),
+                newest_sequence: event.sequence,
+                newest_recorded: event.recorded,
+            }),
+        }
+    }
 }
 
 #[cfg(test)]

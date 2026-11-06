@@ -31,7 +31,7 @@ fn a_desktop_resume_preserves_the_solicitation_of_the_previous_held_end() {
     let key = RunKey::Flow("resumed-phone-run".into());
     watch.register_solicited(key.clone(), true);
     let held = watch.hold_end(end_with_text(&key, None));
-    watch.begin_solicited(&key, false);
+    watch.begin_with(&key, Some(false));
     watch.register_solicited(key.clone(), false);
     watch.release_end(held, end_with_text(&key, Some("phone report")));
     watch.retain(end_with_text(&key, Some("desktop report")));

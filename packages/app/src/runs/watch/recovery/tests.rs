@@ -7,6 +7,7 @@ fn restored(snapshot: RunSnapshot, end: impl FnOnce(RunSnapshot) -> RestoredEnd)
         key: snapshot.key.clone(),
         solicited: true,
         location: None,
+        owed: None,
         end: end(snapshot),
     }
 }
@@ -58,6 +59,7 @@ fn a_carried_key_already_restored_keeps_the_restored_solicitation() {
             key: key.clone(),
             solicited: true,
             location: None,
+            owed: None,
             end: RestoredEnd::Open,
         }],
     );

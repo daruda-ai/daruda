@@ -1,6 +1,8 @@
 //! Storage is independent of windows and orchestrator sessions.
 use super::delivery::{Delivery, WaitId, Waiter};
-use crate::runs::result::{FlowRunLocation, RunKey, RunSnapshot, RunState, WaitingOn};
+use crate::runs::result::{
+    FlowRunLocation, RunKey, RunSnapshot, RunState, WaitingOn, is_interruption,
+};
 use std::collections::HashMap;
 
 /// Whether the delivery ledger records a key's episodes.
@@ -25,6 +27,31 @@ pub(super) enum EndState {
     Ended,
     /// The current episode's end was handed to an agent.
     Reported,
+    /// A running Task's flow stopped where a resume picks it up. The Task's
+    /// own end, whenever it comes, is the next episode, not a replacement.
+    Interrupted {
+        reported: bool,
+    },
+}
+
+impl EndState {
+    /// Whether the current episode has an end announced or reported.
+    pub(super) fn has_end(self) -> bool {
+        !matches!(self, Self::Open | Self::Held)
+    }
+
+    /// Whether the current episode's end was handed to an agent.
+    pub(super) fn is_reported(self) -> bool {
+        matches!(self, Self::Reported | Self::Interrupted { reported: true })
+    }
+
+    /// The state once the current episode's end is handed to an agent.
+    pub(super) fn reported(self) -> Self {
+        match self {
+            Self::Interrupted { .. } => Self::Interrupted { reported: true },
+            _ => Self::Reported,
+        }
+    }
 }
 
 /// An open block and the ledger episode that announced it, if one was recorded.
@@ -159,13 +186,15 @@ impl RunWatch {
             .get(key)
             .map_or(self.revisions, |entry| entry.revision)
     }
-    /// Open a new episode. An end still held for enrichment is announced first,
-    /// as the closing episode's, so a resume during the report read cannot lose it.
+    /// Open a new episode, keeping the key's solicitation.
     pub(crate) fn begin(&mut self, key: &RunKey) {
-        self.begin_solicited(key, false);
+        self.begin_with(key, None);
     }
 
-    pub(crate) fn begin_solicited(&mut self, key: &RunKey, solicited: bool) {
+    /// Open a new episode, taking `solicitation` when the start brings its
+    /// own. An end still held for enrichment is announced first, as the
+    /// closing episode's, so a resume during the report read cannot lose it.
+    pub(crate) fn begin_with(&mut self, key: &RunKey, solicitation: Option<bool>) {
         let entry = self.entry(key);
         if entry.end == EndState::Held
             && let Some(held) = entry.snapshot.clone()
@@ -174,19 +203,28 @@ impl RunWatch {
             self.push_event(held, Origin::Live);
         }
         let entry = self.changed(key);
-        entry.solicited = solicited;
+        if let Some(solicited) = solicitation {
+            entry.solicited = solicited;
+        }
         entry.disk_episode = None;
         entry.local_sequence = None;
-        entry.episode = entry.revision;
-        entry.floor = entry.last_sequence + 1;
-        entry.end = EndState::Open;
         entry.snapshot = None;
-        if entry.membership == Membership::Scoped {
-            // A resumed run is owned again, even after its last end was released.
-            self.record_owned(key);
+        entry.end = EndState::Open;
+        self.close_episode(key);
+        if self.membership(key) == Membership::Scoped {
+            // A resumed run is owned again, even after its last end was released,
+            // and an end it never delivered stays owed.
+            self.record_reopened(key);
         }
         self.clear_waiting(key);
         self.wake();
+    }
+
+    /// Start the key's next episode: earlier events become its history.
+    pub(super) fn close_episode(&mut self, key: &RunKey) {
+        let entry = self.changed(key);
+        entry.episode = entry.revision;
+        entry.floor = entry.last_sequence + 1;
     }
     pub(crate) fn waiting_on(&self, key: &RunKey) -> Option<&WaitingOn> {
         self.entries.get(key)?.block.as_ref().map(|block| &block.on)
@@ -318,12 +356,22 @@ impl RunWatch {
         }
     }
     pub(super) fn record_owned(&mut self, key: &RunKey) {
+        let (solicited, location) = self.ownership(key);
+        self.ledger.owned(key, solicited, location.as_ref());
+    }
+
+    fn record_reopened(&mut self, key: &RunKey) {
+        let (solicited, location) = self.ownership(key);
+        self.ledger.reopened(key, solicited, location.as_ref());
+    }
+
+    fn ownership(&self, key: &RunKey) -> (bool, Option<FlowRunLocation>) {
         let solicited = self.entries.get(key).is_some_and(|entry| entry.solicited);
         let location = match key {
-            RunKey::Flow(id) => self.locations.get(id),
+            RunKey::Flow(id) => self.locations.get(id).cloned(),
             RunKey::Task(_) => None,
         };
-        self.ledger.owned(key, solicited, location);
+        (solicited, location)
     }
     /// Ends an explicit waiter enrolled before the key joined the scope.
     fn record_scoped_ends(&mut self, key: &RunKey) {
@@ -351,7 +399,12 @@ impl RunWatch {
             return;
         };
         let announce = match snapshot.state {
-            RunState::Ended { .. } => entry.end == EndState::Ended,
+            RunState::Ended { .. } => {
+                matches!(
+                    entry.end,
+                    EndState::Ended | EndState::Interrupted { reported: false }
+                )
+            }
             RunState::Running {
                 waiting_on: Some(_),
                 ..
@@ -446,19 +499,25 @@ impl RunWatch {
     /// [`Self::retain`], with the origin a new end's episode takes.
     pub(super) fn settle(&mut self, snapshot: RunSnapshot, origin: Origin) {
         let ended = matches!(snapshot.state, RunState::Ended { .. });
+        let interruption = is_interruption(&snapshot);
         let entry = self.entry(&snapshot.key);
-        if ended
-            && matches!(entry.end, EndState::Ended | EndState::Reported)
-            && entry.snapshot.as_ref() == Some(&snapshot)
-        {
+        if ended && entry.end.has_end() && entry.snapshot.as_ref() == Some(&snapshot) {
             return;
+        }
+        if ended && !interruption && matches!(entry.end, EndState::Interrupted { .. }) {
+            // The Task's own end after its flow's interruption, resumed or not.
+            self.begin(&snapshot.key);
         }
         let entry = self.changed(&snapshot.key);
         entry.disk_episode = None;
         if ended {
             let first = matches!(entry.end, EndState::Open | EndState::Held);
             if first {
-                entry.end = EndState::Ended;
+                entry.end = if interruption {
+                    EndState::Interrupted { reported: false }
+                } else {
+                    EndState::Ended
+                };
             }
             self.clear_waiting(&snapshot.key);
             if first {

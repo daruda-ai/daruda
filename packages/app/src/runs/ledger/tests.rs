@@ -861,6 +861,7 @@ fn a_reported_flow_whose_release_never_landed_is_released_on_restart(cx: &mut Te
             key: key.clone(),
             solicited: true,
             location: None,
+            at_ms: None,
         });
         store.record(RunLedgerEvent::Ended {
             key: key.clone(),
@@ -911,7 +912,7 @@ fn a_flow_resumed_before_its_end_was_reported_stays_owned(cx: &mut TestAppContex
     cx.update(|cx| {
         assert_eq!(RunsHost::unreported_run_events(cx).len(), 1);
         // The resume starts a new episode, as `start_flow` does.
-        cx.update_global::<RunsHost, _>(|host, _| host.watch.begin_solicited(&key, true));
+        cx.update_global::<RunsHost, _>(|host, _| host.watch.begin_with(&key, Some(true)));
         let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
         let answer = RunsHost::poll_run_wait(id, false, cx).unwrap();
         assert_eq!(answer.ended.len(), 1, "the earlier interruption");
@@ -926,5 +927,314 @@ fn a_flow_resumed_before_its_end_was_reported_stays_owned(cx: &mut TestAppContex
         assert_eq!(ended_as(&pending[0]), Some(EndedAs::Crashed));
         assert_eq!(pending[0].origin, Origin::Recovered);
         assert!(pending[0].solicited);
+    });
+}
+
+fn on_watch<R>(cx: &mut App, f: impl FnOnce(&mut crate::runs::watch::RunWatch) -> R) -> R {
+    cx.update_global::<RunsHost, _>(|host, _| f(&mut host.watch))
+}
+
+fn end_of(key: &RunKey, ended_as: EndedAs, what: &str) -> RunSnapshot {
+    RunSnapshot {
+        key: key.clone(),
+        what: what.into(),
+        why: None,
+        state: RunState::Ended {
+            ended_as,
+            text: None,
+            pointers: Default::default(),
+        },
+    }
+}
+
+/// One wait over `keys` (the omitted scope when `None`), answered and receipted.
+fn report(keys: Option<Vec<RunKey>>, cx: &mut App) -> crate::runs::watch::WaitAnswer {
+    let (id, _) = RunsHost::open_run_wait(keys, cx).unwrap();
+    let answer = RunsHost::poll_run_wait(id, false, cx).unwrap();
+    RunsHost::finish_run_wait(id, true, cx);
+    answer
+}
+
+/// Whether the ledger still writes once every queued record is answered.
+fn writing_after_flush(cx: &mut App) -> bool {
+    RunsHost::quit_flush(Instant::now() + Duration::from_secs(5), cx);
+    RunsHost::run_ledger_writing_for_test(cx)
+}
+
+fn whats(answer: &crate::runs::watch::WaitAnswer) -> Vec<&str> {
+    answer.ended.iter().map(|end| end.what.as_str()).collect()
+}
+
+/// An earlier end reported after its run's newer end was reported, released
+/// and the run resumed again names a generation the ledger let go.
+#[gpui::test]
+fn a_report_after_a_release_and_a_resume_keeps_the_ledger_writing(cx: &mut TestAppContext) {
+    let dirs = Dirs::new();
+    let key = RunKey::Flow("f".into());
+    cx.update(|cx| {
+        dirs.start(cx);
+        RunsHost::register_run_solicited(key.clone(), true, cx);
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Crashed, "first")));
+        on_watch(cx, |w| w.begin(&key));
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Completed, "second")));
+        assert_eq!(whats(&report(Some(vec![key.clone()]), cx)), ["second"]);
+        on_watch(cx, |w| w.begin(&key));
+        assert_eq!(whats(&report(None, cx)), ["first"]);
+        assert!(writing_after_flush(cx));
+    });
+    cx.update(|cx| dirs.restart(cx));
+    cx.update(|cx| {
+        assert!(RunsHost::unreported_run_events(cx).is_empty());
+        assert_eq!(RunsHost::run_scope(cx), vec![key.clone()]);
+    });
+}
+
+/// One receipt covering two ends of a run that resumed again meanwhile.
+#[gpui::test]
+fn a_receipt_for_two_ends_of_a_resumed_run_keeps_the_ledger_writing(cx: &mut TestAppContext) {
+    let dirs = Dirs::new();
+    let key = RunKey::Flow("f".into());
+    cx.update(|cx| {
+        dirs.start(cx);
+        RunsHost::register_run_solicited(key.clone(), true, cx);
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Crashed, "first")));
+        on_watch(cx, |w| w.begin(&key));
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Crashed, "second")));
+        let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
+        let answer = RunsHost::poll_run_wait(id, false, cx).unwrap();
+        assert_eq!(whats(&answer), ["first", "second"]);
+        on_watch(cx, |w| w.begin(&key));
+        RunsHost::finish_run_wait(id, true, cx);
+        assert!(writing_after_flush(cx));
+    });
+    cx.update(|cx| dirs.restart(cx));
+    cx.update(|cx| {
+        assert!(RunsHost::unreported_run_events(cx).is_empty());
+        assert_eq!(RunsHost::run_scope(cx), vec![key.clone()]);
+    });
+}
+
+/// An end the cap evicted, reported after its run resumed.
+#[gpui::test]
+fn a_report_of_an_evicted_end_after_a_resume_keeps_the_ledger_writing(cx: &mut TestAppContext) {
+    use daruda_store::run_ledger::UNREPORTED_MAX;
+    let dirs = Dirs::new();
+    let first = RunKey::Flow("0".into());
+    cx.update(|cx| {
+        dirs.start(cx);
+        for n in 0..=UNREPORTED_MAX {
+            let key = RunKey::Flow(n.to_string());
+            RunsHost::register_run(key.clone(), cx);
+            on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Completed, "end")));
+        }
+        on_watch(cx, |w| w.begin(&first));
+        let answer = report(None, cx);
+        assert_eq!(answer.ended[0].key, first);
+        assert!(writing_after_flush(cx));
+    });
+    cx.update(|cx| dirs.restart(cx));
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        assert!(pending.iter().all(|event| event.snapshot.key != first));
+    });
+}
+
+/// A run resumed before its earlier end was reported, then a restart: the
+/// earlier end is still owed, and the resumed run is read from disk.
+#[gpui::test]
+fn a_resume_keeps_the_earlier_end_owed_and_judges_the_new_run_after_a_restart(
+    cx: &mut TestAppContext,
+) {
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let run_dir = finished_flow(&lane.path(), &lane.locks(), "resumed");
+    let key = cx.update(|cx| {
+        lane.start(&dirs, cx);
+        let key = own_flow(lane.location(&run_dir), cx);
+        on_watch(cx, |w| {
+            w.retain(end_of(&key, EndedAs::Crashed, "interrupted"))
+        });
+        on_watch(cx, |w| w.begin_with(&key, Some(true)));
+        key
+    });
+    cx.update(|cx| lane.restart(&dirs, cx));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        let ends: Vec<_> = pending.iter().map(ended_as).collect();
+        assert_eq!(
+            ends,
+            [Some(EndedAs::Crashed), Some(EndedAs::Completed)],
+            "{pending:?}"
+        );
+        assert!(
+            pending
+                .iter()
+                .all(|event| event.origin == Origin::Recovered)
+        );
+        assert!(pending.iter().all(|event| event.solicited));
+        assert_eq!(report(None, cx).ended.len(), 2);
+    });
+    cx.update(|cx| lane.restart(&dirs, cx));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert!(RunsHost::unreported_run_events(cx).is_empty());
+        assert!(RunsHost::run_scope(cx).is_empty(), "released with {key:?}");
+    });
+}
+
+/// A Task whose flow's interruption was reported, then canceled in the
+/// Tasks page without a resume: the cancel is the Task's real end.
+#[gpui::test]
+fn a_task_canceled_after_its_interruption_was_reported_delivers_the_cancel(
+    cx: &mut TestAppContext,
+) {
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let (_, key, _) = interrupted_flow_task(&dirs, &lane, cx);
+    let RunKey::Task(exec) = key.clone() else {
+        unreachable!("the fixture's key is a task");
+    };
+    cx.update(|cx| {
+        let answer = report(None, cx);
+        assert_eq!(answer.ended.len(), 1);
+        seed::commit_now(
+            vec![TaskEvent::CancelRequested {
+                exec,
+                at: chrono::Utc::now(),
+            }],
+            cx,
+        );
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(ended_as(&pending[0]), Some(EndedAs::Canceled));
+        assert!(pending[0].solicited);
+        assert_eq!(report(None, cx).ended.len(), 1);
+    });
+    cx.update(|cx| lane.restart(&dirs, cx));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert!(RunsHost::unreported_run_events(cx).is_empty());
+        assert!(RunsHost::run_scope(cx).is_empty(), "released");
+    });
+}
+
+/// A desktop resume and a resume seen on disk keep who asked for the run.
+#[gpui::test]
+fn a_desktop_resume_keeps_the_runs_solicitation(cx: &mut TestAppContext) {
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let run_dir = crate::runs::runs_dir(&lane.path()).join("asked");
+    cx.update(|cx| {
+        lane.start(&dirs, cx);
+        let key = own_flow(lane.location(&run_dir), cx);
+        let request = command_flow(&lane.path(), &lane.locks(), &run_dir);
+        let (events_tx, events) = smol::channel::unbounded();
+        let (_, asks) = smol::channel::unbounded();
+        RunsHost::start_flow(
+            crate::runs::FlowStart {
+                tree: daruda_flow::lock::CanonicalTree::resolve(&lane.path()).unwrap(),
+                request: daruda_flow::request::RunRequest {
+                    events: Some(events_tx),
+                    ..request
+                },
+                source: crate::runs::FlowSource::Resumed {
+                    run_dir: run_dir.clone(),
+                },
+                runners: Box::new(command_runners),
+                overage: Default::default(),
+                submitted_by: daruda_flow::request::StartedBy::Desktop,
+                solicited: false,
+                events,
+                asks,
+            },
+            cx,
+        )
+        .expect("the worktree is free");
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Completed, "done")));
+        let pending = RunsHost::unreported_run_events(cx);
+        assert!(pending[0].solicited, "{pending:?}");
+    });
+    wait_for_file(&run_dir.join("DONE"));
+}
+
+/// A record naming an episode no end has used is the proposer's bug: it is
+/// logged as an error, and the records after it still land.
+#[test]
+fn a_refused_record_is_logged_and_the_ledger_keeps_writing() {
+    use daruda_store::run_ledger::{LedgerKey, LedgerRejected};
+    let dir = tempfile::tempdir().unwrap();
+    let (mut ledger, _) = Ledger::open(RunLedgerStore::in_directory(dir.path(), "test"));
+    let key = RunKey::Flow("f".into());
+    ledger.reported(&key, 99, false);
+    ledger.flush(Instant::now() + Duration::from_secs(5));
+    assert!(matches!(ledger, Ledger::Writing { .. }));
+    ledger.owned(&key, true, None);
+    ledger.flush(Instant::now() + Duration::from_secs(5));
+    assert!(matches!(ledger, Ledger::Writing { .. }));
+    drop(ledger);
+    let (_, state) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+    let flow = LedgerKey::Flow { run_id: "f".into() };
+    assert!(state.get(&flow).is_some(), "the later record landed");
+
+    let report = rejection(&LedgerRejected::Unassigned {
+        key: flow,
+        episode: 99,
+    });
+    assert_eq!(report.severity, ErrorSeverity::Error);
+    assert_eq!(report.dedup_key.as_deref(), Some("run_ledger.rejected"));
+}
+
+/// A write failure stops the ledger, but not the directory holds it had
+/// committed: an owed flow's directory still survives retention.
+#[test]
+fn a_stopped_ledger_keeps_answering_its_committed_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut ledger, _) = Ledger::open(RunLedgerStore::in_directory(dir.path(), "test"));
+    let key = RunKey::Flow("owed".into());
+    ledger.owned(&key, true, None);
+    ledger.flush(Instant::now() + Duration::from_secs(5));
+    ledger.observe(daruda_store::run_ledger::Answered {
+        failure: Some(daruda_runlog::CommitError::Closed),
+        ..Default::default()
+    });
+    assert!(matches!(ledger, Ledger::Stopped { .. }));
+    assert!(ledger.held_run_dirs(now_ms()).contains("owed"));
+}
+
+/// Seed the ledger with an owned flow the process cannot locate.
+fn owned_unlocated(dirs: &Dirs, run_id: &str, at_ms: u64) {
+    use daruda_store::run_ledger::{LedgerKey, RunLedgerEvent};
+    let (store, _) = RunLedgerStore::in_directory(dirs.ledger.path(), "test").unwrap();
+    store.record(RunLedgerEvent::Owned {
+        key: LedgerKey::Flow {
+            run_id: run_id.into(),
+        },
+        solicited: true,
+        location: None,
+        at_ms: Some(at_ms),
+    });
+    store.flush(Duration::from_secs(5)).unwrap();
+    assert!(store.take_answered().failure.is_none());
+}
+
+/// An owned flow no read can judge is kept for the directory hold, then let
+/// go with a log line; nothing on disk but the ledger changes.
+#[gpui::test]
+fn an_unjudgeable_owned_flow_is_released_after_the_hold(cx: &mut TestAppContext) {
+    let dirs = Dirs::new();
+    let hold_ms = u64::try_from(daruda_store::run_ledger::DIRECTORY_HOLD.as_millis()).unwrap();
+    owned_unlocated(&dirs, "lost", now_ms() - hold_ms - 1);
+    owned_unlocated(&dirs, "recent", now_ms());
+    cx.update(|cx| dirs.start(cx));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(RunsHost::run_scope(cx), vec![RunKey::Flow("recent".into())]);
+        dirs.restart(cx);
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(
+            RunsHost::run_scope(cx),
+            vec![RunKey::Flow("recent".into())],
+            "released on disk"
+        );
     });
 }

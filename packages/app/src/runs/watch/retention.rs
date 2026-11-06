@@ -63,7 +63,7 @@ impl RunWatch {
     fn forget_oldest_retired(&mut self, busy: &HashSet<RunKey>) {
         let mut retired = Vec::new();
         for (key, entry) in &mut self.entries {
-            if busy.contains(key) || entry.snapshot.is_some() || entry.end != EndState::Reported {
+            if busy.contains(key) || entry.snapshot.is_some() || !entry.end.is_reported() {
                 entry.retired = None;
                 continue;
             }
@@ -99,7 +99,10 @@ fn unfollowed_settled(key: &RunKey, entry: &RunEntry) -> bool {
 /// Nothing retained, nothing held or reported, and outside the scope.
 fn forgettable(entry: &RunEntry) -> bool {
     entry.snapshot.is_none()
-        && matches!(entry.end, EndState::Open | EndState::Ended)
+        && matches!(
+            entry.end,
+            EndState::Open | EndState::Ended | EndState::Interrupted { reported: false }
+        )
         && entry.membership != Membership::Scoped
 }
 
