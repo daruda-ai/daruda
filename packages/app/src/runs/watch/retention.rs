@@ -63,7 +63,7 @@ impl RunWatch {
     fn forget_oldest_retired(&mut self, busy: &HashSet<RunKey>) {
         let mut retired = Vec::new();
         for (key, entry) in &mut self.entries {
-            if busy.contains(key) || entry.snapshot.is_some() || !entry.end.is_reported() {
+            if busy.contains(key) || entry.snapshot.is_some() || !entry.only_remembers_report() {
                 entry.retired = None;
                 continue;
             }

@@ -142,3 +142,50 @@ fn forgotten_keys_and_missing_keys_cannot_reuse_a_read_revision() {
     let (_wait, _) = watch.open_wait(Some(vec![key.clone()])).unwrap();
     assert_ne!(watch.revision(&key), revision);
 }
+
+/// A Task whose flow interruption was reported is not over: no retirement
+/// pressure forgets it, so its own end is still announced and ledgered.
+#[test]
+fn a_scoped_tasks_reported_interruption_outlives_retirement_pressure() {
+    use crate::runs::result::{EndedAs, RunState};
+    let mut watch = RunWatch::default();
+    let task = RunKey::Task(daruda_store::tasks::ExecutionRef {
+        task_id: "t".into(),
+        execution_id: "e".into(),
+    });
+    let report = |watch: &mut RunWatch, key: &RunKey| {
+        let (id, _) = watch.open_wait(Some(vec![key.clone()])).unwrap();
+        assert_eq!(watch.poll_wait(id, false).unwrap().ended.len(), 1);
+        watch.finish_wait(id, true);
+    };
+    watch.register(task.clone());
+    let mut interrupted = ended(task.clone());
+    interrupted.state = RunState::Ended {
+        ended_as: EndedAs::Crashed,
+        text: None,
+        pointers: Default::default(),
+    };
+    watch.retain(interrupted);
+    report(&mut watch, &task);
+    for n in 0..RETIRED_MAX + 450 {
+        let flow = RunKey::Flow(format!("flow-{n}"));
+        watch.register(flow.clone());
+        watch.retain(ended(flow.clone()));
+        report(&mut watch, &flow);
+    }
+    assert!(
+        watch.entries.contains_key(&task),
+        "its own end is still to come"
+    );
+
+    let ledger = tempfile::tempdir().unwrap();
+    watch.ledger = crate::runs::ledger::Ledger::open(
+        daruda_store::run_ledger::RunLedgerStore::in_directory(ledger.path(), "test"),
+    )
+    .0;
+    watch.retain(ended(task.clone()));
+    let pending = watch.unreported();
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert_eq!(pending[0].snapshot.key, task);
+    assert!(pending[0].recorded.is_some(), "the end is ledgered");
+}

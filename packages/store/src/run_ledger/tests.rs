@@ -1,4 +1,6 @@
 use super::*;
+use crate::tasks::ExecutionRef;
+use daruda_runlog::Machine as _;
 
 fn task(id: &str) -> LedgerKey {
     LedgerKey::Task(ExecutionRef {
@@ -22,25 +24,6 @@ fn end_event(key: LedgerKey, episode: u64) -> RunLedgerEvent {
         evicts: Vec::new(),
         ended_at_ms: None,
     }
-}
-
-fn with_end(state: &mut RunLedgerState, key: LedgerKey, episode: u64) {
-    RunLedgerMachine::apply(state, &end_event(key, episode));
-}
-
-/// Eviction order follows episodes, not the order keys were first recorded,
-/// and counts every unreported end, a key's owed ones included.
-#[test]
-fn the_oldest_end_is_chosen_by_episode() {
-    let mut state = RunLedgerState::default();
-    for n in 1..UNREPORTED_MAX as u64 {
-        with_end(&mut state, task(&n.to_string()), n);
-    }
-    assert!(state.evictions().is_empty(), "the next end fits");
-    // The first key ends again: its earlier end stays owed, and the oldest.
-    with_end(&mut state, task("1"), UNREPORTED_MAX as u64);
-    assert_eq!(state.get(&task("1")).unwrap().owed().len(), 1);
-    assert_eq!(state.evictions(), vec![task("1")], "its own owed end");
 }
 
 /// Past its record budget the ledger starts a new generation on its own, and

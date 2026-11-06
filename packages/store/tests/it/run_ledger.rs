@@ -945,3 +945,67 @@ fn every_owed_end_of_a_flow_holds_its_directory() {
     );
     assert_eq!(held(&state, at + 3 * DAY_MS + HOLD_MS), ["undated"]);
 }
+
+/// A corrupt owed value names the field and the shapes it may take, not only
+/// that no variant matched.
+#[test]
+fn a_corrupt_owed_value_names_what_was_expected() {
+    let state = |owed: &str| {
+        format!(
+            r#"{{"next_episode":1,"entries":[{{"key":{{"kind":"flow","run_id":"f"}},"solicited":true,"state":{{"kind":"open","owed":{owed}}}}}]}}"#
+        )
+    };
+    let error = serde_json::from_str::<RunLedgerState>(&state(r#""oops""#)).unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("owed"), "{message}");
+    assert!(message.contains("string \"oops\""), "{message}");
+    assert!(message.contains("a list"), "{message}");
+    let error = serde_json::from_str::<RunLedgerState>(&state("[{}]")).unwrap_err();
+    let message = error.to_string();
+    assert!(
+        message.contains("missing field `episode`"),
+        "an element says what it lacks: {message}"
+    );
+}
+
+/// A store told how holds change hears each dated hold of a located flow
+/// as it is committed, and its end once the run is released.
+#[test]
+fn a_marking_store_tells_each_located_dated_hold_and_its_end() {
+    use std::sync::{Arc, Mutex};
+    let at = 100 * DAY_MS;
+    let dir = tempfile::tempdir().unwrap();
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&told);
+    let (store, _) = RunLedgerStore::marking(
+        dir.path(),
+        "test",
+        Box::new(move |run_dir, until| {
+            sink.lock().unwrap().push((run_dir.to_path_buf(), until));
+        }),
+    )
+    .unwrap();
+    let location = RunLocation {
+        run_dir: "/runs/f".into(),
+        lock_dir: None,
+    };
+    store.record(RunLedgerEvent::Owned {
+        key: flow("f"),
+        solicited: true,
+        location: Some(location),
+        at_ms: Some(at),
+    });
+    store.record(ended_at(flow("f"), 0, at));
+    store.record(ended_at(flow("unlocated"), 1, at));
+    store.record(reported(flow("f"), 0));
+    store.record(released(flow("f"), ReleaseReason::Reported));
+    store.flush(Duration::from_secs(5)).unwrap();
+    assert_eq!(
+        *told.lock().unwrap(),
+        [
+            (std::path::PathBuf::from("/runs/f"), Some(at + HOLD_MS)),
+            (std::path::PathBuf::from("/runs/f"), None),
+        ],
+        "an open run holds with no deadline, and a run with no location is never told"
+    );
+}

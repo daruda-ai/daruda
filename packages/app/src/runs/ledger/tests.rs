@@ -9,9 +9,11 @@ use daruda_store::tasks::{TaskEvent, TaskStore};
 use gpui::{App, BorrowAppContext as _, TestAppContext};
 
 use super::*;
+use crate::runs::result::{EndedAs, RunState};
 use crate::runs::seed::{self, SeedEnd, SeedRun};
 use crate::runs::watch::{Origin, WaitOutcome};
 use crate::runs::{GlobalTasks, RunsHost, no_hook};
+use daruda_store::run_ledger::EntryState;
 
 struct Dirs {
     tasks: tempfile::TempDir,
@@ -1471,4 +1473,152 @@ fn every_end_owed_across_two_resumes_survives_a_restart(cx: &mut TestAppContext)
         assert!(RunsHost::unreported_run_events(cx).is_empty());
         assert_eq!(RunsHost::run_scope(cx), vec![key.clone()], "still running");
     });
+}
+
+/// An end recorded before ends were dated holds its directory from when a
+/// process first restores it, for the hold and no longer; a later restore or
+/// a re-record of its text never moves that date.
+#[test]
+fn an_undated_end_is_dated_once_by_the_first_restore() {
+    use daruda_store::run_ledger::{DIRECTORY_HOLD, LedgerKey, RunLedgerEvent};
+    let dir = tempfile::tempdir().unwrap();
+    let key = RunKey::Flow("old".into());
+    let ledger_key = LedgerKey::Flow {
+        run_id: "old".into(),
+    };
+    let snapshot = end_of(&key, EndedAs::Completed, "old work");
+    {
+        let (store, _) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+        store.record(RunLedgerEvent::Ended {
+            key: ledger_key.clone(),
+            solicited: true,
+            episode: 0,
+            end: ledger_end(&snapshot).unwrap(),
+            evicts: Vec::new(),
+            ended_at_ms: None,
+        });
+        store.flush(Duration::from_secs(5)).unwrap();
+    }
+    let dated_at = |rerecord: bool| {
+        let (mut ledger, entries) = Ledger::open(RunLedgerStore::in_directory(dir.path(), "test"));
+        assert_eq!(ledger.restore(entries, None).len(), 1);
+        if rerecord {
+            let mut enriched = snapshot.clone();
+            if let RunState::Ended { text, .. } = &mut enriched.state {
+                *text = Some("read later".into());
+            }
+            ledger.rerecord(0, &enriched, true);
+        }
+        ledger.flush(Instant::now() + Duration::from_secs(5));
+        drop(ledger);
+        let (_, state) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+        let end = state.get(&ledger_key).unwrap().latest().unwrap().clone();
+        (end.ended_at_ms, state)
+    };
+    let before = now_ms();
+    let (first, state) = dated_at(false);
+    let first = first.expect("the first restore dates the end");
+    assert!(first >= before);
+    let hold = u64::try_from(DIRECTORY_HOLD.as_millis()).unwrap();
+    assert!(state.held_run_dirs(first + hold - 1).contains("old"));
+    assert!(state.held_run_dirs(first + hold).is_empty());
+    std::thread::sleep(Duration::from_millis(5));
+    assert_eq!(dated_at(true).0, Some(first), "kept by a later restore");
+}
+
+/// Another profile's sweep never sees this ledger, only the run directory:
+/// an owed end's hold marker spares the run there until the end is reported.
+#[test]
+fn another_profiles_sweep_spares_a_run_this_ledger_owes() {
+    let ledger_dir = tempfile::tempdir().unwrap();
+    let lane = tempfile::tempdir().unwrap();
+    let runs_dir = newer_finished_runs(lane.path());
+    let run_dir = runs_dir.join("01A00");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    std::fs::write(run_dir.join("DONE"), "").unwrap();
+    let (mut ledger, _) = Ledger::open(RunLedgerStore::marking(
+        ledger_dir.path(),
+        "test",
+        hold_markers(),
+    ));
+    let key = RunKey::Flow("01A00".into());
+    let location = FlowRunLocation {
+        run_dir: run_dir.clone(),
+        lock_dir: None,
+    };
+    ledger.owned(&key, true, Some(&location));
+    let episode = ledger
+        .ended(&end_of(&key, EndedAs::Completed, "work"), true)
+        .unwrap();
+    ledger.flush(Instant::now() + Duration::from_secs(5));
+    let other_profile =
+        |keep| daruda_flow::marker::sweep_old_runs(&runs_dir, keep, &Default::default()).unwrap();
+    assert!(!other_profile(daruda_flow::marker::DEFAULT_KEEP_RUNS).contains(&run_dir));
+    assert!(
+        run_dir.is_dir(),
+        "an owed run survives a sweep that cannot see the ledger"
+    );
+
+    ledger.reported(&key, episode);
+    ledger.settled(&key);
+    ledger.flush(Instant::now() + Duration::from_secs(5));
+    assert!(
+        other_profile(0).contains(&run_dir),
+        "a released run is left to retention again"
+    );
+}
+
+/// An orchestrator start scopes its run after `start_flow` answers, in the
+/// same update; the run itself starts only once that record is durable, so
+/// no crash can leave run output the ledger never owned.
+#[gpui::test]
+fn a_started_flow_runs_only_after_its_owner_is_on_disk(cx: &mut TestAppContext) {
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let run_dir = crate::runs::runs_dir(&lane.path()).join("01ORDER");
+    let ledger_dir = dirs.ledger.path().to_path_buf();
+    let (seen_tx, seen) = std::sync::mpsc::channel();
+    cx.update(|cx| {
+        lane.start(&dirs, cx);
+        let request = command_flow(&lane.path(), &lane.locks(), &run_dir);
+        let (events_tx, events) = smol::channel::unbounded();
+        let (_, asks) = smol::channel::unbounded();
+        let run_id = RunsHost::start_flow(
+            crate::runs::FlowStart {
+                tree: daruda_flow::lock::CanonicalTree::resolve(&lane.path()).unwrap(),
+                request: daruda_flow::request::RunRequest {
+                    events: Some(events_tx),
+                    ..request
+                },
+                source: crate::runs::FlowSource::File(lane.path().join("flow.yaml")),
+                runners: Box::new(move |request| {
+                    // What the ledger holds on disk as the run begins.
+                    let mut logged = String::new();
+                    for file in std::fs::read_dir(&ledger_dir).unwrap() {
+                        let path = file.unwrap().path();
+                        if path.is_file() {
+                            logged
+                                .push_str(&String::from_utf8_lossy(&std::fs::read(path).unwrap()));
+                        }
+                    }
+                    seen_tx.send(logged).unwrap();
+                    command_runners(request)
+                }),
+                overage: Default::default(),
+                submitted_by: daruda_flow::request::StartedBy::Orchestrator,
+                solicited: true,
+                events,
+                asks,
+            },
+            cx,
+        )
+        .expect("the worktree is free");
+        assert!(!run_dir.exists(), "the run waits for its caller's update");
+        RunsHost::register_run_solicited(RunKey::Flow(run_id), true, cx);
+    });
+    let logged = seen.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert!(
+        logged.contains(r#""kind":"owned""#) && logged.contains("01ORDER"),
+        "{logged}"
+    );
+    wait_for_file(&run_dir.join("DONE"));
 }

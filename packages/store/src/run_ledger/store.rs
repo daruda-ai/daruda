@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -14,6 +14,11 @@ use daruda_runlog::{
 use super::{
     DirectoryHolds, LedgerKey, LedgerRejected, RunLedgerEvent, RunLedgerMachine, RunLedgerState,
 };
+
+/// Told, on the ledger's writer thread in commit order, each flow run
+/// directory whose dated hold changed: `Some(until_ms)` once it is held until
+/// then, `None` once it is no longer held with a deadline.
+pub type MarkHold = Box<dyn Fn(&Path, Option<u64>) + Send>;
 
 type Answer = Pin<
     Box<dyn Future<Output = Result<Appended<RunLedgerEvent>, CommitError<LedgerRejected>>> + Send>,
@@ -57,10 +62,19 @@ impl std::fmt::Debug for RunLedgerStore {
 }
 
 impl RunLedgerStore {
-    /// Open the profile's ledger and the state it replays to. The caller must
-    /// hold the profile's desktop instance lock: the log assumes one writer.
-    pub fn open_current(build: &str) -> Result<(Self, RunLedgerState), RunLedgerError> {
-        Self::in_directory(crate::storage::StorageLayout::current().run_ledger(), build)
+    /// Open the profile's ledger and the state it replays to, telling `mark`
+    /// how its holds change. The caller must hold the profile's desktop
+    /// instance lock: the log assumes one writer.
+    pub fn open_current(
+        build: &str,
+        mark: MarkHold,
+    ) -> Result<(Self, RunLedgerState), RunLedgerError> {
+        Self::opening(
+            crate::storage::StorageLayout::current().run_ledger(),
+            build,
+            Compaction::WhenDue,
+            Some(mark),
+        )
     }
 
     /// Open the ledger in `dir`. An unreadable or newer log is refused and
@@ -69,15 +83,34 @@ impl RunLedgerStore {
         dir: impl Into<PathBuf>,
         build: &str,
     ) -> Result<(Self, RunLedgerState), RunLedgerError> {
-        Self::compacting(dir, build, Compaction::WhenDue)
+        Self::opening(dir, build, Compaction::WhenDue, None)
+    }
+
+    /// [`Self::in_directory`], telling `mark` how its holds change.
+    pub fn marking(
+        dir: impl Into<PathBuf>,
+        build: &str,
+        mark: MarkHold,
+    ) -> Result<(Self, RunLedgerState), RunLedgerError> {
+        Self::opening(dir, build, Compaction::WhenDue, Some(mark))
     }
 
     /// [`Self::in_directory`], starting a new generation as `compaction`
     /// says; nothing else ever compacts the ledger.
+    #[cfg(test)]
     pub(crate) fn compacting(
         dir: impl Into<PathBuf>,
         build: &str,
         compaction: Compaction,
+    ) -> Result<(Self, RunLedgerState), RunLedgerError> {
+        Self::opening(dir, build, compaction, None)
+    }
+
+    fn opening(
+        dir: impl Into<PathBuf>,
+        build: &str,
+        compaction: Compaction,
+        mark: Option<MarkHold>,
     ) -> Result<(Self, RunLedgerState), RunLedgerError> {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)?;
@@ -89,7 +122,19 @@ impl RunLedgerStore {
             log,
             "run-ledger",
             Box::new(move |_, state: &RunLedgerState| {
-                *lock(&projection) = state.directory_holds();
+                let next = state.directory_holds();
+                let changes = {
+                    let mut held = lock(&projection);
+                    let changes = mark.as_ref().map(|_| held.marker_changes(&next));
+                    *held = next;
+                    changes
+                };
+                // Outside the lock: a reader of the holds never waits on disk.
+                if let (Some(mark), Some(changes)) = (&mark, changes) {
+                    for (run_dir, until) in changes {
+                        mark(&run_dir, until);
+                    }
+                }
             }),
             compaction,
         )?;
@@ -148,8 +193,26 @@ impl RunLedgerStore {
         self.committer.flush(deadline)
     }
 
+    /// A handle another thread can wait on until every record proposed
+    /// before its wait began is answered.
+    pub fn barrier(&self) -> LedgerBarrier {
+        LedgerBarrier(self.committer.clone())
+    }
+
     fn answers(&self) -> MutexGuard<'_, VecDeque<Answer>> {
         lock(&self.answers)
+    }
+}
+
+/// See [`RunLedgerStore::barrier`]. It keeps the ledger's writer alive
+/// until it is waited on or dropped.
+pub struct LedgerBarrier(Committer<RunLedgerMachine>);
+
+impl LedgerBarrier {
+    /// Block until every record proposed before this call is answered, or
+    /// `deadline` passes.
+    pub fn wait(self, deadline: Duration) -> Result<(), FlushTimedOut> {
+        self.0.flush(deadline)
     }
 }
 

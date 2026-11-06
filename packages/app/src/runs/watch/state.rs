@@ -54,6 +54,18 @@ impl EndState {
     }
 }
 
+/// Whether a run restored open from the ledger still awaits this process's
+/// first read of it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum Judgement {
+    /// Read by this process, started in it, or never restored open.
+    #[default]
+    Done,
+    /// Restored open and not read yet: whatever its first read shows, from
+    /// whichever path, was reached before the restart.
+    Pending,
+}
+
 /// An open block and the ledger episode that announced it, if one was recorded.
 #[derive(Clone, Debug)]
 pub(super) struct Block {
@@ -80,6 +92,7 @@ pub(super) struct RunEntry {
     pub(super) local_sequence: Option<u64>,
     /// When the key was first kept only to remember its end was reported.
     pub(super) retired: Option<u64>,
+    pub(super) judgement: Judgement,
 }
 
 impl RunEntry {
@@ -93,6 +106,13 @@ impl RunEntry {
 
     pub(super) fn blocked_sequence(&self) -> Option<u64> {
         self.block.as_ref().and_then(|block| block.sequence)
+    }
+
+    /// Whether the key is kept only to remember that its end was reported. A
+    /// scoped run that is not over (a Task's reported flow interruption) has
+    /// its own end still to come, which only this entry can announce.
+    pub(super) fn only_remembers_report(&self) -> bool {
+        self.end.is_reported() && (self.membership != Membership::Scoped || self.is_over())
     }
 
     /// Whether nothing of the run is left to end: its end was reported, or
@@ -185,7 +205,7 @@ impl RunWatch {
             RunEntry::new(self.revisions)
         })
     }
-    fn changed(&mut self, key: &RunKey) -> &mut RunEntry {
+    pub(super) fn changed(&mut self, key: &RunKey) -> &mut RunEntry {
         self.revisions += 1;
         let revision = self.revisions;
         let entry = self
@@ -234,6 +254,8 @@ impl RunWatch {
         entry.local_sequence = None;
         entry.snapshot = None;
         entry.end = EndState::Open;
+        // A start in this process is no end from before the restart.
+        entry.judgement = Judgement::Done;
         self.close_episode(key);
         if self.membership(key) == Membership::Scoped {
             // A resumed run is owned again, even after its last end was released,
@@ -331,6 +353,9 @@ impl RunWatch {
         let key = snapshot.key.clone();
         if self.get(&key) == Some(&snapshot) {
             return;
+        }
+        if self.take_judgement(&key) {
+            self.after_judgement(&key, &snapshot.state);
         }
         let entry = self.changed(&key);
         match waiting_on {
@@ -526,8 +551,15 @@ impl RunWatch {
         self.settle(snapshot, Origin::Live);
     }
 
-    /// [`Self::retain`], with the origin a new end's episode takes.
+    /// [`Self::retain`], with the origin a new end's episode takes. The first
+    /// read of a restored run is its judgement, whichever path made it.
     pub(super) fn settle(&mut self, snapshot: RunSnapshot, origin: Origin) {
+        let judged = self.take_judgement(&snapshot.key);
+        if judged && self.repeats_owed_end(&snapshot) {
+            self.restore_owed_end(&snapshot.key);
+            return;
+        }
+        let origin = if judged { Origin::Recovered } else { origin };
         let ended = matches!(snapshot.state, RunState::Ended { .. });
         let interruption = is_interruption(&snapshot);
         let entry = self.entry(&snapshot.key);
@@ -555,6 +587,9 @@ impl RunWatch {
             }
         }
         let key = snapshot.key.clone();
+        if judged {
+            self.after_judgement(&key, &snapshot.state);
+        }
         self.entry(&key).snapshot = Some(snapshot);
         self.bound();
         self.wake();

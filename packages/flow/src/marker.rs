@@ -21,6 +21,12 @@ const CANCELED: &str = "CANCELED";
 const STALLED: &str = "STALLED";
 pub(crate) const MARKER_NAMES: [&str; 4] = [DONE, FAILED, CANCELED, STALLED];
 
+/// Not a status: an app that still owes someone this run's result holds its
+/// directory from retention until the Unix-millisecond deadline it contains.
+/// Retention in any app instance reads it, so a profile that never sees the
+/// holder's own records still spares the run.
+const HELD: &str = "HELD";
+
 const WRITE_MARKER: &str = "recording how the run ended";
 const CLEAR_MARKER: &str = "clearing how the run last ended";
 
@@ -231,12 +237,14 @@ pub const DEFAULT_KEEP_RUNS: usize = 20;
 /// the wrong ones.
 ///
 /// `held` names runs, by id (the directory name), whose directories the host
-/// still needs: they are neither deleted nor counted against `keep`.
+/// still needs: they are neither deleted nor counted against `keep`. A run
+/// whose [`hold`] marker has not reached its deadline is spared the same way.
 pub fn sweep_old_runs(
     runs_dir: &Path,
     keep: usize,
     held: &HashSet<String>,
 ) -> std::io::Result<Vec<PathBuf>> {
+    let now = now_ms();
     let mut finished: Vec<PathBuf> = std::fs::read_dir(runs_dir)?
         .filter_map(Result::ok)
         .filter(|entry| {
@@ -247,6 +255,7 @@ pub fn sweep_old_runs(
         })
         .map(|entry| entry.path())
         .filter(|path| path.is_dir() && has_marker(path))
+        .filter(|path| !held_until_later(path, now))
         .collect();
     finished.sort();
 
@@ -257,6 +266,42 @@ pub fn sweep_old_runs(
         removed.push(run_dir);
     }
     Ok(removed)
+}
+
+/// Hold `run_dir` from every app instance's retention until `until_ms`, in
+/// Unix milliseconds. Never creates the directory: a run already gone is an
+/// error the caller may ignore.
+pub fn hold(run_dir: &Path, until_ms: u64) -> std::io::Result<()> {
+    if !run_dir.is_dir() {
+        return Err(std::io::ErrorKind::NotFound.into());
+    }
+    std::fs::write(run_dir.join(HELD), until_ms.to_string())
+}
+
+/// Take back a [`hold`]; a run held by none, or gone, is no error.
+pub fn release_hold(run_dir: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(run_dir.join(HELD)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// Whether a [`hold`] in `run_dir` still stands at `now_ms`. A deadline that
+/// cannot be read holds nothing, so a torn write never pins a run forever.
+fn held_until_later(run_dir: &Path, now_ms: u64) -> bool {
+    std::fs::read_to_string(run_dir.join(HELD))
+        .ok()
+        .and_then(|until| until.trim().parse::<u64>().ok())
+        .is_some_and(|until| now_ms < until)
+}
+
+/// The clock holds are judged against, in Unix milliseconds.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 /// Whether the run is finished *and* done with. The one question retention
@@ -561,6 +606,37 @@ mod tests {
             assert!(left.contains(name), "held {name} was swept: {left:?}");
         }
         assert!(left.contains(&"01B05".to_string()), "{left:?}");
+    }
+
+    /// A hold another app instance left in the run directory spares it until
+    /// its deadline, like a held id; a passed or unreadable deadline, or one
+    /// taken back, spares nothing, so a hold can never pin a run forever.
+    #[test]
+    fn a_sweep_spares_a_run_holding_a_marker_until_its_deadline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let now = now_ms();
+        let held = finished_run_in(dir.path(), "01A00");
+        hold(&held, now + 60_000).expect("hold");
+        let lapsed = finished_run_in(dir.path(), "01A01");
+        hold(&lapsed, now.saturating_sub(1)).expect("hold");
+        let garbled = finished_run_in(dir.path(), "01A02");
+        std::fs::write(garbled.join(HELD), "soon").expect("marker");
+        let released = finished_run_in(dir.path(), "01A03");
+        hold(&released, now + 60_000).expect("hold");
+        release_hold(&released).expect("release");
+        release_hold(&released).expect("releasing twice is no error");
+        for i in 0..20 {
+            finished_run_in(dir.path(), &format!("01B{i:02}"));
+        }
+
+        let removed = sweep_old_runs(dir.path(), 20, &HashSet::new()).expect("sweep");
+
+        assert_eq!(removed, [lapsed, garbled, released.clone()]);
+        assert!(held.is_dir());
+        assert!(
+            hold(&dir.path().join("01Z99"), now).is_err(),
+            "a hold never creates the directory it names"
+        );
     }
 
     /// Newest kept, oldest dropped — and the ordering is by run-id, because

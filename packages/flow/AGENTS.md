@@ -17,6 +17,7 @@ A run lives in `<cwd>/.daruda/flow-runs/<run-id>/`:
 | `logs/` (other files) | Evidence: transcripts, command logs, archived outputs. |
 | `DONE`, `FAILED`, `CANCELED`, `STALLED` | Markers, a cache of the log's ending. Written after `RunEnded`; the log wins. |
 | `run.md` | The human report, written before the marker. |
+| `HELD` | Not a status: a host's retention hold, the deadline in Unix milliseconds (`marker::hold`). `sweep_old_runs` spares the run until then; an unreadable deadline holds nothing. |
 
 The run's lock lives outside the tree, under the host's lock root
 (`lock::lock_dir_for`). Never move it inside: `git clean -fdx` would delete it.

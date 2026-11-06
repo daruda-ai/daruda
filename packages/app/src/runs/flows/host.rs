@@ -23,6 +23,12 @@ use super::{
     FlowStart, NodeRunStates, ParkedAsk, RunView, metadata,
 };
 use crate::runs::RunsHost;
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
+
+/// How long a starting run waits for the ledger to record what precedes it.
+/// The records are a few small appends; past this the run starts anyway.
+const LEDGER_BEFORE_RUN: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl RunsHost {
     /// The run in `worktree`, however it is spelled, if this process holds
@@ -106,30 +112,13 @@ impl RunsHost {
         let (snapshot, pointers) = metadata::for_request(&request, &source);
         let cancel = CancelToken::default();
         let (finished_tx, finished) = std::sync::mpsc::channel();
-        {
-            let cancel = cancel.clone();
-            std::thread::spawn(move || {
-                // Dropped when this returns, panicking or not: the signal
-                // `wait_ended` blocks on.
-                let _finished = finished_tx;
-                let runners = runners(&request);
-                let report = daruda_flow::schedule::execute(&request, &runners, &cancel);
-                // A run refused before it started records nothing and only
-                // returns; this is its end. A run that recorded its own end
-                // has already been retired by then, so this is never read.
-                if let Some(events) = &request.events {
-                    // SILENT-OK: a closed channel means the pump is gone.
-                    let _ = events.try_send(RunNotice::Unrecorded(RunEnd::from(&report.outcome)));
-                }
-            });
-        }
         let pump_overage = overage.clone();
         let run = FlowRun {
             snapshot,
             pointers,
             started: std::time::Instant::now(),
             view: RunView::new(run_dir.clone(), source, nodes_at_start),
-            cancel,
+            cancel: cancel.clone(),
             overage,
             submitted_by,
             solicited,
@@ -146,6 +135,39 @@ impl RunsHost {
             Ok(())
         })?;
         Self::flow_task_resumed(&run_dir, cx);
+        // After the caller's update, so the records it proposes for this start
+        // (its owner's scope) join the ones above before the run is spawned.
+        cx.defer(move |cx| {
+            let barrier = cx.global::<RunsHost>().watch.ledger.barrier();
+            std::thread::spawn(move || {
+                // Dropped when this returns, panicking or not: the signal
+                // `wait_ended` blocks on.
+                let _finished = finished_tx;
+                // Nothing the run writes may precede the ledger's word on it: a
+                // crash between the two would read an old end as a new one.
+                if let Some(barrier) = barrier
+                    && let Err(error) = barrier.wait(LEDGER_BEFORE_RUN)
+                {
+                    LogWriter::log(
+                        ErrorReport::new("A flow run started before the run ledger caught up")
+                            .severity(ErrorSeverity::Warning)
+                            .from_error(&error)
+                            .at(file!(), line!())
+                            .dedup("run_ledger.before_run")
+                            .build(),
+                    );
+                }
+                let runners = runners(&request);
+                let report = daruda_flow::schedule::execute(&request, &runners, &cancel);
+                // A run refused before it started records nothing and only
+                // returns; this is its end. A run that recorded its own end
+                // has already been retired by then, so this is never read.
+                if let Some(events) = &request.events {
+                    // SILENT-OK: a closed channel means the pump is gone.
+                    let _ = events.try_send(RunNotice::Unrecorded(RunEnd::from(&report.outcome)));
+                }
+            });
+        });
         Self::tell_windows(tree.clone(), FlowChanged::Repainted, cx);
         let run_id = crate::runs::result::flow_run_id(&run_dir);
         cx.spawn(async move |cx| pump(tree, run_dir, events, asks, pump_overage, cx).await)

@@ -1,7 +1,7 @@
 //! Task end history projected into the ledger, one change at a time.
 use std::collections::HashSet;
 
-use super::state::{Membership, Origin, RunWatch};
+use super::state::{EndState, Judgement, Membership, Origin, RunWatch};
 use crate::runs::result::{self, RunKey};
 use daruda_store::tasks::TasksBook;
 
@@ -28,6 +28,10 @@ impl RunWatch {
             // A restored ledger entry already holds this key's solicitation.
             if self.membership(&key) != Membership::Scoped {
                 self.register(key.clone());
+                let entry = self.entry(&key);
+                if entry.end == EndState::Open && entry.snapshot.is_none() {
+                    entry.judgement = Judgement::Pending;
+                }
             }
             from_before.insert(key);
         }

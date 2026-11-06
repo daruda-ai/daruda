@@ -7,20 +7,23 @@
 //! record the ledger refuses is logged and the ones after it still land.
 
 use std::collections::HashSet;
+use std::path::Path;
 use std::time::Instant;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::run_ledger::{
-    Answered, DIRECTORY_HOLD, EntryState, LedgerEnd, LedgerEndedAs, LedgerKey, LedgerPointers,
-    LedgerRejected, ReleaseReason, RunLedgerEntry, RunLedgerError, RunLedgerEvent, RunLedgerState,
-    RunLedgerStore, RunLocation,
+    Answered, DIRECTORY_HOLD, LedgerBarrier, LedgerKey, LedgerRejected, MarkHold, ReleaseReason,
+    RunLedgerEntry, RunLedgerError, RunLedgerEvent, RunLedgerState, RunLedgerStore,
 };
-use daruda_store::tasks::{ExecutionRef, TasksBook};
 
-use super::result::{
-    EndedAs, FlowRunLocation, Pointers, RunKey, RunSnapshot, RunState, is_interruption,
-};
+use super::result::{FlowRunLocation, RunKey, RunSnapshot};
+use convert::{ledger_end, ledger_key, ledger_key_of, run_location};
+
+mod convert;
+mod restore;
+
+pub(crate) use restore::{OwedEnd, Restored, RestoredEnd};
 
 /// What opening the profile's ledger produced.
 pub(crate) type OpenedLedger = Result<(RunLedgerStore, RunLedgerState), RunLedgerError>;
@@ -43,55 +46,6 @@ pub(crate) enum Ledger {
     Stopped { store: RunLedgerStore },
 }
 
-/// A ledger entry as the watch takes it back after a restart.
-pub(crate) struct Restored {
-    pub(crate) key: RunKey,
-    pub(crate) solicited: bool,
-    pub(crate) location: Option<FlowRunLocation>,
-    /// Ends from before the run resumed, still unreported, oldest first.
-    pub(crate) owed: Vec<OwedEnd>,
-    pub(crate) end: RestoredEnd,
-}
-
-pub(crate) struct OwedEnd {
-    pub(crate) episode: u64,
-    pub(crate) snapshot: RunSnapshot,
-}
-
-impl OwedEnd {
-    /// What stands for the run itself when only `state` is known of it,
-    /// named as its latest owed end names it.
-    fn stand_in(&self, state: RunState) -> RunSnapshot {
-        RunSnapshot {
-            key: self.snapshot.key.clone(),
-            what: self.snapshot.what.clone(),
-            why: None,
-            state,
-        }
-    }
-}
-
-pub(crate) enum RestoredEnd {
-    /// Owned or resumed, with no end of this run recorded yet.
-    Open,
-    Unreported {
-        episode: u64,
-        snapshot: RunSnapshot,
-    },
-    /// Its latest end was handed to an agent; kept only to stay in scope:
-    /// an end still owed, a Task's flow interruption, or any Task the log
-    /// cannot judge.
-    Reported(RunSnapshot),
-    /// Open, but no read in this process can judge it (an unreadable task
-    /// log): it stays owned for a later one, and only what it owes is
-    /// delivered. The snapshot says its state is unknown.
-    Unjudged(RunSnapshot),
-    /// A Task the log no longer holds, with ends it still owes: nothing more
-    /// can end, so it is let go once those are reported. The snapshot says
-    /// it is gone.
-    Gone(RunSnapshot),
-}
-
 impl Ledger {
     /// The opened ledger and the entries it replayed, or no ledger and one
     /// warning when it could not be opened. Nothing on disk is changed.
@@ -110,80 +64,6 @@ impl Ledger {
                 (Self::Off, Vec::new())
             }
         }
-    }
-
-    /// Turn replayed entries into what the watch restores. A reported end
-    /// owing nothing means its release never landed: released now, unless a
-    /// Task's flow interruption the log holds (its own end is still to come).
-    /// A gone task is released, or restored gone while it owes ends. Without
-    /// `book` (an unreadable task log) no task entry is judged; an open one
-    /// is restored only for the ends it owes.
-    pub(crate) fn restore(
-        &mut self,
-        entries: Vec<RunLedgerEntry>,
-        book: Option<&TasksBook>,
-    ) -> Vec<Restored> {
-        let now = now_ms();
-        let mut restored = Vec::new();
-        for entry in entries {
-            let key = key_of(&entry.key);
-            let owed: Vec<_> = entry
-                .owed()
-                .iter()
-                .map(|owed| OwedEnd {
-                    episode: owed.episode,
-                    snapshot: snapshot_of(key.clone(), &owed.end),
-                })
-                .collect();
-            let end = match &entry.state {
-                EntryState::Unreported { end, .. } => RestoredEnd::Unreported {
-                    episode: end.episode,
-                    snapshot: snapshot_of(key.clone(), &end.end),
-                },
-                EntryState::Reported { end, .. } => {
-                    let snapshot = snapshot_of(key.clone(), &end.end);
-                    match (&key, book) {
-                        _ if !owed.is_empty() => RestoredEnd::Reported(snapshot),
-                        (RunKey::Task(_), None) => RestoredEnd::Reported(snapshot),
-                        (RunKey::Task(exec), Some(book))
-                            if is_interruption(&snapshot) && holds(book, exec) =>
-                        {
-                            RestoredEnd::Reported(snapshot)
-                        }
-                        _ => {
-                            self.release(&entry.key, ReleaseReason::Reported);
-                            continue;
-                        }
-                    }
-                }
-                EntryState::Open { since_ms, .. } => match (&key, book) {
-                    (RunKey::Task(_), None) => match owed.last() {
-                        Some(owed) => RestoredEnd::Unjudged(owed.stand_in(RunState::Unknown)),
-                        None => continue,
-                    },
-                    (RunKey::Task(exec), Some(book)) if !holds(book, exec) => match owed.last() {
-                        Some(owed) => RestoredEnd::Gone(owed.stand_in(RunState::Gone)),
-                        None => {
-                            self.release(&entry.key, ReleaseReason::Expired);
-                            continue;
-                        }
-                    },
-                    (RunKey::Flow(_), _) if owed.is_empty() && lapsed(*since_ms, now) => {
-                        self.lapse(&entry.key);
-                        RestoredEnd::Open
-                    }
-                    _ => RestoredEnd::Open,
-                },
-            };
-            restored.push(Restored {
-                key,
-                solicited: entry.solicited,
-                location: entry.location.as_ref().map(location_of),
-                owed,
-                end,
-            });
-        }
-        restored
     }
 
     pub(super) fn owned(
@@ -235,7 +115,8 @@ impl Ledger {
         Some(episode)
     }
 
-    /// Replace a recorded end's content, after its text was read.
+    /// Replace a recorded end's content, after its text was read. Its date
+    /// is not the reader's to give: the end keeps the one it has.
     pub(super) fn rerecord(&mut self, episode: u64, snapshot: &RunSnapshot, solicited: bool) {
         if let Some(end) = ledger_end(snapshot) {
             self.record(RunLedgerEvent::Ended {
@@ -244,7 +125,7 @@ impl Ledger {
                 episode,
                 end,
                 evicts: Vec::new(),
-                ended_at_ms: Some(now_ms()),
+                ended_at_ms: None,
             });
         }
     }
@@ -289,6 +170,16 @@ impl Ledger {
         match self {
             Self::Writing { store, .. } | Self::Stopped { store } => store.held_run_dirs(now_ms),
             Self::Off => HashSet::new(),
+        }
+    }
+
+    /// What a run about to start waits on, so that every record proposed
+    /// before it starts lands before anything the run writes. `None` without
+    /// a ledger still writing.
+    pub(crate) fn barrier(&self) -> Option<LedgerBarrier> {
+        match self {
+            Self::Writing { store, .. } => Some(store.barrier()),
+            Self::Off | Self::Stopped { .. } => None,
         }
     }
 
@@ -359,28 +250,29 @@ impl Ledger {
             other => other,
         };
     }
+}
 
-    fn lapse(&mut self, key: &LedgerKey) {
-        if let Self::Writing { lapsed, .. } = self {
-            lapsed.insert(key.clone());
+/// Mirror each dated directory hold the ledger commits into a marker in the
+/// run's own directory, so another profile's retention spares it too. A run
+/// already gone has nothing to hold; any other failure is logged once.
+pub(crate) fn hold_markers() -> MarkHold {
+    Box::new(|run_dir: &Path, until: Option<u64>| {
+        let written = match until {
+            Some(until) => daruda_flow::marker::hold(run_dir, until),
+            None => daruda_flow::marker::release_hold(run_dir),
+        };
+        match written {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => LogWriter::log(
+                ErrorReport::new("A flow run directory's hold marker could not be updated")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&error)
+                    .at(file!(), line!())
+                    .dedup("run_ledger.hold_marker")
+                    .build(),
+            ),
+            _ => {}
         }
-    }
-}
-
-/// Whether a run open since `since_ms` has outlived the directory hold.
-fn lapsed(since_ms: Option<u64>, now_ms: u64) -> bool {
-    let hold_ms = u64::try_from(DIRECTORY_HOLD.as_millis()).unwrap_or(u64::MAX);
-    since_ms.is_some_and(|since| now_ms.saturating_sub(since) >= hold_ms)
-}
-
-fn ledger_key_of(event: &RunLedgerEvent) -> &LedgerKey {
-    match event {
-        RunLedgerEvent::Owned { key, .. }
-        | RunLedgerEvent::Reopened { key, .. }
-        | RunLedgerEvent::Ended { key, .. }
-        | RunLedgerEvent::Reported { key, .. }
-        | RunLedgerEvent::Released { key, .. } => key,
-    }
+    })
 }
 
 /// A refused record is the proposer's bug: it never stops the ledger.
@@ -446,106 +338,6 @@ fn eviction(evicted: &[LedgerKey]) -> ErrorReport {
         .at(file!(), line!())
         .dedup("run_ledger.evicted")
         .build()
-}
-
-fn run_location(location: &FlowRunLocation) -> RunLocation {
-    RunLocation {
-        run_dir: location.run_dir.clone(),
-        lock_dir: location.lock_dir.clone(),
-    }
-}
-
-fn holds(book: &TasksBook, exec: &ExecutionRef) -> bool {
-    book.get(&exec.task_id).is_some_and(|record| {
-        record.current_exec() == Some(exec)
-            || record.ended_executions.iter().any(|end| &end.exec == exec)
-    })
-}
-
-fn ledger_key(key: &RunKey) -> LedgerKey {
-    match key {
-        RunKey::Flow(run_id) => LedgerKey::Flow {
-            run_id: run_id.clone(),
-        },
-        RunKey::Task(exec) => LedgerKey::Task(exec.clone()),
-    }
-}
-
-fn key_of(key: &LedgerKey) -> RunKey {
-    match key {
-        LedgerKey::Flow { run_id } => RunKey::Flow(run_id.clone()),
-        LedgerKey::Task(exec) => RunKey::Task(exec.clone()),
-    }
-}
-
-fn location_of(location: &RunLocation) -> FlowRunLocation {
-    FlowRunLocation {
-        run_dir: location.run_dir.clone(),
-        lock_dir: location.lock_dir.clone(),
-    }
-}
-
-fn ledger_end(snapshot: &RunSnapshot) -> Option<LedgerEnd> {
-    let RunState::Ended {
-        ended_as,
-        text,
-        pointers,
-    } = &snapshot.state
-    else {
-        return None;
-    };
-    Some(LedgerEnd {
-        what: snapshot.what.clone(),
-        why: snapshot.why.clone(),
-        ended_as: match ended_as {
-            EndedAs::Completed => LedgerEndedAs::Completed,
-            EndedAs::Failed => LedgerEndedAs::Failed,
-            EndedAs::Canceled => LedgerEndedAs::Canceled,
-            EndedAs::Stalled => LedgerEndedAs::Stalled,
-            EndedAs::Crashed => LedgerEndedAs::Crashed,
-            EndedAs::Interrupted => LedgerEndedAs::Interrupted,
-            EndedAs::Undelivered => LedgerEndedAs::Undelivered,
-            EndedAs::Error => LedgerEndedAs::Error,
-            EndedAs::BudgetExhausted => LedgerEndedAs::BudgetExhausted,
-        },
-        text: text.clone(),
-        pointers: LedgerPointers {
-            run_dir: pointers.run_dir.clone(),
-            report: pointers.report.clone(),
-            outputs: pointers.outputs.clone(),
-            chat: pointers.chat.clone(),
-            transcript: pointers.transcript.clone(),
-        },
-    })
-}
-
-fn snapshot_of(key: RunKey, end: &LedgerEnd) -> RunSnapshot {
-    RunSnapshot {
-        key,
-        what: end.what.clone(),
-        why: end.why.clone(),
-        state: RunState::Ended {
-            ended_as: match end.ended_as {
-                LedgerEndedAs::Completed => EndedAs::Completed,
-                LedgerEndedAs::Failed => EndedAs::Failed,
-                LedgerEndedAs::Canceled => EndedAs::Canceled,
-                LedgerEndedAs::Stalled => EndedAs::Stalled,
-                LedgerEndedAs::Crashed => EndedAs::Crashed,
-                LedgerEndedAs::Interrupted => EndedAs::Interrupted,
-                LedgerEndedAs::Undelivered => EndedAs::Undelivered,
-                LedgerEndedAs::Error => EndedAs::Error,
-                LedgerEndedAs::BudgetExhausted => EndedAs::BudgetExhausted,
-            },
-            text: end.text.clone(),
-            pointers: Pointers {
-                run_dir: end.pointers.run_dir.clone(),
-                report: end.pointers.report.clone(),
-                outputs: end.pointers.outputs.clone(),
-                chat: end.pointers.chat.clone(),
-                transcript: end.pointers.transcript.clone(),
-            },
-        },
-    }
 }
 
 #[cfg(test)]

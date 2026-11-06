@@ -315,12 +315,13 @@ and delivery ledger. It survives orchestrator pane or session replacement and
 gate-token rotation. Each end or waiting episode has a `(RunKey, sequence)` identity.
 
 The run ledger (`daruda_store::run_ledger`, `<data_dir>/run-ledger/`, written
-through `runs/ledger.rs`) keeps that scope and its unreported ends across a
+through `runs/ledger.rs` and taken back by `runs/ledger/restore.rs`) keeps that scope and its unreported ends across a
 restart. Each entry is `Open { owed }` (running), `Unreported { end, owed }` or
 `Reported { end, owed }`; `owed` lists every earlier end (from before the run
 resumed) that no agent was handed, oldest first, so a report can never precede
 its end. Schema 4 snapshots kept one owed end (`null` or an end) and read as a
-list of at most one. The watch queues `Owned` when a key joins the scope,
+list of at most one; an `owed` of any other shape fails replay with an error
+naming the owed ends' accepted shapes and the value found. The watch queues `Owned` when a key joins the scope,
 `Reopened` when a scoped run resumes (an unreported end joins `owed`), `Ended` with a ledger-wide episode
 for each scoped end (again when its text is read), and, after a socket
 receipt, one `Reported` per recorded end it handed over. A report marks only
@@ -347,13 +348,26 @@ run that is open, or whose current end was reported, stays owned and an open
 flow's directory stays held; a run whose only unreported end was its current
 one is let go. Each evicting commit logs one warning
 (`run_ledger.evicted`) with counts by kind, never run ids. `Ended` carries the proposer's clock
-(`ended_at_ms`; a re-record keeps the first), so replay never reads one.
+(`ended_at_ms`), so replay never reads one. A re-record never moves a date: the
+app re-records read text with none, and a re-record that carries one only dates
+an undated end. Ends from logs written before ends were dated are dated by the
+first restore that keeps them, so their directory hold runs from that restore.
 Retention spares what the ledger still owes: `RunsHost::start_flow` fills
 `RunRequest::held_runs` from the committed ledger, and the engine's start sweep
 (`marker::sweep_old_runs`) neither deletes nor counts those run directories.
 A flow is held while it is owned with no end, or while any unreported end is
-undated or under `DIRECTORY_HOLD` (7 days) old, judged against the clock at each
-start; nothing is written when a hold lapses. A lapsed hold frees only the
+undated (only until the restore dates it) or under `DIRECTORY_HOLD` (7 days)
+old, judged against the clock at each start; nothing is written when a hold
+lapses. Another profile's sweep cannot read this ledger, so each dated hold of
+a flow whose location the ledger records is mirrored into the run directory as
+a `HELD` file holding the deadline in Unix milliseconds
+(`marker::hold`/`release_hold`, through `runs::run_ledger_hold_markers`). The
+ledger's writer thread writes and removes it after each commit that changes
+the hold, in commit order; `sweep_old_runs` in any profile spares a run whose
+`HELD` deadline has not passed. An undated hold (an open run) writes none: an
+open run has no outcome marker, so no sweep takes it. An unreadable deadline
+holds nothing, and a crash between a commit and its marker write leaves the
+marker to the hold's next change, so a marker never pins a run past its deadline. A lapsed hold frees only the
 directory: the end stays in the ledger until reported, and a release
 or eviction ends the hold. A restored flow open longer than `DIRECTORY_HOLD`
 (dated by `Owned`/`Reopened`) that the startup read still cannot judge is
@@ -375,9 +389,24 @@ as a `Recovered` episode and its run read as unknown, so no wait waits on it. Re
 `recovered: true` in `daruda_run_wait`/`daruda_run_status` (per delivered
 episode, so a live end of the same key in one answer is not marked), and their
 notice line says they were requested before daruda restarted.
-After install, each scoped run with no end and nothing observed is read once
+A restored open entry, or a carried key with nothing observed, is marked
+unjudged on its `RunEntry` (`Judgement::Pending`). Its first read judges it,
+whichever path made it: an end settles as a `Recovered` episode (so a wait or
+status read that lands before the startup read still marks it `recovered` and
+fires the auto-start), a gone run is released as below, and any other state
+releases a lapsed flow. A start in this process clears the mark.
+After install, each unjudged key is read once
 off the UI thread (`RunsHost::judge_restored`), through `run_query`'s own disk
-readers; a key that changed meanwhile is skipped. A flow ended on disk is
+readers; a key that changed meanwhile, or that another read judged, is skipped.
+A start proposes its records before its run writes anything: `start_flow`
+records `Reopened` for a scoped key, then spawns the run after the caller's
+update (so an orchestrator caller's `Owned` is proposed first), and the run
+thread waits up to `LEDGER_BEFORE_RUN` (2 s) for every earlier ledger record
+to be durable, logging `run_ledger.before_run` if it starts without. When a
+restored run's first read is an end equal to its latest owed end (kind, what,
+why and pointers; read text is ignored), the resume that superseded that end
+never ran: no episode is opened, and the owed end is the run's current,
+resumable end again. A flow ended on disk is
 delivered with its report as a `Recovered` episode. A flow `marker::run_status`
 reads as `Crashed` (a quit leaves its lock with a dead holder) or `Stalled` is
 an end too, with `resumable: true` on the wire, `resumable` in its notice, and,
@@ -455,7 +484,9 @@ results after such a loss. The 200-entry reported retention limit never
 evicts running, held, unreported or in-flight snapshots, even when Task history
 has rolled past them or an earlier episode of the same key was reported.
 After snapshot eviction, up to 1000 cheap reported-terminal identities remain
-to prevent a disk/history lookup from delivering the same end again. The oldest
+to prevent a disk/history lookup from delivering the same end again. A scoped
+key whose run is not over (a Task's reported flow interruption) is never
+retired: its own end is still to come. The oldest
 retired identities are then forgotten with their scope membership and cached
 flow locations; explicitly querying a forgotten end may deliver it again.
 Separately, a sweep keeps the newest 1000 reconstructible settled observations
