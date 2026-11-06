@@ -74,6 +74,21 @@ impl Workspace {
         Self::start_flow_thread(submission, submitter, cx)
     }
 
+    /// [`Self::submit_flow_resume`] for a run its caller just read.
+    pub(in crate::workspace) fn submit_read_flow_resume(
+        &mut self,
+        lane_ref: daruda_store::project::LaneRef,
+        run_dir: &Path,
+        resumed: daruda_flow::resume::Resumed,
+        submitter: (daruda_flow::request::StartedBy, bool),
+        cx: &mut Context<Self>,
+    ) -> Result<String, FlowStartRefused> {
+        let submission = self
+            .resume_request(lane_ref, run_dir, resumed, cx)
+            .map_err(FlowStartRefused::Submit)?;
+        Self::start_flow_thread(submission, submitter, cx)
+    }
+
     /// Hand the run to the process. Its thread, stop switch and pump live
     /// there, so this window closing does not take the run with it.
     /// `submitted_by` is who this episode answers to.

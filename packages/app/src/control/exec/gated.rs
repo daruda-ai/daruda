@@ -16,6 +16,14 @@ use super::{Dispatch, Pending, in_lane_window, in_pane_window, in_project_window
 
 mod flow_resume;
 
+/// A command as its card asked about it. A resume's run is resolved once,
+/// before the card, so a handle such as `TaskLatest` cannot name another
+/// execution by the time the user answers.
+enum Asked {
+    Command(GatedCommand),
+    FlowResume(flow_resume::ResumeTarget),
+}
+
 /// Run a command that has to wait: guards, then the user's approval, then the
 /// work.
 ///
@@ -35,7 +43,7 @@ fn run_gated_with(
     cmd: GatedCommand,
     origin: super::CommandOrigin,
     perform: impl for<'a> FnOnce(
-        GatedCommand,
+        Asked,
         super::CommandOrigin,
         bool,
         &'a mut gpui::AsyncApp,
@@ -46,8 +54,8 @@ fn run_gated_with(
     if let Err(refusal) = guard_gated(&cmd, cx) {
         return Dispatch::Ready(Err(refusal));
     }
-    let summary = match approval_summary(&cmd, cx) {
-        Ok(summary) => summary,
+    let (summary, asked) = match approval_summary(cmd, cx) {
+        Ok(asked) => asked,
         Err(refusal) => return Dispatch::Ready(Err(refusal)),
     };
     let solicited = origin.is_solicited(cx);
@@ -60,16 +68,18 @@ fn run_gated_with(
             // Approval may have waited while another creation spent a slot.
             // Reserve before the first await so overlapping approvals cannot
             // promise the same remaining worktree.
-            Ok(ApprovalOutcome::Approved) => Some(match cx.update(|cx| reserve_gated(&cmd, cx)) {
-                Ok(permit) => {
-                    let outcome = perform(cmd, origin, solicited, cx).await;
-                    if let Some(permit) = permit {
-                        cx.update(|cx| permit.finish(outcome.is_ok(), cx));
+            Ok(ApprovalOutcome::Approved) => {
+                Some(match cx.update(|cx| reserve_gated(&asked, cx)) {
+                    Ok(permit) => {
+                        let outcome = perform(asked, origin, solicited, cx).await;
+                        if let Some(permit) = permit {
+                            cx.update(|cx| permit.finish(outcome.is_ok(), cx));
+                        }
+                        outcome
                     }
-                    outcome
-                }
-                Err(refusal) => Err(refusal),
-            }),
+                    Err(refusal) => Err(refusal),
+                })
+            }
             // Not a refusal: the user never said no, and the caller has freed
             // the id it would be answered on. Nothing ran and nothing is owed,
             // which is what `None` says and no error variant could.
@@ -91,10 +101,14 @@ fn run_gated_with(
 }
 
 /// Validate again and claim a slot only for commands that create a worktree.
+/// A resume checks its run again as it resumes.
 fn reserve_gated(
-    cmd: &GatedCommand,
+    asked: &Asked,
     cx: &mut App,
 ) -> Result<Option<crate::control::guards::CreationPermit>, ControlError> {
+    let Asked::Command(cmd) = asked else {
+        return Ok(None);
+    };
     guard_gated(cmd, cx)?;
     let creates_lane = match cmd {
         GatedCommand::LaneCreate { .. } => true,
@@ -153,9 +167,9 @@ fn guard_gated(cmd: &GatedCommand, cx: &mut App) -> Result<(), ControlError> {
             Ok(())
         }
         GatedCommand::TaskOpen { task } => in_task_window(task, cx, |_ws, _window, _cx| Ok(())),
-        // Only the handle here: the run's state is read once before the card,
-        // into the plan its summary quotes, and once more by the resume itself.
-        GatedCommand::FlowResume { run } => flow_resume::target(run, cx).map(|_| ()),
+        // Resolved with the plan its summary quotes: the run's state is read
+        // once before the card, and once more by the resume itself.
+        GatedCommand::FlowResume { .. } => Ok(()),
     }
 }
 
@@ -196,8 +210,8 @@ pub(crate) fn task_flow_summary(task: &str, cx: &mut App) -> Option<String> {
 ///
 /// A target that cannot be named is refused rather than asked about: a card
 /// with the place left blank asks the person to approve without saying where.
-fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> Result<String, ControlError> {
-    Ok(match cmd {
+fn approval_summary(cmd: GatedCommand, cx: &mut App) -> Result<(String, Asked), ControlError> {
+    let summary = match &cmd {
         GatedCommand::LaneCreate { name, .. } => s::control::approval_lane_create(name),
         GatedCommand::ChatNew { lane, .. } => {
             let path = in_lane_window(*lane, cx, |ws, _window, _cx| {
@@ -256,25 +270,26 @@ fn approval_summary(cmd: &GatedCommand, cx: &mut App) -> Result<String, ControlE
         // that, so the card is not shown.
         GatedCommand::FlowResume { run } => {
             let target = flow_resume::target(run, cx)?;
-            let plan = flow_resume::in_run_window(&target.run_id, cx, |ws, lane, run_dir, cx| {
-                ws.control_flow_resume_check(lane, run_dir, cx)
-            })?;
-            if plan.passed == plan.total {
-                s::control::approval_flow_resume_all_passed(&plan.name, plan.total)
-            } else {
-                s::control::approval_flow_resume(&plan.name, plan.passed, plan.total)
-            }
+            let summary = flow_resume::summary(&target, cx)?;
+            return Ok((summary, Asked::FlowResume(target)));
         }
-    })
+    };
+    Ok((summary, Asked::Command(cmd)))
 }
 
 /// Do the thing, now that the user has said yes.
 async fn perform_gated(
-    cmd: GatedCommand,
+    asked: Asked,
     origin: super::CommandOrigin,
     solicited: bool,
     cx: &mut gpui::AsyncApp,
 ) -> ControlOutcome {
+    let cmd = match asked {
+        Asked::FlowResume(target) => {
+            return cx.update(|cx| flow_resume::resume(target, origin, solicited, cx));
+        }
+        Asked::Command(cmd) => cmd,
+    };
     let created = match cmd {
         GatedCommand::TaskCreate {
             workspace,
@@ -294,11 +309,9 @@ async fn perform_gated(
         }
         GatedCommand::TaskStart { task } => return start_task(task, origin, solicited, cx).await,
         GatedCommand::TaskOpen { task } => return cx.update(|cx| open_task(task, solicited, cx)),
-        GatedCommand::FlowResume { run } => {
-            return cx.update(|cx| {
-                flow_resume::resume(flow_resume::target(&run, cx)?, origin, solicited, cx)
-            });
-        }
+        // Never asked as a command: `approval_summary` resolves every resume
+        // into `Asked::FlowResume` before the card.
+        GatedCommand::FlowResume { .. } => return Err(ControlError::FlowRunNotFound),
         GatedCommand::ChatNew { lane, agent } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {

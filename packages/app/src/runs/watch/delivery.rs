@@ -129,19 +129,18 @@ impl RunWatch {
                 }
             }
         }
-        // Once per key, after the whole batch: a report names the newest
-        // recorded end, which covers every earlier one of the key.
+        // Each recorded end is reported by its own episode; once per key,
+        // after the whole batch, a run with nothing left owed is released.
         for receipt in reported {
-            let floor = self.floor(&receipt.key);
-            let current = receipt.newest_sequence >= floor;
-            let entry = self.entry(&receipt.key);
-            if current {
+            for episode in &receipt.recorded {
+                self.ledger.reported(&receipt.key, *episode);
+            }
+            if receipt.newest_sequence >= self.floor(&receipt.key) {
+                let entry = self.entry(&receipt.key);
                 entry.end = entry.end.reported();
             }
-            // A Task's flow interruption leaves its own end still to come.
-            let settled = current && !matches!(entry.end, EndState::Interrupted { .. });
-            if let Some(episode) = receipt.newest_recorded {
-                self.ledger.reported(&receipt.key, episode, settled);
+            if !receipt.recorded.is_empty() && self.settled(&receipt.key) {
+                self.ledger.settled(&receipt.key);
             }
         }
         // A closed block or a terminal supersedes only an unreported blocked episode.
@@ -325,11 +324,28 @@ impl RunWatch {
         Some(answer)
     }
 }
+impl RunWatch {
+    /// Whether the key's run is over, its end handed to an agent, and no end
+    /// it recorded is still waiting for a receipt. A Task's flow
+    /// interruption leaves the Task's own end still to come.
+    fn settled(&self, key: &RunKey) -> bool {
+        self.entries
+            .get(key)
+            .is_some_and(|entry| entry.end == EndState::Reported)
+            && !self.events.iter().any(|event| {
+                &event.snapshot.key == key
+                    && event.recorded.is_some()
+                    && event.delivery != Delivery::Reported
+            })
+    }
+}
+
 /// The ends one receipt confirmed for a key.
 struct Receipt {
     key: RunKey,
     newest_sequence: u64,
-    newest_recorded: Option<u64>,
+    /// The ledger episodes of the recorded ends it handed over.
+    recorded: Vec<u64>,
 }
 
 impl Receipt {
@@ -338,12 +354,12 @@ impl Receipt {
         match receipts.iter_mut().find(|receipt| &receipt.key == key) {
             Some(receipt) => {
                 receipt.newest_sequence = receipt.newest_sequence.max(event.sequence);
-                receipt.newest_recorded = receipt.newest_recorded.max(event.recorded);
+                receipt.recorded.extend(event.recorded);
             }
             None => receipts.push(Self {
                 key: key.clone(),
                 newest_sequence: event.sequence,
-                newest_recorded: event.recorded,
+                recorded: event.recorded.into_iter().collect(),
             }),
         }
     }

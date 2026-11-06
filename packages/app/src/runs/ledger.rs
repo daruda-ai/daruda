@@ -66,8 +66,13 @@ pub(crate) enum RestoredEnd {
         snapshot: RunSnapshot,
     },
     /// Its latest end was handed to an agent; kept only to stay in scope:
-    /// a Task's flow interruption, or any Task the log cannot judge.
+    /// an end still owed, a Task's flow interruption, or any Task the log
+    /// cannot judge.
     Reported(RunSnapshot),
+    /// Open, but no read in this process can judge it (an unreadable task
+    /// log): it stays owned for a later one, and only what it owes is
+    /// delivered. The snapshot says its state is unknown.
+    Unjudged(RunSnapshot),
 }
 
 impl Ledger {
@@ -90,12 +95,12 @@ impl Ledger {
         }
     }
 
-    /// Turn replayed entries into what the watch restores. A reported latest
-    /// end means its release never landed, so the entry is released now unless
-    /// it is a Task's flow interruption whose execution the log still holds:
-    /// the Task's own end is still to come. A task whose execution is gone
-    /// with nothing to deliver is released too. Without `book` (an unreadable
-    /// task log) no task entry is judged.
+    /// Turn replayed entries into what the watch restores. A reported end
+    /// owing nothing means its release never landed: released now, unless a
+    /// Task's flow interruption whose execution the log holds (its own end is
+    /// still to come). A task gone with nothing to deliver is released too.
+    /// Without `book` (an unreadable task log) no task entry is judged; an
+    /// open one is restored only for the end it owes.
     pub(crate) fn restore(
         &mut self,
         entries: Vec<RunLedgerEntry>,
@@ -114,9 +119,10 @@ impl Ledger {
                     episode: end.episode,
                     snapshot: snapshot_of(key.clone(), &end.end),
                 },
-                EntryState::Reported { end } => {
+                EntryState::Reported { end, .. } => {
                     let snapshot = snapshot_of(key.clone(), &end.end);
                     match (&key, book) {
+                        _ if owed.is_some() => RestoredEnd::Reported(snapshot),
                         (RunKey::Task(_), None) => RestoredEnd::Reported(snapshot),
                         (RunKey::Task(exec), Some(book))
                             if is_interruption(&snapshot) && holds(book, exec) =>
@@ -130,7 +136,15 @@ impl Ledger {
                     }
                 }
                 EntryState::Open { since_ms, .. } => match (&key, book) {
-                    (RunKey::Task(_), None) => continue,
+                    (RunKey::Task(_), None) => match &owed {
+                        Some(owed) => RestoredEnd::Unjudged(RunSnapshot {
+                            key: key.clone(),
+                            what: owed.snapshot.what.clone(),
+                            why: None,
+                            state: RunState::Unknown,
+                        }),
+                        None => continue,
+                    },
                     (RunKey::Task(exec), Some(book)) if !holds(book, exec) && owed.is_none() => {
                         self.release(&entry.key, ReleaseReason::Expired);
                         continue;
@@ -216,18 +230,18 @@ impl Ledger {
         }
     }
 
-    /// An agent received `episode` and every earlier end of the key. When
-    /// that settled the run, the entry has nothing left to deliver and is
-    /// released with it.
-    pub(super) fn reported(&mut self, key: &RunKey, episode: u64, settled: bool) {
-        let key = ledger_key(key);
+    /// An agent received the recorded end numbered `episode`.
+    pub(super) fn reported(&mut self, key: &RunKey, episode: u64) {
         self.record(RunLedgerEvent::Reported {
-            key: key.clone(),
+            key: ledger_key(key),
             episode,
         });
-        if settled {
-            self.release(&key, ReleaseReason::Reported);
-        }
+    }
+
+    /// Every recorded end of the run was handed to an agent and its run is
+    /// over: nothing is left to deliver.
+    pub(super) fn settled(&mut self, key: &RunKey) {
+        self.release(&ledger_key(key), ReleaseReason::Reported);
     }
 
     /// The run is gone with nothing delivered: no later process can either.

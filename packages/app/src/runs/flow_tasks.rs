@@ -103,20 +103,36 @@ pub(super) fn task_end(
     })
 }
 
+/// The flow run a task's current execution runs as.
+pub(crate) struct TaskFlowRun {
+    pub(crate) run_id: String,
+    pub(crate) run_dir: PathBuf,
+    /// Whether the task still runs: only then does a resume of its run
+    /// settle it, so only then is the run the task's to resume.
+    pub(crate) running: bool,
+}
+
 impl RunsHost {
-    /// The task execution whose current run is flow run `run_id`.
-    pub(crate) fn task_of_flow_run(run_id: &str, cx: &App) -> Option<ExecutionRef> {
+    /// The running task execution whose current run is flow run `run_id`. A
+    /// task that ended no longer answers for its run.
+    pub(crate) fn running_task_of_flow_run(run_id: &str, cx: &App) -> Option<ExecutionRef> {
         let tasks = cx.try_global::<GlobalTasks>()?;
-        task_of_run_id(run_id, tasks.book()).map(|(exec, _)| exec)
+        match task_of_run_id(run_id, tasks.book())? {
+            (exec, Lifecycle::Running { .. }) => Some(exec),
+            _ => None,
+        }
     }
 
     /// The flow run `exec` runs as, while it is its task's current execution.
-    pub(crate) fn flow_run_of_task(exec: &ExecutionRef, cx: &App) -> Option<String> {
-        let tasks = cx.try_global::<GlobalTasks>()?;
-        exec.resolve(tasks.book())?
-            .source
-            .flow_run_id()
-            .map(str::to_owned)
+    pub(crate) fn flow_run_of_task(exec: &ExecutionRef, cx: &App) -> Option<TaskFlowRun> {
+        let book = cx.try_global::<GlobalTasks>()?.book();
+        let run = exec.resolve(book)?;
+        let record = book.get(&exec.task_id)?;
+        Some(TaskFlowRun {
+            run_id: run.source.flow_run_id()?.to_owned(),
+            run_dir: task_run_dir(run)?,
+            running: matches!(record.lifecycle, Lifecycle::Running { .. }),
+        })
     }
 
     /// The run in `run_dir` recorded its start: a task waiting on it is now

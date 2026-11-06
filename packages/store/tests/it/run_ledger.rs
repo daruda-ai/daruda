@@ -121,6 +121,10 @@ fn assert_ends_in_order(state: &RunLedgerState) {
             EntryState::Unreported {
                 end,
                 owed: Some(owed),
+            }
+            | EntryState::Reported {
+                end,
+                owed: Some(owed),
             },
             key,
         ) = (&entry.state, &entry.key)
@@ -162,7 +166,7 @@ fn owning_ending_and_reporting_one_run_walks_its_entry_to_release() {
 }
 
 /// A resume opens the entry again; the end it had not delivered stays owed
-/// beside the resumed run, and a report of the newer end covers both.
+/// beside the resumed run, and a report marks only the end it names.
 #[test]
 fn a_reopened_run_keeps_its_unreported_end_owed() {
     let key = flow("f");
@@ -196,15 +200,148 @@ fn a_reopened_run_keeps_its_unreported_end_owed() {
 
     events.push(reported(key.clone(), 1));
     let state = replay(&events);
+    let entry = state.get(&key).unwrap();
     assert!(
-        matches!(&state.get(&key).unwrap().state, EntryState::Reported { end } if end.episode == 1),
-        "the newer report covers the owed end too"
+        matches!(
+            &entry.state,
+            EntryState::Reported { end, owed: Some(owed) } if end.episode == 1 && owed.episode == 0
+        ),
+        "the newer report leaves the owed end owed: {entry:?}"
     );
+    assert_eq!(entry.unreported().unwrap().episode, 0);
+    assert_eq!(held(&state, u64::MAX), ["f"], "an owed end keeps its hold");
+
+    let mut resumed = events.clone();
+    resumed.push(reopened(key.clone()));
+    assert!(matches!(
+        &replay(&resumed).get(&key).unwrap().state,
+        EntryState::Open { owed: Some(owed), .. } if owed.episode == 0
+    ));
+    resumed.push(ended(key.clone(), 2));
+    assert!(matches!(
+        &replay(&resumed).get(&key).unwrap().state,
+        EntryState::Unreported { end, owed: Some(owed) } if end.episode == 2 && owed.episode == 0
+    ));
+
+    events.push(reported(key.clone(), 0));
+    let state = replay(&events);
+    assert!(matches!(
+        &state.get(&key).unwrap().state,
+        EntryState::Reported { end, owed: None } if end.episode == 1
+    ));
+    assert!(state.get(&key).unwrap().unreported().is_none());
     events.push(reopened(key.clone()));
     assert!(matches!(
         replay(&events).get(&key).unwrap().state,
         EntryState::Open { owed: None, .. }
     ));
+}
+
+/// The cap evicts only what an open run owes: the run stays owned, and its
+/// directory held, while it runs.
+#[test]
+fn an_eviction_drops_only_the_owed_end_of_an_open_run() {
+    let open = flow("open");
+    let mut events = vec![
+        owned(open.clone(), true),
+        ended(open.clone(), 0),
+        reopened(open.clone()),
+    ];
+    for n in 1..=UNREPORTED_MAX as u64 {
+        events.push(ended(task(&n.to_string()), n));
+    }
+    let state = replay(&events);
+    let entry = state.get(&open).expect("the open run stays owned");
+    assert!(
+        matches!(entry.state, EntryState::Open { owed: None, .. }),
+        "{entry:?}"
+    );
+    assert!(entry.solicited);
+    assert!(held(&state, u64::MAX).contains(&"open".to_owned()));
+
+    let dir = tempfile::tempdir().unwrap();
+    let (store, _) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+    for event in &events {
+        store.record(event.clone());
+    }
+    store.flush(Duration::from_secs(5)).unwrap();
+    let answered = store.take_answered();
+    assert!(answered.failure.is_none() && answered.rejected.is_none());
+    assert_eq!(answered.evicted, vec![open.clone()], "counted as evicted");
+    drop(store);
+    let (_, reopened) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+    assert_eq!(reopened, state);
+}
+
+/// A log written before resumes were modelled (schema 2: `Owned` without a
+/// time) replays into today's entry states.
+#[test]
+fn a_schema_2_log_replays_into_the_current_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let flow_f = r#"{"kind":"flow","run_id":"f"}"#;
+    let flow_g = r#"{"kind":"flow","run_id":"g"}"#;
+    let task_t = r#"{"kind":"task","task_id":"t","execution_id":"e1"}"#;
+    let end = r#"{"what":"work","why":"because","ended_as":"completed","text":"answer","pointers":{"run_dir":"/run","report":null,"outputs":[],"chat":null,"transcript":null}}"#;
+    let events = [
+        format!(
+            r#"{{"kind":"owned","key":{flow_f},"solicited":true,"location":{{"run_dir":"/tree/f","lock_dir":null}}}}"#
+        ),
+        format!(
+            r#"{{"kind":"ended","key":{flow_f},"solicited":true,"episode":0,"end":{end},"evicts":[],"ended_at_ms":5}}"#
+        ),
+        format!(r#"{{"kind":"reported","key":{flow_f},"episode":0}}"#),
+        format!(r#"{{"kind":"released","key":{flow_f},"reason":"reported"}}"#),
+        format!(r#"{{"kind":"owned","key":{task_t},"solicited":false,"location":null}}"#),
+        format!(
+            r#"{{"kind":"ended","key":{task_t},"solicited":false,"episode":1,"end":{end},"evicts":[],"ended_at_ms":6}}"#
+        ),
+        format!(r#"{{"kind":"owned","key":{flow_g},"solicited":true}}"#),
+    ];
+    let mut lines = vec![
+        r#"{"v":1,"seq":1,"at_ms":0,"kind":"opened","epoch":1,"build":"old","schema":2}"#
+            .to_owned(),
+    ];
+    for (n, event) in events.iter().enumerate() {
+        lines.push(format!(
+            r#"{{"v":1,"seq":{},"at_ms":{n},"kind":"event","event":{event}}}"#,
+            n + 2
+        ));
+    }
+    let log = daruda_runlog::FileBackend::new(dir.path()).log_path(0);
+    std::fs::write(&log, lines.join("\n") + "\n").unwrap();
+
+    let (_store, state) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+    let expected = replay(&[
+        RunLedgerEvent::Owned {
+            key: flow("f"),
+            solicited: true,
+            location: Some(RunLocation {
+                run_dir: "/tree/f".into(),
+                lock_dir: None,
+            }),
+            at_ms: None,
+        },
+        ended_at(flow("f"), 0, 5),
+        reported(flow("f"), 0),
+        released(flow("f"), ReleaseReason::Reported),
+        owned(task("t"), false),
+        ended_at(task("t"), 1, 6),
+        owned(flow("g"), true),
+    ]);
+    assert_eq!(state, expected);
+    assert!(state.get(&flow("f")).is_none());
+    assert_eq!(
+        state.get(&task("t")).unwrap().unreported().unwrap().episode,
+        1
+    );
+    assert!(matches!(
+        state.get(&flow("g")).unwrap().state,
+        EntryState::Open {
+            owed: None,
+            since_ms: None
+        }
+    ));
+    assert_eq!(state.next_episode(), 2);
 }
 
 #[test]

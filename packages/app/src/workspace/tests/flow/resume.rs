@@ -643,8 +643,25 @@ async fn a_desktop_resume_while_the_card_waits_is_not_resumed_twice(cx: &mut Tes
 async fn interrupted_task_run(
     cx: &mut TestAppContext,
 ) -> (Interrupted, daruda_store::tasks::ExecutionRef) {
-    use crate::runs::seed::{self, SeedEnd, SeedRun};
-    let run = interrupted_run(CommandOrigin::Phone, "first", cx).await;
+    let (run, exec) = task_run_as(CommandOrigin::Phone, SeedEnd::Running, cx).await;
+    cx.update(|cx| RunsHost::register_run(RunKey::Task(exec.clone()), cx));
+    cx.update(|cx| {
+        assert!(!RunsHost::run_scope(cx).contains(&RunKey::Flow(run.run_id.clone())));
+    });
+    (run, exec)
+}
+
+use crate::runs::seed::SeedEnd;
+
+/// A crashed run started by `origin` whose Task's execution stands at `end`;
+/// the Task's key is not put in the scope.
+async fn task_run_as(
+    origin: CommandOrigin,
+    end: SeedEnd,
+    cx: &mut TestAppContext,
+) -> (Interrupted, daruda_store::tasks::ExecutionRef) {
+    use crate::runs::seed::{self, SeedRun};
+    let run = interrupted_run(origin, "first", cx).await;
     let exec = run.ws.update(cx, |ws, cx| {
         let seeded = SeedRun {
             source: daruda_store::tasks::TaskExecutionSource::Flow {
@@ -655,15 +672,10 @@ async fn interrupted_task_run(
         };
         let task = seed::task(
             seed::spec(ws.projects[0].uuid, "Ship"),
-            Some((&seeded, SeedEnd::Running)),
+            Some((&seeded, end)),
             cx,
         );
-        let exec = seeded.exec(&task);
-        RunsHost::register_run(RunKey::Task(exec.clone()), cx);
-        exec
-    });
-    cx.update(|cx| {
-        assert!(!RunsHost::run_scope(cx).contains(&RunKey::Flow(run.run_id.clone())));
+        seeded.exec(&task)
     });
     (run, exec)
 }
@@ -770,4 +782,137 @@ async fn a_tasks_flow_handle_resumes_it_as_the_tasks(cx: &mut TestAppContext) {
     cx.update(|cx| {
         assert!(!RunsHost::run_scope(cx).contains(&RunKey::Flow(run.run_id.clone())));
     });
+}
+
+/// Unreported ends of `key` that completed.
+fn completed_ends(key: &RunKey, cx: &mut TestAppContext) -> usize {
+    cx.update(|cx| {
+        RunsHost::unreported_run_events(cx)
+            .iter()
+            .filter(|event| {
+                &event.snapshot.key == key
+                    && matches!(
+                        event.snapshot.state,
+                        RunState::Ended {
+                            ended_as: EndedAs::Completed,
+                            ..
+                        }
+                    )
+            })
+            .count()
+    })
+}
+
+/// A Task that ended after its flow crashed no longer owns the run: its
+/// handle is refused, and the flow's handle resumes the run under the flow's
+/// own key, so the resumed end is delivered.
+#[gpui::test]
+async fn a_finished_tasks_crashed_flow_resumes_under_the_flows_handle(cx: &mut TestAppContext) {
+    let (run, exec) = task_run_as(CommandOrigin::Phone, SeedEnd::Cancelled, cx).await;
+    cx.update(|cx| RunsHost::register_run(RunKey::Task(exec.clone()), cx));
+    let refused = refused_before_the_card(
+        GatedCommand::FlowResume {
+            run: task_handle(&exec),
+        },
+        cx,
+    );
+    assert!(
+        matches!(
+            refused,
+            ControlError::FlowRunNotResumable {
+                reason: NotResumableReason::Ended,
+                ..
+            }
+        ),
+        "{refused:?}"
+    );
+    let outcome =
+        deferred(cx.update(|cx| exec::run_gated(run.resume(), CommandOrigin::Orchestrator, cx)));
+    let ControlResult::FlowResuming { handle, .. } = approved(outcome, cx).await else {
+        panic!("not a resume");
+    };
+    assert_eq!(handle, run.handle());
+    let flow = RunKey::Flow(run.run_id.clone());
+    assert!(
+        wait_for_run(cx, |cx| completed_ends(&flow, cx) == 1).await,
+        "the resumed run's end was never delivered"
+    );
+    cx.update(|cx| assert!(RunsHost::run_scope(cx).contains(&flow)));
+}
+
+/// A Task's handle for a run the orchestrator already holds by the flow's
+/// handle keeps that one key: the Task's never joins the scope.
+#[gpui::test]
+async fn a_tasks_handle_resumes_under_the_flow_key_already_held(cx: &mut TestAppContext) {
+    let (run, exec) = task_run_as(CommandOrigin::Orchestrator, SeedEnd::Running, cx).await;
+    let flow = RunKey::Flow(run.run_id.clone());
+    let task = RunKey::Task(exec.clone());
+    cx.update(|cx| {
+        let scope = RunsHost::run_scope(cx);
+        assert!(scope.contains(&flow) && !scope.contains(&task), "{scope:?}");
+    });
+    let before = completed_ends(&flow, cx);
+    let command = GatedCommand::FlowResume {
+        run: task_handle(&exec),
+    };
+    let outcome =
+        deferred(cx.update(|cx| exec::run_gated(command, CommandOrigin::Orchestrator, cx)));
+    let ControlResult::FlowResuming { handle, .. } = approved(outcome, cx).await else {
+        panic!("not a resume");
+    };
+    assert_eq!(handle, run.handle(), "the key already held");
+    assert!(
+        wait_for_run(cx, |cx| completed_ends(&flow, cx) == before + 1).await,
+        "the resumed run's end was never delivered"
+    );
+    cx.update(|cx| {
+        assert!(!RunsHost::run_scope(cx).contains(&task), "one key per run");
+        assert!(
+            RunsHost::unreported_run_events(cx)
+                .iter()
+                .all(|event| event.snapshot.key != task)
+        );
+    });
+}
+
+/// The card asked about one execution's run; a Task that stopped running
+/// while it waited is not resumed as that Task afterwards.
+#[gpui::test]
+async fn a_task_that_ended_while_the_card_waited_is_not_resumed(cx: &mut TestAppContext) {
+    let (run, exec) = interrupted_task_run(cx).await;
+    let command = GatedCommand::FlowResume {
+        run: RunHandle::TaskLatest {
+            task_id: exec.task_id.clone(),
+        },
+    };
+    let outcome =
+        deferred(cx.update(|cx| exec::run_gated(command, CommandOrigin::Orchestrator, cx)));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        crate::runs::seed::commit_now(
+            vec![daruda_store::tasks::TaskEvent::CancelRequested {
+                exec: exec.clone(),
+                at: chrono::Utc::now(),
+            }],
+            cx,
+        );
+        resolve_only_pending_for_test(ApprovalChoice::Approved, cx);
+    });
+    cx.run_until_parked();
+    let answered = outcome.recv().await.expect("answered");
+    assert!(
+        matches!(
+            answered,
+            Some(Err(ControlError::FlowRunNotResumable {
+                reason: NotResumableReason::Ended,
+                ..
+            }))
+        ),
+        "{answered:?}"
+    );
+    assert_eq!(
+        (run.lines("first.log"), run.lines("second.log")),
+        (1, 1),
+        "nothing ran again"
+    );
 }

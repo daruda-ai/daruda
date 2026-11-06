@@ -83,6 +83,8 @@ impl RunWatch {
         let entry = self.entry(&run.key);
         match run.end {
             RestoredEnd::Open => {}
+            // Known, so no startup read judges it and no wait waits on it.
+            RestoredEnd::Unjudged(snapshot) => entry.snapshot = Some(snapshot),
             RestoredEnd::Reported(snapshot) => {
                 entry.end = if is_interruption(&snapshot) {
                     EndState::Interrupted { reported: true }

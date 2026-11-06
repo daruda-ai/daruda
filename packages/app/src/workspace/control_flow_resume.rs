@@ -10,9 +10,7 @@ use gpui::{App, Context};
 
 use crate::control::result::{ControlError, FlowNotStartedReason, LaneHandle, NotResumableReason};
 use crate::workspace::Workspace;
-use crate::workspace::flow_ops::FlowStartRefused;
 use crate::workspace::flow_paths;
-use crate::workspace::flow_request::FlowSubmitError;
 use daruda_control_types::runs::RunHandle;
 use daruda_flow::marker::RunStatus;
 use daruda_flow::resume::ResumeError;
@@ -59,6 +57,26 @@ impl Workspace {
         run_dir: &Path,
         cx: &App,
     ) -> Result<FlowResumePlan, ControlError> {
+        let (name, resumed) = self.read_resumable(lane, run_dir, cx)?;
+        let selected = match &resumed.until {
+            Some(until) => resumed.loaded.graph().ancestors(until).len() + 1,
+            None => resumed.loaded.flow().nodes.len(),
+        };
+        Ok(FlowResumePlan {
+            name,
+            passed: resumed.passed.len().min(selected),
+            total: selected,
+        })
+    }
+
+    /// [`Self::control_flow_resume_check`]'s checks, answering the run's
+    /// name and what `resume::prepare` read of it.
+    fn read_resumable(
+        &self,
+        lane: LaneRef,
+        run_dir: &Path,
+        cx: &App,
+    ) -> Result<(String, daruda_flow::resume::Resumed), ControlError> {
         let cwd = self
             .lane_for(lane)
             .map(|lane| lane.path.clone())
@@ -91,20 +109,12 @@ impl Workspace {
         let is_alive: fn(u32) -> bool = crate::workspace::flow_request::process_is_alive;
         let resumed = daruda_flow::resume::prepare(run_dir, lock_dir.as_deref(), &is_alive)
             .map_err(|error| resume_refusal(name.clone(), error))?;
-        let selected = match &resumed.until {
-            Some(until) => resumed.loaded.graph().ancestors(until).len() + 1,
-            None => resumed.loaded.flow().nodes.len(),
-        };
-        Ok(FlowResumePlan {
-            name,
-            passed: resumed.passed.len().min(selected),
-            total: selected,
-        })
+        Ok((name, resumed))
     }
 
     /// Resume the run in `run_dir` for `submitter`, the way the Flows panel
     /// does, after checking it again: the card may have waited while the
-    /// worktree changed.
+    /// worktree changed. That one read is what the resume is built from.
     pub(crate) fn control_flow_resume(
         &mut self,
         lane: LaneRef,
@@ -112,12 +122,9 @@ impl Workspace {
         submitter: (daruda_flow::request::StartedBy, bool),
         cx: &mut Context<Self>,
     ) -> Result<FlowResumed, ControlError> {
-        let FlowResumePlan { name, .. } = self.control_flow_resume_check(lane, run_dir, cx)?;
-        let run_id = match self.submit_flow_resume(lane, run_dir, submitter, cx) {
+        let (name, resumed) = self.read_resumable(lane, run_dir, cx)?;
+        let run_id = match self.submit_read_flow_resume(lane, run_dir, resumed, submitter, cx) {
             Ok(run_id) => run_id,
-            Err(FlowStartRefused::Submit(FlowSubmitError::Resume(error))) => {
-                return Err(resume_refusal(name, error));
-            }
             Err(refused) => {
                 let held_by = self
                     .lane_for(lane)

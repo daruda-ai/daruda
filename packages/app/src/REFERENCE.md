@@ -317,15 +317,21 @@ gate-token rotation. Each end or waiting episode has a `(RunKey, sequence)` iden
 The run ledger (`daruda_store::run_ledger`, `<data_dir>/run-ledger/`, written
 through `runs/ledger.rs`) keeps that scope and its unreported ends across a
 restart. Each entry is `Open { owed }` (running), `Unreported { end, owed }` or
-`Reported { end }`; `owed` is the newest end from before the run resumed that
-no agent was handed, so a report can never precede its end. The watch queues
-`Owned` when a key joins the scope, `Reopened` when a scoped run resumes (an
-unreported end becomes `owed`), `Ended` with a ledger-wide episode for each
-scoped end (again when its text is read), and, once per key after a socket
-receipt, one `Reported` naming the newest end it confirmed, which covers every
-earlier one, followed by `Released` when that settled the key's current run.
-A report of an episode the key no longer has (released, evicted or resumed
-past) is a stale no-op; only one no end has used is refused. In-flight
+`Reported { end, owed }`; `owed` is the newest earlier end (from before the run
+resumed) that no agent was handed, so a report can never precede its end. The
+watch queues `Owned` when a key joins the scope, `Reopened` when a scoped run
+resumes (an unreported end becomes `owed`), `Ended` with a ledger-wide episode
+for each scoped end (again when its text is read), and, after a socket
+receipt, one `Reported` per recorded end it handed over. A report marks only
+the end with its episode, current or owed, so an explicit wait that took a
+run's newer end leaves the owed one owed. Once per key after the receipt,
+`Released` follows only when the key's current end was reported, it is not a
+Task's flow interruption, and none of its recorded ends is still unreported or
+in flight. A report of an episode the key no longer has (released, evicted or
+resumed past) is a stale no-op; only one no end has used is refused. Logs
+written before reports were per end (schema 3 and older) replay the same way,
+so an end an older build reported as covered stays owed and is delivered once
+more after an upgrade. In-flight
 reservations are never written, so a result whose receipt never came is
 unreported after a restart. Writes are queued without waiting and flushed at
 quit; open or write failures leave delivery memory-only with one deduplicated
@@ -334,14 +340,16 @@ force. A refused record is logged as an error (`run_ledger.rejected`) and the
 ledger keeps writing. The ledger compacts itself once its log passes the
 runlog's budget.
 At most 200 unreported ends are kept; a newer end evicts the oldest, and the
-`Ended` record names what it evicted. Each evicting commit logs one warning
+`Ended` record names what it evicted. Evicting an entry whose run is open, or
+whose current end was reported, drops only its owed end: the run stays owned
+and an open flow's directory stays held. Each evicting commit logs one warning
 (`run_ledger.evicted`) with counts by kind, never run ids. `Ended` carries the proposer's clock
 (`ended_at_ms`; a re-record keeps the first), so replay never reads one.
 Retention spares what the ledger still owes: `RunsHost::start_flow` fills
 `RunRequest::held_runs` from the committed ledger, and the engine's start sweep
 (`marker::sweep_old_runs`) neither deletes nor counts those run directories.
-A flow is held while it is owned with no end, or its latest end is unreported
-and under `DIRECTORY_HOLD` (7 days) old, judged against the clock at each
+A flow is held while it is owned with no end, or its newest unreported end is
+under `DIRECTORY_HOLD` (7 days) old, judged against the clock at each
 start; nothing is written when a hold lapses. A lapsed hold frees only the
 directory: the end stays in the ledger until reported, and a release
 or eviction ends the hold. A restored flow open longer than `DIRECTORY_HOLD`
@@ -353,11 +361,12 @@ carried Task takes it from there), and unreported ends, owed ones included,
 return as `Recovered` episodes, as do the ends task history adds for a restored
 or carried key, such as a carried Task startup reconciliation settled. A
 reopened entry is judged from disk like any open one. An entry whose latest end
-was already reported (a crash came before its `Released`) is released, unless
-it is a Task's flow interruption whose execution the log still holds: the
-Task's own end is still to come. A Task whose execution is gone with nothing to
-deliver is released too. When the task log cannot be read, no Task entry is
-judged or released. Recovered results carry
+was already reported with nothing owed (a crash came before its `Released`) is
+released, unless it is a Task's flow interruption whose execution the log still
+holds: the Task's own end is still to come. A Task whose execution is gone with
+nothing to deliver is released too. When the task log cannot be read, no Task
+entry is judged or released; an open Task that owes an end rejoins with that end
+as a `Recovered` episode and its run read as unknown, so no wait waits on it. Recovered results carry
 `recovered: true` in `daruda_run_wait`/`daruda_run_status` (per delivered
 episode, so a live end of the same key in one answer is not marked), and their
 notice line says they were requested before daruda restarted.
@@ -371,16 +380,24 @@ without a report, fixed English text naming how many nodes passed. Only an end
 no later episode superseded carries the hint (`RunEvent::resumable`): a crash
 still owed after a resume is delivered without it.
 `daruda_flow_resume` takes the handle of any result marked resumable: a flow's,
-or a Task's, which names the flow run its current execution runs as. The run
-keeps the handle its end arrives under: a flow handle whose run a scoped Task
-runs as answers with that Task's handle, and an orchestrator resume scopes only
-that owner key, so one run never ends under two keys. It finds the run through
+or a Task's, which names the flow run its current execution runs as. A Task
+owns the run only while it is `Running` (its flow was interrupted); a Task
+handle of a Task that ended is refused as `flow_run_not_resumable` with
+`ended`, and a flow handle then resumes under the flow's own key. One function
+picks the owner: a key already in the scope keeps the run (the running Task's
+first), otherwise the key the handle named; an orchestrator resume scopes only
+that owner, so one run never ends under two keys. The handle is resolved once,
+before the card, into the run and the execution it names (`TaskLatest` cannot
+name another execution after the card); after approval only that run's
+resumability and the Task's lifecycle are checked again, and the owner is
+picked against the scope as it then stands. It finds the run through
 `RunsHost::flow_location` (the watch's recorded location, else
 `RunsEffects::locate_flow_run`, the lookup result queries use) and the window
 whose lane keeps its directory. The run is read once before the card into the
 plan the card quotes (passed nodes come from `resume::prepare`'s replay; all
 passed has its own wording), and once more after approval, since the worktree
-can change while the card waits. Refusals no answer can change come before the
+can change while the card waits; that read is the one the resume request is
+built from. Refusals no answer can change come before the
 card: `flow_run_not_found`, `flow_locked` naming the holder (checked first,
 since another run's lock hides this run's status; a live holder of this same
 run is `running` instead), and `flow_run_not_resumable` with `running`,

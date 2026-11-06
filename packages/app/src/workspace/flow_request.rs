@@ -306,7 +306,7 @@ impl Workspace {
         run_dir: &Path,
         cx: &mut Context<Self>,
     ) -> Result<FlowSubmission, FlowSubmitError> {
-        let (cwd, tree) = self.lane_tree(lane_ref)?;
+        let (_, tree) = self.lane_tree(lane_ref)?;
         let is_alive: fn(u32) -> bool = process_is_alive;
         // Where this lane's lock lives, outside the tree. Told to look
         // anywhere else, `prepare` reads every run as `Unknown` — which is
@@ -314,7 +314,20 @@ impl Workspace {
         let lock_dir = daruda_flow::lock::lock_dir_for(&self.lock_root, &tree);
         let resumed = daruda_flow::resume::prepare(run_dir, Some(&lock_dir), &is_alive)
             .map_err(FlowSubmitError::Resume)?;
+        self.resume_request(lane_ref, run_dir, resumed, cx)
+    }
 
+    /// [`Self::build_resume_request`] for a run `resume::prepare` already
+    /// read, with the same liveness predicate, [`process_is_alive`].
+    pub(in crate::workspace) fn resume_request(
+        &mut self,
+        lane_ref: daruda_store::project::LaneRef,
+        run_dir: &Path,
+        resumed: daruda_flow::resume::Resumed,
+        cx: &mut Context<Self>,
+    ) -> Result<FlowSubmission, FlowSubmitError> {
+        let (cwd, tree) = self.lane_tree(lane_ref)?;
+        let is_alive: fn(u32) -> bool = process_is_alive;
         let catalog = self.flow_agent_catalog(
             lane_ref,
             &cwd,

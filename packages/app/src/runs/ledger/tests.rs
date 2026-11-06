@@ -1173,7 +1173,7 @@ fn a_refused_record_is_logged_and_the_ledger_keeps_writing() {
     let dir = tempfile::tempdir().unwrap();
     let (mut ledger, _) = Ledger::open(RunLedgerStore::in_directory(dir.path(), "test"));
     let key = RunKey::Flow("f".into());
-    ledger.reported(&key, 99, false);
+    ledger.reported(&key, 99);
     ledger.flush(Instant::now() + Duration::from_secs(5));
     assert!(matches!(ledger, Ledger::Writing { .. }));
     ledger.owned(&key, true, None);
@@ -1247,4 +1247,107 @@ fn an_unjudgeable_owned_flow_is_released_after_the_hold(cx: &mut TestAppContext)
             "released on disk"
         );
     });
+}
+
+/// An explicit wait takes only a run's current end. The end it owed from
+/// before its resume is still owed after a restart, and only its own report
+/// lets the run go.
+#[gpui::test]
+fn an_owed_end_outlives_a_report_of_the_newer_one_across_a_restart(cx: &mut TestAppContext) {
+    let dirs = Dirs::new();
+    let key = RunKey::Flow("f".into());
+    cx.update(|cx| {
+        dirs.start(cx);
+        RunsHost::register_run_solicited(key.clone(), true, cx);
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Crashed, "first")));
+        on_watch(cx, |w| w.begin(&key));
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Completed, "second")));
+        assert_eq!(whats(&report(Some(vec![key.clone()]), cx)), ["second"]);
+    });
+    cx.update(|cx| dirs.restart(cx));
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].snapshot.what, "first");
+        assert_eq!(pending[0].origin, Origin::Recovered);
+        assert_eq!(RunsHost::run_scope(cx), vec![key.clone()]);
+        assert_eq!(whats(&report(None, cx)), ["first"]);
+    });
+    cx.update(|cx| dirs.restart(cx));
+    cx.update(|cx| {
+        assert!(RunsHost::unreported_run_events(cx).is_empty());
+        assert!(
+            RunsHost::run_scope(cx).is_empty(),
+            "released once both were"
+        );
+    });
+}
+
+/// One receipt handing over an owed end and the newer one reports both and
+/// releases the run.
+#[gpui::test]
+fn one_receipt_for_an_owed_and_a_newer_end_releases_the_run(cx: &mut TestAppContext) {
+    let dirs = Dirs::new();
+    let key = RunKey::Flow("f".into());
+    cx.update(|cx| {
+        dirs.start(cx);
+        RunsHost::register_run_solicited(key.clone(), true, cx);
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Crashed, "first")));
+        on_watch(cx, |w| w.begin(&key));
+        on_watch(cx, |w| w.retain(end_of(&key, EndedAs::Completed, "second")));
+        assert_eq!(whats(&report(None, cx)), ["first", "second"]);
+        assert!(writing_after_flush(cx));
+    });
+    cx.update(|cx| dirs.restart(cx));
+    cx.update(|cx| {
+        assert!(RunsHost::unreported_run_events(cx).is_empty());
+        assert!(RunsHost::run_scope(cx).is_empty());
+    });
+}
+
+/// An unreadable task log cannot judge a resumed Task's run, but the end it
+/// owes from before the resume is still delivered, and the run stays owned.
+#[gpui::test]
+fn an_unreadable_task_log_still_delivers_a_resumed_tasks_owed_end(cx: &mut TestAppContext) {
+    let dirs = Dirs::new();
+    let key = cx.update(|cx| {
+        dirs.start(cx);
+        let key = ended_task("owed", cx);
+        RunsHost::register_run_solicited(key.clone(), true, cx);
+        on_watch(cx, |w| w.begin(&key));
+        RunsHost::quit_flush(Instant::now() + Duration::from_secs(5), cx);
+        drop(cx.remove_global::<RunsHost>());
+        drop(cx.remove_global::<GlobalTasks>());
+        let unreadable = Err(daruda_store::tasks::TaskStoreError::Io(
+            std::io::Error::other("unreadable"),
+        ));
+        let opened = RunsHost::open(unreadable)
+            .with_run_ledger(RunLedgerStore::in_directory(dirs.ledger.path(), "test"));
+        RunsHost::install(opened, cx);
+        key
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].snapshot.key, key);
+        assert_eq!(pending[0].origin, Origin::Recovered);
+        assert!(pending[0].solicited);
+        let answer = report(None, cx);
+        assert_eq!(
+            answer.ended.len(),
+            1,
+            "a wait is not held by the unjudged run"
+        );
+        assert_eq!(answer.outcome, WaitOutcome::Settled);
+        RunsHost::quit_flush(Instant::now() + Duration::from_secs(5), cx);
+        drop(cx.remove_global::<RunsHost>());
+        drop(cx.remove_global::<GlobalTasks>());
+    });
+    let (_, state) = RunLedgerStore::in_directory(dirs.ledger.path(), "test").unwrap();
+    let entry = state.get(&ledger_key(&key)).expect("the run stays owned");
+    assert!(
+        matches!(entry.state, EntryState::Open { owed: None, .. }),
+        "{entry:?}"
+    );
 }
