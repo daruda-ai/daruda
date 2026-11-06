@@ -80,7 +80,7 @@ pub(crate) fn run_command(
         // right after the reply no longer shows the task running.
         command::Resolution::StopTask(task) => {
             let started = crate::control::exec::run_waiting(
-                crate::control::spec::ResolvedCommand::TaskStop { task },
+                crate::control::spec::WaitingCommand::TaskStop { task },
                 crate::control::exec::CommandOrigin::Phone,
                 cx,
             );

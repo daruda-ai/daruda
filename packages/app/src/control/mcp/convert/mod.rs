@@ -16,7 +16,9 @@ use serde_json::Value;
 
 use crate::control::mcp::tools::ToolId;
 use crate::control::result::{ControlOutcome, LaneHandle};
-use crate::control::spec::{GatedCommand, NewTask, ResolvedCommand, ResolvedFlowCommand};
+use crate::control::spec::{
+    GatedCommand, NewTask, ResolvedCommand, ResolvedFlowCommand, WaitingCommand,
+};
 use crate::telegram::bridge::PaneRef;
 
 /// Why a call could not become a command. Reported as a tool error, not a
@@ -67,7 +69,7 @@ pub(crate) enum Command {
     /// Runs at once but answers later: the reply is the turn it starts, or
     /// the task change it writes. Not `Gated` — nobody is asked, so nothing
     /// is approved.
-    Waiting(ResolvedCommand),
+    Waiting(WaitingCommand),
     Gated(GatedCommand),
 }
 
@@ -125,7 +127,7 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
                 name: optional_string_arg(args, "name")?,
             }))
         }
-        ToolId::ChatAsk => Command::Waiting(ResolvedCommand::AskPane {
+        ToolId::ChatAsk => Command::Waiting(WaitingCommand::AskPane {
             target: pane_arg(args, "target")?,
             text: string_arg(args, "text")?,
         }),
@@ -149,7 +151,7 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
             agent: optional_string_arg(args, "agent")?,
         }),
         ToolId::TaskList => Command::Immediate(ResolvedCommand::TaskList),
-        ToolId::TaskStop => Command::Waiting(ResolvedCommand::TaskStop {
+        ToolId::TaskStop => Command::Waiting(WaitingCommand::TaskStop {
             task: string_arg(args, "task")?,
         }),
         ToolId::TaskCreate => Command::Gated(GatedCommand::TaskCreate {

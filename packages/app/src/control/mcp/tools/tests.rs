@@ -10,8 +10,8 @@ fn agents() -> Vec<daruda_config::AgentDefinition> {
 }
 
 #[test]
-fn twenty_one_tools_are_exposed() {
-    assert_eq!(ToolTable::all(&agents()).describe().len(), 21);
+fn every_row_is_described() {
+    assert_eq!(ToolTable::all(&agents()).describe().len(), TABLE.len());
 }
 
 #[test]
@@ -101,20 +101,68 @@ fn creation_tools_declare_that_they_need_approval() {
     }
 }
 
-/// The sentence and the gate are two statements of one fact, so they have
-/// to agree in both directions.
+/// The approval terms and the gate are two statements of one fact: the
+/// terms come from the gate, so no row writes its own.
 #[test]
 fn the_gate_and_the_description_agree() {
     for t in TABLE {
-        let advertises = t.description.to_lowercase().contains("approval");
+        assert!(
+            !t.description.to_lowercase().contains("approval"),
+            "{} writes approval terms of its own",
+            t.name
+        );
         assert_eq!(
-            advertises,
+            t.described().ends_with(APPROVAL_TERMS),
             t.gate == Gate::NeedsApproval,
-            "{} says {advertises} but is gated {:?}",
+            "{} is gated {:?}",
             t.name,
             t.gate
         );
     }
+}
+
+/// MCP sends a refusal's code, never its sentence, so what the model knows
+/// about a timed-out approval is what each gated tool's description says.
+#[test]
+fn a_gated_tool_tells_the_model_a_timeout_is_not_consent() {
+    for t in ToolTable::all(&agents()).describe() {
+        let name = t["name"].as_str().expect("name");
+        let gated = TABLE
+            .iter()
+            .any(|row| row.name == name && row.gate == Gate::NeedsApproval);
+        let description = t["description"].as_str().expect("description");
+        if gated {
+            assert!(
+                description.contains("silence is not consent"),
+                "{name}: {description}"
+            );
+            assert!(
+                description.contains("Do not retry or bypass"),
+                "{name}: {description}"
+            );
+        }
+    }
+}
+
+#[test]
+fn approval_tools_are_listed_in_table_order() {
+    assert_eq!(
+        approval_tool_names(),
+        "daruda_worktree_create, daruda_chat_new, daruda_flow_resume, daruda_task_create, \
+         daruda_task_start and daruda_task_open"
+    );
+}
+
+/// The cap the schema advertises is the one a wait applies.
+#[test]
+fn the_wait_schema_names_the_timeout_cap() {
+    let timeout = &run_wait_properties()["timeout"]["description"];
+    assert!(
+        timeout
+            .as_str()
+            .is_some_and(|text| text.contains(&RUN_WAIT_TIMEOUT_MAX.to_string())),
+        "{timeout}"
+    );
 }
 
 /// Only the tools that bring something into being are gated — a worktree, a

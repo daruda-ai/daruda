@@ -44,6 +44,19 @@ fn malformed_handles_are_rejected_including_serde() {
     }
 }
 
+/// A run id builds the handle its text would parse to, and one the grammar
+/// cannot carry builds none.
+#[test]
+fn a_flow_handle_from_a_run_id_matches_its_parsed_form() {
+    assert_eq!(
+        RunHandle::flow("1929fcd-a1-5"),
+        "flow:1929fcd-a1-5".parse::<RunHandle>()
+    );
+    for run_id in ["", "..", "a/b", "a:b"] {
+        assert!(RunHandle::flow(run_id).is_err(), "accepted {run_id:?}");
+    }
+}
+
 #[test]
 fn waiting_on_answer_round_trips_on_the_wire() {
     use daruda_control_types::runs::WaitingOn;

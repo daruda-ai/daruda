@@ -1,6 +1,6 @@
 //! Agent-facing pointer protocol, separate from localized desktop labels.
 use crate::runs::{
-    result::{EndedAs, RunKey, RunState, WaitingOn},
+    result::{EndedAs, RunState, WaitingOn},
     watch::{Origin, RunEvent},
 };
 
@@ -48,10 +48,7 @@ pub(super) fn prompt(events: &[RunEvent]) -> String {
         .take(LINES_MAX)
         .map(|event| {
             let snapshot = &event.snapshot;
-            let handle = match &snapshot.key {
-                RunKey::Flow(id) => format!("flow:{id}"),
-                RunKey::Task(exec) => format!("task:{}/{}", exec.task_id, exec.execution_id),
-            };
+            let handle = crate::control::mcp::runs::run_handle(snapshot.key.clone());
             let summary = match &snapshot.state {
                 RunState::Ended { ended_as, .. } => {
                     let resumable = if event.resumable() {
@@ -97,7 +94,7 @@ pub(super) fn prompt(events: &[RunEvent]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runs::result::RunSnapshot;
+    use crate::runs::result::{RunKey, RunSnapshot};
 
     fn event(id: &str, state: RunState) -> RunEvent {
         RunEvent::for_test(

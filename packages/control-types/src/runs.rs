@@ -40,14 +40,25 @@ fn valid_id(id: &str) -> bool {
             .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '/' | '\\' | ':'))
 }
 
+impl RunHandle {
+    /// A flow run's handle, refusing an id the handle grammar cannot carry.
+    pub fn flow(run_id: &str) -> Result<Self, InvalidRunHandle> {
+        if valid_id(run_id) {
+            Ok(Self::Flow {
+                run_id: run_id.into(),
+            })
+        } else {
+            Err(InvalidRunHandle)
+        }
+    }
+}
+
 impl FromStr for RunHandle {
     type Err = InvalidRunHandle;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if let Some(run_id) = value.strip_prefix("flow:").filter(|id| valid_id(id)) {
-            return Ok(Self::Flow {
-                run_id: run_id.into(),
-            });
+        if let Some(run_id) = value.strip_prefix("flow:") {
+            return Self::flow(run_id);
         }
         if let Some(task) = value.strip_prefix("task:") {
             return match task.split_once('/') {

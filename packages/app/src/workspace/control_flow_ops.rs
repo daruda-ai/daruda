@@ -261,7 +261,7 @@ impl Workspace {
     /// `daruda_flow_run` answered with.
     fn hosted_flow_handle_in(&self, lane: LaneRef, cx: &gpui::App) -> Option<RunHandle> {
         let run = self.flow_run_in(lane, cx)?;
-        flow_handle(run.view().run_dir().file_name()?.to_str()?)
+        RunHandle::flow(run.view().run_dir().file_name()?.to_str()?).ok()
     }
 
     /// The run holding `lane`'s worktree: one this process hosts, else the
@@ -273,8 +273,9 @@ impl Workspace {
         cx: &gpui::App,
     ) -> Option<RunHandle> {
         self.hosted_flow_handle_in(lane, cx).or_else(|| {
+            // An unreadable lock's empty run id names nothing.
             self.lane_holder(cwd)
-                .and_then(|holder| flow_handle(&holder.run_id))
+                .and_then(|holder| RunHandle::flow(&holder.run_id).ok())
         })
     }
 
@@ -298,12 +299,6 @@ impl Workspace {
             .into_iter()
             .find(|found| crate::workspace::flow_paths::names_flow(&found.path, name))
     }
-}
-
-/// A run id as the handle a control caller passes back; an id the handle
-/// grammar rejects (an unreadable lock's empty one) names nothing.
-fn flow_handle(run_id: &str) -> Option<RunHandle> {
-    format!("flow:{run_id}").parse().ok()
 }
 
 /// The inputs `path` declares, as a listing row names them.

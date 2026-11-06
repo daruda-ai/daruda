@@ -3,7 +3,7 @@ use daruda_control_types::agent_text::bound_agent_text;
 use daruda_core::text::char_prefix;
 use daruda_store::tasks::{ExecutionRef, Lifecycle, TaskExecution, TaskRecord};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum RunKey {
     Flow(String),
     Task(ExecutionRef),
@@ -21,16 +21,22 @@ pub(super) fn flow_run_id(run_dir: &std::path::Path) -> String {
         .to_string_lossy()
         .into_owned()
 }
-impl std::hash::Hash for RunKey {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::mem::discriminant(self).hash(state);
-        match self {
-            Self::Flow(id) => id.hash(state),
-            Self::Task(exec) => {
-                exec.task_id.hash(state);
-                exec.execution_id.hash(state);
+/// Flows before Tasks, each by id: a stable order for listing a scope.
+impl Ord for RunKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (Self::Flow(a), Self::Flow(b)) => a.cmp(b),
+            (Self::Task(a), Self::Task(b)) => {
+                (&a.task_id, &a.execution_id).cmp(&(&b.task_id, &b.execution_id))
             }
+            (Self::Flow(_), Self::Task(_)) => std::cmp::Ordering::Less,
+            (Self::Task(_), Self::Flow(_)) => std::cmp::Ordering::Greater,
         }
+    }
+}
+impl PartialOrd for RunKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -228,7 +234,13 @@ pub(super) fn flow_ended(
         RunEnd::Canceled { .. } => EndedAs::Canceled,
         RunEnd::BudgetExhausted { .. } => EndedAs::BudgetExhausted,
         RunEnd::Stalled { .. } => EndedAs::Stalled,
-        _ => EndedAs::Error,
+        RunEnd::Io { .. }
+        | RunEnd::LockHeld { .. }
+        | RunEnd::Invalid { .. }
+        | RunEnd::Unprovisioned { .. }
+        | RunEnd::ShutDown
+        | RunEnd::Log { .. }
+        | RunEnd::NotResumed { .. } => EndedAs::Error,
     };
     let text = match end {
         RunEnd::Io { message, .. }

@@ -177,3 +177,32 @@ fn review_regression_execution_description_is_frozen_at_dispatch() {
     assert_eq!(snapshot.what, "original");
     assert_eq!(snapshot.why.as_deref(), Some("original prompt"));
 }
+
+/// A scope lists flows before Tasks, each by id.
+#[test]
+fn run_keys_order_flows_first_then_by_id() {
+    let task = |task_id: &str, execution_id: &str| {
+        RunKey::Task(ExecutionRef {
+            task_id: task_id.into(),
+            execution_id: execution_id.into(),
+        })
+    };
+    let mut keys = vec![
+        task("b", "1"),
+        RunKey::Flow("z".into()),
+        task("a", "2"),
+        RunKey::Flow("a".into()),
+        task("a", "1"),
+    ];
+    keys.sort();
+    assert_eq!(
+        keys,
+        vec![
+            RunKey::Flow("a".into()),
+            RunKey::Flow("z".into()),
+            task("a", "1"),
+            task("a", "2"),
+            task("b", "1"),
+        ]
+    );
+}

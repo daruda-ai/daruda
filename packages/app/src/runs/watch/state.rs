@@ -45,6 +45,16 @@ impl EndState {
         matches!(self, Self::Reported | Self::Interrupted { reported: true })
     }
 
+    /// The state `snapshot`'s end leaves its episode in: a running Task's
+    /// flow interruption keeps its own, so the Task's end can follow it.
+    pub(super) fn of_end(snapshot: &RunSnapshot, reported: bool) -> Self {
+        match (is_interruption(snapshot), reported) {
+            (true, reported) => Self::Interrupted { reported },
+            (false, false) => Self::Ended,
+            (false, true) => Self::Reported,
+        }
+    }
+
     /// The state once the current episode's end is handed to an agent.
     pub(super) fn reported(self) -> Self {
         match self {
@@ -297,33 +307,48 @@ impl RunWatch {
                 || event.delivery != Delivery::Unreported
         });
     }
+    /// Queue an end or block this process saw. An observed-only run queues
+    /// nothing, and only a scoped one's episode is recorded in the ledger.
     fn push_event(&mut self, snapshot: RunSnapshot, origin: Origin) {
-        let Some(entry) = self.entries.get_mut(&snapshot.key) else {
+        let Some(entry) = self.entries.get(&snapshot.key) else {
             return;
         };
-        if entry.membership == Membership::Outside {
-            return;
-        }
-        entry.last_sequence += 1;
-        let sequence = entry.last_sequence;
-        if let RunState::Running {
-            waiting_on: Some(on),
-            ..
-        } = &snapshot.state
-        {
-            let block = entry.block.get_or_insert_with(|| Block {
-                on: on.clone(),
-                sequence: None,
-            });
+        let recorded = match entry.membership {
+            Membership::Outside => return,
+            Membership::Enrolled => None,
+            Membership::Scoped => self.ledger.ended(&snapshot, entry.solicited),
+        };
+        let blocked_on = match &snapshot.state {
+            RunState::Running {
+                waiting_on: Some(on),
+                ..
+            } => Some(on.clone()),
+            _ => None,
+        };
+        let key = snapshot.key.clone();
+        let sequence = self.queue_event(snapshot, origin, recorded);
+        if let Some(on) = blocked_on {
+            let block = self
+                .entry(&key)
+                .block
+                .get_or_insert(Block { on, sequence: None });
             block.sequence = Some(sequence);
         }
-        let recorded = if entry.membership == Membership::Scoped {
-            self.ledger.ended(&snapshot, entry.solicited)
-        } else {
-            None
-        };
+        self.wake();
+    }
+
+    /// Append `snapshot` as its key's next unreported event and announce it;
+    /// the event's sequence. Whether the key may queue one is the caller's.
+    pub(super) fn queue_event(
+        &mut self,
+        snapshot: RunSnapshot,
+        origin: Origin,
+        recorded: Option<u64>,
+    ) -> u64 {
+        let entry = self.entry(&snapshot.key);
+        entry.last_sequence += 1;
         let event = RunEvent {
-            sequence,
+            sequence: entry.last_sequence,
             solicited: entry.solicited,
             origin,
             episode: entry.episode,
@@ -332,9 +357,10 @@ impl RunWatch {
             delivery: Delivery::Unreported,
             superseded: false,
         };
+        let sequence = event.sequence;
         self.events.push(event.clone());
         self.announce(event);
-        self.wake();
+        sequence
     }
     /// Only scoped episodes can become notices; enrolled ones wait for their waiter.
     pub(super) fn announce(&self, event: RunEvent) {
@@ -489,6 +515,9 @@ impl RunWatch {
         self.events
             .retain(|event| &event.snapshot.key != key || event.delivery != Delivery::Unreported);
     }
+    pub(crate) fn in_scope(&self, key: &RunKey) -> bool {
+        self.membership(key) == Membership::Scoped
+    }
     pub(crate) fn scope(&self) -> Vec<RunKey> {
         let mut keys: Vec<_> = self
             .entries
@@ -496,10 +525,7 @@ impl RunWatch {
             .filter(|(_, entry)| entry.membership == Membership::Scoped)
             .map(|(key, _)| key.clone())
             .collect();
-        keys.sort_by_key(|key| match key {
-            RunKey::Flow(id) => format!("flow:{id}"),
-            RunKey::Task(exec) => format!("task:{}/{}", exec.task_id, exec.execution_id),
-        });
+        keys.sort();
         keys
     }
     pub(crate) fn get(&self, key: &RunKey) -> Option<&RunSnapshot> {
@@ -529,15 +555,26 @@ impl RunWatch {
         {
             *current_text = Some(text.clone());
         }
+        self.write_unreported_text(&snapshot.key, &text, |event| event.sequence >= floor);
+    }
+
+    /// Give `key`'s unreported ends that `takes` accepts `text`, and record
+    /// each again so a restart delivers it with that text.
+    fn write_unreported_text(
+        &mut self,
+        key: &RunKey,
+        text: &str,
+        takes: impl Fn(&RunEvent) -> bool,
+    ) {
         for event in &mut self.events {
-            if event.snapshot.key == snapshot.key
+            if &event.snapshot.key == key
                 && event.delivery == Delivery::Unreported
-                && event.sequence >= floor
+                && takes(event)
                 && let RunState::Ended {
                     text: current_text, ..
                 } = &mut event.snapshot.state
             {
-                *current_text = Some(text.clone());
+                *current_text = Some(text.to_owned());
                 if let Some(episode) = event.recorded {
                     self.ledger
                         .rerecord(episode, &event.snapshot, event.solicited);
@@ -575,11 +612,7 @@ impl RunWatch {
         if ended {
             let first = matches!(entry.end, EndState::Open | EndState::Held);
             if first {
-                entry.end = if interruption {
-                    EndState::Interrupted { reported: false }
-                } else {
-                    EndState::Ended
-                };
+                entry.end = EndState::of_end(&snapshot, false);
             }
             self.clear_waiting(&snapshot.key);
             if first {
@@ -655,7 +688,8 @@ impl RunWatch {
         self.wake();
     }
 
-    /// Give an earlier episode's still-unreported end the text read for it.
+    /// Give an earlier episode's still-unreported end the text read for it,
+    /// unless that end already has text.
     fn enrich_closed(&mut self, held: HeldEnd, enriched: RunSnapshot) {
         let RunState::Ended {
             text: Some(text), ..
@@ -663,22 +697,10 @@ impl RunWatch {
         else {
             return;
         };
-        for event in &mut self.events {
-            if event.snapshot.key == enriched.key
-                && event.delivery == Delivery::Unreported
-                && event.episode == held.episode
-                && let RunState::Ended {
-                    text: current @ None,
-                    ..
-                } = &mut event.snapshot.state
-            {
-                *current = Some(text.clone());
-                if let Some(episode) = event.recorded {
-                    self.ledger
-                        .rerecord(episode, &event.snapshot, event.solicited);
-                }
-            }
-        }
+        self.write_unreported_text(&held.key, &text, |event| {
+            event.episode == held.episode
+                && matches!(event.snapshot.state, RunState::Ended { text: None, .. })
+        });
     }
 }
 #[cfg(test)]

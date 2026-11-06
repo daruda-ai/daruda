@@ -189,9 +189,8 @@ fn flow_settlement(
         .flatten()
         .and_then(|inspection| inspection.end);
     if let Some(end) = end {
-        let report = std::fs::read_to_string(run_dir.join(daruda_flow::record::RUN_REPORT_FILE))
-            .ok()
-            .and_then(|report| daruda_control_types::agent_text::bound_agent_text(&report));
+        let report =
+            super::result_io::read_report(&run_dir.join(daruda_flow::record::RUN_REPORT_FILE));
         // The log holds a start, since `started` above found it.
         events.extend(super::flow_tasks::task_end(
             &end,

@@ -47,25 +47,9 @@ fn open_logs_use_the_real_lock_holder_and_unknown_identity_is_not_a_crash() {
 }
 
 #[test]
-fn terminal_output_pointers_follow_engine_run_directory_and_spec_dependencies() {
-    let dir = tempfile::tempdir().unwrap();
-    let spec = daruda_flow::parse::parse_flow_file("version: 1\nname: A flow\nnodes:\n  - id: first\n    kind: agent\n    prompt: first\n    output: first.md\n  - id: last\n    deps: [first]\n    kind: agent\n    prompt: last\n    output: last.md\n").unwrap();
-    let pointers = flow_pointers(dir.path(), Some(&spec), None);
-    assert_eq!(pointers.outputs, vec![dir.path().join("last.md")]);
-    assert_eq!(
-        flow_pointers(dir.path(), Some(&spec), Some(&"first".into())).outputs,
-        vec![dir.path().join("first.md")]
-    );
-    assert_eq!(
-        pointers.report,
-        Some(dir.path().join(daruda_flow::record::RUN_REPORT_FILE))
-    );
-}
-
-#[test]
 fn review_regression_legacy_selection_preserves_outputs_and_reason() {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = "version: 1\nname: Legacy\nnodes:\n  - id: a\n    kind: agent\n    prompt: a\n    output: a.md\n  - id: b\n    deps: [a]\n    kind: agent\n    prompt: b\n    output: b.md\n";
+    let yaml = "version: 1\nname: Legacy\ndefaults:\n  agent:\n    id: claude\nnodes:\n  - id: a\n    kind: agent\n    prompt: a\n    output: a.md\n  - id: b\n    deps: [a]\n    kind: agent\n    prompt: b\n    output: b.md\n";
     std::fs::write(dir.path().join("run.yaml"), yaml).unwrap();
     let journal = b"{\"kind\":\"started\",\"v\":1,\"until\":\"a\",\"pinned\":[\"a\"]}\n";
     std::fs::write(dir.path().join("progress.jsonl"), journal).unwrap();
@@ -86,7 +70,7 @@ fn review_regression_legacy_selection_preserves_outputs_and_reason() {
 #[test]
 fn full_legacy_runs_keep_all_terminal_output_pointers() {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = "version: 1\nnodes:\n  - id: a\n    kind: agent\n    prompt: a\n    output: a.md\n  - id: b\n    deps: [a]\n    kind: agent\n    prompt: b\n    output: b.md\n  - id: c\n    kind: agent\n    prompt: c\n    output: c.md\n";
+    let yaml = "version: 1\ndefaults:\n  agent:\n    id: claude\nnodes:\n  - id: a\n    kind: agent\n    prompt: a\n    output: a.md\n  - id: b\n    deps: [a]\n    kind: agent\n    prompt: b\n    output: b.md\n  - id: c\n    kind: agent\n    prompt: c\n    output: c.md\n";
     std::fs::write(dir.path().join("run.yaml"), yaml).unwrap();
     std::fs::write(
         dir.path().join("progress.jsonl"),
@@ -109,7 +93,7 @@ fn full_legacy_runs_keep_all_terminal_output_pointers() {
 #[test]
 fn legacy_selection_survives_a_resume_that_only_opened_the_modern_log() {
     let dir = tempfile::tempdir().unwrap();
-    let yaml = "version: 1\nname: Legacy\nnodes:\n  - id: a\n    kind: agent\n    prompt: a\n    output: a.md\n  - id: b\n    deps: [a]\n    kind: agent\n    prompt: b\n    output: b.md\n";
+    let yaml = "version: 1\nname: Legacy\ndefaults:\n  agent:\n    id: claude\nnodes:\n  - id: a\n    kind: agent\n    prompt: a\n    output: a.md\n  - id: b\n    deps: [a]\n    kind: agent\n    prompt: b\n    output: b.md\n";
     std::fs::write(dir.path().join("run.yaml"), yaml).unwrap();
     let journal = b"{\"kind\":\"started\",\"v\":1,\"until\":\"a\",\"pinned\":[\"a\"]}\n";
     std::fs::write(dir.path().join("progress.jsonl"), journal).unwrap();

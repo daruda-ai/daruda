@@ -18,7 +18,7 @@
 //! **Two of the three are applied by the caller, not inherited.**
 //! [`guard_agent_budget`] sits inside `exec::run_gated`, so every adapter gets
 //! it; [`guard_self_target`] and [`guard_queue_depth`] are applied by
-//! `super::mcp::dispatch::guard_immediate`, i.e. on the MCP path only. That
+//! `super::mcp::dispatch`'s prompt guard, i.e. on the MCP path only. That
 //! is deliberate — Telegram's `/say` is a person, and refusing them for
 //! "addressing the orchestrator" would refuse the whole point of the app — but
 //! a new adapter driving an *agent* has to apply those two itself.

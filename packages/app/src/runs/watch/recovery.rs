@@ -1,9 +1,9 @@
 //! A new process takes back the scope and unreported ends the ledger kept,
 //! and judges the owned runs that ended, or stopped, while it was away.
 use super::delivery::Delivery;
-use super::state::{EndState, Judgement, Membership, Origin, RunEvent, RunWatch};
+use super::state::{EndState, Judgement, Membership, Origin, RunWatch};
 use crate::runs::ledger::{Ledger, OwedEnd, Restored, RestoredEnd};
-use crate::runs::result::{RunKey, RunSnapshot, RunState, is_interruption};
+use crate::runs::result::{RunKey, RunSnapshot, RunState};
 
 impl RunWatch {
     /// Write to `ledger` from now on and rejoin what it restored, before task
@@ -110,11 +110,7 @@ impl RunWatch {
         let entry = self.changed(key);
         entry.floor = sequence;
         entry.episode = episode;
-        entry.end = if is_interruption(&snapshot) {
-            EndState::Interrupted { reported: false }
-        } else {
-            EndState::Ended
-        };
+        entry.end = EndState::of_end(&snapshot, false);
         entry.snapshot = Some(snapshot);
         self.wake();
     }
@@ -152,41 +148,21 @@ impl RunWatch {
                 entry.snapshot = Some(snapshot)
             }
             RestoredEnd::Reported(snapshot) => {
-                entry.end = if is_interruption(&snapshot) {
-                    EndState::Interrupted { reported: true }
-                } else {
-                    EndState::Reported
-                };
+                entry.end = EndState::of_end(&snapshot, true);
                 entry.snapshot = Some(snapshot);
             }
             RestoredEnd::Unreported { episode, snapshot } => {
-                entry.end = if is_interruption(&snapshot) {
-                    EndState::Interrupted { reported: false }
-                } else {
-                    EndState::Ended
-                };
+                entry.end = EndState::of_end(&snapshot, false);
                 entry.snapshot = Some(snapshot.clone());
                 self.push_recovered(episode, snapshot);
             }
         }
     }
 
-    /// Queue a restored, unreported end as a recovered episode of its key.
+    /// Queue a restored, unreported end as a recovered episode of its key,
+    /// under the record the ledger restored.
     fn push_recovered(&mut self, recorded: u64, snapshot: RunSnapshot) {
-        let entry = self.entry(&snapshot.key);
-        entry.last_sequence += 1;
-        let event = RunEvent {
-            sequence: entry.last_sequence,
-            solicited: entry.solicited,
-            origin: Origin::Recovered,
-            episode: entry.episode,
-            recorded: Some(recorded),
-            snapshot,
-            delivery: Delivery::Unreported,
-            superseded: false,
-        };
-        self.events.push(event.clone());
-        self.announce(event);
+        self.queue_event(snapshot, Origin::Recovered, Some(recorded));
     }
 }
 

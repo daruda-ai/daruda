@@ -1,4 +1,5 @@
 //! MCP waits keep their reservation live until the socket acknowledges the full frame.
+use super::tools::RUN_WAIT_TIMEOUT_MAX as TIMEOUT_MAX;
 use crate::runs::{
     RunsHost,
     result_host::RunQuery,
@@ -8,7 +9,6 @@ use daruda_control_types::runs as wire;
 use gpui::App;
 use std::time::{Duration, Instant};
 
-const TIMEOUT_MAX: u64 = 110;
 const DISK_REFRESH: Duration = Duration::from_secs(2);
 #[derive(Clone, Copy)]
 pub(super) struct PendingRunWait(pub(super) WaitId);

@@ -165,8 +165,11 @@ directly. Flow `RunStarted` and Task `DispatchRequested` persist this provenance
 resume and Task reopen preserve it. Start responses construct handles from the
 actual returned run id or `ExecutionRef`: `flow:<run-id>` or
 `task:<task-id>/<execution-id>`. `task:<task-id>` resolves the latest execution
-once per result call. An optional `daruda_flow_stop.run` rejects a mismatched
-current run instead of stopping a replacement in the same worktree.
+once per result call. `control::mcp::runs::{run_handle, run_key}` is the one
+conversion between a `RunKey` and its handle; notices print the handle's
+`Display`, and `runs/` orders keys with `RunKey`'s own `Ord`. An optional
+`daruda_flow_stop.run` rejects a mismatched current run instead of stopping a
+replacement in the same worktree.
 
 Solicitation is separate, process-local metadata captured when a request enters,
 before approval or asynchronous preparation. An orchestrator command is solicited
@@ -188,6 +191,11 @@ text and pointers to reports, outputs, sessions or CLI transcripts when known.
 `what` names the flow or Task; `why` carries the Task prompt prefix or flow
 `until` and pinned-node context. Resume metadata carries the original pinned
 selection for this description without applying the outputs as new pins.
+A flow's `what`, `why` and output pointers come from one
+`runs::flow_description::FlowDescription`, built from a submission's facts
+and from a run directory alike: the flow's name, else the stem of the source
+its log recorded (`SourceRecorded`), else the run id. A live end and the same
+end read after a restart therefore compare equal.
 
 Only `TaskEvent::Settled` carries a textual result. AgentChat captures its final
 answer at `fire_activity_completion`, after activity has settled; CLI settling
@@ -210,6 +218,12 @@ opens a `PhoneTurn` only for Phone input; Orchestrator input uses InApp with
 the same slash-command and clear handling. A solicited chat announcement
 selects the chat and records its ping. An unsolicited announcement is a Notice,
 which changes neither selection nor reply-to/last-ping routing.
+`Delivery::reaches(only_when_away)` is the one test of whether a delivery
+reaches a channel; each channel applies it to its own live setting. Hosts send
+through `remote_channel::send_ping` / `send_notice`, which fan out to Telegram,
+Slack and Discord and report whether any channel accepted the message. A
+permission or question is marked told to the phone only when one did; each
+channel's card ledger separately keeps one card per identity.
 
 The remote-channel facade fans out Flow questions and card settlement across
 Telegram, Slack and Discord. Card ledgers belong to a remote identity (the bot
@@ -299,9 +313,12 @@ durability remain outside this contract.
 
 ### Result queries, waits and delivery
 
-The orchestrator's twenty-one MCP tools include `daruda_run_status` and
-`daruda_run_wait`. These result tools are MCP-only; phone commands retain their
-existing surface. Status reads progress or results without consuming events.
+The orchestrator's MCP tools include `daruda_run_status` and
+`daruda_run_wait`. A gated tool's approval terms come from its `Gate`
+(`Tool::described`), and the briefing names the gated tools and the wait cap
+from the tool table, so neither restates them. These result tools are
+MCP-only; phone commands retain their existing surface. Status reads progress
+or results without consuming events.
 Both tools accept explicit handles from any origin, including older persisted
 runs. Omitting handles selects successful orchestrator starts in this process
 plus unfinished orchestrator Task executions captured before startup
@@ -461,9 +478,9 @@ held end before opening the new episode; a late report enriches only its own
 still-unreported end, even across consecutive resumes.
 
 Wait requires an integer `timeout` in seconds: zero polls, and values above
-110 are clamped with requested/actual metadata. One omitted-handles waiter may
-be active (`WaiterBusy` for another); explicit waiters can coexist. Eligible
-events are delivered end-first, FIFO within each class, at most twenty per
+`RUN_WAIT_TIMEOUT_MAX` (110) are clamped with requested/actual metadata. One
+omitted-handles waiter may be active (`WaiterBusy` for another); explicit
+waiters can coexist. Eligible events are delivered end-first, FIFO within each class, at most twenty per
 answer with a `more` count. Explicit waits return previously reported ends in
 `already_reported` and unknown, gone or unreadable entries in `not_running`;
 those entries do not end a wait while another selected execution is running.

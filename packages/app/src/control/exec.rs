@@ -18,7 +18,7 @@ use crate::runs::GlobalTasks;
 // Named only by the tests, which reach it through `super::*`.
 #[cfg(test)]
 use crate::control::spec::GatedCommand;
-use crate::control::spec::{ResolvedCommand, ResolvedFlowCommand};
+use crate::control::spec::{ResolvedCommand, ResolvedFlowCommand, WaitingCommand};
 use crate::telegram::bridge::PaneRef;
 use crate::window_registry::WindowRegistry;
 use crate::workspace::Workspace;
@@ -109,9 +109,9 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
                     );
                 }
                 ControlResult::FlowStarting {
-                    handle: daruda_control_types::runs::RunHandle::Flow {
-                        run_id: started.run_id,
-                    },
+                    handle: crate::control::mcp::runs::run_handle(
+                        crate::runs::result::RunKey::Flow(started.run_id),
+                    ),
                     name: started.entry.name,
                     origin: started.entry.origin,
                     lane: started.entry.lane,
@@ -157,18 +157,8 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
             destination,
             connecting,
         } => ask_orchestrator(text, destination, connecting, origin, cx),
-        // Handled by `run_waiting`, which can hand back a channel. Reaching
-        // here would mean an adapter called the wrong entry point, and
-        // answering "still working" about a prompt never sent would be a lie.
-        ResolvedCommand::AskPane { target, .. } => Ok(ControlResult::Answer {
-            target,
-            answer: PaneAnswer::Queued,
-        }),
         ResolvedCommand::TaskList => Ok(ControlResult::TaskList {
             tasks: task_list(cx),
-        }),
-        ResolvedCommand::TaskStop { .. } => Err(ControlError::TaskNotRecorded {
-            detail: "task_stop requires deferred dispatch".into(),
         }),
     }
 }
@@ -240,6 +230,15 @@ fn in_task_window<T>(
     out.unwrap_or(Err(ControlError::TaskProjectNotOpen))
 }
 
+/// Run a command whose answer comes later: hand back a channel for it, or
+/// the answer when it is known at once.
+pub(crate) fn run_waiting(cmd: WaitingCommand, origin: CommandOrigin, cx: &mut App) -> Dispatch {
+    match cmd {
+        WaitingCommand::AskPane { target, text } => ask_pane(target, text, origin, cx),
+        WaitingCommand::TaskStop { task } => stop_task_waiting(task, cx),
+    }
+}
+
 /// Prompt a pane and hand back a promise of the turn's answer.
 ///
 /// A waiter is registered only for a prompt that went out *now*: a delivered
@@ -248,16 +247,7 @@ fn in_task_window<T>(
 /// already in flight would be answered by that turn's edge instead, which is
 /// somebody else's answer — so it is told `Queued` and can read the reply
 /// later.
-pub(crate) fn run_waiting(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> Dispatch {
-    if let ResolvedCommand::TaskStop { task } = cmd {
-        return stop_task_waiting(task, cx);
-    }
-    let ResolvedCommand::AskPane { target, text } = cmd else {
-        // Unreachable: `convert` builds `Command::Waiting` for exactly one
-        // tool. Answering through the immediate path is the harmless way to
-        // be wrong.
-        return Dispatch::Ready(run(cmd, origin, cx));
-    };
+fn ask_pane(target: PaneRef, text: String, origin: CommandOrigin, cx: &mut App) -> Dispatch {
     let sent = in_pane_window(target, cx, |ws, _window, cx| {
         ws.control_say(target.pane, text.clone(), origin, cx)
     });

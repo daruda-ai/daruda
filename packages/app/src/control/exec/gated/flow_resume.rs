@@ -3,6 +3,7 @@
 
 use gpui::App;
 
+use crate::control::mcp::runs::{run_handle, run_key};
 use crate::control::result::{ControlError, ControlOutcome, ControlResult, NotResumableReason};
 use crate::runs::RunsHost;
 use crate::runs::result::RunKey;
@@ -36,22 +37,17 @@ pub(super) fn target(run: &RunHandle, cx: &App) -> Result<ResumeTarget, ControlE
             named: Named::Task(exec),
         })
     };
-    match run {
-        RunHandle::Flow { run_id } => Ok(ResumeTarget {
-            run_id: run_id.clone(),
+    let key = match run {
+        RunHandle::TaskLatest { task_id } => RunsHost::latest_task_key(task_id, cx),
+        concrete => run_key(concrete.clone()),
+    };
+    match key {
+        Some(RunKey::Flow(run_id)) => Ok(ResumeTarget {
+            run_id,
             named: Named::Flow,
         }),
-        RunHandle::Task {
-            task_id,
-            execution_id,
-        } => task_target(ExecutionRef {
-            task_id: task_id.clone(),
-            execution_id: execution_id.clone(),
-        }),
-        RunHandle::TaskLatest { task_id } => match RunsHost::latest_task_key(task_id, cx) {
-            Some(RunKey::Task(exec)) => task_target(exec),
-            _ => Err(ControlError::FlowRunNotFound),
-        },
+        Some(RunKey::Task(exec)) => task_target(exec),
+        None => Err(ControlError::FlowRunNotFound),
     }
 }
 
@@ -137,20 +133,10 @@ pub(super) fn resume(
         RunsHost::register_run_solicited(owner.clone(), solicited, cx);
     }
     Ok(ControlResult::FlowResuming {
-        handle: handle_of(owner),
+        handle: run_handle(owner),
         name: resumed.name,
         lane: resumed.lane,
     })
-}
-
-fn handle_of(key: RunKey) -> RunHandle {
-    match key {
-        RunKey::Flow(run_id) => RunHandle::Flow { run_id },
-        RunKey::Task(exec) => RunHandle::Task {
-            task_id: exec.task_id,
-            execution_id: exec.execution_id,
-        },
-    }
 }
 
 /// Run `f` in the window whose worktree keeps flow run `run_id`. The run is
@@ -184,23 +170,6 @@ pub(super) fn in_run_window<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The answer's handle is the key the end arrives under.
-    #[test]
-    fn the_answer_names_the_owners_handle() {
-        assert_eq!(
-            handle_of(RunKey::Flow("run".into())),
-            "flow:run".parse().unwrap()
-        );
-        let exec = ExecutionRef {
-            task_id: "task".into(),
-            execution_id: "exec".into(),
-        };
-        assert_eq!(
-            handle_of(RunKey::Task(exec)),
-            "task:task/exec".parse().unwrap()
-        );
-    }
 
     #[gpui::test]
     fn a_handle_naming_no_flow_run_is_not_found(cx: &mut gpui::TestAppContext) {

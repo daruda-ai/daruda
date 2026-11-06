@@ -27,14 +27,6 @@ pub(super) fn resolve(
     if let Some(handles) = handles {
         for raw in handles {
             let key = match raw.parse::<wire::RunHandle>() {
-                Ok(wire::RunHandle::Flow { run_id }) => Some(domain::RunKey::Flow(run_id)),
-                Ok(wire::RunHandle::Task {
-                    task_id,
-                    execution_id,
-                }) => Some(domain::RunKey::Task(daruda_store::tasks::ExecutionRef {
-                    task_id,
-                    execution_id,
-                })),
                 Ok(wire::RunHandle::TaskLatest { task_id }) => {
                     RunsHost::latest_task_key(&task_id, cx).or_else(|| {
                         ready.push(wire::RunResult {
@@ -47,6 +39,7 @@ pub(super) fn resolve(
                         None
                     })
                 }
+                Ok(handle) => run_key(handle),
                 Err(_) => {
                     errors.push(serde_json::json!({"code":"unknown_handle", "handle":raw}));
                     None
@@ -108,14 +101,35 @@ pub(super) fn convert_episode(event: crate::runs::watch::RunEvent) -> wire::RunR
     }
 }
 
-fn convert_as(snapshot: domain::RunSnapshot, resumable: bool) -> wire::RunResult {
-    let handle = match snapshot.key {
+/// The handle a control caller holds for `key`.
+pub(crate) fn run_handle(key: domain::RunKey) -> wire::RunHandle {
+    match key {
         domain::RunKey::Flow(run_id) => wire::RunHandle::Flow { run_id },
         domain::RunKey::Task(exec) => wire::RunHandle::Task {
             task_id: exec.task_id,
             execution_id: exec.execution_id,
         },
-    };
+    }
+}
+
+/// The run `handle` names; `None` for a Task's latest execution, which only
+/// the task book can resolve.
+pub(crate) fn run_key(handle: wire::RunHandle) -> Option<domain::RunKey> {
+    match handle {
+        wire::RunHandle::Flow { run_id } => Some(domain::RunKey::Flow(run_id)),
+        wire::RunHandle::Task {
+            task_id,
+            execution_id,
+        } => Some(domain::RunKey::Task(daruda_store::tasks::ExecutionRef {
+            task_id,
+            execution_id,
+        })),
+        wire::RunHandle::TaskLatest { .. } => None,
+    }
+}
+
+fn convert_as(snapshot: domain::RunSnapshot, resumable: bool) -> wire::RunResult {
+    let handle = run_handle(snapshot.key);
     let state = match snapshot.state {
         domain::RunState::Unknown => wire::RunState::Unknown,
         domain::RunState::Gone => wire::RunState::Gone,

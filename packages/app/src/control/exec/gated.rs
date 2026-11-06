@@ -490,10 +490,7 @@ impl PendingTaskStart {
             announce_chat(chat, self.solicited, cx);
         }
         Ok(ControlResult::TaskStarted {
-            handle: daruda_control_types::runs::RunHandle::Task {
-                task_id: exec.task_id,
-                execution_id: exec.execution_id,
-            },
+            handle: crate::control::mcp::runs::run_handle(crate::runs::result::RunKey::Task(exec)),
             task: self.task.clone(),
             lane: LaneHandle::new(self.workspace, lane),
             chat,

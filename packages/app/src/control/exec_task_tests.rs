@@ -209,7 +209,7 @@ async fn only_a_running_task_stops(cx: &mut gpui::TestAppContext) {
     let task = add_task(uuid, "t", cx);
     let outcome = cx.update(|cx| {
         ready(run_waiting(
-            ResolvedCommand::TaskStop { task },
+            WaitingCommand::TaskStop { task },
             crate::control::exec::CommandOrigin::Orchestrator,
             cx,
         ))
@@ -217,7 +217,7 @@ async fn only_a_running_task_stops(cx: &mut gpui::TestAppContext) {
     assert_eq!(outcome, Err(ControlError::TaskNotRunning));
     let outcome = cx.update(|cx| {
         ready(run_waiting(
-            ResolvedCommand::TaskStop {
+            WaitingCommand::TaskStop {
                 task: "missing".into(),
             },
             crate::control::exec::CommandOrigin::Orchestrator,
@@ -236,20 +236,9 @@ async fn task_stop_answers_after_the_projection_changes(cx: &mut gpui::TestAppCo
         let run = crate::runs::seed::SeedRun::chat(fixture.root());
         crate::runs::seed::task(spec, Some((&run, crate::runs::seed::SeedEnd::Running)), cx)
     });
-    let immediate = cx.update(|cx| {
-        run(
-            ResolvedCommand::TaskStop { task: task.clone() },
-            CommandOrigin::Orchestrator,
-            cx,
-        )
-    });
-    assert!(matches!(
-        immediate,
-        Err(ControlError::TaskNotRecorded { .. })
-    ));
     let dispatch = cx.update(|cx| {
         run_waiting(
-            ResolvedCommand::TaskStop { task: task.clone() },
+            WaitingCommand::TaskStop { task: task.clone() },
             crate::control::exec::CommandOrigin::Orchestrator,
             cx,
         )

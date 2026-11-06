@@ -42,18 +42,19 @@ impl RunsHost {
         cx.update_global::<Self, _>(|host, _| host.watch.observe_waiting(snapshot));
     }
 
+    #[cfg(test)]
     pub(crate) fn register_run(key: RunKey, cx: &mut App) {
-        Self::ensure_installed(cx);
-        cx.update_global::<Self, _>(|host, _| host.watch.register(key));
+        Self::register_run_solicited(key, false, cx);
     }
 
     pub(crate) fn register_run_solicited(key: RunKey, solicited: bool, cx: &mut App) {
-        if !solicited {
-            Self::register_run(key, cx);
-            return;
-        }
         Self::ensure_installed(cx);
         cx.update_global::<Self, _>(|host, _| host.watch.register_solicited(key, solicited));
+    }
+    /// Whether `key` is in the scope [`Self::run_scope`] lists.
+    pub(crate) fn in_run_scope(key: &RunKey, cx: &App) -> bool {
+        cx.try_global::<Self>()
+            .is_some_and(|host| host.watch.in_scope(key))
     }
     pub(crate) fn run_scope(cx: &App) -> Vec<RunKey> {
         cx.try_global::<Self>()

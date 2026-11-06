@@ -45,6 +45,11 @@ impl Interrupted {
         std::fs::read_to_string(self.lane.path().join(file)).map_or(0, |t| t.lines().count())
     }
 
+    /// What the run is called: the unnamed flow's file, as its start recorded.
+    fn name(&self) -> String {
+        "ship".into()
+    }
+
     fn handle(&self) -> RunHandle {
         RunHandle::Flow {
             run_id: self.run_id.clone(),
@@ -215,7 +220,7 @@ async fn an_approved_resume_runs_only_the_remaining_steps_under_the_same_handle(
     assert_eq!(
         asked,
         vec![crate::surface::strings::control::approval_flow_resume(
-            &run.run_id,
+            run.name(),
             1,
             2
         )],
@@ -229,7 +234,7 @@ async fn an_approved_resume_runs_only_the_remaining_steps_under_the_same_handle(
         panic!("not resumed: {answered:?}");
     };
     assert_eq!(handle, run.handle(), "the handle the orchestrator holds");
-    assert_eq!(name, run.run_id);
+    assert_eq!(name, run.name());
     let active = run
         .ws
         .read_with(cx, |ws, _| LaneHandle::new(ws.uuid(), ws.active));
@@ -328,7 +333,7 @@ async fn a_run_that_ended_is_refused_before_the_card(cx: &mut TestAppContext) {
     assert_eq!(
         error,
         ControlError::FlowRunNotResumable {
-            name: run.run_id.clone(),
+            name: run.name(),
             reason: NotResumableReason::Ended,
         }
     );
@@ -374,7 +379,7 @@ async fn a_worktree_another_process_holds_is_refused_naming_the_holder(cx: &mut 
     assert_eq!(
         error,
         ControlError::FlowLocked {
-            name: run.run_id.clone(),
+            name: run.name(),
             held_by: Some(RunHandle::Flow {
                 run_id: "elsewhere".into()
             }),
@@ -415,7 +420,7 @@ async fn the_flows_panel_resume_is_the_desktops_episode(cx: &mut TestAppContext)
     assert_eq!(
         refused_before_the_card(run.resume(), cx),
         ControlError::FlowRunNotResumable {
-            name: run.run_id.clone(),
+            name: run.name(),
             reason: NotResumableReason::Running,
         }
     );
@@ -557,7 +562,7 @@ async fn a_live_holder_of_the_same_run_is_refused_as_running(cx: &mut TestAppCon
     assert_eq!(
         refused_before_the_card(run.resume(), cx),
         ControlError::FlowRunNotResumable {
-            name: run.run_id.clone(),
+            name: run.name(),
             reason: NotResumableReason::Running,
         }
     );
@@ -573,7 +578,7 @@ async fn a_run_cut_off_after_its_last_step_says_nothing_runs_again(cx: &mut Test
     cx.run_until_parked();
     assert_eq!(
         cx.update(|cx| approval::waiting_summaries_for_test(cx)),
-        vec![crate::surface::strings::control::approval_flow_resume_all_passed(&run.run_id, 2)]
+        vec![crate::surface::strings::control::approval_flow_resume_all_passed(run.name(), 2)]
     );
     cx.update(|cx| resolve_only_pending_for_test(ApprovalChoice::Refused, cx));
     cx.run_until_parked();
@@ -615,7 +620,7 @@ async fn a_desktop_resume_while_the_card_waits_is_not_resumed_twice(cx: &mut Tes
     assert_eq!(
         outcome.recv().await.expect("answered"),
         Some(Err(ControlError::FlowRunNotResumable {
-            name: run.run_id.clone(),
+            name: run.name(),
             reason: NotResumableReason::Running,
         }))
     );
@@ -715,7 +720,7 @@ async fn a_tasks_handle_resumes_its_flow_under_the_tasks_handle(cx: &mut TestApp
         panic!("not a resume");
     };
     assert_eq!(handle, task_handle(&exec));
-    assert_eq!(name, run.run_id);
+    assert_eq!(name, run.name());
     assert!(
         wait_for_run(cx, |cx| {
             run.run_dir.join("DONE").exists() && !run_is_held(cx, run.lane.path())

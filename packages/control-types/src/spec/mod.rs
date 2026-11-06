@@ -122,7 +122,8 @@ pub enum ResolvedCommand {
     /// Hand `text` to the orchestrator. Named for who receives it, not for
     /// the act: the answer is *not* in this command's result — it arrives
     /// later as that pane's own completion ping — and a bare `Ask` promised
-    /// otherwise. Compare [`Self::AskPane`], where the answer *is* the result.
+    /// otherwise. Compare [`WaitingCommand::AskPane`], where the answer *is*
+    /// the result.
     ///
     /// `destination` is the orchestrator's pane and `connecting` says whether
     /// naming it had to start one. Neither comes from an ordinal, so an
@@ -134,17 +135,6 @@ pub enum ResolvedCommand {
         destination: PaneRef,
         connecting: bool,
     },
-    /// Prompt one lane's agent and wait for the turn it starts, so the answer
-    /// comes back as this command's own result.
-    ///
-    /// The waiting is what separates it from [`Self::Say`], which reports only
-    /// that a prompt went out. Not a flag on `Say`: the two answer with
-    /// different shapes, and a `wait: bool` beside a text field would spell
-    /// states neither means.
-    AskPane {
-        target: PaneRef,
-        text: String,
-    },
     /// Every worktree, including ones with no agent chat in them — the
     /// listing `/list` answers with is chat-scoped and cannot name one.
     LaneList,
@@ -155,10 +145,27 @@ pub enum ResolvedCommand {
     /// Every task, in every project. Tasks are app-wide, so like the other
     /// listings this names nothing.
     TaskList,
-    /// Cancel a running task, as the Tasks UI's Cancel does.
-    TaskStop {
-        task: String,
-    },
+}
+
+/// A command that runs at once but answers later: with the turn it starts,
+/// or once the change it makes is in the task log.
+///
+/// Separate from [`ResolvedCommand`] for the reason [`GatedCommand`] is: the
+/// executor hands back a channel for these, and folding them in would leave
+/// `run` with arms it could never answer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WaitingCommand {
+    /// Prompt one lane's agent and wait for the turn it starts, so the answer
+    /// comes back as this command's own result.
+    ///
+    /// The waiting is what separates it from [`ResolvedCommand::Say`], which
+    /// reports only that a prompt went out. Not a flag on `Say`: the two
+    /// answer with different shapes, and a `wait: bool` beside a text field
+    /// would spell states neither means.
+    AskPane { target: PaneRef, text: String },
+    /// Cancel a running task, as the Tasks UI's Cancel does, answering once
+    /// the cancel is in the task log.
+    TaskStop { task: String },
 }
 
 /// A command that cannot be answered in one turn of the event loop.

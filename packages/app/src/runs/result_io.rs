@@ -1,83 +1,22 @@
 //! Read-only enrichment of result snapshots, used off the UI thread by queries.
+use super::flow_description::{FlowDescription, StartFacts};
 use super::result::{self, EndedAs, Pointers, RunKey, RunSnapshot, RunState};
 use daruda_control_types::agent_text::bound_agent_text;
 use std::path::Path;
 
-pub(super) fn flow_spec(dir: &Path) -> Option<daruda_flow::parse::FlowFile> {
-    std::fs::read_to_string(dir.join(daruda_flow::resume::RUN_SPEC_FILE))
-        .ok()
-        .and_then(|text| daruda_flow::parse::parse_flow_file(&text).ok())
-}
-
-/// What a flow run calls itself: its flow's name, else its run id. One
-/// reading, so a result and a refusal about the run name it alike.
-pub(crate) fn flow_run_name(dir: &Path) -> String {
-    flow_spec(dir)
-        .and_then(|spec| spec.name)
-        .unwrap_or_else(|| result::flow_run_id(dir))
-}
-
-pub(super) fn flow_base(dir: &Path) -> RunSnapshot {
-    RunSnapshot {
-        key: RunKey::flow_of(dir),
-        what: flow_run_name(dir),
-        why: None,
-        state: RunState::Unknown,
-    }
-}
-
-pub(super) fn flow_pointers(
-    dir: &Path,
-    spec: Option<&daruda_flow::parse::FlowFile>,
-    until: Option<&daruda_flow::NodeId>,
-) -> Pointers {
-    let outputs = spec
-        .map(|file| {
-            let mut selected = std::collections::HashSet::new();
-            let mut pending = until.into_iter().cloned().collect::<Vec<_>>();
-            while let Some(id) = pending.pop() {
-                if selected.insert(id.clone())
-                    && let Some(node) = file.nodes.iter().find(|node| node.id == id)
-                {
-                    pending.extend(node.deps.iter().cloned());
-                }
-            }
-            let includes = |id: &daruda_flow::NodeId| until.is_none() || selected.contains(id);
-            file.nodes
-                .iter()
-                .filter(|node| {
-                    includes(&node.id)
-                        && !file
-                            .nodes
-                            .iter()
-                            .any(|other| includes(&other.id) && other.deps.contains(&node.id))
-                })
-                .filter_map(|node| match &node.kind {
-                    daruda_flow::parse::NodeKindFile::Agent { output, .. } => {
-                        Some(dir.join(output))
-                    }
-                    _ => None,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    Pointers {
-        run_dir: Some(dir.to_path_buf()),
-        report: Some(dir.join(daruda_flow::record::RUN_REPORT_FILE)),
-        outputs,
-        ..Default::default()
-    }
-}
-
 pub(super) fn enrich(mut snapshot: RunSnapshot) -> RunSnapshot {
     if let RunState::Ended { text, pointers, .. } = &mut snapshot.state
-        && let Some(report) = &pointers.report
-        && let Ok(report) = std::fs::read_to_string(report)
-        && let Some(report) = bound_agent_text(&report)
+        && let Some(report) = pointers.report.as_deref().and_then(read_report)
     {
         *text = Some(report);
     }
     snapshot
+}
+
+/// A run's `run.md` as an agent may read it; `None` when it cannot be read.
+pub(super) fn read_report(report: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(report).ok()?;
+    bound_agent_text(&text)
 }
 
 #[cfg(test)]
@@ -92,56 +31,68 @@ pub(super) struct FlowObservation {
 
 pub(super) fn flow_observation(location: &super::result::FlowRunLocation) -> FlowObservation {
     let dir = &location.run_dir;
-    let mut snapshot = flow_base(dir);
-    let mut resumed_at = None;
+    let mut snapshot = RunSnapshot {
+        key: RunKey::flow_of(dir),
+        what: result::flow_run_id(dir),
+        why: None,
+        state: RunState::Unknown,
+    };
     if !dir.exists() {
         snapshot.state = RunState::Gone;
         return FlowObservation {
             snapshot,
-            resumed_at,
+            resumed_at: None,
         };
     }
-    match daruda_flow::run_log::reader::inspect(dir) {
+    // A legacy journal records no source and is read for no end: the
+    // status markers say how it ended.
+    let (resumed_at, source, replay, end) = match daruda_flow::run_log::reader::inspect(dir) {
         Err(error) => {
+            snapshot.what = FlowDescription::read(dir, StartFacts::default()).what;
             snapshot.state = RunState::Unreadable {
                 reason: error.to_string(),
-            }
-        }
-        Ok(Some(read)) => {
-            resumed_at = Some(read.resumed_at);
-            snapshot.why = result::flow_why(
-                read.replay.until.as_ref(),
-                read.replay.pinned.iter().map(ToString::to_string),
-            );
-            let pointers = flow_pointers(dir, flow_spec(dir).as_ref(), read.replay.until.as_ref());
-            snapshot = if let Some(end) = read.end {
-                result::flow_ended(snapshot, &end, pointers)
-            } else {
-                let passed = read.replay.passed.len();
-                snapshot.state = open_state(dir, location.lock_dir.as_deref(), pointers, passed);
-                snapshot
+            };
+            return FlowObservation {
+                snapshot,
+                resumed_at: None,
             };
         }
-        Ok(None) => {
-            resumed_at = Some(0);
-            let replay = daruda_flow::run_log::reader::read(dir);
-            snapshot.why = result::flow_why(
-                replay.until.as_ref(),
-                replay.pinned.iter().map(ToString::to_string),
-            );
+        Ok(Some(read)) => (
+            read.resumed_at,
+            read.state.source().map(Path::to_path_buf),
+            read.replay,
+            read.end,
+        ),
+        Ok(None) => (0, None, daruda_flow::run_log::reader::read(dir), None),
+    };
+    let description = FlowDescription::read(
+        dir,
+        StartFacts {
+            source: source.as_deref(),
+            until: replay.until.as_ref(),
+            pinned: replay.pinned.iter().collect(),
+        },
+    );
+    snapshot.what = description.what;
+    snapshot.why = description.why;
+    snapshot = match end {
+        Some(end) => result::flow_ended(snapshot, &end, description.pointers),
+        None => {
             snapshot.state = open_state(
                 dir,
                 location.lock_dir.as_deref(),
-                flow_pointers(dir, flow_spec(dir).as_ref(), replay.until.as_ref()),
+                description.pointers,
                 replay.passed.len(),
-            )
+            );
+            snapshot
         }
-    }
+    };
     FlowObservation {
         snapshot: enrich(snapshot),
-        resumed_at,
+        resumed_at: Some(resumed_at),
     }
 }
+
 /// Fixed English like the notice protocol: the reader is the orchestrator.
 const STOPPED_TEXT: &str = "The run stopped before it ended: daruda quit or its process died";
 const STALLED_TEXT: &str = "The run stalled: nothing left in it could start";

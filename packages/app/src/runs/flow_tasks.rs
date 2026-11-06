@@ -63,17 +63,15 @@ pub(super) fn task_end(
     exec: ExecutionRef,
     at: chrono::DateTime<chrono::Utc>,
 ) -> Option<TaskEvent> {
-    if matches!(end, RunEnd::ShutDown | RunEnd::Stalled { .. }) {
-        return None;
-    }
-    if !started {
-        return Some(TaskEvent::DispatchFailed {
-            exec,
-            cause: StartFailure::FlowRefused,
-            at,
-        });
-    }
     let outcome = match end {
+        RunEnd::ShutDown | RunEnd::Stalled { .. } => return None,
+        _ if !started => {
+            return Some(TaskEvent::DispatchFailed {
+                exec,
+                cause: StartFailure::FlowRefused,
+                at,
+            });
+        }
         RunEnd::Done => SettleOutcome::Completed {
             end_reason: SessionEndReason::Stop,
         },
@@ -93,7 +91,6 @@ pub(super) fn task_end(
         | RunEnd::Unprovisioned { .. }
         | RunEnd::Invalid { .. }
         | RunEnd::NotResumed { .. } => SettleOutcome::Errored,
-        RunEnd::ShutDown | RunEnd::Stalled { .. } => return None,
     };
     Some(TaskEvent::Settled {
         result,

@@ -81,7 +81,6 @@ fn run_in(run_dir: &str) -> FlowRun {
         &FlowSource::Resumed {
             run_dir: run_dir.clone(),
         },
-        None,
     );
     FlowRun {
         snapshot,

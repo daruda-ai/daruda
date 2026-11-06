@@ -1,6 +1,6 @@
 //! The tool table daruda advertises. GPUI-free.
 //!
-//! Twenty-one tools, all for the orchestrator. A lane's own agent gets none — it
+//! Every tool is for the orchestrator. A lane's own agent gets none — it
 //! reads untrusted text and could be steered into calling them — so there is
 //! no per-caller filtering here.
 //! Descriptions and schemas are English and not localized: a tool definition
@@ -59,11 +59,49 @@ pub(crate) enum Gate {
 pub(crate) struct Tool {
     pub id: ToolId,
     pub name: &'static str,
+    /// What the tool does. A gated tool's approval terms are appended by
+    /// [`Tool::described`], never written here.
     pub description: &'static str,
     pub gate: Gate,
     /// JSON Schema `properties` for the call arguments.
     pub properties: fn() -> serde_json::Value,
     pub required: &'static [&'static str],
+}
+
+/// What every gated tool's description ends with: the call blocks on a card
+/// the person answers, and a model that read nothing about it would retry.
+pub(crate) const APPROVAL_TERMS: &str = "Needs the user's approval on the desktop or phone: \
+the first answer wins. Refusal or timeout fails the call; silence is not consent. Do not \
+retry or bypass approval.";
+
+/// The longest `daruda_run_wait` blocks, in seconds; a longer request waits
+/// this long and says it was clamped.
+pub(crate) const RUN_WAIT_TIMEOUT_MAX: u64 = 110;
+
+impl Tool {
+    /// The description the model reads, with the approval terms of a gated
+    /// tool.
+    pub(crate) fn described(&self) -> std::borrow::Cow<'static, str> {
+        match self.gate {
+            Gate::Open => self.description.into(),
+            Gate::NeedsApproval => format!("{} {APPROVAL_TERMS}", self.description).into(),
+        }
+    }
+}
+
+/// The names of the tools that wait for approval, in table order, as a
+/// sentence lists them.
+pub(crate) fn approval_tool_names() -> String {
+    let names: Vec<&str> = TABLE
+        .iter()
+        .filter(|t| t.gate == Gate::NeedsApproval)
+        .map(|t| t.name)
+        .collect();
+    match names.split_last() {
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        None => String::new(),
+    }
 }
 
 /// The vocabulary one run advertises: the static tool set, plus the agent
@@ -107,7 +145,7 @@ impl<'a> ToolTable<'a> {
                 }
                 serde_json::json!({
                     "name": t.name,
-                    "description": t.description,
+                    "description": t.described(),
                     "inputSchema": {
                         "type": "object",
                         "properties": properties,
@@ -414,9 +452,9 @@ static TABLE: &[Tool] = &[
                       Tasks carried into this process; an empty handles array is refused as \
                       bad_argument. Only one omitted-handles wait may be active; a second is a \
                       tool error with code waiter_busy. timeout is required in seconds: 0 polls; \
-                      above 110 waits 110, and the result's timeout object reports \
-                      requested_secs, actual_secs and clamped. outcome is settled, timed_out or \
-                      nothing; timed_out and nothing are normal results, and after repeated \
+                      above its schema's limit it waits that long, and the result's \
+                      timeout object reports requested_secs, actual_secs and clamped. \
+                      outcome is settled, timed_out or nothing; timed_out and nothing are normal results, and after repeated \
                       timeouts call daruda_run_status. A completed Task means its session ended \
                       normally, not that its work succeeded. Reported results remain queryable \
                       with daruda_run_status. The person cannot talk to you while you wait: \
@@ -519,10 +557,7 @@ static TABLE: &[Tool] = &[
         name: "daruda_worktree_create",
         description: "Create a worktree on a new branch and open its first chat. To add a \
                       tab to a worktree that already exists — including the one a project \
-                      is currently on — use daruda_chat_new instead. Needs the user's \
-                      approval on the desktop or phone: the first answer wins. The call \
-                      fails on refusal or timeout. Silence is not consent; do not retry \
-                      or bypass approval.",
+                      is currently on — use daruda_chat_new instead.",
         gate: Gate::NeedsApproval,
         properties: lane_create_properties,
         required: &["workspace", "project", "name"],
@@ -532,9 +567,7 @@ static TABLE: &[Tool] = &[
         name: "daruda_chat_new",
         description: "Open one more agent chat — a new tab — in a worktree that already \
                       exists, from daruda_worktree_list. Any number can share one \
-                      worktree. Needs the user's approval on the desktop or phone: the \
-                      first answer wins. Refusal or timeout fails the call; silence is \
-                      not consent. Do not retry or bypass approval.",
+                      worktree.",
         gate: Gate::NeedsApproval,
         properties: chat_new_properties,
         required: &["worktree"],
@@ -601,12 +634,10 @@ static TABLE: &[Tool] = &[
                       a result with `resumable: true`, a flow's or a Task's that runs one; \
                       the run keeps that handle. Only such a result can be resumed; offer it \
                       when you see one. Nodes that passed do not run again; any node that \
-                      was running starts over. Needs the user's approval on the desktop or phone, \
-                      which is how the person is asked: the first answer wins. Refusal or \
-                      timeout fails the call; silence is not consent. Do not retry or \
-                      bypass approval. Reports that it resumed, not that it finished: end \
-                      your turn after it, and a notice arrives on its own when the run \
-                      ends or is blocked.",
+                      was running starts over. The card this raises is how the person is \
+                      asked. Reports that it resumed, not that it finished: end your turn \
+                      after it, and a notice arrives on its own when the run ends or is \
+                      blocked.",
         gate: Gate::NeedsApproval,
         properties: flow_resume_properties,
         required: &["run"],
@@ -627,10 +658,7 @@ static TABLE: &[Tool] = &[
         id: ToolId::TaskCreate,
         name: "daruda_task_create",
         description: "Add a task to a project's backlog; it does not start it. Take \
-                      `workspace` and `project` from a daruda_worktree_list row. Needs the \
-                      user's approval on the desktop or phone: the first answer wins. \
-                      Refusal or timeout fails the call; silence is not consent. Do not \
-                      retry or bypass approval.",
+                      `workspace` and `project` from a daruda_worktree_list row.",
         gate: Gate::NeedsApproval,
         properties: task_create_properties,
         required: &["workspace", "project", "title", "prompt"],
@@ -640,12 +668,9 @@ static TABLE: &[Tool] = &[
         name: "daruda_task_start",
         description: "Start a backlog task: it opens its worktree and hands the task's \
                       prompt to an agent there. Answers once it is running, with the \
-                      worktree and — when it runs as a chat — the chat's `target`. Needs \
-                      the user's approval on the desktop or phone; the first answer wins. \
-                      Refusal or timeout fails the call; do not retry or bypass approval. \
-                      End your turn \
-                      after it: a notice arrives on its own when the run ends or is \
-                      blocked. Do not follow it with daruda_run_wait unless the person \
+                      worktree and — when it runs as a chat — the chat's `target`. End \
+                      your turn after it: a notice arrives on its own when the run ends or \
+                      is blocked. Do not follow it with daruda_run_wait unless the person \
                       asked you to wait.",
         gate: Gate::NeedsApproval,
         properties: task_properties,
@@ -665,9 +690,7 @@ static TABLE: &[Tool] = &[
         name: "daruda_task_open",
         description: "Open the chat a task's run belongs to, reloading its conversation \
                       when no tab shows it, and answer with that chat's `target` — so a \
-                      finished task can be continued with daruda_chat_send. Needs the \
-                      user's approval on the desktop or phone; the first answer wins. \
-                      Refusal or timeout fails the call; do not retry or bypass approval.",
+                      finished task can be continued with daruda_chat_send.",
         gate: Gate::NeedsApproval,
         properties: task_properties,
         required: &["task"],
@@ -683,6 +706,6 @@ fn run_status_properties() -> serde_json::Value {
 
 fn run_wait_properties() -> serde_json::Value {
     let mut properties = run_status_properties();
-    properties["timeout"] = serde_json::json!({"type":"integer", "minimum":0, "description":"Required seconds to wait; 0 polls, above 110 waits 110 (timeout.clamped)."});
+    properties["timeout"] = serde_json::json!({"type":"integer", "minimum":0, "description":format!("Required seconds to wait; 0 polls, above {RUN_WAIT_TIMEOUT_MAX} waits {RUN_WAIT_TIMEOUT_MAX} (timeout.clamped).")});
     properties
 }

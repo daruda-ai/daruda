@@ -109,7 +109,7 @@ impl RunsHost {
             .iter()
             .map(|node| node.id.clone())
             .collect();
-        let (snapshot, pointers) = metadata::for_request(&request, &source);
+        let (snapshot, pointers) = metadata::for_request(&request);
         let cancel = CancelToken::default();
         let (finished_tx, finished) = std::sync::mpsc::channel();
         let pump_overage = overage.clone();
@@ -449,7 +449,7 @@ impl RunsHost {
     ) {
         let tree = CanonicalTree::resolve(&worktree)
             .unwrap_or_else(|_| CanonicalTree::unchecked(worktree));
-        let (snapshot, pointers) = flow_metadata(view.run_dir(), view.source(), None);
+        let (snapshot, pointers) = flow_metadata(view.run_dir(), view.source());
         let run = FlowRun {
             snapshot,
             pointers,

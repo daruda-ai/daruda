@@ -1622,3 +1622,86 @@ fn a_started_flow_runs_only_after_its_owner_is_on_disk(cx: &mut TestAppContext) 
     );
     wait_for_file(&run_dir.join("DONE"));
 }
+
+/// An unnamed flow that stalls: its first node removes the folder the
+/// second works in, after the start checked that folder exists.
+const UNNAMED_STALL: &str = "\
+version: 1
+nodes:
+  - id: first
+    kind: command
+    run: \"rmdir sub\"
+  - id: there
+    kind: command
+    deps: [first]
+    cwd: sub
+    run: \"true\"
+";
+
+/// A live end of an unnamed flow file, still owed when a resume the restart
+/// cut off reopened it: the restart reads the same end from disk, which must
+/// name the run as the live end did, or it is delivered a second time.
+#[gpui::test]
+async fn an_unnamed_flows_owed_end_is_not_repeated_after_a_cut_off_resume(cx: &mut TestAppContext) {
+    // A real run thread wakes the app from outside the scheduler.
+    cx.executor().allow_parking();
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let flows = lane.path().join(".daruda/flows");
+    std::fs::create_dir_all(&flows).unwrap();
+    std::fs::write(flows.join("ship.yaml"), UNNAMED_STALL).unwrap();
+    std::fs::create_dir_all(lane.path().join("sub")).unwrap();
+    let run_dir = crate::runs::runs_dir(&lane.path()).join("01STALL");
+    let key = RunKey::flow_of(&run_dir);
+    cx.update(|cx| {
+        lane.start(&dirs, cx);
+        let (events_tx, events) = smol::channel::unbounded();
+        let (_, asks) = smol::channel::unbounded();
+        let request = daruda_flow::request::RunRequest {
+            history: daruda_flow::session::HistoryContext {
+                source: Some(".daruda/flows/ship.yaml".into()),
+                accounts: Default::default(),
+            },
+            loaded: daruda_flow::load(UNNAMED_STALL, None).unwrap(),
+            events: Some(events_tx),
+            ..command_flow(&lane.path(), &lane.locks(), &run_dir)
+        };
+        RunsHost::start_flow(
+            crate::runs::FlowStart {
+                tree: daruda_flow::lock::CanonicalTree::resolve(&lane.path()).unwrap(),
+                request,
+                source: crate::runs::FlowSource::File(flows.join("ship.yaml")),
+                runners: Box::new(command_runners),
+                overage: Default::default(),
+                submitted_by: daruda_flow::request::StartedBy::Orchestrator,
+                solicited: true,
+                events,
+                asks,
+            },
+            cx,
+        )
+        .expect("the worktree is free");
+        RunsHost::register_run_solicited(key.clone(), true, cx);
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while cx.update(|cx| RunsHost::unreported_run_events(cx).is_empty()) {
+        assert!(Instant::now() < deadline, "the live end never arrived");
+        cx.background_executor
+            .timer(Duration::from_millis(20))
+            .await;
+        cx.run_until_parked();
+    }
+    cx.update(|cx| {
+        let live = RunsHost::unreported_run_events(cx);
+        assert_eq!(ended_as(&live[0]), Some(EndedAs::Stalled), "{live:?}");
+        // A resume the restart cuts off before it writes anything.
+        on_watch(cx, |w| w.begin_with(&key, Some(true)));
+        lane.restart(&dirs, cx);
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1, "one end, delivered once: {pending:?}");
+        assert_eq!(ended_as(&pending[0]), Some(EndedAs::Stalled));
+        assert!(pending[0].resumable(), "the run can be picked up again");
+    });
+}

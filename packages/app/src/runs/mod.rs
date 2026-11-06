@@ -12,6 +12,7 @@ mod cli_result;
 mod continuation;
 mod delivery;
 mod effects;
+mod flow_description;
 mod flow_tasks;
 mod flows;
 mod inbox;
@@ -32,6 +33,7 @@ pub(crate) use cli::hook_end_reason as cli_hook_end_reason;
 pub(crate) use cli::resume::CliResumeLease;
 pub(crate) use delivery::{DeliveryFailure, RunPane, TerminalDispatchError};
 pub(crate) use effects::RunsEffects;
+pub(crate) use flow_description::flow_run_name;
 pub(crate) use flow_tasks::{REPO_DIR, runs_dir, task_run_dir};
 pub(crate) use flows::{
     AlreadyRunning, AnswerRefused, FlowAskOutcome, FlowChange, FlowChanged, FlowEnded, FlowRun,
@@ -41,7 +43,6 @@ pub(crate) use flows::{
 pub(crate) use flows::{NodeRunStates, apply_run_event};
 pub(crate) use intent::TaskIntent;
 pub(crate) use ledger::hold_markers as run_ledger_hold_markers;
-pub(crate) use result_io::flow_run_name;
 pub(crate) use tasks::{
     GlobalTasks, QUIT_FLUSH_DEADLINE, ReadOnlyCause, RunsHost, TaskCommitError, no_hook,
 };

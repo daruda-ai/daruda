@@ -31,7 +31,7 @@ async fn nothing_and_zero_poll_are_normal_and_timeout_metadata_is_clamped(cx: &m
     assert_eq!(value["outcome"], "nothing");
     assert_eq!(
         value["timeout"],
-        serde_json::json!({"requested_secs":999,"actual_secs":110,"clamped":true})
+        serde_json::json!({"requested_secs":999,"actual_secs":TIMEOUT_MAX,"clamped":true})
     );
     drop(reply);
     cx.run_until_parked();

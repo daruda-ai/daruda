@@ -42,7 +42,7 @@ struct Notices {
 impl Global for Notices {}
 
 pub(crate) fn enqueue(event: RunEvent, cx: &mut App) {
-    if RunsHost::run_scope(cx).contains(&event.snapshot.key) {
+    if RunsHost::in_run_scope(&event.snapshot.key, cx) {
         schedule(cx);
     }
 }

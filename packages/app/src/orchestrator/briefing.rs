@@ -18,8 +18,11 @@
 //! session's directory: a prompt is read once, a directory file survives a
 //! long conversation.
 //!
-//! Both are assembled from the same three constants, so the two channels
-//! cannot drift.
+//! Both are assembled from the same parts, so the two channels cannot drift.
+//! What the tool table already states — which tools wait for approval, how
+//! long a wait may block — is read from it rather than restated.
+
+use crate::control::mcp::tools::{RUN_WAIT_TIMEOUT_MAX, approval_tool_names};
 
 /// The briefing for a session whose tools come from the MCP server called
 /// `server`.
@@ -28,7 +31,11 @@
 /// agent spells a namespaced tool is its own business, so this names the
 /// server once and the tools bare.
 pub(crate) fn briefing(server: &str) -> String {
-    format!("{PREAMBLE}\n\nYour tools come from the MCP server `{server}`.\n{TOOLS}\n{RULES}")
+    format!(
+        "{PREAMBLE}\n\nYour tools come from the MCP server `{server}`.\n{}\n{}",
+        tools(),
+        rules()
+    )
 }
 
 /// The same briefing as a standing instruction file.
@@ -40,7 +47,11 @@ pub(crate) fn briefing(server: &str) -> String {
 /// orchestrator start; a person who wants different standing instructions has
 /// to put them where their agent reads user-scoped ones, not here.
 pub(crate) fn instructions() -> String {
-    format!("{GENERATED_HEADER}\n\n{PREAMBLE}\n\nYour tools:\n{TOOLS}\n{RULES}\n")
+    format!(
+        "{GENERATED_HEADER}\n\n{PREAMBLE}\n\nYour tools:\n{}\n{}\n",
+        tools(),
+        rules()
+    )
 }
 
 const GENERATED_HEADER: &str =
@@ -53,15 +64,33 @@ not a place to write code.
 The person may be talking to you from the desktop tab or their phone. Do not \
 infer their location or reading ability from your role.";
 
-const TOOLS: &str = "\
+fn tools() -> String {
+    format!(
+        "{TOOLS_BEFORE_WAIT}\n- daruda_run_wait — wait for ended or blocked run handles \
+         (required timeout, at most {RUN_WAIT_TIMEOUT_MAX} seconds)\n{TOOLS_AFTER_WAIT}"
+    )
+}
+
+fn rules() -> String {
+    format!(
+        "{RULES_BEFORE_APPROVAL}\n- {} wait for approval on the desktop or phone. The \
+         first answer wins and settles both cards. That wait is normal; do not retry around \
+         it. A timeout means silence, not consent: do not retry or bypass the approval.\n\
+         {RULES_AFTER_APPROVAL}",
+        approval_tool_names()
+    )
+}
+
+const TOOLS_BEFORE_WAIT: &str = "\
 - daruda_chat_list, daruda_status — what is open and what it is doing
 - daruda_chat_send, daruda_chat_stop — prompt one of those chats, or stop it
 - daruda_chat_read — what one of those chats last said
 - daruda_chat_ask — prompt one and wait for its reply, in one call
 - daruda_worktree_list — every worktree, with the branch each is on
 - daruda_chat_new — one more chat (a new tab) in a worktree that already exists
-- daruda_worktree_create — a worktree on a *new* branch
-- daruda_run_wait — wait for ended or blocked run handles (required timeout, at most 110 seconds)
+- daruda_worktree_create — a worktree on a *new* branch";
+
+const TOOLS_AFTER_WAIT: &str = "\
 - daruda_run_status — query current progress or retained results without marking them reported
 - daruda_flow_list, daruda_flow_run, daruda_flow_stop — the saved flows
 - daruda_flow_resume — pick an interrupted flow run up where it stopped
@@ -71,7 +100,7 @@ const TOOLS: &str = "\
 - daruda_task_start, daruda_task_stop — run a backlog task, or cancel one
 - daruda_task_open — the chat a task ran in, to read or continue it";
 
-const RULES: &str = "\
+const RULES_BEFORE_APPROVAL: &str = "\
 How to work here:
 - Act. Do not load a skill, brainstorm, or write a plan — a request from \
 either surface is an instruction, not a topic.
@@ -82,12 +111,9 @@ if none of them does what was asked, say that.
 second worktree. To add a tab to a worktree that already exists — including \
 the one a project is currently on — use daruda_chat_new. Match a name the \
 person says (\"main\", \"feat/x\") against daruda_worktree_list's rows rather \
-than guessing a handle.
-- daruda_chat_new, daruda_worktree_create, daruda_flow_resume, \
-daruda_task_create, daruda_task_start and daruda_task_open wait for approval on the desktop or \
-phone. The first answer wins and settles both cards. That wait is normal; \
-do not retry around it. A timeout means silence, not consent: do not retry \
-or bypass the approval.
+than guessing a handle.";
+
+const RULES_AFTER_APPROVAL: &str = "\
 - A task the person names (\"the login bug\") is a daruda_task_list row; \
 match its title there and pass its `task` rather than guessing one.
 - daruda_chat_send does not return the answer. Reading straight after sending \
@@ -131,9 +157,7 @@ mod tests {
     #[test]
     fn every_advertised_tool_appears() {
         let text = briefing("daruda-x");
-        let tools = crate::control::mcp::tools::table_for_test();
-        assert_eq!(tools.len(), 21);
-        for tool in tools {
+        for tool in crate::control::mcp::tools::table_for_test() {
             assert!(
                 text.contains(tool.name),
                 "{} is advertised but not briefed",
@@ -157,6 +181,31 @@ mod tests {
             );
             assert!(!text.contains("cannot read a plan"), "{text}");
             assert!(!text.contains("They are not at a keyboard"), "{text}");
+        }
+    }
+
+    /// Every tool that waits for approval is named where the briefing says
+    /// so, in both channels, because the list comes from the gate.
+    #[test]
+    fn every_gated_tool_is_briefed_as_waiting_for_approval() {
+        use crate::control::mcp::tools::Gate;
+        for text in [briefing("daruda-x"), instructions()] {
+            let line = text
+                .lines()
+                .find(|line| line.contains("wait for approval"))
+                .expect("an approval rule");
+            for tool in crate::control::mcp::tools::table_for_test() {
+                assert_eq!(
+                    line.contains(tool.name),
+                    tool.gate == Gate::NeedsApproval,
+                    "{}: {line}",
+                    tool.name
+                );
+            }
+            assert!(
+                text.contains(&format!("at most {RUN_WAIT_TIMEOUT_MAX} seconds")),
+                "{text}"
+            );
         }
     }
 

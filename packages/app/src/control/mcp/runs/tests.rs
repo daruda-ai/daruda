@@ -100,3 +100,22 @@ fn only_an_interrupted_or_stalled_end_is_marked_resumable() {
     let value = serde_json::to_value(convert(end(domain::EndedAs::Completed))).unwrap();
     assert!(value["state"].get("resumable").is_none());
 }
+
+/// A run's key and the handle a caller holds convert both ways; a Task's
+/// latest alias names no key until the task book resolves it.
+#[test]
+fn run_keys_and_concrete_handles_convert_both_ways() {
+    let task = domain::RunKey::Task(daruda_store::tasks::ExecutionRef {
+        task_id: "t".into(),
+        execution_id: "e".into(),
+    });
+    for (key, text) in [
+        (domain::RunKey::Flow("01A".into()), "flow:01A"),
+        (task, "task:t/e"),
+    ] {
+        let handle = run_handle(key.clone());
+        assert_eq!(handle.to_string(), text);
+        assert_eq!(run_key(handle), Some(key));
+    }
+    assert_eq!(run_key("task:t".parse().unwrap()), None);
+}

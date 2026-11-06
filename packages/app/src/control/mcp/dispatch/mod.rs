@@ -118,7 +118,7 @@ impl ConnectionSession {
 use crate::control::mcp::socket::{Inbound, Outgoing};
 use crate::control::mcp::tools::{Gate, ToolId, ToolTable};
 use crate::control::result::{ControlError, ControlOutcome};
-use crate::control::spec::ResolvedCommand;
+use crate::control::spec::{ResolvedCommand, WaitingCommand};
 
 /// What answering a frame produced.
 enum Answer {
@@ -347,16 +347,13 @@ fn answer_frame(
                 convert::to_tool_result(&outcome),
             ))
         }
-        // The same target guards an immediate call clears — it prompts a pane,
-        // so it must not be able to address the orchestrator or overfill a
-        // queue — but its answer arrives with the turn rather than at once.
-        Command::Waiting(resolved) => match guard_immediate(id, &resolved, protected, cx) {
+        Command::Waiting(waiting) => match guard_waiting(id, &waiting, protected, cx) {
             Err(refusal) => Answer::Now(protocol::result_frame(
                 call.id,
                 convert::to_tool_result(&Err(refusal)),
             )),
             Ok(()) => match exec::run_waiting(
-                resolved,
+                waiting,
                 crate::control::exec::CommandOrigin::Orchestrator,
                 cx,
             ) {
@@ -387,9 +384,9 @@ fn answer_frame(
     }
 }
 
-/// The two guards a non-creating tool has to clear.
+/// The target guards an immediate tool has to clear.
 ///
-/// The budget guard belongs to the gated path, which spends it; these two are
+/// The budget guard belongs to the gated path, which spends it; these are
 /// about the *target*, so they apply wherever a tool names one.
 fn guard_immediate(
     id: ToolId,
@@ -397,23 +394,9 @@ fn guard_immediate(
     protected: Option<PaneRef>,
     cx: &mut App,
 ) -> Result<(), ControlError> {
-    // Belt to the braces of
-    // `convert::tests::the_declared_gate_and_the_converted_command_agree`,
-    // which is what actually binds the gate to the command shape — this only
-    // catches it at the call site in a debug build.
-    debug_assert_eq!(
-        ToolTable::all(&[]).gate(id),
-        Gate::Open,
-        "a gated tool must not reach the unapproved path"
-    );
+    debug_assert_ungated(id);
     match resolved {
-        // Both prompt a pane, so both clear the same two: a prompt to the
-        // orchestrator's own pane makes a turn that makes a turn, and an
-        // unbounded queue outgrows the one-per-turn drain.
-        ResolvedCommand::Say { target, .. } | ResolvedCommand::AskPane { target, .. } => {
-            guards::guard_self_target(*target, protected)?;
-            guards::guard_queue_depth(*target, cx)
-        }
+        ResolvedCommand::Say { target, .. } => guard_prompt(*target, protected, cx),
         // A stop is how a runaway is *ended*, so it is never refused for
         // addressing the orchestrator; a listing names nothing. A read starts
         // no turn and enqueues nothing, so neither target guard has anything
@@ -425,9 +408,47 @@ fn guard_immediate(
         | ResolvedCommand::Read { .. }
         | ResolvedCommand::Flow(_)
         | ResolvedCommand::AskOrchestrator { .. }
-        | ResolvedCommand::TaskList
-        | ResolvedCommand::TaskStop { .. } => Ok(()),
+        | ResolvedCommand::TaskList => Ok(()),
     }
+}
+
+/// [`guard_immediate`]'s target guards for a tool whose answer arrives later.
+fn guard_waiting(
+    id: ToolId,
+    waiting: &WaitingCommand,
+    protected: Option<PaneRef>,
+    cx: &mut App,
+) -> Result<(), ControlError> {
+    debug_assert_ungated(id);
+    match waiting {
+        WaitingCommand::AskPane { target, .. } => guard_prompt(*target, protected, cx),
+        // Like a pane's stop, a task's cancel ends work and prompts nothing.
+        WaitingCommand::TaskStop { .. } => Ok(()),
+    }
+}
+
+/// What every prompt to a pane clears: a prompt to the orchestrator's own
+/// pane makes a turn that makes a turn, and an unbounded queue outgrows the
+/// one-per-turn drain.
+fn guard_prompt(
+    target: PaneRef,
+    protected: Option<PaneRef>,
+    cx: &mut App,
+) -> Result<(), ControlError> {
+    guards::guard_self_target(target, protected)?;
+    guards::guard_queue_depth(target, cx)
+}
+
+/// Belt to the braces of
+/// `convert::tests::the_declared_gate_and_the_converted_command_agree`,
+/// which is what actually binds the gate to the command shape — this only
+/// catches it at the call site in a debug build.
+fn debug_assert_ungated(id: ToolId) {
+    debug_assert_eq!(
+        ToolTable::all(&[]).gate(id),
+        Gate::Open,
+        "a gated tool must not reach the unapproved path"
+    );
 }
 
 /// A parsed `tools/call`. `None` for any other method, which the protocol
