@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use daruda_runlog::testing::{Fault, FaultBackend};
 use daruda_runlog::{
-    Body, CatchUp, CommitError, Committer, FileBackend, LogBackend, Record, RunLog,
+    Body, CatchUp, CommitError, Committer, Compaction, FileBackend, LogBackend, Record, RunLog,
 };
 use smol::channel::Receiver;
 
@@ -481,4 +481,45 @@ fn a_rejected_proposal_emits_nothing() {
     let streamed = drain(&live);
     assert_eq!(streamed.len(), 1);
     assert_eq!(streamed[0].body, Body::Event { event: insert("a") });
+}
+
+/// A committer told to compact when due starts a new generation past its
+/// budget, and the log reopens to the state its answers led to.
+#[test]
+fn a_compacting_committer_starts_a_new_generation_once_due() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = RunLog::<Toy, _>::open(FileBackend::new(dir.path()), BUILD).unwrap();
+    let committer =
+        Committer::spawn_with(log, "runlog-test", no_hook(), Compaction::AfterRecords(4)).unwrap();
+    let mut expected = ToyState::default();
+    let mut last_seq = 0;
+    for n in 0..10 {
+        let appended = smol::block_on(committer.append(insert(&format!("m{n}")))).unwrap();
+        assert!(appended.seq > last_seq);
+        last_seq = appended.seq;
+        expected.members.insert(format!("m{n}"));
+    }
+    committer.flush(Duration::from_secs(5)).unwrap();
+    drop(committer);
+    let generations = FileBackend::new(dir.path()).generations().unwrap();
+    assert_eq!(generations.len(), 1, "older generations are dropped");
+    assert!(
+        generations[0] >= 2,
+        "compacted more than once: {generations:?}"
+    );
+    let reopened = RunLog::<Toy, _>::open(FileBackend::new(dir.path()), BUILD).unwrap();
+    assert_eq!(reopened.state(), &expected);
+}
+
+#[test]
+fn a_committer_compacts_only_on_request_by_default() {
+    let backend = FaultBackend::new();
+    let committer = spawn(backend.clone(), no_hook());
+    let before = backend.generations().unwrap();
+    for _ in 0..1100 {
+        smol::block_on(committer.append(ticket())).unwrap();
+    }
+    committer.flush(Duration::from_secs(30)).unwrap();
+    drop(committer);
+    assert_eq!(backend.generations().unwrap(), before);
 }

@@ -34,6 +34,11 @@ and no subscriber sees a record the disk lacks. A rejection emits nothing.
   machine or the hook, `Poisoned` (the panicking event may be durable). Both
   end every live stream; `flush` and later requests answer at once.
 - `flush(deadline)` waits until every request queued before it is answered.
+- `append` answers like `propose` without cloning the state, for callers
+  that never read it. `spawn_with(.., Compaction)` lets the committer compact
+  after a commit that leaves the log past budget; `spawn` compacts only on
+  `compact()`. A compaction failure that closes the log surfaces as `Closed`
+  on the next proposal.
 - Dropping the last handle drains the queue, then joins the thread.
 - Never block on the committer from inside the hook: `subscribe` refuses,
   `flush` times out.

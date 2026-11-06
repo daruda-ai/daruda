@@ -17,7 +17,7 @@ mod snapshot;
 pub mod testing;
 
 pub use backend::{FileBackend, Generation, LogBackend};
-pub use committer::{AfterCommit, Committer};
+pub use committer::{AfterCommit, Appended, Committer, Compaction};
 pub use error::{CommitError, FlushTimedOut, OpenError, SubscribeError, Versioned};
 pub use log::{CatchUp, Committed, History, RunLog};
 pub use machine::Machine;

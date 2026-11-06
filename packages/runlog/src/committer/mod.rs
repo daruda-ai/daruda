@@ -29,12 +29,40 @@ pub type AfterCommit<M> =
 
 type Live<E> = Receiver<Arc<Record<E>>>;
 type CommitResult<M> = Result<Committed<M>, CommitError<<M as Machine>::Rejected>>;
+type AppendResult<M> =
+    Result<Appended<<M as Machine>::Event>, CommitError<<M as Machine>::Rejected>>;
 type Subscription<M> = Result<(CatchUp<M>, Live<<M as Machine>::Event>), SubscribeError>;
+
+/// A durable, applied event, answered without the state after it.
+#[derive(Debug)]
+pub struct Appended<E> {
+    pub seq: u64,
+    /// The event as `assign` filled it in.
+    pub event: E,
+}
+
+/// When the committer starts a new generation on its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Compaction {
+    /// Only when [`Committer::compact`] asks.
+    OnRequest,
+    /// After a commit that leaves the log past the shared budgets.
+    WhenDue,
+    /// After a commit that leaves more than this many records in the log,
+    /// or the shared byte budget passed.
+    AfterRecords(u64),
+}
+
+/// How a proposal is answered.
+enum Reply<M: Machine> {
+    Committed(Sender<CommitResult<M>>),
+    Appended(Sender<AppendResult<M>>),
+}
 
 enum Request<M: Machine> {
     Propose {
         event: M::Event,
-        reply: Sender<CommitResult<M>>,
+        reply: Reply<M>,
     },
     Subscribe {
         after_seq: u64,
@@ -99,14 +127,24 @@ where
     M::Event: Clone + Send + Sync,
     M::Rejected: Send,
 {
-    /// Move `log` onto a new thread named `name`.
+    /// Move `log` onto a new thread named `name`; it compacts only on request.
     pub fn spawn<B: LogBackend + Send + 'static>(
         log: RunLog<M, B>,
         name: &str,
         after_commit: AfterCommit<M>,
     ) -> io::Result<Self> {
+        Self::spawn_with(log, name, after_commit, Compaction::OnRequest)
+    }
+
+    /// [`Self::spawn`], compacting as `compaction` says.
+    pub fn spawn_with<B: LogBackend + Send + 'static>(
+        log: RunLog<M, B>,
+        name: &str,
+        after_commit: AfterCommit<M>,
+        compaction: Compaction,
+    ) -> io::Result<Self> {
         let (requests, queue) = channel::unbounded();
-        let mut worker = Worker::new(log, after_commit);
+        let mut worker = Worker::new(log, after_commit, compaction);
         let thread = thread::Builder::new()
             .name(name.to_owned())
             .spawn(move || worker.run(&queue))?;
@@ -124,12 +162,24 @@ where
     /// `!Send` caller can await it on any executor.
     pub fn propose(&self, event: M::Event) -> impl Future<Output = CommitResult<M>> + use<M> {
         let (reply, answer) = channel::bounded(1);
+        self.send_proposal(event, Reply::Committed(reply));
+        async move { answer.recv().await.unwrap_or(Err(CommitError::Closed)) }
+    }
+
+    /// [`Self::propose`] for a caller that never reads the state after the
+    /// commit, so none is cloned for it.
+    pub fn append(&self, event: M::Event) -> impl Future<Output = AppendResult<M>> + use<M> {
+        let (reply, answer) = channel::bounded(1);
+        self.send_proposal(event, Reply::Appended(reply));
+        async move { answer.recv().await.unwrap_or(Err(CommitError::Closed)) }
+    }
+
+    fn send_proposal(&self, event: M::Event, reply: Reply<M>) {
         // SILENT-OK: a failed send drops `reply`, which resolves `Closed`.
         let _ = self
             .shared
             .requests
             .try_send(Request::Propose { event, reply });
-        async move { answer.recv().await.unwrap_or(Err(CommitError::Closed)) }
     }
 
     /// Records after `after_seq` (or a snapshot, if they were compacted

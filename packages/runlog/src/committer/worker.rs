@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 use smol::channel::{self, Receiver, Sender};
 
-use super::{AfterCommit, CommitResult, Request, Subscription};
+use super::{AfterCommit, Appended, Compaction, Reply, Request, Subscription};
 use crate::backend::LogBackend;
 use crate::error::{CommitError, SubscribeError};
-use crate::log::{Committed, RunLog};
+use crate::log::{Applied, Committed, RunLog};
 use crate::machine::Machine;
 use crate::record::{Body, FORMAT_VERSION, Record};
 
@@ -43,6 +43,7 @@ struct Subscriber<E> {
 pub(super) struct Worker<M: Machine, B: LogBackend> {
     log: RunLog<M, B>,
     after_commit: AfterCommit<M>,
+    compaction: Compaction,
     subscribers: Vec<Subscriber<M::Event>>,
     stopped: Option<Stop>,
 }
@@ -51,10 +52,15 @@ impl<M: Machine, B: LogBackend> Worker<M, B>
 where
     M::Event: Clone,
 {
-    pub(super) fn new(log: RunLog<M, B>, after_commit: AfterCommit<M>) -> Self {
+    pub(super) fn new(
+        log: RunLog<M, B>,
+        after_commit: AfterCommit<M>,
+        compaction: Compaction,
+    ) -> Self {
         Self {
             log,
             after_commit,
+            compaction,
             subscribers: Vec::new(),
             stopped: None,
         }
@@ -73,8 +79,28 @@ where
     fn handle(&mut self, request: Request<M>) {
         // SILENT-OK (every send below): the caller dropped its answer.
         match request {
-            Request::Propose { event, reply } => {
-                let _ = reply.try_send(self.propose(event));
+            Request::Propose {
+                event,
+                reply: Reply::Committed(reply),
+            } => {
+                let committed = self.propose(event).map(|applied| Committed {
+                    seq: applied.seq,
+                    event: applied.event,
+                    state_after: self.log.state().clone(),
+                });
+                self.compact_when_due();
+                let _ = reply.try_send(committed);
+            }
+            Request::Propose {
+                event,
+                reply: Reply::Appended(reply),
+            } => {
+                let appended = self.propose(event).map(|applied| Appended {
+                    seq: applied.seq,
+                    event: applied.event,
+                });
+                self.compact_when_due();
+                let _ = reply.try_send(appended);
             }
             Request::Subscribe { after_seq, reply } => {
                 let _ = reply.send(self.subscribe(after_seq));
@@ -88,7 +114,7 @@ where
         }
     }
 
-    fn propose(&mut self, event: M::Event) -> CommitResult<M> {
+    fn propose(&mut self, event: M::Event) -> Result<Applied<M::Event>, CommitError<M::Rejected>> {
         match self.stopped {
             Some(Stop::Closed) => return Err(CommitError::Closed),
             Some(Stop::Poisoned | Stop::Exited) => return Err(CommitError::Poisoned),
@@ -123,11 +149,22 @@ where
             self.stop(Stop::Poisoned);
             return Err(CommitError::Poisoned);
         }
-        Ok(Committed {
-            seq: applied.seq,
-            event: applied.event,
-            state_after: self.log.state().clone(),
-        })
+        Ok(applied)
+    }
+
+    /// Start a new generation once the log is past the policy's budget. A
+    /// failure that closed the log surfaces as `Closed` on the next proposal;
+    /// any other leaves the old generation for the next compaction to drop.
+    fn compact_when_due(&mut self) {
+        let due = match self.compaction {
+            Compaction::OnRequest => false,
+            Compaction::WhenDue => self.log.should_compact(),
+            Compaction::AfterRecords(budget) => self.log.should_compact_after_records(budget),
+        };
+        if due && self.stopped.is_none() {
+            // SILENT-OK: see above; the proposer's record is durable either way.
+            let _ = self.compact();
+        }
     }
 
     fn subscribe(&mut self, after_seq: u64) -> Subscription<M> {
@@ -191,7 +228,7 @@ mod tests {
     fn a_dropped_subscriber_is_removed_on_the_next_send() {
         let temp = tempfile::tempdir().unwrap();
         let log = RunLog::<Sum, _>::open(FileBackend::new(temp.path()), "b").unwrap();
-        let mut worker = Worker::new(log, Box::new(|_, _| {}));
+        let mut worker = Worker::new(log, Box::new(|_, _| {}), Compaction::OnRequest);
         let (_, kept) = worker.subscribe(0).unwrap();
         let (_, ahead) = worker.subscribe(2).unwrap();
         drop(worker.subscribe(0).unwrap());
