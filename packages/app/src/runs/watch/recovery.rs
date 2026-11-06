@@ -60,6 +60,25 @@ impl RunWatch {
         }
     }
 
+    /// An earlier episode's end was reported after its run resumed. With no
+    /// newer end recorded, the ledger's entry would read as reported and be
+    /// released at the next start, so it starts over as owned with no end.
+    pub(super) fn reown_resumed(&mut self, key: &RunKey) {
+        let resumed = self.entries.get(key).is_some_and(|entry| {
+            entry.membership == Membership::Scoped
+                && matches!(entry.end, EndState::Open | EndState::Held)
+        });
+        let outstanding = self.events.iter().any(|event| {
+            &event.snapshot.key == key
+                && event.recorded.is_some()
+                && event.delivery != Delivery::Reported
+        });
+        if resumed && !outstanding {
+            self.ledger.release_reported(key);
+            self.record_owned(key);
+        }
+    }
+
     fn rejoin(&mut self, run: Restored) {
         if let (RunKey::Flow(id), Some(location)) = (&run.key, run.location) {
             self.locations.insert(id.clone(), location);

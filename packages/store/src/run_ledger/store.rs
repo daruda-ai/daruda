@@ -11,7 +11,9 @@ use daruda_runlog::{
     CommitError, Committed, Committer, FileBackend, FlushTimedOut, OpenError, RunLog,
 };
 
-use super::{DirectoryHolds, LedgerRejected, RunLedgerEvent, RunLedgerMachine, RunLedgerState};
+use super::{
+    DirectoryHolds, LedgerKey, LedgerRejected, RunLedgerEvent, RunLedgerMachine, RunLedgerState,
+};
 
 type Answer = Pin<
     Box<
@@ -26,6 +28,15 @@ pub enum RunLedgerError {
     Io(#[from] io::Error),
     #[error("run ledger could not be opened: {0}")]
     Open(#[from] OpenError),
+}
+
+/// What the records answered since the last look tell their writer.
+#[derive(Debug, Default)]
+pub struct Answered {
+    /// The first failure among them.
+    pub failure: Option<CommitError<LedgerRejected>>,
+    /// Entries the committed ends evicted to stay under the cap, in commit order.
+    pub evicted: Vec<LedgerKey>,
 }
 
 /// Domain code holds this, never the ledger's directory.
@@ -81,30 +92,35 @@ impl RunLedgerStore {
         ))
     }
 
-    /// Queue `event` without waiting. A failure surfaces later through
-    /// [`Self::take_failure`]; after an I/O failure every later record fails.
+    /// Queue `event` without waiting. Its outcome surfaces later through
+    /// [`Self::take_answered`]; after an I/O failure every later record fails.
     pub fn record(&self, event: RunLedgerEvent) {
         let answer = Box::pin(self.committer.propose(event));
         self.answers().push_back(answer);
     }
 
-    /// The first failure among the records answered so far, once. Records
-    /// still being written are looked at on a later call.
-    pub fn take_failure(&self) -> Option<CommitError<LedgerRejected>> {
+    /// What the records answered so far report, each once. Records still
+    /// being written are looked at on a later call.
+    pub fn take_answered(&self) -> Answered {
         let mut answers = self.answers();
-        let mut failure = None;
+        let mut answered = Answered::default();
         while let Some(answer) = answers.front_mut() {
             let Some(result) = smol::future::block_on(smol::future::poll_once(answer)) else {
                 break;
             };
             answers.pop_front();
-            if let Err(error) = result
-                && failure.is_none()
-            {
-                failure = Some(error);
+            match result {
+                Ok(committed) => {
+                    if let RunLedgerEvent::Ended { evicts, .. } = committed.event {
+                        answered.evicted.extend(evicts);
+                    }
+                }
+                Err(error) => {
+                    answered.failure.get_or_insert(error);
+                }
             }
         }
-        failure
+        answered
     }
 
     /// Flow runs, by id, whose directories retention must spare at `now_ms`,

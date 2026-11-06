@@ -141,6 +141,9 @@ impl RunWatch {
             }
             if let Some(episode) = recorded {
                 self.ledger.reported(&key, episode, current && settles);
+                if !current {
+                    self.reown_resumed(&key);
+                }
             }
         }
         // A closed block or a terminal supersedes only an unreported blocked episode.

@@ -464,15 +464,18 @@ impl RunsHost {
             opened.host.watch = watch;
             opened.host.effects = opened.host.effects.take().or(effects);
         }
+        let mut restored_keys = Vec::new();
         if let Some((mut ledger, entries)) = opened.ledger.take() {
             // An unreadable task log cannot tell a deleted task from a lost one.
             let book = (!matches!(opened.host.access, Access::Unavailable))
                 .then_some(&opened.projection.book);
             let restored = ledger.restore(entries, book);
+            restored_keys = restored.iter().map(|run| run.key.clone()).collect();
             opened.host.watch.attach_ledger(ledger, restored);
         }
         opened.host.watch.adopt_log(
             std::mem::take(&mut opened.carried),
+            restored_keys,
             previous.as_ref(),
             &opened.projection.book,
         );

@@ -56,7 +56,7 @@ impl Profile {
     }
 
     /// A phone-asked orchestrator Task was still running when daruda quit;
-    /// the next start's reconciliation ends it as a live, solicited end.
+    /// the next start's reconciliation ends it as a recovered, solicited end.
     fn restart_with_carried_task(&self, cx: &mut TestAppContext) {
         cx.update(|cx| {
             self.start(cx);
@@ -82,7 +82,7 @@ impl Profile {
             self.start(cx);
             let pending = RunsHost::unreported_run_events(cx);
             assert_eq!(pending.len(), 1);
-            assert_eq!(pending[0].origin, Origin::Live);
+            assert_eq!(pending[0].origin, Origin::Recovered);
             assert!(pending[0].solicited);
         });
     }
@@ -210,6 +210,40 @@ fn a_disabled_orchestrator_is_not_started_and_the_result_stays_pending(cx: &mut 
     });
 }
 
+/// A start that fails is toasted in the window that would have hosted it,
+/// once per process, and the phone's results stay unreported.
+#[gpui::test]
+fn a_failed_start_is_toasted_once_and_the_result_stays_pending(cx: &mut TestAppContext) {
+    let profile = Profile::new();
+    let key = profile.restart_owing(true, cx);
+    let (_outbound, probes) = surroundings(true, cx);
+    cx.update(|cx| {
+        cx.update_global::<crate::settings_store::SettingsStore, _>(|store, _| {
+            let mut config = (*store.user()).clone();
+            config.orchestrator.agent_id = Some("no-such-agent".into());
+            store.set_user_for_testing(config);
+        });
+    });
+    let first = crate::test_support::workspace_for_control(cx);
+    let _second = crate::test_support::workspace_for_control(cx);
+    cx.run_until_parked();
+    assert!(orchestrator_pane(cx).is_none());
+    assert!(probes.borrow().is_empty());
+    let toasts: Vec<_> = first.workspace.read_with(cx, |ws, _| {
+        ws.error_history()
+            .iter()
+            .filter(|report| report.dedup_key.as_deref() == Some("orchestrator.recovered_start"))
+            .map(|report| report.context.get("reason").cloned())
+            .collect()
+    });
+    assert_eq!(toasts, vec![Some("Unresolvable".to_owned())]);
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].snapshot.key, key);
+    });
+}
+
 #[gpui::test]
 fn more_windows_and_a_closed_orchestrator_never_start_it_twice(cx: &mut TestAppContext) {
     let profile = Profile::new();
@@ -255,8 +289,8 @@ fn a_recovered_end_announced_after_the_first_window_starts_it(cx: &mut TestAppCo
     assert_eq!(probes.borrow().len(), 1);
 }
 
-/// Startup reconciliation settles a carried Task as a live end; the phone is
-/// still owed its answer, so the first window starts the orchestrator.
+/// Startup reconciliation settles a carried Task before the first window; the
+/// phone is still owed its answer, so that window starts the orchestrator.
 #[gpui::test]
 fn a_carried_phone_task_settled_at_startup_starts_it_and_answers_once(cx: &mut TestAppContext) {
     let profile = Profile::new();
@@ -268,6 +302,7 @@ fn a_carried_phone_task_settled_at_startup_starts_it_and_answers_once(cx: &mut T
     let prompts = sent(cx);
     assert_eq!(prompts.len(), 1);
     assert!(prompts[0].contains("summarize the release"));
+    assert!(prompts[0].contains("requested before daruda restarted"));
     assert_eq!(probes.borrow_mut()[0].drain().0, 1);
     super::solicited::answer_reaches_phone_once(pane, &mut outbound, true, false, cx);
 }

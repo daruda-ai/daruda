@@ -84,6 +84,8 @@ fn decide(trigger: Trigger, cx: &mut App) {
     start(owed.len(), cx);
 }
 
+/// Runs deferred, outside any window's update, so the failure toast can
+/// update the host workspace directly.
 fn start(owed: usize, cx: &mut App) {
     let outcome = if super::pane(cx).is_some() {
         "already running"
@@ -92,13 +94,31 @@ fn start(owed: usize, cx: &mut App) {
             Ok(_) => "started",
             Err(EnsureError::Disabled) => "disabled; results stay pending",
             Err(error) => {
-                log(ErrorSeverity::Warning, owed, &format!("failed: {error:?}"));
+                report_failure(owed, &error, cx);
                 return;
             }
         }
     };
     log(ErrorSeverity::Info, owed, outcome);
 }
+
+/// Nobody clicked anything, so a log line alone would leave the phone's
+/// results waiting without a word: the failure is toasted like a chip start.
+fn report_failure(owed: usize, error: &EnsureError, cx: &mut App) {
+    let report = ErrorReport::new(crate::surface::strings::orchestrator::start_failed())
+        .severity(ErrorSeverity::Warning)
+        .with_context("results", owed.to_string())
+        .with_context("reason", format!("{error:?}"))
+        .at(file!(), line!())
+        .dedup(DEDUP)
+        .build();
+    match WindowRegistry::first_workspace(cx) {
+        Some((_, host)) => super::report_start_failure(&host, report, cx),
+        None => LogWriter::log(report),
+    }
+}
+
+const DEDUP: &str = "orchestrator.recovered_start";
 
 /// Unreported episodes in the orchestrator's scope that a phone asked for:
 /// the ones whose notice turn answers the phone.
@@ -118,7 +138,7 @@ fn log(severity: ErrorSeverity, owed: usize, outcome: &str) {
             .with_context("results", owed.to_string())
             .with_context("outcome", outcome)
             .at(file!(), line!())
-            .dedup("orchestrator.recovered_start")
+            .dedup(DEDUP)
             .build(),
     );
 }

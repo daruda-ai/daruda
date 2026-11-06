@@ -275,11 +275,21 @@ fn report_chip_start_failure(
     .at(file!(), line!())
     .dedup("orchestrator.chip.start")
     .build();
-    if chip_host
+    report_start_failure(chip_host, report, cx);
+}
+
+/// Toast `report` in `host`, which also logs it. Never call this inside an
+/// update of `host` itself.
+pub(crate) fn report_start_failure(
+    host: &gpui::WeakEntity<crate::workspace::Workspace>,
+    report: daruda_store::observability::error_report::ErrorReport,
+    cx: &mut App,
+) {
+    if host
         .update(cx, |ws, cx| ws.report_error(report.clone(), cx))
         .is_err()
     {
-        // The window went away with the click in flight — the log is all
+        // The window went away with the start in flight — the log is all
         // that is left to tell.
         daruda_store::observability::log_writer::LogWriter::log(report);
     }

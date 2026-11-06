@@ -73,11 +73,11 @@ impl Ledger {
         }
     }
 
-    /// Turn replayed entries into what the watch restores. A task execution has
-    /// one end, so one already reported, or one whose task is gone with nothing
-    /// to deliver, is released instead; a still-running task's reported end was
-    /// its flow's interruption, so it stays in scope for the real one. `book`
-    /// is `None` when the task log could not be read: no task entry is judged then.
+    /// Turn replayed entries into what the watch restores. A reported latest
+    /// end means its release never landed, so the entry is released now unless
+    /// it is a still-running task, whose end was its flow's interruption. A
+    /// task whose execution is gone with nothing to deliver is released too.
+    /// Without `book` (an unreadable task log) no task entry is judged.
     pub(crate) fn restore(
         &mut self,
         entries: Vec<RunLedgerEntry>,
@@ -91,11 +91,18 @@ impl Ledger {
                     episode: ended.episode,
                     snapshot: snapshot_of(key.clone(), &ended.end),
                 },
-                (None, Some(_)) if matches!(&key, RunKey::Task(exec) if !running(book, exec)) => {
-                    self.release(&entry.key, ReleaseReason::Reported);
-                    continue;
-                }
-                (None, Some(ended)) => RestoredEnd::Reported(snapshot_of(key.clone(), &ended.end)),
+                (None, Some(ended)) => match (&key, book) {
+                    (RunKey::Task(_), None) => {
+                        RestoredEnd::Reported(snapshot_of(key.clone(), &ended.end))
+                    }
+                    (RunKey::Task(exec), Some(book)) if running(book, exec) => {
+                        RestoredEnd::Reported(snapshot_of(key.clone(), &ended.end))
+                    }
+                    _ => {
+                        self.release(&entry.key, ReleaseReason::Reported);
+                        continue;
+                    }
+                },
                 (None, None) => match (&key, book) {
                     (RunKey::Task(_), None) => continue,
                     (RunKey::Task(exec), Some(book)) if !holds(book, exec) => {
@@ -179,6 +186,11 @@ impl Ledger {
         }
     }
 
+    /// Every recorded end of the key was reported while its run goes on.
+    pub(super) fn release_reported(&mut self, key: &RunKey) {
+        self.release(&ledger_key(key), ReleaseReason::Reported);
+    }
+
     /// The run is gone with nothing delivered: no later process can either.
     pub(super) fn expired(&mut self, key: &RunKey) {
         self.release(&ledger_key(key), ReleaseReason::Expired);
@@ -225,12 +237,17 @@ impl Ledger {
         }
     }
 
-    /// Stop at the first failed write, warning once.
+    /// Stop at the first failed write, warning once, and note the ends the
+    /// cap made the ledger forget.
     fn check(&mut self) {
         let Self::Writing { store, .. } = self else {
             return;
         };
-        let Some(error) = store.take_failure() else {
+        let answered = store.take_answered();
+        if !answered.evicted.is_empty() {
+            LogWriter::log(eviction(&answered.evicted));
+        }
+        let Some(error) = answered.failure else {
             return;
         };
         LogWriter::log(
@@ -264,6 +281,22 @@ fn open_failure(error: &RunLedgerError) -> ErrorReport {
         .build()
 }
 
+/// Unreported ends dropped past the cap are results no restart can deliver.
+fn eviction(evicted: &[LedgerKey]) -> ErrorReport {
+    let flows = evicted
+        .iter()
+        .filter(|key| matches!(key, LedgerKey::Flow { .. }))
+        .count();
+    ErrorReport::new("Older undelivered run results were dropped from the run ledger")
+        .severity(ErrorSeverity::Warning)
+        .with_context("evicted", evicted.len().to_string())
+        .with_context("flows", flows.to_string())
+        .with_context("tasks", (evicted.len() - flows).to_string())
+        .at(file!(), line!())
+        .dedup("run_ledger.evicted")
+        .build()
+}
+
 fn holds(book: &TasksBook, exec: &ExecutionRef) -> bool {
     book.get(&exec.task_id).is_some_and(|record| {
         record.current_exec() == Some(exec)
@@ -272,11 +305,10 @@ fn holds(book: &TasksBook, exec: &ExecutionRef) -> bool {
 }
 
 /// Whether `exec` is its task's current, unfinished execution.
-fn running(book: Option<&TasksBook>, exec: &ExecutionRef) -> bool {
-    book.and_then(|book| book.get(&exec.task_id))
-        .is_some_and(|record| {
-            record.current_exec() == Some(exec) && !record.lifecycle.is_terminal()
-        })
+fn running(book: &TasksBook, exec: &ExecutionRef) -> bool {
+    book.get(&exec.task_id).is_some_and(|record| {
+        record.current_exec() == Some(exec) && !record.lifecycle.is_terminal()
+    })
 }
 
 fn ledger_key(key: &RunKey) -> LedgerKey {

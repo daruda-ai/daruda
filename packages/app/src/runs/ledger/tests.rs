@@ -164,6 +164,31 @@ fn an_unreadable_ledger_leaves_delivery_in_memory(cx: &mut TestAppContext) {
     assert_eq!(std::fs::read(&log).unwrap(), b"not json\n{}\n");
 }
 
+#[test]
+fn an_eviction_is_logged_by_kind_without_naming_runs() {
+    use daruda_store::run_ledger::LedgerKey;
+    let evicted = [
+        LedgerKey::Flow {
+            run_id: "secret-run".into(),
+        },
+        LedgerKey::Task(daruda_store::tasks::ExecutionRef {
+            task_id: "secret-task".into(),
+            execution_id: "secret-exec".into(),
+        }),
+        LedgerKey::Flow {
+            run_id: "other".into(),
+        },
+    ];
+    let report = eviction(&evicted);
+    assert_eq!(report.dedup_key.as_deref(), Some("run_ledger.evicted"));
+    assert_eq!(report.severity, ErrorSeverity::Warning);
+    assert_eq!(report.context["evicted"], "3");
+    assert_eq!(report.context["flows"], "2");
+    assert_eq!(report.context["tasks"], "1");
+    let rendered = format!("{report:?}");
+    assert!(!rendered.contains("secret"), "{rendered}");
+}
+
 #[gpui::test]
 fn a_carried_orchestrator_task_keeps_its_ledger_solicitation(cx: &mut TestAppContext) {
     let dirs = Dirs::new();
@@ -195,7 +220,14 @@ fn a_carried_orchestrator_task_keeps_its_ledger_solicitation(cx: &mut TestAppCon
             pending[0].solicited,
             "the carry took the ledger's solicitation"
         );
-        assert_eq!(pending[0].origin, Origin::Live);
+        assert_eq!(
+            pending[0].origin,
+            Origin::Recovered,
+            "it predates this process"
+        );
+        let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
+        let answer = RunsHost::poll_run_wait(id, false, cx).unwrap();
+        assert_eq!(answer.recovered, vec![key.clone()]);
     });
 }
 
@@ -491,12 +523,14 @@ fn a_flow_whose_directory_is_gone_is_released(cx: &mut TestAppContext) {
     cx.update(|cx| assert!(RunsHost::run_scope(cx).is_empty(), "released"));
 }
 
-#[gpui::test]
-async fn a_task_whose_flow_was_interrupted_reads_resumable_then_settles_after_a_resume(
+/// A phone-asked orchestrator Task backed by a flow the restart interrupted.
+/// Its task, still running, lives in `dirs`' log; its flow's run is returned.
+fn interrupted_flow_task(
+    dirs: &Dirs,
+    lane: &Lane,
     cx: &mut TestAppContext,
-) {
-    use daruda_store::tasks::{LifecycleKind, TaskExecutionSource};
-    let (dirs, lane) = (Dirs::new(), Lane::new());
+) -> (String, RunKey, PathBuf) {
+    use daruda_store::tasks::TaskExecutionSource;
     let run_id = "task-flow";
     let run = SeedRun {
         source: TaskExecutionSource::Flow {
@@ -506,7 +540,7 @@ async fn a_task_whose_flow_was_interrupted_reads_resumable_then_settles_after_a_
         ..SeedRun::chat(lane.path())
     };
     let (id, key) = cx.update(|cx| {
-        lane.start(&dirs, cx);
+        lane.start(dirs, cx);
         let spec = seed::spec(Default::default(), "flow task");
         let id = spec.id.clone();
         let mut events = seed::created(spec);
@@ -523,8 +557,18 @@ async fn a_task_whose_flow_was_interrupted_reads_resumable_then_settles_after_a_
     });
     let run_dir = finished_flow(&lane.path(), &lane.locks(), run_id);
     interrupt(&run_dir);
-    cx.update(|cx| lane.restart(&dirs, cx));
+    cx.update(|cx| lane.restart(dirs, cx));
     cx.run_until_parked();
+    (id, key, run_dir)
+}
+
+#[gpui::test]
+async fn a_task_whose_flow_was_interrupted_reads_resumable_then_settles_after_a_resume(
+    cx: &mut TestAppContext,
+) {
+    use daruda_store::tasks::LifecycleKind;
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let (id, key, run_dir) = interrupted_flow_task(&dirs, &lane, cx);
     let lifecycle = |cx: &mut TestAppContext| {
         cx.update(|cx| {
             cx.global::<GlobalTasks>()
@@ -571,26 +615,43 @@ async fn a_task_whose_flow_was_interrupted_reads_resumable_then_settles_after_a_
         assert!(RunsHost::unreported_run_events(cx).is_empty());
     });
 
-    // A person resumes it from the Flows panel; it ends, and so does the task.
+    resume_and_finish(&lane, &run_dir, &key, cx).await;
+    assert_eq!(lifecycle(cx), LifecycleKind::Done);
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].snapshot.key, key);
+        assert_eq!(ended_as(&pending[0]), Some(EndedAs::Completed));
+        assert_eq!(pending[0].origin, Origin::Live);
+    });
+}
+
+/// A person resumes the run from the Flows panel; it ends, and so does its task.
+async fn resume_and_finish(
+    lane: &Lane,
+    run_dir: &std::path::Path,
+    key: &RunKey,
+    cx: &mut TestAppContext,
+) {
     cx.update(|cx| {
         RunsHost::seed_flow_run(
             lane.path(),
             crate::runs::RunView::new(
-                run_dir.clone(),
+                run_dir.to_path_buf(),
                 crate::runs::FlowSource::Resumed {
-                    run_dir: run_dir.clone(),
+                    run_dir: run_dir.to_path_buf(),
                 },
                 Vec::new(),
             ),
             cx,
         );
-        RunsHost::flow_task_resumed(&run_dir, cx);
+        RunsHost::flow_task_resumed(run_dir, cx);
         assert!(matches!(
             RunsHost::run_query(key.clone(), cx).read().state,
             RunState::Running { .. }
         ));
         RunsHost::flow_task_ended(
-            &run_dir,
+            run_dir,
             &daruda_flow::event::RunEnd::Done,
             false,
             false,
@@ -601,13 +662,47 @@ async fn a_task_whose_flow_was_interrupted_reads_resumable_then_settles_after_a_
     let barrier = cx.update(|cx| RunsHost::barrier(cx));
     barrier.await;
     cx.run_until_parked();
-    assert_eq!(lifecycle(cx), LifecycleKind::Done);
+}
+
+/// Without a readable task log nothing tells a reported, still-running Task
+/// from a finished one: it is kept, so a later start neither reports the same
+/// interruption again nor forgets who asked for the run.
+#[gpui::test]
+async fn an_unreadable_task_log_keeps_a_reported_task_in_scope(cx: &mut TestAppContext) {
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let (_, key, run_dir) = interrupted_flow_task(&dirs, &lane, cx);
+    cx.update(|cx| {
+        let (wait, _) = RunsHost::open_run_wait(None, cx).unwrap();
+        let answer = RunsHost::poll_run_wait(wait, false, cx).unwrap();
+        assert_eq!(answer.ended.len(), 1);
+        RunsHost::finish_run_wait(wait, true, cx);
+        RunsHost::quit_flush(Instant::now() + Duration::from_secs(5), cx);
+        drop(cx.remove_global::<RunsHost>());
+        drop(cx.remove_global::<GlobalTasks>());
+        let unreadable = Err(daruda_store::tasks::TaskStoreError::Io(
+            std::io::Error::other("unreadable"),
+        ));
+        let opened = RunsHost::open(unreadable)
+            .with_run_ledger(RunLedgerStore::in_directory(dirs.ledger.path(), "test"))
+            .with_flow_lock_root(lane.locks());
+        RunsHost::install(opened, cx);
+        assert_eq!(RunsHost::run_scope(cx), vec![key.clone()]);
+        assert!(RunsHost::unreported_run_events(cx).is_empty());
+    });
+    cx.run_until_parked();
+    cx.update(|cx| lane.restart(&dirs, cx));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(RunsHost::run_scope(cx), vec![key.clone()]);
+        let pending = RunsHost::unreported_run_events(cx);
+        assert!(pending.is_empty(), "reported once: {pending:?}");
+    });
+    resume_and_finish(&lane, &run_dir, &key, cx).await;
     cx.update(|cx| {
         let pending = RunsHost::unreported_run_events(cx);
         assert_eq!(pending.len(), 1, "{pending:?}");
         assert_eq!(pending[0].snapshot.key, key);
-        assert_eq!(ended_as(&pending[0]), Some(EndedAs::Completed));
-        assert_eq!(pending[0].origin, Origin::Live);
+        assert!(pending[0].solicited, "the phone still gets the real end");
     });
 }
 
@@ -748,5 +843,88 @@ fn an_unreported_flow_end_frees_its_directory_after_the_hold_but_is_still_delive
         assert_eq!(answer.ended.len(), 1);
         assert_eq!(answer.ended[0].key, key);
         assert_eq!(answer.recovered, vec![key.clone()]);
+    });
+}
+
+/// A crash between a flow's `Reported` and its `Released` leaves an entry with
+/// nothing to deliver; the next start releases it instead of keeping it.
+#[gpui::test]
+fn a_reported_flow_whose_release_never_landed_is_released_on_restart(cx: &mut TestAppContext) {
+    use daruda_store::run_ledger::{LedgerEnd, LedgerEndedAs, LedgerKey, RunLedgerEvent};
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let key = LedgerKey::Flow {
+        run_id: "reported".into(),
+    };
+    {
+        let (store, _) = RunLedgerStore::in_directory(dirs.ledger.path(), "test").unwrap();
+        store.record(RunLedgerEvent::Owned {
+            key: key.clone(),
+            solicited: true,
+            location: None,
+        });
+        store.record(RunLedgerEvent::Ended {
+            key: key.clone(),
+            solicited: true,
+            episode: 0,
+            end: LedgerEnd {
+                what: "Restarted".into(),
+                why: None,
+                ended_as: LedgerEndedAs::Completed,
+                text: None,
+                pointers: Default::default(),
+            },
+            evicts: Vec::new(),
+            ended_at_ms: Some(now_ms()),
+        });
+        store.record(RunLedgerEvent::Reported {
+            key: key.clone(),
+            episode: 0,
+        });
+        store.flush(Duration::from_secs(5)).unwrap();
+        assert!(store.take_answered().failure.is_none());
+    }
+    cx.update(|cx| {
+        lane.start(&dirs, cx);
+        assert!(RunsHost::run_scope(cx).is_empty());
+        assert!(RunsHost::unreported_run_events(cx).is_empty());
+        RunsHost::flush_run_ledger_for_test(cx);
+        drop(cx.remove_global::<RunsHost>());
+    });
+    let (_, state) = RunLedgerStore::in_directory(dirs.ledger.path(), "test").unwrap();
+    assert!(state.get(&key).is_none(), "released on disk");
+}
+
+/// An end reported only after its flow was resumed belongs to an earlier
+/// episode: the ledger keeps the resumed run owned, so a restart that
+/// interrupts it again reports that interruption.
+#[gpui::test]
+fn a_flow_resumed_before_its_end_was_reported_stays_owned(cx: &mut TestAppContext) {
+    let (dirs, lane) = (Dirs::new(), Lane::new());
+    let run_dir = finished_flow(&lane.path(), &lane.locks(), "resumed");
+    interrupt(&run_dir);
+    let key = cx.update(|cx| {
+        lane.start(&dirs, cx);
+        own_flow(lane.location(&run_dir), cx)
+    });
+    cx.update(|cx| lane.restart(&dirs, cx));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(RunsHost::unreported_run_events(cx).len(), 1);
+        // The resume starts a new episode, as `start_flow` does.
+        cx.update_global::<RunsHost, _>(|host, _| host.watch.begin_solicited(&key, true));
+        let (id, _) = RunsHost::open_run_wait(None, cx).unwrap();
+        let answer = RunsHost::poll_run_wait(id, false, cx).unwrap();
+        assert_eq!(answer.ended.len(), 1, "the earlier interruption");
+        RunsHost::finish_run_wait(id, true, cx);
+    });
+    cx.update(|cx| lane.restart(&dirs, cx));
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(RunsHost::run_scope(cx), vec![key.clone()]);
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(ended_as(&pending[0]), Some(EndedAs::Crashed));
+        assert_eq!(pending[0].origin, Origin::Recovered);
+        assert!(pending[0].solicited);
     });
 }

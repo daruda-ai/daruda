@@ -269,6 +269,24 @@ fn unreported_ends_past_the_cap_evict_the_oldest_and_record_which() {
 }
 
 #[test]
+fn a_store_answers_which_entries_its_ends_evicted_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, _) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
+    for n in 0..=UNREPORTED_MAX as u64 {
+        store.record(owned(task(&n.to_string()), false));
+        store.record(ended(task(&n.to_string()), n));
+    }
+    store.flush(Duration::from_secs(5)).unwrap();
+    let answered = store.take_answered();
+    assert!(answered.failure.is_none());
+    assert_eq!(answered.evicted, vec![task("0")]);
+    assert!(
+        store.take_answered().evicted.is_empty(),
+        "each answer is read once"
+    );
+}
+
+#[test]
 fn reported_and_owned_only_entries_never_count_against_the_cap() {
     let mut events = vec![owned(flow("running"), true)];
     for n in 0..=UNREPORTED_MAX as u64 {
@@ -351,7 +369,7 @@ fn a_store_replays_what_it_recorded_after_reopening() {
     store.record(owned(task("t"), true));
     store.record(ended(task("t"), 0));
     store.flush(Duration::from_secs(5)).unwrap();
-    assert!(store.take_failure().is_none());
+    assert!(store.take_answered().failure.is_none());
     drop(store);
 
     let (_store, state) = RunLedgerStore::in_directory(dir.path(), "test").unwrap();
@@ -368,10 +386,10 @@ fn a_refused_record_is_reported_once_by_the_store() {
     store.record(reported(task("t"), 0));
     store.flush(Duration::from_secs(5)).unwrap();
     assert!(matches!(
-        store.take_failure(),
+        store.take_answered().failure,
         Some(CommitError::Rejected(LedgerRejected::NotEnded { .. }))
     ));
-    assert!(store.take_failure().is_none());
+    assert!(store.take_answered().failure.is_none());
 }
 
 #[test]
@@ -466,7 +484,7 @@ fn directory_holds_replay_the_same_from_the_log() {
         store.record(event.clone());
     }
     store.flush(Duration::from_secs(5)).unwrap();
-    assert!(store.take_failure().is_none());
+    assert!(store.take_answered().failure.is_none());
     let now = at + HOLD_MS;
     let live = store.held_run_dirs(now);
     drop(store);

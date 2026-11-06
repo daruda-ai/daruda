@@ -324,7 +324,8 @@ written, so a result whose receipt never came is unreported after a restart.
 Writes are queued without waiting and flushed at quit; open or write failures
 leave delivery memory-only with one deduplicated warning and never affect tasks.
 At most 200 unreported ends are kept; a newer end evicts the oldest, and the
-`Ended` record names what it evicted. `Ended` carries the proposer's clock
+`Ended` record names what it evicted. Each evicting commit logs one warning
+(`run_ledger.evicted`) with counts by kind, never run ids. `Ended` carries the proposer's clock
 (`ended_at_ms`; a re-record keeps the first), so replay never reads one.
 Retention spares what the ledger still owes: `RunsHost::start_flow` fills
 `RunRequest::held_runs` from the committed ledger, and the engine's start sweep
@@ -336,8 +337,15 @@ directory: the end stays in the ledger until reported, and a release
 or eviction ends the hold. Task ends are kept by the ledger alone. At install, before task history is
 compared, restored keys rejoin the scope with their saved solicitation (a
 carried Task takes it from there), and unreported ends return as `Recovered`
-episodes. A Task whose end was already reported, or whose execution is gone
-with nothing to deliver, is released instead. Recovered results carry
+episodes, as do the ends task history adds for a restored or carried key, such
+as a carried Task startup reconciliation settled. An entry whose latest end was
+already reported (a crash came before its `Released`) is released, unless it is
+a Task its log shows still running: that end was its flow's interruption, so it
+stays in scope for the real one. A Task whose execution is gone with nothing to
+deliver is released too. When the task log cannot be read, no Task entry is
+judged or released. An earlier episode reported after its run resumed, with no
+newer end recorded, writes `Released` then `Owned`, so the resumed run stays
+owned with no end rather than reading as reported. Recovered results carry
 `recovered: true` in `daruda_run_wait`/`daruda_run_status`, and their notice
 line says they were requested before daruda restarted.
 After install, each scoped run with no end and nothing observed is read once
@@ -460,17 +468,20 @@ Notices reach only a running orchestrator, which starts lazily. After a
 restart, `orchestrator/recovered.rs` starts it at most once per process for
 results the phone is still owed. When the first Workspace registers
 (`WindowRegistry::register`), any solicited, unreported episode in the omitted
-scope starts it, whatever its origin: a carried Task that startup
-reconciliation settled is `Live` but predates this process. If nothing was
+scope starts it: before a window exists, every such episode predates this
+process. If nothing was
 owed then, only a later `Recovered` solicited announcement starts it, because
 `judge_restored` ends arrive after the first window; a live result in ordinary
 operation never does. Both checks are deferred out of the current update. The
 start goes through `orchestrator::ensure`, so a disabled feature starts
 nothing, and the notice turn arms `CompletionOnly` from the episode's
-solicitation, which the ledger restores. A failed start is logged and leaves
-the results unreported. Results the desktop asked for never start it; the next
-ordinary start delivers them. One info line records each decision (count and
-outcome only).
+solicitation, which the ledger restores. Results the desktop asked for never
+start it; the next ordinary start delivers them. Each start attempt is logged
+once: an info line with the count and outcome (started, already running, or
+disabled), or, for any other `EnsureError`, a warning with the count and reason
+that is also toasted in the first registered window, as a chip start failure
+is (the log alone if that window is gone). A failed start leaves the results
+unreported and is not retried in that process.
 
 An active Orchestrator-started Task's matching child chat suppresses its own
 completion/error relay, even before run-scope registration: TaskRecord

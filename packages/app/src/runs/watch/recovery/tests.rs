@@ -61,7 +61,7 @@ fn a_carried_key_already_restored_keeps_the_restored_solicitation() {
             end: RestoredEnd::Open,
         }],
     );
-    watch.adopt_log(vec![key.clone()], None, &Default::default());
+    watch.adopt_log(vec![key.clone()], Vec::new(), None, &Default::default());
     watch.retain(ended(key.clone()));
     let pending = watch.unreported();
     assert_eq!(pending.len(), 1);

@@ -16,7 +16,7 @@ use crate::tasks::ExecutionRef;
 
 mod store;
 
-pub use store::{RunLedgerError, RunLedgerStore};
+pub use store::{Answered, RunLedgerError, RunLedgerStore};
 
 /// Unreported ends the ledger keeps. A newer end beyond it evicts the oldest.
 pub const UNREPORTED_MAX: usize = 200;

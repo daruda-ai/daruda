@@ -317,7 +317,7 @@ impl RunWatch {
             Membership::Scoped => {}
         }
     }
-    fn record_owned(&mut self, key: &RunKey) {
+    pub(super) fn record_owned(&mut self, key: &RunKey) {
         let solicited = self.entries.get(key).is_some_and(|entry| entry.solicited);
         let location = match key {
             RunKey::Flow(id) => self.locations.get(id),

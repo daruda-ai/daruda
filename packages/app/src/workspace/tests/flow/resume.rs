@@ -416,3 +416,113 @@ async fn the_flows_panel_resume_is_the_desktops_episode(cx: &mut TestAppContext)
         Some(StartedBy::Orchestrator)
     );
 }
+
+/// A new process knows the run only from the run ledger: its owner crashed
+/// mid-run and left `Owned` with the run's location. The restart judges it
+/// interrupted, and the orchestrator resumes it under the same handle.
+#[gpui::test]
+async fn a_run_owned_before_a_restart_is_resumed_through_the_ledger(cx: &mut TestAppContext) {
+    use daruda_store::run_ledger::{RunLedgerEvent, RunLedgerStore, RunLocation};
+    let run = interrupted_orchestrator_run(cx).await;
+    let (tasks, ledger) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let lock_root = run.ws.read_with(cx, |ws, _| ws.lock_root.clone());
+    {
+        let (store, _) = RunLedgerStore::in_directory(ledger.path(), "test").unwrap();
+        store.record(RunLedgerEvent::Owned {
+            key: daruda_store::run_ledger::LedgerKey::Flow {
+                run_id: run.run_id.clone(),
+            },
+            solicited: true,
+            location: Some(RunLocation {
+                run_dir: run.run_dir.clone(),
+                lock_dir: flow_paths::lane_lock_dir(&lock_root, run.lane.path()),
+            }),
+        });
+        store.flush(std::time::Duration::from_secs(5)).unwrap();
+        assert!(store.take_answered().failure.is_none());
+    }
+    // The new process's host has no window effects: no open worktree is
+    // asked where the run is, so only the ledger can say.
+    cx.update(|cx| {
+        drop(cx.remove_global::<RunsHost>());
+        drop(cx.remove_global::<crate::runs::GlobalTasks>());
+        let opened = RunsHost::open(daruda_store::tasks::TaskStore::in_directory(
+            tasks.path(),
+            None,
+            "test",
+            crate::runs::no_hook(),
+        ))
+        .with_run_ledger(RunLedgerStore::in_directory(ledger.path(), "test"))
+        .with_flow_lock_root(lock_root.clone());
+        RunsHost::install(opened, cx);
+    });
+    let key = RunKey::Flow(run.run_id.clone());
+    assert!(
+        wait_for_run(cx, |cx| {
+            cx.update(|cx| {
+                RunsHost::unreported_run_events(cx)
+                    .iter()
+                    .any(|event| event.snapshot.key == key)
+            })
+        })
+        .await,
+        "the restart never judged the run"
+    );
+    cx.update(|cx| {
+        let pending = RunsHost::unreported_run_events(cx);
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert!(matches!(
+            pending[0].snapshot.state,
+            RunState::Ended {
+                ended_as: EndedAs::Crashed,
+                ..
+            }
+        ));
+        assert!(pending[0].solicited);
+    });
+
+    run.orchestrator.update(cx, |view, _| {
+        view.start_phone_turn_for_test(std::time::Instant::now())
+    });
+    let outcome =
+        deferred(cx.update(|cx| exec::run_gated(run.resume(), CommandOrigin::Orchestrator, cx)));
+    cx.run_until_parked();
+    run.orchestrator.update(cx, |view, _| view.end_phone_turn());
+    cx.update(|cx| resolve_only_pending_for_test(ApprovalChoice::Approved, cx));
+    cx.run_until_parked();
+    let answered = outcome.recv().await.expect("answered");
+    let Some(Ok(ControlResult::FlowResuming { handle, .. })) = answered else {
+        panic!("not resumed: {answered:?}");
+    };
+    assert_eq!(handle, run.handle(), "the handle the orchestrator holds");
+    assert!(
+        wait_for_run(cx, |cx| {
+            run.run_dir.join("DONE").exists() && !run_is_held(cx, run.lane.path())
+        })
+        .await,
+        "the resumed run did not finish"
+    );
+    assert_eq!(
+        (run.lines("first.log"), run.lines("second.log")),
+        (1, 2),
+        "only the step that had not passed ran again"
+    );
+    cx.update(|cx| {
+        assert!(RunsHost::run_scope(cx).contains(&key));
+        let completed: Vec<_> = RunsHost::unreported_run_events(cx)
+            .into_iter()
+            .filter(|event| {
+                event.snapshot.key == key
+                    && matches!(
+                        event.snapshot.state,
+                        RunState::Ended {
+                            ended_as: EndedAs::Completed,
+                            ..
+                        }
+                    )
+            })
+            .collect();
+        assert_eq!(completed.len(), 1, "the resumed episode's end");
+        assert!(completed[0].solicited, "asked from the phone");
+    });
+}
