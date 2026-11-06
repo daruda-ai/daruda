@@ -800,9 +800,129 @@ fn retry_without_a_resume_target_keeps_the_conversation(cx: &mut gpui::TestAppCo
                 ]
             );
             assert_eq!(view.wire_text_for_test("go"), "RECAP\n\n---\n\ngo");
+        })
+        .unwrap();
+}
 
-            view.retry_for_reconnect(Some("sess".into()), cx);
-            assert!(view.items.is_empty(), "a resume replays the history itself");
+/// Once the switched-to session has an id, a reconnect resumes it — and its
+/// replay only covers what came after the divider. What came before must
+/// survive, or a dropped connection would erase the conversation the switch
+/// carried over.
+#[gpui::test]
+fn resuming_the_switched_to_session_keeps_the_conversation_before_the_switch(
+    cx: &mut gpui::TestAppContext,
+) {
+    use daruda_acp::ChatItem;
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items.push(ChatItem::UserText("before".into()));
+            view.begin_handoff(handoff_mark(), Some("RECAP".into()), cx);
+            view.session_id = Some("new".into());
+            view.items.push(ChatItem::UserText("after".into()));
+
+            view.retry_for_reconnect(Some("new".into()), cx);
+
+            assert_eq!(
+                view.items,
+                vec![
+                    ChatItem::UserText("before".into()),
+                    ChatItem::Handoff(handoff_mark())
+                ],
+                "the resumed session replays only its own history"
+            );
+        })
+        .unwrap();
+}
+
+/// `/clear` after a switch starts over: the recap describes the conversation
+/// it cleared and must not reach the next session. A pane's standing briefing
+/// is not about that conversation and stays.
+#[gpui::test]
+fn clear_drops_a_pending_recap_but_not_the_briefing(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::ChatItem;
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items.push(ChatItem::UserText("hi".into()));
+            view.set_briefing("BRIEF".into());
+            view.begin_handoff(handoff_mark(), Some("RECAP".into()), cx);
+            assert_eq!(
+                view.peek_wire_text_for_test("peek"),
+                "RECAP\n\n---\n\nBRIEF\n\n---\n\npeek",
+                "the recap leads so a replay finds its block first"
+            );
+
+            view.reset_for_new_session(cx);
+
+            assert_eq!(view.wire_text_for_test("go"), "BRIEF\n\n---\n\ngo");
+        })
+        .unwrap();
+}
+
+/// A first send that never reaches the agent has not told it anything: the
+/// recap stays for the prompt that does.
+#[gpui::test]
+fn a_failed_first_send_keeps_the_recap(cx: &mut gpui::TestAppContext) {
+    use daruda_acp::ChatItem;
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items.push(ChatItem::UserText("hi".into()));
+            view.begin_handoff(handoff_mark(), Some("RECAP".into()), cx);
+            let (handle, probe) = daruda_acp::AcpSessionHandle::detached_for_test();
+            view.status = crate::view::AgentSessionStatus::Connected;
+            view.attach_handle(handle);
+            // A closed connection: the send cannot be handed over.
+            drop(probe);
+
+            view.send_prompt_text("go on".into(), cx);
+
+            assert!(
+                matches!(view.status, crate::view::AgentSessionStatus::Error { .. }),
+                "the failed handoff parks the pane for a retry"
+            );
+            assert_eq!(
+                view.peek_wire_text_for_test("go on"),
+                "RECAP\n\n---\n\ngo on"
+            );
+        })
+        .unwrap();
+}
+
+/// Switching again before anyone spoke replaces the trailing divider instead
+/// of stacking a second one; and the failure that prompted a switch stays in
+/// the record above it.
+#[gpui::test]
+fn a_second_switch_replaces_the_trailing_divider_and_keeps_the_failure(
+    cx: &mut gpui::TestAppContext,
+) {
+    use daruda_acp::handoff::{HandoffMark, HandoffParty};
+    use daruda_acp::{AcpFailure, ChatItem};
+
+    let window = make_test_view(cx);
+    window
+        .update(cx, |view, _window, cx| {
+            view.items.push(ChatItem::UserText("hi".into()));
+            view.items
+                .push(ChatItem::Failure(AcpFailure::unclassified("session limit")));
+            view.begin_handoff(handoff_mark(), Some("R1".into()), cx);
+            let again = HandoffMark {
+                from: handoff_mark().from,
+                to: HandoffParty {
+                    agent: "Codex".into(),
+                    account: None,
+                },
+            };
+            view.begin_handoff(again.clone(), Some("R2".into()), cx);
+
+            assert_eq!(view.items.len(), 3, "{:?}", view.items);
+            assert!(matches!(view.items[1], ChatItem::Failure(_)));
+            assert_eq!(view.items[2], ChatItem::Handoff(again));
+            assert_eq!(view.wire_text_for_test("go"), "R2\n\n---\n\ngo");
         })
         .unwrap();
 }

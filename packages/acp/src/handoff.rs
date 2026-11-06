@@ -43,13 +43,32 @@ pub struct HandoffMark {
     pub to: HandoffParty,
 }
 
+/// The mark for moving `items` from `from` to `to`. A switch made before
+/// anyone spoke again replaces the one still trailing the transcript, so it
+/// keeps that switch's origin: nothing happened in between to hand over.
+pub fn continue_mark(items: &[ChatItem], from: HandoffParty, to: HandoffParty) -> HandoffMark {
+    match items.last() {
+        Some(ChatItem::Handoff(pending)) => HandoffMark {
+            from: pending.from.clone(),
+            to,
+        },
+        _ => HandoffMark { from, to },
+    }
+}
+
 /// The block to send in front of the new session's first prompt, or `None`
 /// when `items` holds nothing worth carrying over.
 ///
 /// Who spoke is not recorded per item, so each reply is credited to the party
 /// the last divider before it handed to — the first stretch to the earliest
-/// divider's `from`, or `mark.from` when the pane has never switched.
+/// divider's `from`, or `mark.from` when the pane has never switched. A divider
+/// still trailing the transcript is the switch `mark` replaces (see
+/// [`continue_mark`]), so it is left out.
 pub fn recap(items: &[ChatItem], mark: &HandoffMark) -> Option<String> {
+    let items = match items.split_last() {
+        Some((ChatItem::Handoff(_), earlier)) => earlier,
+        _ => items,
+    };
     let first_from = items.iter().find_map(|item| match item {
         ChatItem::Handoff(earlier) => Some(&earlier.from),
         _ => None,
@@ -70,7 +89,7 @@ pub fn recap(items: &[ChatItem], mark: &HandoffMark) -> Option<String> {
     if transcript.is_empty() {
         return None;
     }
-    let from = mark.from.label();
+    let from = neutralize_tags(&mark.from.label());
     Some(format!(
         "{open}>\n\
          You are continuing a conversation in daruda, a desktop app where the user can switch \
@@ -236,8 +255,11 @@ fn parse_mark(attrs: &str) -> Option<HandoffMark> {
         let name = rest[..eq].trim();
         let value_start = &rest[eq + 2..];
         let close = value_start.find('"')?;
-        let slot = names.iter().position(|known| *known == name)?;
-        values[slot] = Some(unescape_attr(&value_start[..close]));
+        // An attribute a later build added is skipped, not fatal, so that
+        // build's dividers still fold here.
+        if let Some(slot) = names.iter().position(|known| *known == name) {
+            values[slot] = Some(unescape_attr(&value_start[..close]));
+        }
         rest = value_start[close + 1..].trim_start();
     }
     let [from_agent, from_account, to_agent, to_account] = values;

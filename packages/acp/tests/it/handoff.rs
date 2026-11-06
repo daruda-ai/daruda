@@ -132,3 +132,35 @@ fn split_ignores_text_without_a_leading_block() {
     assert_eq!(split_handoff("hello <conversation_handoff>"), None);
     assert_eq!(split_handoff("<conversation_handoff broken"), None);
 }
+
+#[test]
+fn a_switch_before_anyone_spoke_keeps_the_pending_origin() {
+    use daruda_acp::handoff::continue_mark;
+    let pending = HandoffMark {
+        from: party("Claude Code", Some("work")),
+        to: party("Codex", None),
+    };
+    let items = vec![reply("done"), ChatItem::Handoff(pending)];
+    let merged = continue_mark(&items, party("Codex", None), party("Gemini", None));
+    assert_eq!(merged.from, party("Claude Code", Some("work")));
+    assert_eq!(merged.to, party("Gemini", None));
+
+    let text = recap(&items, &merged).unwrap();
+    assert!(text.contains("Claude Code · work:\ndone"), "{text}");
+    assert!(
+        !text.contains("moved to Codex"),
+        "the replaced switch never happened as far as the record goes: {text}"
+    );
+
+    let fresh = continue_mark(&[reply("done")], party("A", None), party("B", None));
+    assert_eq!(fresh.from, party("A", None));
+}
+
+#[test]
+fn an_attribute_a_later_build_added_does_not_break_the_fold() {
+    let text = "<conversation_handoff from-agent=\"A\" to-agent=\"B\" since=\"v9\">\nx\n\
+                </conversation_handoff>\n\n---\n\nhi";
+    let (mark, rest) = split_handoff(text).expect("unknown attributes are skipped");
+    assert_eq!(mark.to, party("B", None));
+    assert_eq!(rest, "hi");
+}

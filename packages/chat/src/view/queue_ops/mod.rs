@@ -313,7 +313,6 @@ impl AgentChatView {
         task: Option<ExecutionRef>,
         cx: &mut Context<Self>,
     ) -> bool {
-        // Resolved before the handle is borrowed: taking the briefing needs `&mut self`.
         let wire = self.wire_text(&text);
         if !self.live_handle().is_some_and(|handle| {
             handle
@@ -323,6 +322,7 @@ impl AgentChatView {
             self.fail_prompt_handoff(task, cx);
             return false;
         }
+        self.consume_briefings();
         self.report_sent(task, origin, &text, cx);
         self.start_dispatched_turn();
         self.echo_attached_prompt(text, &attachments, cx);
@@ -626,6 +626,7 @@ impl AgentChatView {
             self.fail_prompt_handoff(drained.task, cx);
             return;
         }
+        self.consume_briefings();
         self.activate_queued_prompt(&drained, cx);
         self.report_sent(drained.task, drained.origin, &drained.text, cx);
         cx.notify();
@@ -646,17 +647,28 @@ impl AgentChatView {
     /// What actually goes on the wire for `text`.
     ///
     /// Equal to `text` for every pane but a briefed one, where the session's
-    /// **first** prompt carries the briefing in front of it and the transcript
-    /// keeps showing only what the person typed. The person never wrote it and
-    /// would have to scroll past it on every glance; the agent needs it once.
+    /// **first** prompt carries the recap of a switch and the pane's briefing
+    /// in front of it, and the transcript keeps showing only what the person
+    /// typed. The person never wrote them and would have to scroll past them
+    /// on every glance; the agent needs them once. The recap leads, so a
+    /// replay finds its block at the start of the prompt.
     ///
-    /// One-shot by construction: the briefing is taken, so a second prompt
-    /// cannot repeat it and no call site has to track whether it already ran.
-    fn wire_text(&mut self, text: &str) -> String {
-        match self.briefing.take() {
-            Some(briefing) => format!("{briefing}\n\n---\n\n{text}"),
-            None => text.to_owned(),
+    /// Read, not taken: a send that fails leaves them for the retry, and only
+    /// [`Self::consume_briefings`] after a successful send drops them.
+    fn wire_text(&self, text: &str) -> String {
+        let mut wire = String::new();
+        for part in [&self.handoff_recap, &self.briefing].into_iter().flatten() {
+            wire.push_str(part);
+            wire.push_str("\n\n---\n\n");
         }
+        wire.push_str(text);
+        wire
+    }
+
+    /// The first prompt reached the wire: what it carried is said.
+    fn consume_briefings(&mut self) {
+        self.handoff_recap = None;
+        self.briefing = None;
     }
 
     /// Arm the one-shot briefing. Called between inserting the orchestrator's
@@ -665,9 +677,18 @@ impl AgentChatView {
         self.briefing = Some(briefing);
     }
 
+    /// The wire form the next send would carry, without sending.
+    #[cfg(test)]
+    pub(super) fn peek_wire_text_for_test(&self, text: &str) -> String {
+        self.wire_text(text)
+    }
+
+    /// The wire form of one successful send.
     #[cfg(test)]
     pub(super) fn wire_text_for_test(&mut self, text: &str) -> String {
-        self.wire_text(text)
+        let wire = self.wire_text(text);
+        self.consume_briefings();
+        wire
     }
 
     /// Seed a queue a Stop parked, optionally with the resume gesture already

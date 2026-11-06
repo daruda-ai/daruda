@@ -1,16 +1,3 @@
-use super::compose_briefing;
-
-#[test]
-fn the_recap_leads_the_orchestrator_briefing() {
-    assert_eq!(
-        compose_briefing(Some("R".into()), Some("B".into())),
-        Some("R\n\n---\n\nB".into())
-    );
-    assert_eq!(compose_briefing(Some("R".into()), None), Some("R".into()));
-    assert_eq!(compose_briefing(None, Some("B".into())), Some("B".into()));
-    assert_eq!(compose_briefing(None, None), None);
-}
-
 use super::{ChatHold, agent_menu_entries};
 use crate::workspace::main_area::pane_menu::spec::MenuEntry;
 
@@ -59,4 +46,12 @@ fn continue_is_disabled_while_the_pane_cannot_hand_off() {
             "a new chat never touches this pane: {hold:?}"
         );
     }
+}
+
+#[test]
+fn a_one_agent_catalog_offers_only_a_new_chat() {
+    let only = vec![("claude".to_string(), "Claude Code".to_string())];
+    let entries = agent_menu_entries(1, &only, "claude", ChatHold::Conversation);
+    assert_eq!(entries.len(), 1, "the empty Continue submenu drops");
+    assert_eq!(submenu(&entries, 0), vec![("Claude Code".into(), false)]);
 }

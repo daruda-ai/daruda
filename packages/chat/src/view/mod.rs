@@ -428,10 +428,15 @@ pub struct AgentChatView {
     /// which is briefed on what it is and which tools it has — see
     /// `orchestrator::briefing`.
     ///
-    /// One-shot: [`Self::wire_text`] takes it. A pane that carries none is
-    /// structurally unable to inject anything, so no send path needs to ask
-    /// whose pane it is.
+    /// One-shot: a successful send consumes it (see [`Self::wire_text`]). A
+    /// pane that carries none is structurally unable to inject anything, so
+    /// no send path needs to ask whose pane it is.
     briefing: Option<String>,
+    /// The record of the conversation a switch to another account or agent
+    /// carried into this session, sent once ahead of [`Self::briefing`].
+    /// Separate from it because `/clear` drops the recap of the conversation
+    /// it clears, while a pane's standing briefing still applies.
+    handoff_recap: Option<String>,
     /// GPUI-side pump that drains the `AcpEvent` receiver and folds events into
     /// `items` / `status`. Dropped with the view, ending the loop.
     pub(super) _event_pump: Option<Task<()>>,

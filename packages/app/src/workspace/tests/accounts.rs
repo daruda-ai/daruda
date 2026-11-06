@@ -1245,3 +1245,123 @@ async fn a_login_the_account_list_refuses_is_reported_and_cleaned_up(cx: &mut Te
         "and the file it could not read is left as it was"
     );
 }
+
+/// A live agent chat pane at a real cwd, seeded with `items`, plus the fake
+/// connections that keep its reconnects offline.
+fn seed_live_chat(
+    ws: &mut Workspace,
+    cwd: &std::path::Path,
+    items: Vec<ChatItem>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> PaneId {
+    let pane = ws.create_agent_chat_pane(
+        Some(PaneCwd::Local(cwd.to_path_buf())),
+        None,
+        daruda_config::AgentDefinition::claude_default().id,
+        None,
+        window,
+        cx,
+    );
+    let id = pane.id;
+    ws.active_runtime_mut().panes.push(pane);
+    agent_view(ws, id).update(cx, |v, cx| v.seed_items_for_test(items, cx));
+    id
+}
+
+/// What an account pick left on `pane_id`: pane count, its account, whether
+/// a divider was pushed.
+fn after_account_pick(
+    cx: &mut TestAppContext,
+    prepare: impl FnOnce(&mut Workspace, PaneId, &mut Context<Workspace>),
+    items: Vec<ChatItem>,
+) -> (usize, usize, Option<AccountSelection>, bool) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let dir = tempfile::tempdir().unwrap();
+    let target = AccountSelection::Managed(AccountId::new());
+    let (pane_id, before) = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let id = seed_live_chat(ws, dir.path(), items, window, cx);
+                prepare(ws, id, cx);
+                (id, ws.active_runtime().panes.len())
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(window_handle.into(), |_, window, cx| {
+        workspace.update(cx, |ws, cx| {
+            ws.switch_pane_account(pane_id, target, window, cx)
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, cx| {
+        let selection = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|p| p.id == pane_id)
+            .and_then(|p| p.account_selection());
+        let divided = agent_view(ws, pane_id)
+            .read(cx)
+            .items()
+            .iter()
+            .any(|item| matches!(item, ChatItem::Handoff(_)));
+        (before, ws.active_runtime().panes.len(), selection, divided)
+    })
+}
+
+/// A pane holding only the failure that sent the person to another account
+/// (an expired login, a spent limit) has nothing to carry over: it simply
+/// reconnects in place.
+#[gpui::test]
+async fn a_failure_only_pane_switches_accounts_in_place(cx: &mut TestAppContext) {
+    let failure = ChatItem::Failure(daruda_acp::AcpFailure::classify(
+        &agent_client_protocol::Error::new(-32000, "Authentication required"),
+    ));
+    let (before, after, selection, divided) = after_account_pick(cx, |_, _, _| {}, vec![failure]);
+    assert_eq!(before, after);
+    assert!(matches!(selection, Some(AccountSelection::Managed(_))));
+    assert!(!divided, "nothing was handed over");
+}
+
+/// A turn in flight is never torn down: the pick goes to the confirm dialog
+/// for a new pane, and this pane keeps its account and conversation.
+#[gpui::test]
+async fn a_busy_pane_keeps_its_session_on_an_account_pick(cx: &mut TestAppContext) {
+    let (before, after, selection, divided) = after_account_pick(
+        cx,
+        |ws, id, cx| agent_view(ws, id).update(cx, |v, _| v.set_turn_in_flight()),
+        vec![ChatItem::UserText("working on it".into())],
+    );
+    assert_eq!(before, after, "the new pane waits for the confirm");
+    assert_eq!(selection, Some(AccountSelection::SystemDefault));
+    assert!(!divided);
+}
+
+/// A pane bound to a task execution stays on its session: a teardown would
+/// record the task's delivery as torn down.
+#[gpui::test]
+async fn a_task_bound_pane_keeps_its_session_on_an_account_pick(cx: &mut TestAppContext) {
+    let (before, after, selection, divided) = after_account_pick(
+        cx,
+        |ws, id, cx| {
+            let pane = ws.run_pane(id);
+            crate::runs::RunsHost::bind_execution(
+                pane,
+                daruda_store::tasks::ExecutionRef {
+                    task_id: "task-1".into(),
+                    execution_id: "exec-1".into(),
+                },
+                cx,
+            );
+        },
+        vec![ChatItem::UserText("run the task".into())],
+    );
+    assert_eq!(before, after);
+    assert_eq!(selection, Some(AccountSelection::SystemDefault));
+    assert!(!divided, "the task's session was not handed over");
+}

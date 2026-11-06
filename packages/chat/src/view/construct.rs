@@ -60,6 +60,7 @@ impl AgentChatView {
             host_cards_scroll: ScrollHandle::new(),
             queue: PromptQueue::default(),
             briefing: None,
+            handoff_recap: None,
             _event_pump: None,
             pending_permissions: HashSet::new(),
             questions: Default::default(),

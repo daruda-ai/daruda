@@ -744,6 +744,10 @@ async fn continuing_with_another_agent_keeps_the_conversation_in_place(cx: &mut 
         assert_eq!(mark.to.agent, view.agent_name());
         assert_eq!(mark.to.account, None);
         assert_eq!(
+            mark.from.account, None,
+            "a recap bound for another provider carries no account address"
+        );
+        assert_eq!(
             view.session_id(),
             Some(format!("test-session-{pane_id}").as_str())
         );

@@ -14,6 +14,7 @@ use super::super::reconcile::ReconcileScope;
 use super::super::session_config::SessionConfig;
 use super::super::session_config::model_select;
 use super::{ActivitySpan, AgentChatView, OverageNotice, Turn, TurnOutcome};
+use crate::strings as s;
 
 /// What a session teardown does with the conversation on screen.
 #[derive(Clone, Copy)]
@@ -22,8 +23,11 @@ enum TranscriptFate {
     Discard,
     /// Keep it: nothing will replay it, and the person is still reading it.
     Keep,
+    /// Keep items up to and including `ix`, the last switch divider: what
+    /// came before it belongs to sessions the resume will not replay, and
+    /// what follows is the resumed session's own history, which it will.
+    KeepThrough(usize),
 }
-use crate::strings as s;
 
 /// Who asked for a Stop; decides how its transcript marker reads.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -412,12 +416,14 @@ impl AgentChatView {
                 self.assets.clear();
                 self.fold.clear_overrides();
             }
-            TranscriptFate::Keep => {
-                // The failed connect this teardown answers says nothing about
-                // the conversation above it.
-                while matches!(self.items.last(), Some(ChatItem::Failure(_))) {
-                    self.items.pop();
-                }
+            TranscriptFate::Keep => {}
+            TranscriptFate::KeepThrough(ix) => {
+                self.items.truncate(ix + 1);
+                self.overage_stop_markers.retain(|&marker| marker <= ix);
+                self.activity.turn_records.retain(|&record, _| record <= ix);
+                // Overrides name items by index, and the replayed tail reuses
+                // the indices past `ix`.
+                self.fold.clear_overrides();
             }
         }
         let dropped = self.queue.discard_all();
@@ -448,6 +454,8 @@ impl AgentChatView {
             return;
         }
         self.teardown_transient_session_state(TranscriptFate::Discard, cx);
+        // The recap describes the conversation just cleared.
+        self.handoff_recap = None;
         // Clear the persisted id so a restart resumes the fresh session, not
         // the cleared conversation (Connected re-persists the new id).
         self.session_id = None;
@@ -459,32 +467,46 @@ impl AgentChatView {
     /// Reconnect after a terminal `Error` without losing the conversation:
     /// same teardown as [`Self::reset_for_new_session`] but keeps `session_id`,
     /// so the reconnect resumes via `session/load` and replays the history.
-    /// With nothing to resume — a handoff whose new session never connected —
-    /// nothing would replay it, so the conversation on screen stays.
+    /// The replay covers only the session being resumed, so a transcript that
+    /// a switch carried over keeps everything up to its last divider; with
+    /// nothing to resume, nothing would replay it, so all of it stays.
     ///
     /// `resume` is the target the caller is about to reconnect with, passed in
     /// rather than re-derived from `session_id` — the gate and the request it
     /// gates are then decided in one place, by the caller that owns both.
     pub fn retry_for_reconnect(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
-        let fate = if resume.is_some() {
-            TranscriptFate::Discard
-        } else {
-            TranscriptFate::Keep
+        let last_handoff = self
+            .items
+            .iter()
+            .rposition(|item| matches!(item, ChatItem::Handoff(_)));
+        let fate = match (&resume, last_handoff) {
+            (Some(_), Some(ix)) => TranscriptFate::KeepThrough(ix),
+            (Some(_), None) => TranscriptFate::Discard,
+            (None, _) => TranscriptFate::Keep,
         };
         self.teardown_transient_session_state(fate, cx);
+        if resume.is_none() {
+            // The failed connect being retried says nothing about the
+            // conversation above it.
+            while matches!(self.items.last(), Some(ChatItem::Failure(_))) {
+                self.items.pop();
+            }
+        }
         self.rebuild_rows();
         self.begin_connect(resume, cx);
     }
 
     /// Move this pane's conversation to a fresh session — another account or
     /// agent — keeping the transcript on screen. The divider marks the switch,
-    /// and `briefing` (the recap, plus whatever else the host sends first)
-    /// goes once in front of the next prompt; see [`daruda_acp::handoff`].
-    /// The caller connects right after, as for [`Self::reset_for_new_session`].
+    /// and `recap` goes once in front of the next prompt; see
+    /// [`daruda_acp::handoff`]. A divider still trailing the transcript is a
+    /// switch nobody spoke after, so this one replaces it (the host built
+    /// `mark` with [`daruda_acp::handoff::continue_mark`]). The caller connects
+    /// right after, as for [`Self::reset_for_new_session`].
     pub fn begin_handoff(
         &mut self,
         mark: daruda_acp::handoff::HandoffMark,
-        briefing: Option<String>,
+        recap: Option<String>,
         cx: &mut Context<Self>,
     ) {
         if self.is_read_only() {
@@ -492,8 +514,11 @@ impl AgentChatView {
         }
         self.teardown_transient_session_state(TranscriptFate::Keep, cx);
         self.session_id = None;
+        if matches!(self.items.last(), Some(ChatItem::Handoff(_))) {
+            self.items.pop();
+        }
         self.items.push(ChatItem::Handoff(mark));
-        self.briefing = briefing;
+        self.handoff_recap = recap;
         self.rebuild_rows();
         self.begin_connect(None, cx);
     }
