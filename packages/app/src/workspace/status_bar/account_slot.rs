@@ -183,7 +183,6 @@ impl AccountSlot {
             login_pending,
         }
     }
-
 }
 
 /// Pure label formatter for an account's identity: `email (plan)`, else

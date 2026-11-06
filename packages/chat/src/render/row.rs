@@ -49,11 +49,9 @@ pub(super) fn render_row(
             interrupted_row(this.stop_marker_label(*ix), this.dim_amount, cx)
         }
         RowKind::Handoff(ix) => match this.items.get(*ix) {
-            Some(ChatItem::Handoff(mark)) => interrupted_row(
-                s::agent_chat::handoff(mark.to.label()),
-                this.dim_amount,
-                cx,
-            ),
+            Some(ChatItem::Handoff(mark)) => {
+                interrupted_row(s::agent_chat::handoff(mark.to.label()), this.dim_amount, cx)
+            }
             _ => gpui::Empty.into_any_element(),
         },
         RowKind::ResponseHeader {
