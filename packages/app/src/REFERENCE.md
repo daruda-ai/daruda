@@ -279,8 +279,12 @@ no edit will own its message, so a later stale tap strips the buttons unless
 an earlier tap on that message answered it. A released card drops its claim
 and tokens together and may be offered again. The common coordinator extends
 approval deadlines only for a fresh delivery. Duplicate or retired completions neither extend deadlines nor discard
-current buttons. Transports keep their own receipts, token cleanup and
-message-edit implementations.
+current buttons. Each remote identity's `cards::CardDesk` owns its card ledger
+and callback tokens together: a released or unreceipted card forgets its
+tokens, a settled card leaves bounded tombstones, and a change of identity
+drops both. Live tokens are bounded at 64 per card kind (approval, flow
+question, permission, question), oldest evicted first. Transports keep their
+own receipts and message-edit implementations.
 
 `permission = ask` flows can start through control; profile selection is still
 refused. Runtime questions appear in desktop modals or inline flow rows and on

@@ -124,18 +124,37 @@ fn a_consumed_token_keeps_its_slot() {
     assert!(!tokens.live.contains_key(&oldest_live));
 }
 
-/// Pins today's behavior: flow questions are bounded only by settlement.
+/// A run of flow questions nobody answers is bounded like every other kind:
+/// the oldest is evicted, and other kinds keep their own slots.
 #[test]
-fn flow_ask_tokens_are_not_evicted() {
+fn flow_ask_tokens_evict_their_own_oldest() {
     let mut tokens = CardTokens::<String>::default();
+    let (approve, _) = tokens.mint_approval(ApprovalId(1));
     let first = flow_ask(&mut tokens, 0).remove(0);
-    for ask_id in 1..=TOKENS_PER_KIND_CAP as u64 {
+    let second = flow_ask(&mut tokens, 1).remove(0);
+    for ask_id in 2..=TOKENS_PER_KIND_CAP as u64 {
         flow_ask(&mut tokens, ask_id);
     }
+    assert_eq!(tokens.route_tap(&first), Some(InboundAction::Ignore));
     assert!(matches!(
-        tokens.route_tap(&first),
-        Some(InboundAction::ResolveFlowAsk { ask_id: 0, .. })
+        tokens.route_tap(&second),
+        Some(InboundAction::ResolveFlowAsk { ask_id: 1, .. })
     ));
+    assert!(matches!(
+        tokens.route_tap(&approve),
+        Some(InboundAction::ResolveApproval { .. })
+    ));
+    tokens.forget(&flow_card(1));
+    flow_ask(&mut tokens, 100);
+    assert!(
+        !tokens.live.contains_key(&second),
+        "forgotten with its card"
+    );
+    assert_eq!(
+        tokens.order[&Kind::FlowAsk].len(),
+        TOKENS_PER_KIND_CAP,
+        "a forgotten card frees its slot"
+    );
 }
 
 fn question(tokens: &mut CardTokens<String>, step: u64) -> (QuestionPromptRef, Vec<String>) {

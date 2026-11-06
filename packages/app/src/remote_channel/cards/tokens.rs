@@ -77,14 +77,6 @@ impl Kind {
             CardId::Question { .. } => Self::Question,
         }
     }
-
-    /// Kinds whose live tokens are bounded, oldest evicted first.
-    fn cap(self) -> Option<usize> {
-        match self {
-            Self::Approval | Self::Permission | Self::Question => Some(TOKENS_PER_KIND_CAP),
-            Self::FlowAsk => None,
-        }
-    }
 }
 
 impl Token {
@@ -207,7 +199,7 @@ pub(crate) enum QuestionCard {
 
 pub(super) struct CardTokens<M> {
     live: HashMap<String, Token>,
-    /// Insertion order per bounded kind. A consumed token keeps its slot until
+    /// Insertion order per kind. A consumed token keeps its slot until
     /// evicted, so a tap never makes room for a newer card early.
     order: HashMap<Kind, VecDeque<String>>,
     /// Retired tokens and what a late tap on each still answers. Identifies a
@@ -236,14 +228,10 @@ impl<M> Default for CardTokens<M> {
 
 impl<M: Eq + std::hash::Hash + Clone> CardTokens<M> {
     fn insert(&mut self, token: String, value: Token) {
-        let kind = value.kind();
+        let order = self.order.entry(value.kind()).or_default();
         self.live.insert(token.clone(), value);
-        let Some(cap) = kind.cap() else {
-            return;
-        };
-        let order = self.order.entry(kind).or_default();
         order.push_back(token);
-        if order.len() > cap
+        if order.len() > TOKENS_PER_KIND_CAP
             && let Some(oldest) = order.pop_front()
         {
             self.live.remove(&oldest);
