@@ -88,8 +88,8 @@ agent/ → lane/
 - `project/` imports `lane/` only; nothing from `workspace/` or `agent/`.
 - `agent/` imports `lane/` only; nothing from `workspace/` or `project/`.
 - `runs/` owns the process-wide task log, execution bindings, CLI tracker,
-  flow runs in flight, and `RunWatch` result snapshots, delivery ledger and waiters.
-  Its GPUI-free domain state uses its own `RunKey`, `RunSnapshot` and `RunEvent`
+  flow runs in flight, and `RunWatch` result snapshots, delivery ledger and waiters,
+  plus the durable run ledger that carries that delivery across restarts. Its GPUI-free domain state uses its own `RunKey`, `RunSnapshot` and `RunEvent`
   types. `runs/` never imports `control/`, chat views, or this crate's
   `workspace/`, `project/` or `lane/`, and imports `daruda_control_types` only
   for `agent_text`: answer bounds are control-contract policy that run results

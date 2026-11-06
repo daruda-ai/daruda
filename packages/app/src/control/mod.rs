@@ -8,7 +8,8 @@
 //!
 //! The core is stateless. Which pane an ordinal names, and which pane is
 //! currently selected, are conversation context owned by the adapter — see
-//! `crate::telegram::command`.
+//! `crate::telegram::command`. Run delivery state, including what survives a
+//! restart, belongs to `crate::runs`; control only converts it at the boundary.
 
 pub(crate) mod approval;
 pub(crate) mod ask;
