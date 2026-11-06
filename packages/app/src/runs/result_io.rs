@@ -112,7 +112,8 @@ pub(super) fn flow_observation(location: &super::result::FlowRunLocation) -> Flo
             snapshot = if let Some(end) = read.end {
                 result::flow_ended(snapshot, &end, pointers)
             } else {
-                snapshot.state = open_state(dir, location.lock_dir.as_deref(), pointers);
+                let passed = read.replay.passed.len();
+                snapshot.state = open_state(dir, location.lock_dir.as_deref(), pointers, passed);
                 snapshot
             };
         }
@@ -127,6 +128,7 @@ pub(super) fn flow_observation(location: &super::result::FlowRunLocation) -> Flo
                 dir,
                 location.lock_dir.as_deref(),
                 flow_pointers(dir, flow_spec(dir).as_ref(), replay.until.as_ref()),
+                replay.passed.len(),
             )
         }
     }
@@ -135,27 +137,53 @@ pub(super) fn flow_observation(location: &super::result::FlowRunLocation) -> Flo
         resumed_at,
     }
 }
-fn open_state(dir: &Path, lock_dir: Option<&Path>, pointers: Pointers) -> RunState {
+/// Fixed English like the notice protocol: the reader is the orchestrator.
+const STOPPED_TEXT: &str = "The run stopped before it ended: daruda quit or its process died";
+const STALLED_TEXT: &str = "The run stalled: nothing left in it could start";
+
+/// `passed` is how many nodes the run log says passed, for a run that may
+/// have stopped without writing its report.
+fn open_state(dir: &Path, lock_dir: Option<&Path>, pointers: Pointers, passed: usize) -> RunState {
     use daruda_flow::marker::RunStatus;
-    let ended_as =
-        match daruda_flow::marker::run_status(dir, lock_dir, &daruda_core::process::is_alive) {
-            RunStatus::Running => {
-                return RunState::Running {
-                    progress: Default::default(),
-                    waiting_on: None,
-                };
-            }
-            RunStatus::Unknown => return RunState::Unknown,
-            RunStatus::Done => EndedAs::Completed,
-            RunStatus::Failed => EndedAs::Failed,
-            RunStatus::Canceled => EndedAs::Canceled,
-            RunStatus::Stalled => EndedAs::Stalled,
-            RunStatus::Crashed => EndedAs::Crashed,
-        };
-    RunState::Ended {
-        ended_as,
-        text: None,
-        pointers,
+    let status = daruda_flow::marker::run_status(dir, lock_dir, &daruda_core::process::is_alive);
+    match ended_as_of(status) {
+        Some(ended_as) => RunState::Ended {
+            ended_as,
+            text: resumable_text(ended_as, passed),
+            pointers,
+        },
+        None if status == RunStatus::Running => RunState::Running {
+            progress: Default::default(),
+            waiting_on: None,
+        },
+        None => RunState::Unknown,
+    }
+}
+
+/// What an orchestrator reads for an end it can resume, until a report
+/// replaces it; `None` for any other end.
+fn resumable_text(ended_as: EndedAs, passed: usize) -> Option<String> {
+    let why = match ended_as {
+        EndedAs::Crashed => STOPPED_TEXT,
+        EndedAs::Stalled => STALLED_TEXT,
+        _ => return None,
+    };
+    let nodes = if passed == 1 { "node" } else { "nodes" };
+    Some(format!(
+        "{why}. {passed} {nodes} passed. It can be resumed from where it stopped."
+    ))
+}
+
+/// The end a run directory's status names; `None` while it may still run.
+fn ended_as_of(status: daruda_flow::marker::RunStatus) -> Option<EndedAs> {
+    use daruda_flow::marker::RunStatus;
+    match status {
+        RunStatus::Running | RunStatus::Unknown => None,
+        RunStatus::Done => Some(EndedAs::Completed),
+        RunStatus::Failed => Some(EndedAs::Failed),
+        RunStatus::Canceled => Some(EndedAs::Canceled),
+        RunStatus::Stalled => Some(EndedAs::Stalled),
+        RunStatus::Crashed => Some(EndedAs::Crashed),
     }
 }
 

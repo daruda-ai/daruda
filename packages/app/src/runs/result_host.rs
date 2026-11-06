@@ -77,15 +77,23 @@ impl RunsHost {
                 return RunQuery::Ready(run.result());
             }
             if let RunKey::Task(exec) = &key
-                && let Some(mut snapshot) = cx
+                && let Some(record) = cx
                     .try_global::<GlobalTasks>()
                     .and_then(|tasks| tasks.get(&exec.task_id))
-                    .and_then(|record| result::task_snapshot(record, exec))
+                && let Some(mut snapshot) = result::task_snapshot(record, exec)
             {
                 if let RunState::Running { waiting_on, .. } = &mut snapshot.state {
                     *waiting_on = host.watch.waiting_on(&key).cloned();
                 }
-                return RunQuery::Ready(snapshot);
+                return match host.idle_task_flow(record, exec, &snapshot) {
+                    Some((run_dir, cwd)) => RunQuery::TaskFlow(TaskFlowQuery {
+                        task: snapshot,
+                        run_dir,
+                        cwd,
+                        lock_root: host.flow_lock_root.clone(),
+                    }),
+                    None => RunQuery::Ready(snapshot),
+                };
             }
             if let RunKey::Flow(id) = &key
                 && let Some(location) = host.watch.location(id)
@@ -128,6 +136,92 @@ impl RunsHost {
             state,
         })
     }
+
+    /// Read each owned run with no end once, off the UI thread, as a new
+    /// process starts: a run that ended or was interrupted while the app was
+    /// closed is reported then, not only when a wait happens to read it.
+    pub(super) fn judge_restored(cx: &mut App) {
+        let keys = cx.global::<Self>().watch.unjudged();
+        let reads: Vec<_> = keys
+            .into_iter()
+            .filter_map(|key| {
+                let revision = Self::run_revision(&key, cx);
+                match Self::run_query(key, cx) {
+                    RunQuery::Ready(_) => None,
+                    query => Some((query, revision)),
+                }
+            })
+            .collect();
+        if reads.is_empty() {
+            return;
+        }
+        let read = cx.background_executor().spawn(async move {
+            reads
+                .into_iter()
+                .map(|(query, revision)| (query.read_observation(), revision))
+                .collect::<Vec<_>>()
+        });
+        cx.spawn(async move |cx| {
+            let observations = read.await;
+            cx.update(|cx| {
+                for (observation, revision) in observations {
+                    // Anything that moved the key meanwhile saw newer facts.
+                    if Self::run_revision(&observation.snapshot.key, cx) == revision {
+                        cx.update_global::<Self, _>(|host, _| {
+                            host.watch
+                                .judge_restored(observation.snapshot, observation.disk_episode)
+                        });
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+}
+
+impl RunsHost {
+    /// The run directory and worktree of the flow a running task waits on,
+    /// when no flow of this process runs it: only disk can then say whether
+    /// it was interrupted. `None` for any other task or a live run.
+    fn idle_task_flow(
+        &self,
+        record: &daruda_store::tasks::TaskRecord,
+        exec: &daruda_store::tasks::ExecutionRef,
+        snapshot: &RunSnapshot,
+    ) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+        if !matches!(snapshot.state, RunState::Running { .. })
+            || record.current_exec() != Some(exec)
+        {
+            return None;
+        }
+        let run = record.execution.as_ref()?;
+        let run_dir = super::flow_tasks::task_run_dir(run)?;
+        let live = self.flows.by_id(&result::flow_run_id(&run_dir)).is_some();
+        (!live).then(|| (run_dir, run.cwd.clone()))
+    }
+}
+
+/// A running task's flow, read from disk off the UI thread.
+pub(crate) struct TaskFlowQuery {
+    task: RunSnapshot,
+    run_dir: std::path::PathBuf,
+    cwd: std::path::PathBuf,
+    lock_root: Option<std::path::PathBuf>,
+}
+
+impl TaskFlowQuery {
+    fn read(self) -> RunSnapshot {
+        // Resolved here, not on the UI thread: canonicalizing touches disk.
+        let lock_dir = self.lock_root.as_ref().and_then(|root| {
+            let tree = daruda_flow::lock::CanonicalTree::resolve(&self.cwd).ok()?;
+            Some(daruda_flow::lock::lock_dir_for(root, &tree))
+        });
+        let flow = super::result_io::flow_observation(&super::result::FlowRunLocation {
+            run_dir: self.run_dir,
+            lock_dir,
+        });
+        result::through_flow(self.task, flow.snapshot)
+    }
 }
 
 pub(crate) struct DiskQuery {
@@ -139,6 +233,7 @@ pub(crate) struct DiskQuery {
 pub(crate) enum RunQuery {
     Ready(RunSnapshot),
     Disk(DiskQuery),
+    TaskFlow(TaskFlowQuery),
 }
 pub(crate) struct QueryObservation {
     pub snapshot: RunSnapshot,
@@ -152,6 +247,11 @@ impl RunQuery {
         match self {
             Self::Ready(snapshot) => QueryObservation {
                 snapshot: super::result_io::enrich(snapshot),
+                disk_episode: None,
+            },
+            // A task's own episodes follow its lifecycle, never a disk episode.
+            Self::TaskFlow(query) => QueryObservation {
+                snapshot: query.read(),
                 disk_episode: None,
             },
             Self::Disk(query) => {

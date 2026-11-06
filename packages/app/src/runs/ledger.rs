@@ -74,8 +74,9 @@ impl Ledger {
 
     /// Turn replayed entries into what the watch restores. A task execution has
     /// one end, so one already reported, or one whose task is gone with nothing
-    /// to deliver, is released instead. `book` is `None` when the task log
-    /// could not be read: no task entry is judged then.
+    /// to deliver, is released instead; a still-running task's reported end was
+    /// its flow's interruption, so it stays in scope for the real one. `book`
+    /// is `None` when the task log could not be read: no task entry is judged then.
     pub(crate) fn restore(
         &mut self,
         entries: Vec<RunLedgerEntry>,
@@ -89,7 +90,7 @@ impl Ledger {
                     episode: ended.episode,
                     snapshot: snapshot_of(key.clone(), &ended.end),
                 },
-                (None, Some(_)) if matches!(key, RunKey::Task(_)) => {
+                (None, Some(_)) if matches!(&key, RunKey::Task(exec) if !running(book, exec)) => {
                     self.release(&entry.key, ReleaseReason::Reported);
                     continue;
                 }
@@ -175,6 +176,11 @@ impl Ledger {
         }
     }
 
+    /// The run is gone with nothing delivered: no later process can either.
+    pub(super) fn expired(&mut self, key: &RunKey) {
+        self.release(&ledger_key(key), ReleaseReason::Expired);
+    }
+
     /// Make every queued write durable by `until`, as the app quits.
     pub(crate) fn flush(&mut self, until: Instant) {
         let Self::Writing { store, .. } = self else {
@@ -241,6 +247,14 @@ fn holds(book: &TasksBook, exec: &ExecutionRef) -> bool {
         record.current_exec() == Some(exec)
             || record.ended_executions.iter().any(|end| &end.exec == exec)
     })
+}
+
+/// Whether `exec` is its task's current, unfinished execution.
+fn running(book: Option<&TasksBook>, exec: &ExecutionRef) -> bool {
+    book.and_then(|book| book.get(&exec.task_id))
+        .is_some_and(|record| {
+            record.current_exec() == Some(exec) && !record.lifecycle.is_terminal()
+        })
 }
 
 fn ledger_key(key: &RunKey) -> LedgerKey {

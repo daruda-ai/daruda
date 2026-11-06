@@ -426,3 +426,57 @@ async fn a_flow_run_that_ends_at_once_still_settles_its_task(cx: &mut gpui::Test
     });
     assert_eq!(kind, daruda_store::tasks::LifecycleKind::Done);
 }
+
+/// A task's flow run that stalls leaves the task running, to be resumed;
+/// its result reads the stall meanwhile instead of running forever.
+#[gpui::test]
+fn a_tasks_stalled_flow_run_is_its_resumable_result(cx: &mut gpui::TestAppContext) {
+    use crate::runs::result::{EndedAs, RunKey, RunSnapshot, RunState};
+    use crate::runs::seed::{self, SeedEnd, SeedRun};
+    use daruda_store::tasks::{LifecycleKind, TaskExecutionSource};
+    use gpui::BorrowAppContext as _;
+    let lane = std::path::PathBuf::from("/lane");
+    let run_id = "stalled";
+    let run_dir = crate::runs::runs_dir(&lane).join(run_id);
+    let run = SeedRun {
+        source: TaskExecutionSource::Flow {
+            run_id: run_id.into(),
+            flow: "review.yaml".into(),
+        },
+        ..SeedRun::chat(&lane)
+    };
+    cx.update(|cx| {
+        RunsHost::seed_for_test(cx);
+        let id = seed::task(
+            seed::spec(Default::default(), "flow"),
+            Some((&run, SeedEnd::Running)),
+            cx,
+        );
+        let stalled = RunState::Ended {
+            ended_as: EndedAs::Stalled,
+            text: Some("stalled report".into()),
+            pointers: Default::default(),
+        };
+        cx.update_global::<RunsHost, _>(|host, _| {
+            host.watch.retain(RunSnapshot {
+                key: RunKey::flow_of(&run_dir),
+                what: "flow".into(),
+                why: None,
+                state: stalled.clone(),
+            })
+        });
+        RunsHost::flow_task_ended(
+            &run_dir,
+            &RunEnd::Stalled { nodes: vec![] },
+            false,
+            true,
+            Some("stalled report".into()),
+            cx,
+        );
+        let record = cx.global::<crate::runs::GlobalTasks>().get(&id).unwrap();
+        assert_eq!(record.lifecycle.kind(), LifecycleKind::Running);
+        let key = RunKey::Task(run.exec(&id));
+        let held = cx.global::<RunsHost>().watch.get(&key).cloned();
+        assert_eq!(held.map(|snapshot| snapshot.state), Some(stalled));
+    });
+}

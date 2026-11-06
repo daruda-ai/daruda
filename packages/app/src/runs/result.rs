@@ -72,6 +72,14 @@ pub(crate) enum EndedAs {
     BudgetExhausted,
 }
 
+impl EndedAs {
+    /// A flow run that stopped without deciding to, which a resume picks up:
+    /// the ends `daruda_flow::resume::is_resumable` accepts.
+    pub(crate) fn resumable(self) -> bool {
+        matches!(self, Self::Crashed | Self::Stalled)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum WaitingOn {
     Question { node: String },
@@ -180,6 +188,18 @@ fn task_pointers(execution: Option<&TaskExecution>) -> Pointers {
         run_dir,
         ..Default::default()
     }
+}
+
+/// A running task's result, read through its flow run: a flow interrupted
+/// where it can be resumed is the task's end until a resume reopens it. The
+/// task itself stays running, so the person's resume settles it later.
+pub(super) fn through_flow(mut task: RunSnapshot, flow: RunSnapshot) -> RunSnapshot {
+    if matches!(task.state, RunState::Running { .. })
+        && matches!(flow.state, RunState::Ended { ended_as, .. } if ended_as.resumable())
+    {
+        task.state = flow.state;
+    }
+    task
 }
 
 /// Freeze the end from process facts even when the log/report could not be written.

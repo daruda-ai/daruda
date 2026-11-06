@@ -96,6 +96,7 @@ fn result_states_round_trip_without_losing_ending_or_pointers() {
     ] {
         states.push(RunState::Ended {
             ended_as,
+            resumable: matches!(ended_as, EndedAs::Crashed | EndedAs::Stalled),
             text: Some("answer".into()),
             pointers: Pointers {
                 run_dir: Some("/run".into()),

@@ -125,17 +125,22 @@ impl RunWatch {
                     Delivery::Unreported
                 };
                 if delivered && matches!(event.snapshot.state, RunState::Ended { .. }) {
-                    reported.push((event.snapshot.key.clone(), event.sequence, event.recorded));
+                    reported.push((
+                        event.snapshot.key.clone(),
+                        event.sequence,
+                        event.recorded,
+                        settles(&event.snapshot),
+                    ));
                 }
             }
         }
-        for (key, sequence, recorded) in reported {
+        for (key, sequence, recorded, settles) in reported {
             let current = sequence >= self.floor(&key);
             if current {
                 self.entry(&key).end = EndState::Reported;
             }
             if let Some(episode) = recorded {
-                self.ledger.reported(&key, episode, current);
+                self.ledger.reported(&key, episode, current && settles);
             }
         }
         // A closed block or a terminal supersedes only an unreported blocked episode.
@@ -323,5 +328,15 @@ impl RunWatch {
         Some(answer)
     }
 }
+/// Whether reporting this end leaves its key nothing more to deliver. A
+/// task's resumable end is its flow's interruption while the task runs on:
+/// the ledger keeps it in scope for the end a resume brings.
+fn settles(snapshot: &RunSnapshot) -> bool {
+    !matches!(
+        (&snapshot.key, &snapshot.state),
+        (RunKey::Task(_), RunState::Ended { ended_as, .. }) if ended_as.resumable()
+    )
+}
+
 #[cfg(test)]
 mod tests;

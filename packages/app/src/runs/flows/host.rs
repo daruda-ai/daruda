@@ -78,9 +78,11 @@ impl RunsHost {
             return Err(AlreadyRunning);
         }
         let run_dir = request.run_dir.clone();
+        // The request names the lock root; the run's own lock lives in the
+        // per-tree directory the engine derives from it.
         let location = crate::runs::result::FlowRunLocation {
             run_dir: run_dir.clone(),
-            lock_dir: Some(request.lock_dir.clone()),
+            lock_dir: Some(daruda_flow::lock::lock_dir_for(&request.lock_dir, &tree)),
         };
         let nodes_at_start = request
             .loaded
@@ -127,6 +129,7 @@ impl RunsHost {
             host.watch.locate(location);
             Ok(())
         })?;
+        Self::flow_task_resumed(&run_dir, cx);
         Self::tell_windows(tree.clone(), FlowChanged::Repainted, cx);
         let run_id = crate::runs::result::flow_run_id(&run_dir);
         cx.spawn(async move |cx| pump(tree, run_dir, events, asks, pump_overage, cx).await)

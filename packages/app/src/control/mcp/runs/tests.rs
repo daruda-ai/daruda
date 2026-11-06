@@ -63,3 +63,40 @@ fn status_scope_is_only_registered_starts_and_queries_have_no_reporting_effect(
         );
     });
 }
+
+/// A flow that stopped without deciding to can be picked up again; the
+/// orchestrator reads that from the result rather than from the end's name.
+#[test]
+fn only_an_interrupted_or_stalled_end_is_marked_resumable() {
+    let end = |ended_as| domain::RunSnapshot {
+        key: domain::RunKey::Flow("run".into()),
+        what: "Flow".into(),
+        why: None,
+        state: domain::RunState::Ended {
+            ended_as,
+            text: None,
+            pointers: Default::default(),
+        },
+    };
+    let resumable = |ended_as| match convert(end(ended_as)).state {
+        wire::RunState::Ended { resumable, .. } => resumable,
+        other => panic!("not an end: {other:?}"),
+    };
+    assert!(resumable(domain::EndedAs::Crashed));
+    assert!(resumable(domain::EndedAs::Stalled));
+    for ended_as in [
+        domain::EndedAs::Completed,
+        domain::EndedAs::Failed,
+        domain::EndedAs::Canceled,
+        domain::EndedAs::Interrupted,
+        domain::EndedAs::Undelivered,
+        domain::EndedAs::Error,
+        domain::EndedAs::BudgetExhausted,
+    ] {
+        assert!(!resumable(ended_as), "{ended_as:?}");
+    }
+    let value = serde_json::to_value(convert(end(domain::EndedAs::Crashed))).unwrap();
+    assert_eq!(value["state"]["resumable"], true);
+    let value = serde_json::to_value(convert(end(domain::EndedAs::Completed))).unwrap();
+    assert!(value["state"].get("resumable").is_none());
+}

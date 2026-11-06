@@ -125,6 +125,9 @@ pub(crate) struct RunsHost {
     /// The flow runs in flight; they belong to the process, not to a log.
     pub(super) flows: super::flows::FlowRuns,
     pub(super) watch: super::watch::RunWatch,
+    /// Where flow run locks live, so a task's flow run read from disk is
+    /// judged by its real holder. `None` reads such a run as `Unknown`.
+    pub(super) flow_lock_root: Option<std::path::PathBuf>,
     /// Closes once the newest proposal has reached the projection; the next
     /// proposal waits on it, so projections apply in proposal order.
     tail: smol::channel::Receiver<()>,
@@ -225,6 +228,7 @@ impl RunsHost {
                 effects: None,
                 flows: Default::default(),
                 watch: Default::default(),
+                flow_lock_root: None,
                 tail: settled_tail(),
                 #[cfg(any(test, feature = "screenshot"))]
                 _scratch: None,
@@ -444,16 +448,18 @@ impl RunsHost {
             .try_global::<GlobalTasks>()
             .map(|tasks| tasks.book.clone());
         if cx.try_global::<RunsHost>().is_some() {
-            let (flows, effects, watch, cli_resumes) =
-                cx.update_global::<RunsHost, _>(|host, _| {
+            let (flows, effects, watch, cli_resumes, flow_lock_root) = cx
+                .update_global::<RunsHost, _>(|host, _| {
                     (
                         std::mem::take(&mut host.flows),
                         host.effects.take(),
                         std::mem::take(&mut host.watch),
                         std::mem::take(&mut host.cli_resumes),
+                        host.flow_lock_root.take(),
                     )
                 });
             opened.host.cli_resumes = cli_resumes;
+            opened.host.flow_lock_root = opened.host.flow_lock_root.take().or(flow_lock_root);
             opened.host.flows = flows;
             opened.host.watch = watch;
             opened.host.effects = opened.host.effects.take().or(effects);
@@ -473,6 +479,7 @@ impl RunsHost {
         cx.set_global(opened.projection);
         cx.set_global(opened.host);
         Self::install_cli_tracker(cx);
+        Self::judge_restored(cx);
     }
 
     /// Install a host when none was: a test gets a scratch log, anything
@@ -574,6 +581,13 @@ impl OpenedRuns {
         self
     }
 
+    /// Read task flow runs' locks under `root`, the one every window's
+    /// flows take theirs under.
+    pub(crate) fn with_flow_lock_root(mut self, root: std::path::PathBuf) -> Self {
+        self.host.flow_lock_root = Some(root);
+        self
+    }
+
     fn unavailable() -> Self {
         Self {
             carried: Vec::new(),
@@ -586,6 +600,7 @@ impl OpenedRuns {
                 effects: None,
                 flows: Default::default(),
                 watch: Default::default(),
+                flow_lock_root: None,
                 tail: settled_tail(),
                 #[cfg(any(test, feature = "screenshot"))]
                 _scratch: None,

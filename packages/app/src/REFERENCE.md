@@ -308,8 +308,7 @@ plus unfinished orchestrator Task executions captured before startup
 reconciliation, including Running CLI executions, plus the runs the durable
 run ledger restores. Other already-terminal Tasks and flows from earlier
 processes do not enter that omitted scope. Older flows remain explicitly
-queryable; judging a restored flow that has no recorded end is outside this
-contract.
+queryable, and restored runs with no recorded end are judged at startup (below).
 
 `RunWatch`, inside `RunsHost`, owns that process-wide scope, snapshots, waiters
 and delivery ledger. It survives orchestrator pane or session replacement and
@@ -332,6 +331,21 @@ episodes. A Task whose end was already reported, or whose execution is gone
 with nothing to deliver, is released instead. Recovered results carry
 `recovered: true` in `daruda_run_wait`/`daruda_run_status`, and their notice
 line says they were requested before daruda restarted.
+After install, each scoped run with no end and nothing observed is read once
+off the UI thread (`RunsHost::judge_restored`), through `run_query`'s own disk
+readers; a key that changed meanwhile is skipped. A flow ended on disk is
+delivered with its report as a `Recovered` episode. A flow `marker::run_status`
+reads as `Crashed` (a quit leaves its lock with a dead holder) or `Stalled` is
+an end too, with `resumable: true` on the wire, `resumable` in its notice, and,
+without a report, fixed English text naming how many nodes passed. A flow whose
+holder is alive stays pending for wait refreshes; a missing run directory is
+retained as `Gone` and released `Expired`. A running Task whose flow no process
+here runs reads its result through the run directory and the profile's flow
+lock root (`RunQuery::TaskFlow`): a resumable flow end is the Task's end while
+the Task stays `Running`. Reporting it does not release the Task's ledger entry,
+a restart keeps it in scope while the Task runs, and a resume (or `start_flow`)
+reopens the Task key, so `flow_task_ended` settles the Task and that end is
+delivered as a new episode. A live `Stalled` end gives the Task the same result.
 Flow questions and level comparisons of the exact Running AgentChat Task's
 permission state produce waiting episodes. Closing a block or ending the run
 supersedes an unreported block; a resumed flow can produce a new end episode

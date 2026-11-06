@@ -13,8 +13,9 @@ use daruda_store::tasks::machine::{SettleOutcome, StartFailure, StopCause};
 use daruda_store::tasks::{
     ExecutionRef, Lifecycle, SessionEndReason, TaskEvent, TaskExecution, TasksBook,
 };
-use gpui::App;
+use gpui::{App, BorrowAppContext as _};
 
+use super::result::RunKey;
 use super::{GlobalTasks, RunsHost};
 
 /// Per-repository daruda directory, checked in with the repo.
@@ -138,17 +139,56 @@ impl RunsHost {
         let Some(tasks) = cx.try_global::<GlobalTasks>() else {
             return;
         };
-        let event = task_of_run(run_dir, tasks.book()).and_then(|(exec, lifecycle)| {
-            let started = match lifecycle {
-                Lifecycle::Dispatching { .. } => saw_start,
-                // A resumed run records no start of its own.
-                Lifecycle::Running { .. } => true,
-                _ => return None,
-            };
-            task_end(end, overage, started, result, exec, chrono::Utc::now())
+        let Some((exec, lifecycle)) = task_of_run(run_dir, tasks.book()) else {
+            return;
+        };
+        let started = match lifecycle {
+            Lifecycle::Dispatching { .. } => saw_start,
+            // A resumed run records no start of its own.
+            Lifecycle::Running { .. } => true,
+            _ => return,
+        };
+        match task_end(
+            end,
+            overage,
+            started,
+            result,
+            exec.clone(),
+            chrono::Utc::now(),
+        ) {
+            Some(event) => Self::propose_fact(event, cx),
+            None if matches!(end, RunEnd::Stalled { .. }) => {
+                Self::flow_task_stalled(exec, run_dir, cx)
+            }
+            None => {}
+        }
+    }
+
+    /// The task runs on until its stalled run is resumed; its result reads the
+    /// run's end meanwhile, so no one waits on a run that cannot progress.
+    fn flow_task_stalled(exec: ExecutionRef, run_dir: &Path, cx: &mut App) {
+        let Some(task) = cx
+            .try_global::<GlobalTasks>()
+            .and_then(|tasks| tasks.get(&exec.task_id))
+            .and_then(|record| super::result::task_snapshot(record, &exec))
+        else {
+            return;
+        };
+        cx.update_global::<RunsHost, _>(|host, _| {
+            if let Some(flow) = host.watch.get(&RunKey::flow_of(run_dir)).cloned() {
+                host.watch.retain(super::result::through_flow(task, flow));
+            }
         });
-        if let Some(event) = event {
-            Self::propose_fact(event, cx);
+    }
+
+    /// The run in `run_dir` started again, as a resume does: a running task
+    /// whose result read it as interrupted takes a new episode for its end.
+    pub(super) fn flow_task_resumed(run_dir: &Path, cx: &mut App) {
+        let Some(tasks) = cx.try_global::<GlobalTasks>() else {
+            return;
+        };
+        if let Some((exec, Lifecycle::Running { .. })) = task_of_run(run_dir, tasks.book()) {
+            cx.update_global::<RunsHost, _>(|host, _| host.watch.reopen(&RunKey::Task(exec)));
         }
     }
 

@@ -37,7 +37,8 @@ pub(super) fn run() {
     ))
     .with_run_ledger(daruda_store::run_ledger::RunLedgerStore::open_current(
         env!("CARGO_PKG_VERSION"),
-    ));
+    ))
+    .with_flow_lock_root(daruda_store::persistence::flow_lock_root());
     let app = bootstrap::new_application();
     app.run(move |cx: &mut App| {
         crate::workspace_storage::install(workspace_store, cx);

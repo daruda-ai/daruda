@@ -126,6 +126,7 @@ pub(super) fn convert(snapshot: domain::RunSnapshot) -> wire::RunResult {
             text,
             pointers,
         } => wire::RunState::Ended {
+            resumable: ended_as.resumable(),
             ended_as: match ended_as {
                 domain::EndedAs::Completed => wire::EndedAs::Completed,
                 domain::EndedAs::Failed => wire::EndedAs::Failed,

@@ -8,6 +8,7 @@ const LINES_MAX: usize = 20;
 const FIELD_CHARS_MAX: usize = 200;
 /// Fixed English like the rest of the line: the reader is the orchestrator agent.
 const RECOVERED_NOTE: &str = " (requested before daruda restarted)";
+const RESUMABLE_NOTE: &str = ", resumable";
 
 fn single_line(value: &str) -> String {
     value
@@ -52,7 +53,14 @@ pub(super) fn prompt(events: &[RunEvent]) -> String {
                 RunKey::Task(exec) => format!("task:{}/{}", exec.task_id, exec.execution_id),
             };
             let summary = match &snapshot.state {
-                RunState::Ended { ended_as, .. } => ended_label(*ended_as).into(),
+                RunState::Ended { ended_as, .. } => {
+                    let resumable = if ended_as.resumable() {
+                        RESUMABLE_NOTE
+                    } else {
+                        ""
+                    };
+                    format!("{}{resumable}", ended_label(*ended_as))
+                }
                 RunState::Running {
                     waiting_on: Some(WaitingOn::Question { node }),
                     ..
@@ -128,6 +136,18 @@ mod tests {
             prompt(&[recovered]),
             "flow:run name /clear (requested before daruda restarted) — Completed; \
              call daruda_run_wait"
+        );
+    }
+
+    #[test]
+    fn an_end_that_can_be_resumed_says_so() {
+        assert_eq!(
+            prompt(&[event("run", ended(EndedAs::Crashed))]),
+            "flow:run name /clear — Crashed, resumable; call daruda_run_wait"
+        );
+        assert_eq!(
+            prompt(&[event("run", ended(EndedAs::Failed))]),
+            "flow:run name /clear — Failed; call daruda_run_wait"
         );
     }
 

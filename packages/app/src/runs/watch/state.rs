@@ -171,7 +171,7 @@ impl RunWatch {
             && let Some(held) = entry.snapshot.clone()
         {
             entry.end = EndState::Ended;
-            self.push_event(held);
+            self.push_event(held, Origin::Live);
         }
         let entry = self.changed(key);
         entry.solicited = solicited;
@@ -208,7 +208,7 @@ impl RunWatch {
                 || event.delivery != Delivery::Unreported
         });
     }
-    fn push_event(&mut self, snapshot: RunSnapshot) {
+    fn push_event(&mut self, snapshot: RunSnapshot, origin: Origin) {
         let Some(entry) = self.entries.get_mut(&snapshot.key) else {
             return;
         };
@@ -236,7 +236,7 @@ impl RunWatch {
         let event = RunEvent {
             sequence,
             solicited: entry.solicited,
-            origin: Origin::Live,
+            origin,
             episode: entry.episode,
             recorded,
             snapshot,
@@ -281,7 +281,7 @@ impl RunWatch {
                         on: waiting.clone(),
                         sequence: None,
                     });
-                    self.push_event(snapshot.clone());
+                    self.push_event(snapshot.clone(), Origin::Live);
                 }
             }
             None => self.clear_waiting(&key),
@@ -359,7 +359,7 @@ impl RunWatch {
             _ => false,
         };
         if announce {
-            self.push_event(snapshot);
+            self.push_event(snapshot, Origin::Live);
         }
     }
     /// Leave the ledger once no explicit waiter names the key. Unreported episodes
@@ -440,6 +440,11 @@ impl RunWatch {
     /// Retain an observation. An end already held with identical content is
     /// no change, so in-flight reads and waiters are left alone.
     pub(crate) fn retain(&mut self, snapshot: RunSnapshot) {
+        self.settle(snapshot, Origin::Live);
+    }
+
+    /// [`Self::retain`], with the origin a new end's episode takes.
+    pub(super) fn settle(&mut self, snapshot: RunSnapshot, origin: Origin) {
         let ended = matches!(snapshot.state, RunState::Ended { .. });
         let entry = self.entry(&snapshot.key);
         if ended
@@ -457,7 +462,7 @@ impl RunWatch {
             }
             self.clear_waiting(&snapshot.key);
             if first {
-                self.push_event(snapshot.clone());
+                self.push_event(snapshot.clone(), origin);
             }
         }
         let key = snapshot.key.clone();
@@ -522,7 +527,7 @@ impl RunWatch {
         let entry = self.changed(&held.key);
         entry.end = EndState::Ended;
         entry.snapshot = Some(enriched.clone());
-        self.push_event(enriched);
+        self.push_event(enriched, Origin::Live);
         self.wake();
     }
 

@@ -74,7 +74,7 @@ impl PreparedWait {
             stage(&keys, cx)
                 .into_iter()
                 .filter_map(|(query, revision)| match query {
-                    RunQuery::Disk(_) => Some((query, revision)),
+                    RunQuery::Disk(_) | RunQuery::TaskFlow(_) => Some((query, revision)),
                     RunQuery::Ready(snapshot) => {
                         if matches!(
                             snapshot.state,

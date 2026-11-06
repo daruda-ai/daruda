@@ -130,3 +130,24 @@ fn legacy_selection_survives_a_resume_that_only_opened_the_modern_log() {
     );
     assert_eq!(std::fs::read(&log).unwrap(), opened);
 }
+
+/// The engine decides what can be resumed; a result's end says the same.
+#[test]
+fn an_end_is_resumable_exactly_when_the_engine_would_resume_its_run() {
+    use daruda_flow::marker::RunStatus;
+    for status in [
+        RunStatus::Running,
+        RunStatus::Unknown,
+        RunStatus::Done,
+        RunStatus::Failed,
+        RunStatus::Canceled,
+        RunStatus::Stalled,
+        RunStatus::Crashed,
+    ] {
+        assert_eq!(
+            ended_as_of(status).is_some_and(EndedAs::resumable),
+            daruda_flow::resume::is_resumable(status),
+            "{status:?}"
+        );
+    }
+}
