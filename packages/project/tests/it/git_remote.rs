@@ -5,11 +5,6 @@ use std::path::{Path, PathBuf};
 
 use crate::fixture::{git, has_git, init, open};
 
-fn identify(repo: &Path) {
-    git(repo, &["config", "user.email", "daruda@test"]);
-    git(repo, &["config", "user.name", "daruda"]);
-}
-
 /// A repository with one commit pushed to a bare `origin.git` beside it,
 /// tracking `origin/main`. Returns `(origin, work)`.
 fn pushed_repo(temp: &Path) -> (PathBuf, PathBuf) {
@@ -18,7 +13,6 @@ fn pushed_repo(temp: &Path) -> (PathBuf, PathBuf) {
     std::fs::create_dir_all(&work).unwrap();
     git(temp, &["init", "-q", "--bare", "-b", "main", "origin.git"]);
     git(&work, &["init", "-q", "-b", "main"]);
-    identify(&work);
     std::fs::write(work.join("f.txt"), "one\n").unwrap();
     git(&work, &["add", "-A"]);
     git(&work, &["commit", "-qm", "initial"]);
@@ -110,7 +104,6 @@ fn a_commit_in_a_linked_lane_rewrites_its_own_index() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("work");
     init(&root);
-    identify(&root);
     git(&root, &["commit", "-q", "--allow-empty", "-m", "initial"]);
     let linked = temp.path().join("side-wt");
     open(&root).add_lane(&linked, Some("side"), None).unwrap();

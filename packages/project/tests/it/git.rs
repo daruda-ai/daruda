@@ -637,3 +637,36 @@ fn system_git_delegates_to_the_git_cli() {
     assert_eq!(repo.status_scoped().unwrap(), "?? new.txt");
     teardown(&dir);
 }
+
+/// [`FakeGit`]'s plain-directory column, checked against real git on a
+/// directory that is no repository.
+#[test]
+fn the_fakes_plain_directory_answers_match_real_git() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("plain_vs_fake");
+    let real = system_git().open(&dir);
+    let fake = FakeGit::new().open(&dir);
+    for repo in [&real, &fake] {
+        assert!(
+            matches!(
+                repo.worktree_status(),
+                Err(GitError::Exit {
+                    code: Some(128),
+                    ..
+                })
+            ),
+            "worktree_status in a plain directory"
+        );
+        assert_eq!(repo.default_branch(), None);
+        assert!(
+            matches!(
+                repo.base_tips(Some("main"), None),
+                Err(base::BaseProblem::Git(_))
+            ),
+            "base_tips in a plain directory"
+        );
+    }
+    teardown(&dir);
+}

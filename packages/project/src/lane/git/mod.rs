@@ -340,14 +340,6 @@ pub(crate) fn default_branch(repo_root: &Path) -> Option<String> {
     current_branch(repo_root).ok().flatten()
 }
 
-/// `git init` at `path`. Creates the directory if missing. A test fixture:
-/// the app initializes an existing directory through [`git_init`].
-#[cfg(test)]
-pub(crate) fn init(path: &Path) -> Result<(), GitError> {
-    std::fs::create_dir_all(path).map_err(GitError::Spawn)?;
-    run_git(path, ["init", "--quiet"]).map(|_| ())
-}
-
 /// `git worktree add <new_path> [-b <new_branch>] [<base>]`.
 ///
 /// * `new_branch = Some(_)` → create a new branch (`-b`).

@@ -1,6 +1,5 @@
 use super::*;
-use crate::lane::git::init;
-use crate::lane::git::tests::{commit_initial, require_git, teardown, unique_tmpdir};
+use crate::lane::git::tests::{commit_initial, init, require_git, teardown, unique_tmpdir};
 
 fn commit_file(repo: &Path, name: &str, body: &str, message: &str) {
     std::fs::write(repo.join(name), body).unwrap();

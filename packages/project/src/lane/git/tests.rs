@@ -38,6 +38,13 @@ pub(super) fn require_git() -> bool {
     has_git()
 }
 
+/// `git init` at `path`, creating the directory if missing; the app
+/// initializes an existing directory through [`git_init`].
+pub(super) fn init(path: &Path) -> Result<(), GitError> {
+    std::fs::create_dir_all(path).map_err(GitError::Spawn)?;
+    run_git(path, ["init", "--quiet"]).map(|_| ())
+}
+
 // ----------------------------------------------------------------
 // parse_git_status_output unit tests
 // ----------------------------------------------------------------
