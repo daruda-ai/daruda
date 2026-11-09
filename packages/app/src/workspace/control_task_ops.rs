@@ -109,6 +109,35 @@ impl Workspace {
         }
     }
 
+    /// Where the approval to start `task` as a chat says it runs: the branch
+    /// its first prompt's header names, quoted since the agent receives it,
+    /// and the worktree an existing one runs in.
+    pub(crate) fn control_task_start_location(
+        &self,
+        task: &daruda_store::tasks::TaskRecord,
+    ) -> String {
+        use crate::control::exec::quoted_title;
+        use crate::surface::strings::control as s;
+        let path = match &task.spec.run_in {
+            daruda_store::tasks::TaskRunIn::NewWorktree => {
+                return s::approval_task_in_new_branch(quoted_title(&task.spec.branch_name));
+            }
+            daruda_store::tasks::TaskRunIn::ExistingLane { path } => path,
+        };
+        // A lane gone by now refuses the start; its path is all there is.
+        let Some(lane) = self.lane_ref_at(path).and_then(|lane| self.lane_for(lane)) else {
+            return s::approval_task_in_worktree(quoted_title(&path.display().to_string()));
+        };
+        // A worktree named by its branch is named once.
+        let name = lane.display_name();
+        match super::right_dock::task_existing_lane_ops::lane_branch(lane) {
+            Some(branch) if branch != name => {
+                s::approval_task_in_worktree_on_branch(quoted_title(&name), quoted_title(branch))
+            }
+            _ => s::approval_task_in_worktree(quoted_title(&name)),
+        }
+    }
+
     /// How the approval to start `task` names the flow it runs as, if it
     /// runs as one, and whether that flow is given the task's prompt.
     pub(crate) fn control_task_flow_approval(

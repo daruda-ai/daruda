@@ -44,12 +44,17 @@ impl ExistingLaneStart {
 /// What the prompt header names for a lane: its branch, else its label
 /// (a plain directory or a detached HEAD has no branch to name).
 pub(super) fn lane_branch_label(lane: &crate::lane::Lane) -> String {
+    lane_branch(lane).map_or_else(|| lane.display_name(), str::to_owned)
+}
+
+/// The branch `lane` has checked out, if any.
+pub(in crate::workspace) fn lane_branch(lane: &crate::lane::Lane) -> Option<&str> {
     match &lane.kind {
         LaneKind::Git {
             branch: Some(branch),
             ..
-        } => branch.clone(),
-        _ => lane.display_name(),
+        } => Some(branch),
+        _ => None,
     }
 }
 

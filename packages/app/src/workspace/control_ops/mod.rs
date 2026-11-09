@@ -16,7 +16,7 @@ use crate::remote_channel::bridge::PaneRef;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::{ActivityState, AgentChatView, AgentSessionStatus, PromptDispatch};
-use daruda_control_types::agent_text::{bound_agent_text, sanitize_title};
+use daruda_control_types::agent_text::{bound_agent_text, one_line, sanitize_title};
 use daruda_store::project::{LaneRef, ProjectId};
 
 mod disclosure;
@@ -100,18 +100,19 @@ impl Workspace {
     /// Both halves of the agent, because they answer different questions — the
     /// id is what a caller passes back, the name is what a person reads — and
     /// both are workspace-private, so this is the one way out. `None` when the
-    /// pane is gone.
+    /// pane is gone. The names are user-set text a phone announcement shows,
+    /// flattened as a card's are so they cannot break its line.
     pub(crate) fn control_chat_label(&self, pane: PaneId, cx: &App) -> Option<ChatLabel> {
         let lane = self.lane_ref_for_pane(pane)?;
         let view = self.agent_chat_view(pane)?.read(cx);
         let preferences = view.session_preferences(&self.mirrors.agents);
         Some(ChatLabel {
             path: crate::surface::strings::control::lane_path(
-                self.control_project_name(lane.project),
-                self.control_lane_name(lane),
+                one_line(&self.control_project_name(lane.project)),
+                one_line(&self.control_lane_name(lane)),
             ),
             agent: view.agent_id().to_owned(),
-            agent_name: view.agent_name().to_owned(),
+            agent_name: one_line(view.agent_name()),
             mode: self.requested_mode_label(view.agent_id(), &preferences),
         })
     }

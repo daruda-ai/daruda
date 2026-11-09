@@ -3,6 +3,7 @@
 //! with the agent pinned when the card is built.
 
 use super::*;
+use crate::control::exec::quoted_title;
 use crate::control::{
     approval::ApprovalId,
     exec::{self, CommandOrigin, Dispatch, Pending},
@@ -177,10 +178,10 @@ async fn a_chat_new_card_names_agent_and_mode_and_its_announcement_the_requested
         s::control::approval_chat_new(
             fixture
                 .workspace
-                .read_with(cx, |ws, _| s::control::lane_path(
+                .read_with(cx, |ws, _| quoted_title(&s::control::lane_path(
                     ws.control_project_name(lane.project),
                     ws.control_lane_name(lane.lane_ref()),
-                )),
+                ))),
             s::control::approval_agent(&claude.name, BYPASS),
         )
     );
@@ -280,14 +281,55 @@ async fn a_task_title_reads_plainly_and_an_empty_prompt_is_not_quoted(cx: &mut T
     });
     cx.run_until_parked();
     let task = created.await.unwrap();
+    let location = fixture.workspace.read_with(cx, |ws, _| {
+        s::control::approval_task_in_worktree(quoted_title(&ws.control_lane_name(lane.lane_ref())))
+    });
     let (id, _outcome, card) = ask(GatedCommand::TaskStart { task }, cx);
     assert_eq!(
         card,
         s::control::approval_task_start_no_prompt(
             &shown,
+            &location,
             s::control::approval_agent(&claude.name, BYPASS)
         )
     );
+    refuse(id, cx);
+}
+
+/// An existing worktree's branch heads the task's first prompt, so the start
+/// card names it, quoted like any text the agent receives.
+#[gpui::test]
+async fn a_task_start_card_names_the_branch_the_agent_is_told(cx: &mut TestAppContext) {
+    let (fixture, lane, _claude) = host(cx);
+    fixture.workspace.update(cx, |ws, _| {
+        let found = ws.lane_for_mut(lane.lane_ref()).unwrap();
+        found.name = Some("Login lane".into());
+        found.kind = daruda_store::project::LaneKind::Git {
+            branch: Some("feat\u{202E}/login".into()),
+            repo_root: found.path.clone(),
+            worktree_root: found.path.clone(),
+        };
+    });
+    let created = fixture.workspace.update(cx, |ws, cx| {
+        ws.control_task_create(
+            lane.project,
+            crate::test_support::new_task("Login", "Fix it", Some(lane)),
+            cx,
+        )
+        .unwrap()
+    });
+    cx.run_until_parked();
+    let task = created.await.unwrap();
+    let (id, _outcome, card) = ask(GatedCommand::TaskStart { task }, cx);
+    let branch = format!(
+        "{}{}",
+        s::control::approval_quoted("feat/login"),
+        s::control::approval_hidden_chars(1)
+    );
+    let location =
+        s::control::approval_task_in_worktree_on_branch(quoted_title("Login lane"), &branch);
+    assert!(card.contains(&location), "{card}");
+    assert!(!card.contains('\u{202E}'), "{card}");
     refuse(id, cx);
 }
 
@@ -367,8 +409,10 @@ fn a_task_create_card_quotes_the_prompt_it_will_send(cx: &mut TestAppContext) {
     let (fixture, lane, _claude) = host(cx);
     let (project, location) = fixture.workspace.read_with(cx, |ws, _| {
         (
-            ws.control_project_name(lane.project),
-            s::control::approval_task_in_worktree(ws.control_lane_name(lane.lane_ref())),
+            quoted_title(&ws.control_project_name(lane.project)),
+            s::control::approval_task_in_worktree(quoted_title(
+                &ws.control_lane_name(lane.lane_ref()),
+            )),
         )
     });
     let title = s::control::approval_quoted("Login");

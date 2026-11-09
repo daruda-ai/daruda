@@ -795,6 +795,7 @@ pub(crate) fn drive(
             let (settled, _) = approval::request(
                 s::approval_task_start(
                     "Review changes",
+                    s::approval_task_in_new_branch("feat/review"),
                     s::approval_agent(&agent.agent_name, &agent.mode),
                     "Review the open changes on feat/approvals and list anything risky",
                 ),

@@ -2483,6 +2483,7 @@ control:
   approval_task_in_new_worktree: "in a new worktree"
   approval_task_in_new_branch: "in a new worktree on the branch %{branch}"
   approval_task_in_worktree: "in the worktree %{lane}"
+  approval_task_in_worktree_on_branch: "in the worktree %{lane} on the branch %{branch}"
   approval_task_as_chat: "as an agent chat"
   # A task that runs as a flow: the flow, and the permission modes its
   # agents run under (`bypassPermissions` approves every tool by itself).
@@ -2492,10 +2493,12 @@ control:
   approval_task_as_flow_unresolved: "as the flow %{flow}, which daruda cannot find there"
   approval_flow_modes: "permission mode: %{modes}"
   approval_flow_no_agents: "commands only, no agents"
-  # `agent` is approval_agent; `prompt` a one-line excerpt of the task's.
-  approval_task_start: "daruda wants to start the task %{title} with %{agent}, prompting %{prompt}. Allow?"
+  # `location` is one of the approval_task_in_* phrases, naming the branch
+  # the first prompt's header gives the agent; `agent` is approval_agent;
+  # `prompt` a one-line excerpt of the task's.
+  approval_task_start: "daruda wants to start the task %{title} %{location} with %{agent}, prompting %{prompt}. Allow?"
   # A task whose prompt is empty.
-  approval_task_start_no_prompt: "daruda wants to start the task %{title} with %{agent}. Allow?"
+  approval_task_start_no_prompt: "daruda wants to start the task %{title} %{location} with %{agent}. Allow?"
   # `flow` is one of the approval_task_as_flow phrases.
   approval_task_start_flow: "daruda wants to start the task %{title} %{flow}. Allow?"
   # A flow given the task's prompt as an input; `prompt` is a one-line

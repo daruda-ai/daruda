@@ -316,10 +316,10 @@ fn approval_summary(
         }
         Asked::ChatNew { lane, agent } => {
             let (path, agent) = in_lane_window(*lane, cx, |ws, _window, _cx| {
-                let path = s::control::lane_path(
+                let path = quoted_title(&s::control::lane_path(
                     ws.control_project_name(lane.project),
                     ws.control_lane_name(lane.lane_ref()),
-                );
+                ));
                 Ok((path, agent_phrase(&ws.control_chat_disclosure(agent, mode))))
             })?;
             s::control::approval_chat_new(&path, agent)
@@ -341,9 +341,9 @@ fn approval_summary(
                         )
                     });
                     let location = match task.worktree {
-                        Some(lane) => s::control::approval_task_in_worktree(
-                            ws.control_lane_name(lane.lane_ref()),
-                        ),
+                        Some(lane) => s::control::approval_task_in_worktree(quoted_title(
+                            &ws.control_lane_name(lane.lane_ref()),
+                        )),
                         None => match task
                             .branch
                             .as_deref()
@@ -356,7 +356,8 @@ fn approval_summary(
                             None => s::control::approval_task_in_new_worktree(),
                         },
                     };
-                    Ok((ws.control_project_name(*project), location, flow))
+                    let project = quoted_title(&ws.control_project_name(*project));
+                    Ok((project, location, flow))
                 })?;
             // The prompt is what the task's agents will be told once it
             // starts, which may be without another card (phone `/task`), so
@@ -386,14 +387,23 @@ fn approval_summary(
             },
             None => {
                 let prompt = task_prompt(task, cx);
-                let agent = in_task_window(task, cx, |ws, _, _| {
-                    Ok(agent_phrase(&ws.control_chat_disclosure(agent, mode)))
+                let (location, agent) = in_task_window(task, cx, |ws, _, cx| {
+                    let location = cx
+                        .global::<GlobalTasks>()
+                        .get(task)
+                        .map(|t| ws.control_task_start_location(t))
+                        .ok_or(ControlError::TaskNotFound)?;
+                    Ok((
+                        location,
+                        agent_phrase(&ws.control_chat_disclosure(agent, mode)),
+                    ))
                 })?;
+                let title = task_title(task, cx);
                 match prompt {
                     Some(prompt) => {
-                        s::control::approval_task_start(task_title(task, cx), agent, prompt)
+                        s::control::approval_task_start(title, &location, agent, prompt)
                     }
-                    None => s::control::approval_task_start_no_prompt(task_title(task, cx), agent),
+                    None => s::control::approval_task_start_no_prompt(title, &location, agent),
                 }
             }
         },

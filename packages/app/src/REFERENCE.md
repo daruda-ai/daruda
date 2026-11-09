@@ -302,6 +302,10 @@ counts stand outside the card's quotation marks, where quoted text cannot
 forge them. A branch name may not contain those characters
 (`BranchNameRule::InvisibleChar`), since it reaches the agent's first prompt
 uncounted; worktree and branch names are still quoted on a card the same way.
+So are project names, and a chat task's start card names its worktree and
+the branch its first prompt's header gives the agent, which an existing
+worktree's git checkout chose without that rule. A phone announcement
+flattens the agent and worktree names it shows.
 A mode name the adapter advertised that daruda's seed does not match
 is shown beside the mode id. Phone `/task` rows quote titles the same way.
 A flow task's start card quotes the prompt too unless the flow was found to
