@@ -80,7 +80,7 @@ fn isolated_git_env() -> [(&'static str, &'static std::ffi::OsStr); 2] {
     let global = GLOBAL.get_or_init(|| {
         // The name carries a version so a changed config never reuses a stale
         // file; bump it with `ISOLATED_GIT_CONFIG`.
-        let path = std::env::temp_dir().join("daruda-test-gitconfig-v1");
+        let path = std::env::temp_dir().join(isolated_config_name());
         if let Err(error) = write_isolated_config(&path) {
             panic!(
                 "write the isolated test git config {}: {error}",
@@ -93,6 +93,29 @@ fn isolated_git_env() -> [(&'static str, &'static std::ffi::OsStr); 2] {
         ("GIT_CONFIG_NOSYSTEM", std::ffi::OsStr::new("1")),
         ("GIT_CONFIG_GLOBAL", global.as_os_str()),
     ]
+}
+
+/// The shared temp directory can hold other users' files, so the name is
+/// scoped per effective user where the OS has one.
+#[cfg(any(test, feature = "test-support"))]
+fn isolated_config_name() -> String {
+    const BASE: &str = "daruda-test-gitconfig-v1";
+    match effective_user() {
+        Some(uid) => format!("{BASE}-{uid}"),
+        None => BASE.to_owned(),
+    }
+}
+
+#[cfg(all(unix, any(test, feature = "test-support")))]
+fn effective_user() -> Option<u32> {
+    // SAFETY: `geteuid` takes no arguments, cannot fail, and has no
+    // memory-safety preconditions.
+    Some(unsafe { libc::geteuid() })
+}
+
+#[cfg(all(not(unix), any(test, feature = "test-support")))]
+fn effective_user() -> Option<u32> {
+    None
 }
 
 /// Shared by every test binary, so it is published by rename: a reader never

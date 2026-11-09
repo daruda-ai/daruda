@@ -1833,6 +1833,7 @@ dependencies = [
  "daruda_core",
  "daruda_project",
  "daruda_store",
+ "libc",
  "serde_json",
  "shell-words",
  "tempfile",

@@ -48,8 +48,10 @@ pub trait GitRepo: Send + Sync {
     fn add_all(&self) -> Result<(), GitError>;
     /// As [`restore_staged_paths`](Self::restore_staged_paths) for one path.
     fn restore_staged(&self, path: &Path) -> Result<(), GitError>;
-    /// Paths in `git status` form, relative to the worktree root: a rename's
-    /// source is found by comparing against that form.
+    /// Paths in `git status` form, relative to the worktree root (git reads
+    /// them relative to the handle path, so the handle must be rooted at that
+    /// worktree root): a rename's source is found by comparing against that
+    /// form.
     fn restore_staged_paths(&self, paths: &[PathBuf]) -> Result<(), GitError>;
     fn restore_all_staged(&self) -> Result<(), GitError>;
     /// `pinned` paths are relative to the worktree root, as `git status`
@@ -62,7 +64,9 @@ pub trait GitRepo: Send + Sync {
     fn fetch(&self) -> Result<(), GitError>;
     fn pull(&self) -> Result<(), GitError>;
 
-    /// `new_path` is absolute or relative to [`path`](Self::path).
+    /// `new_path` must be absolute: the follow-up config step runs git in it,
+    /// where a relative path would resolve against the process cwd and be
+    /// skipped silently.
     fn add_lane(
         &self,
         new_path: &Path,

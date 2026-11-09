@@ -13,13 +13,17 @@ workspace = true
 [features]
 # `FakeGit` and the isolated git config, for crates whose tests must not
 # spawn git or read the developer's own config. Never a shipping default.
-test-support = []
+test-support = ["dep:libc"]
 
 [dependencies]
 daruda_config = { workspace = true }
 daruda_core = { workspace = true }
 daruda_store = { workspace = true }
 which = { workspace = true }
+
+# Only the isolated test git config reads the effective uid.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true, optional = true }
 
 [dev-dependencies]
 daruda_project = { workspace = true, features = ["test-support"] }
