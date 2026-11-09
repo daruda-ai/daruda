@@ -2,9 +2,8 @@
 //!
 //! Hosts the task workflows after Start (which is `task_start`'s):
 //! `cancel_task`, `focus_task_lane`, `reopen_task`, `retry_task`, plus
-//! the supporting Claude-Code session bookkeeping
-//! (`apply_task_session_changed`, `apply_task_session_ended`,
-//! `apply_todo_write`, …).
+//! the session bookkeeping of Claude CLI task runs
+//! (`apply_task_session_changed`, `apply_task_session_ended`).
 //!
 //! Sibling of `task_ops` (filter + CRUD). Both modules
 //! extend the same `Workspace` via separate `impl Workspace` blocks.
@@ -16,34 +15,13 @@ use crate::runs::{GlobalTasks, RunsHost};
 use chrono::Utc;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
-use daruda_store::tasks::machine::{SettleOutcome, TodoItem as MergedTodo};
-use daruda_store::tasks::{ExecutionRef, Lifecycle, TaskEvent, TaskRecord, new_task_id};
+use daruda_store::tasks::machine::SettleOutcome;
+use daruda_store::tasks::{Lifecycle, TaskEvent};
 use gpui::{Context, Window};
-use serde::Deserialize;
 
 use crate::workspace::Workspace;
 
 pub(in crate::workspace) const TASK_LIVE_TICK: Duration = Duration::from_millis(250);
-
-/// Subset of the `TodoWrite` tool's `tool_input.todos[]` shape.
-/// Claude Code includes more fields (`activeForm`, sometimes free-form
-/// metadata) but daruda only cares about title + completion state.
-/// `#[serde(default)]` on `status` keeps the parser robust against
-/// minor schema drift — missing / unknown status reads as not-completed.
-#[derive(Clone, Debug, Deserialize)]
-struct TodoItem {
-    #[serde(default)]
-    content: String,
-    #[serde(default)]
-    status: String,
-}
-
-/// `tool_input` envelope from `PostToolUse { tool_name: "TodoWrite" }`.
-#[derive(Clone, Debug, Deserialize)]
-struct TodoWritePayload {
-    #[serde(default)]
-    todos: Vec<TodoItem>,
-}
 
 impl Workspace {
     pub(in crate::workspace) fn after_task_projection(
@@ -127,28 +105,13 @@ impl Workspace {
             })
     }
 
-    pub(super) fn write_task_input(
-        &self,
-        pane_id: crate::workspace::main_area::pane_tree::PaneId,
-        bytes: Vec<u8>,
-    ) -> Option<std::sync::mpsc::Receiver<Result<(), daruda_terminal::pty::PtyError>>> {
-        self.main_area.pane(pane_id)?.write_confirmed_input(bytes)
-    }
-
     /// User-initiated stop. Lane is preserved (D-1). The log records the
     /// cancel before the run's pane is told to stop.
     pub(in crate::workspace) fn cancel_task(&mut self, task_id: &str, cx: &mut Context<Self>) {
         let Some(task) = cx.global::<GlobalTasks>().get(task_id) else {
             return;
         };
-        let cleared_sessions = task.session_ids.clone();
-        let exec = task.current_exec().cloned();
-        // Drop pending PostToolUseFailure tallies — ULIDs are never reused,
-        // so leaving them would slowly accumulate dead entries across many
-        // cancel/reopen cycles.
-        self.claude_sessions
-            .forget_tool_use_failures(&cleared_sessions);
-        match exec {
+        match task.current_exec().cloned() {
             Some(exec) => self.cancel_execution(exec, cx).detach(),
             // Nothing runs, so the log refuses; the refusal is the report.
             None => {
@@ -181,12 +144,10 @@ impl Workspace {
         };
         if !path.exists() {
             if let Lifecycle::Running { exec, .. } = &task.lifecycle {
-                let cleared = task.session_ids.clone();
                 let event = TaskEvent::LaneLost {
                     exec: exec.clone(),
                     at: Utc::now(),
                 };
-                self.claude_sessions.forget_tool_use_failures(&cleared);
                 RunsHost::propose_fact(event, cx);
             }
             return;
@@ -236,10 +197,6 @@ impl Workspace {
             Some(path) => daruda_store::tasks::TaskRunIn::ExistingLane { path },
             None => task.spec.run_in.clone(),
         });
-        let cleared = task
-            .map(|task| task.session_ids.clone())
-            .unwrap_or_default();
-        self.claude_sessions.forget_tool_use_failures(&cleared);
         let intent = crate::runs::TaskIntent::Reopen {
             id: task_id.to_owned(),
             run_in: run_in.unwrap_or_default(),
@@ -277,13 +234,7 @@ impl Workspace {
     ) {
         let session_id = session_id.to_owned();
         self.after_task_projection(
-            move |workspace, cx| {
-                workspace
-                    .claude_sessions
-                    .tool_use_failure_counts
-                    .remove(&session_id);
-                RunsHost::settle_cli_session(&session_id, reason, cx);
-            },
+            move |_, cx| RunsHost::settle_cli_session(&session_id, reason, cx),
             cx,
         );
     }
@@ -356,207 +307,6 @@ impl Workspace {
                 cx,
             );
         }
-    }
-
-    /// Increment the `PostToolUseFailure` counter for `session_id`.
-    /// When the count crosses
-    /// [`daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD`] the matching
-    /// `Running` task is escalated to `Error` and the counter is
-    /// dropped — subsequent failures from the same session start
-    /// fresh (e.g. after a Retry).
-    ///
-    /// Sessions that no `Running` task owns are skipped entirely — the
-    /// hook watcher fires for every Claude session on the host (including
-    /// CLI invocations and other IDE integrations outside daruda's task
-    /// system), and counting those would emit a noisy
-    /// `tasks.escalation.orphan` warning every 5 failures.
-    pub(in crate::workspace) fn bump_tool_use_failure(
-        &mut self,
-        session_id: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let session_id = session_id.to_owned();
-        self.after_task_projection(
-            move |workspace, cx| workspace.bump_projected_tool_use_failure(&session_id, cx),
-            cx,
-        );
-    }
-
-    fn bump_projected_tool_use_failure(&mut self, session_id: &str, cx: &mut Context<Self>) {
-        if !Self::session_owned_by_running_task(session_id, cx) {
-            return;
-        }
-        let count = self
-            .claude_sessions
-            .tool_use_failure_counts
-            .entry(session_id.to_string())
-            .and_modify(|n| *n = n.saturating_add(1))
-            .or_insert(1);
-        let count = *count;
-        if count >= daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD {
-            self.claude_sessions
-                .tool_use_failure_counts
-                .remove(session_id);
-            let message = crate::surface::strings::task::error_tool_use_failure(count);
-            self.escalate_task_session_to_error(session_id, message, cx);
-        }
-    }
-
-    /// Does any `Running` task carry `session_id` in its `session_ids`?
-    /// Used as a guard before incrementing the tool-use-failure counter
-    /// so sessions outside daruda's task system don't trigger
-    /// escalation.
-    fn session_owned_by_running_task(session_id: &str, cx: &Context<Self>) -> bool {
-        cx.global::<GlobalTasks>().records().any(|task| {
-            matches!(task.lifecycle, Lifecycle::Running { .. })
-                && task
-                    .execution
-                    .as_ref()
-                    .is_some_and(|run| run.source.cli_process().is_some())
-                && task.session_ids.iter().any(|s| s == session_id)
-        })
-    }
-
-    /// Escalate every running task that owns `session_id` to `Error` for
-    /// its tool failures. Distinct from a session that ended in error: the
-    /// cause names why daruda ended the run itself.
-    pub(super) fn escalate_task_session_to_error(
-        &mut self,
-        session_id: &str,
-        message: String,
-        cx: &mut Context<Self>,
-    ) {
-        let owners: Vec<&TaskRecord> = cx
-            .global::<GlobalTasks>()
-            .records()
-            .filter(|task| task.session_ids.iter().any(|s| s == session_id))
-            .collect();
-        let matched = !owners.is_empty();
-        let escalate: Vec<ExecutionRef> = owners.into_iter().filter_map(running_exec).collect();
-        if !matched {
-            // Hook ordering can land PostToolUseFailure before the
-            // first StatusChanged that attaches the session to a
-            // task. The threshold has been hit but no Running task
-            // owns this session — surface it so the silent drop is
-            // observable. The session counter has already been
-            // cleared by the caller, so we don't escalate again
-            // when the next failure arrives.
-            let report = ErrorReport::new(crate::surface::strings::error::task_escalation_orphan())
-                .severity(ErrorSeverity::Warning)
-                .message(
-                    crate::surface::strings::error::task_escalation_orphan_detail(
-                        session_id, &message,
-                    ),
-                )
-                .at(file!(), line!())
-                .with_context("session", session_id)
-                .with_context("escalation", &message)
-                .dedup("tasks.escalation.orphan")
-                .build();
-            self.report_error(report, cx);
-        }
-        for exec in escalate {
-            let event = TaskEvent::ToolFailuresEscalated {
-                exec,
-                at: Utc::now(),
-            };
-            RunsHost::propose_fact(event, cx);
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // TodoWrite hook auto-merge
-    // ------------------------------------------------------------------
-
-    /// Merge a `TodoWrite` hook payload into the matching task's
-    /// subtasks.
-    ///
-    /// Routing: the workspace already tracks which Claude session id
-    /// belongs to which `Running` task via `session_ids`. We
-    /// reuse that linkage to find the target task — no extra
-    /// bookkeeping needed.
-    ///
-    /// Policy (namespace isolation):
-    /// - User-added subtasks (`source_session_id == None`) are
-    ///   **never** touched, even if a hook todo carries the same title.
-    /// - For matches against an existing auto-subtask we only flip
-    ///   `completed`; titles aren't rewritten (Claude sometimes shifts
-    ///   wording across emissions and we don't want the row text to
-    ///   jitter under the user's cursor).
-    /// - Unknown titles for this session_id are pushed as new auto
-    ///   rows. Items Claude drops on subsequent emissions stay put —
-    ///   no stale marking.
-    ///
-    /// Payload parse failures are silently dropped — Claude can change
-    /// the `TodoWrite` schema at any time and a broken hook must not
-    /// crash daruda. The parse failure is recorded as `Info` so the
-    /// next bug report has a trail.
-    pub(in crate::workspace) fn apply_todo_write(
-        &mut self,
-        session_id: &str,
-        tool_input: &serde_json::Value,
-        cx: &mut Context<Self>,
-    ) {
-        let payload: TodoWritePayload = match serde_json::from_value(tool_input.clone()) {
-            Ok(p) => p,
-            Err(e) => {
-                LogWriter::log(
-                    ErrorReport::new("TodoWrite payload parse failed")
-                        .severity(ErrorSeverity::Info)
-                        .from_error(&e)
-                        .at(file!(), line!())
-                        .with_context("session", session_id)
-                        .dedup("hooks.todowrite.parse")
-                        .build(),
-                );
-                return;
-            }
-        };
-
-        if payload.todos.is_empty() {
-            return;
-        }
-
-        let items: Vec<MergedTodo> = payload
-            .todos
-            .iter()
-            .map(|todo| MergedTodo {
-                content: todo.content.clone(),
-                completed: todo.status.eq_ignore_ascii_case("completed"),
-                // Used only if the entry becomes a new row.
-                id: new_task_id(),
-            })
-            .collect();
-        let session_id = session_id.to_owned();
-        self.after_task_projection(
-            move |_, cx| {
-                let owners: Vec<String> = cx
-                    .global::<GlobalTasks>()
-                    .records()
-                    .filter(|task| task.session_ids.contains(&session_id))
-                    .map(|task| task.id().to_owned())
-                    .collect();
-                for id in owners {
-                    let event = TaskEvent::TodoMerged {
-                        id,
-                        session_id: session_id.to_owned(),
-                        items: items.clone(),
-                        at: Utc::now(),
-                    };
-                    RunsHost::propose_fact(event, cx);
-                }
-            },
-            cx,
-        );
-    }
-}
-
-/// The execution of a task whose run is `Running`, the only state a
-/// session can settle or escalate.
-fn running_exec(task: &TaskRecord) -> Option<ExecutionRef> {
-    match &task.lifecycle {
-        Lifecycle::Running { exec, .. } => Some(exec.clone()),
-        _ => None,
     }
 }
 

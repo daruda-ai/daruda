@@ -163,7 +163,6 @@ pub(crate) fn to_command(id: ToolId, args: &Value) -> Result<Command, ConvertErr
                 worktree: optional_lane_arg(args, "worktree")?,
                 branch: optional_string_arg(args, "branch")?,
                 notes: optional_string_arg(args, "notes")?,
-                surface: optional_surface_arg(args, "surface")?,
                 flow: optional_flow_arg(args, "flow")?,
             },
         }),
@@ -276,19 +275,6 @@ fn input_values_arg(
             Ok((key.clone(), text))
         })
         .collect()
-}
-
-/// A task surface by its wire name, the one `TaskAgentSurface` serializes as.
-fn optional_surface_arg(
-    args: &Value,
-    name: &'static str,
-) -> Result<Option<daruda_store::tasks::TaskAgentSurface>, ConvertError> {
-    match args.get(name) {
-        None | Some(Value::Null) => Ok(None),
-        Some(value) => serde_json::from_value(value.clone())
-            .map(Some)
-            .map_err(|_| ConvertError::BadArgument { name }),
-    }
 }
 
 fn optional_flow_arg(

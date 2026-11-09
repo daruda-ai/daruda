@@ -1,5 +1,7 @@
-//! Task-specific consumption of terminal observations. Route ownership,
-//! pane badges and notifications remain independent of task executions.
+//! Task-specific consumption of terminal observations: the Claude CLI task
+//! runs in the log still learn their sessions, transcripts, processes and
+//! ends from hooks. Route ownership, pane badges and notifications remain
+//! independent of task executions.
 
 use daruda_agent::hooks::status_file::StatusFile;
 use gpui::Context;
@@ -19,26 +21,11 @@ impl Workspace {
             self.record_task_cli_transcript(&file.session_id, file.transcript_path.as_deref(), cx);
         }
         self.apply_task_session_changed(&file.session_id, cx);
-        if file.last_event == "PostToolUseFailure" {
-            self.bump_tool_use_failure(&file.session_id, cx);
-        }
-        if file.last_event == "PostToolUse"
-            && file.tool_name.as_deref() == Some("TodoWrite")
-            && let Some(input) = file.tool_input.as_ref()
-        {
-            self.apply_todo_write(&file.session_id, input, cx);
-        }
         if let Some(reason) = crate::runs::cli_hook_end_reason(&file.last_event) {
             let session = file.session_id.clone();
             let terminal = file.terminal_id.as_ref().map(|id| id.as_str().to_owned());
             self.after_task_projection(
-                move |workspace, cx| {
-                    workspace
-                        .claude_sessions
-                        .tool_use_failure_counts
-                        .remove(&session);
-                    RunsHost::settle_cli_terminal(&session, terminal, reason, cx);
-                },
+                move |_, cx| RunsHost::settle_cli_terminal(&session, terminal, reason, cx),
                 cx,
             );
         }

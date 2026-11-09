@@ -1,16 +1,13 @@
 //! Right-panel Tasks tab — workspace-side behaviour tests.
 //!
 //! Covers the lifecycle paths whose correctness depends on
-//! `Workspace` state (counter cleanup, escalation thresholds, hook
-//! mapping). Pure data-model checks live next to the data in
-//! `daruda_store::tasks::tests`.
+//! `Workspace` state (hook mapping, starts, lane focus). Pure data-model
+//! checks live next to the data in `daruda_store::tasks::tests`.
 
 use super::build_workspace;
 
 use daruda_store::tasks::machine::ErrorCause;
-use daruda_store::tasks::{
-    CliProcessState, Lifecycle, SessionEndReason, TASK_TOOL_USE_FAILURE_THRESHOLD, TaskAgentSurface,
-};
+use daruda_store::tasks::{CliProcessState, Lifecycle, SessionEndReason, TaskAgentSurface};
 use gpui::{AppContext as _, TestAppContext};
 
 use crate::runs::GlobalTasks;
@@ -92,132 +89,13 @@ fn lifecycle(id: &str, cx: &mut TestAppContext) -> Lifecycle {
     })
 }
 
+/// Deleting a running task stops its run before the delete is recorded.
 #[gpui::test]
-fn bump_tool_use_failure_thresholds_and_orphans(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let below_id = seed_running_task(&workspace, cx, "sess-below");
-    let threshold_id = seed_running_task(&workspace, cx, "sess-threshold");
-
-    workspace.update(cx, |ws, cx| {
-        // Bump just under the threshold — task must stay Running and
-        // the counter must reflect the bumps.
-        for _ in 0..(TASK_TOOL_USE_FAILURE_THRESHOLD - 1) {
-            ws.bump_tool_use_failure("sess-below", cx);
-        }
-        assert_eq!(
-            ws.claude_sessions.tool_use_failure_counts.get("sess-below"),
-            Some(&(TASK_TOOL_USE_FAILURE_THRESHOLD - 1))
-        );
-        for _ in 0..TASK_TOOL_USE_FAILURE_THRESHOLD {
-            ws.bump_tool_use_failure("sess-threshold", cx);
-        }
-        // Counter is removed once escalation fires.
-        assert!(
-            !ws.claude_sessions
-                .tool_use_failure_counts
-                .contains_key("sess-threshold")
-        );
-    });
-    cx.run_until_parked();
-    assert!(matches!(
-        lifecycle(&below_id, cx),
-        Lifecycle::Running { .. }
-    ));
-    cx.update(|cx| {
-        let task = cx.global::<GlobalTasks>().get(&threshold_id).unwrap();
-        match &task.lifecycle {
-            Lifecycle::Error { cause, .. } => assert_eq!(*cause, ErrorCause::ToolFailures),
-            other => panic!("expected Error, got {other:?}"),
-        }
-        // session_ids is cleared so the next Retry starts fresh.
-        assert!(task.session_ids.is_empty());
-        // finished_at marks the escalation moment.
-        assert!(task.finished_at.is_some());
-    });
-
-    workspace.update(cx, |ws, cx| {
-        for _ in 0..(TASK_TOOL_USE_FAILURE_THRESHOLD + 2) {
-            ws.bump_tool_use_failure("sess-orphan", cx);
-        }
-        assert!(
-            !ws.claude_sessions
-                .tool_use_failure_counts
-                .contains_key("sess-orphan"),
-            "unowned sessions must not allocate a counter entry"
-        );
-    });
-}
-
-#[gpui::test]
-fn failure_counter_clears_when_task_leaves_running_or_session_ends(cx: &mut TestAppContext) {
+fn deleting_a_running_task_cancels_it_first(cx: &mut TestAppContext) {
     let (wh, workspace) = build_workspace(cx);
-    let _task_id = seed_running_task(&workspace, cx, "sess-end");
-
-    workspace.update(cx, |ws, cx| {
-        ws.bump_tool_use_failure("sess-end", cx);
-        ws.bump_tool_use_failure("sess-end", cx);
-        assert_eq!(
-            ws.claude_sessions.tool_use_failure_counts.get("sess-end"),
-            Some(&2)
-        );
-
-        ws.apply_task_session_ended("sess-end", SessionEndReason::Stop, cx);
-        assert!(
-            !ws.claude_sessions
-                .tool_use_failure_counts
-                .contains_key("sess-end"),
-            "apply_task_session_ended must drop the failure counter"
-        );
-    });
-    cx.run_until_parked();
-
-    let task_id = seed_running_task(&workspace, cx, "sess-cancel");
-    workspace.update(cx, |ws, cx| {
-        ws.bump_tool_use_failure("sess-cancel", cx);
-        ws.bump_tool_use_failure("sess-cancel", cx);
-        assert_eq!(
-            ws.claude_sessions
-                .tool_use_failure_counts
-                .get("sess-cancel"),
-            Some(&2)
-        );
-
-        ws.cancel_task(&task_id, cx);
-        assert!(
-            !ws.claude_sessions
-                .tool_use_failure_counts
-                .contains_key("sess-cancel"),
-            "cancel_task must drop the failure counter"
-        );
-    });
-    cx.run_until_parked();
-
-    let task_id = seed_running_task(&workspace, cx, "sess-reopen");
-    workspace.update(cx, |ws, cx| {
-        ws.bump_tool_use_failure("sess-reopen", cx);
-        ws.bump_tool_use_failure("sess-reopen", cx);
-        ws.reopen_task(&task_id, cx);
-        assert!(
-            !ws.claude_sessions
-                .tool_use_failure_counts
-                .contains_key("sess-reopen"),
-            "reopen_task must drop the failure counter"
-        );
-    });
-    cx.run_until_parked();
-
     let task_id = seed_running_task(&workspace, cx, "sess-delete");
     cx.update_window(wh.into(), |_, window, cx| {
-        workspace.update(cx, |ws, cx| {
-            ws.bump_tool_use_failure("sess-delete", cx);
-            ws.delete_task(&task_id, window, cx);
-            assert!(
-                !ws.claude_sessions
-                    .tool_use_failure_counts
-                    .contains_key("sess-delete"),
-                "delete_task must drop the failure counter"
-            );
-        });
+        workspace.update(cx, |ws, cx| ws.delete_task(&task_id, window, cx));
     })
     .unwrap();
     cx.run_until_parked();
@@ -247,7 +125,7 @@ fn classify_hook_end_reason_maps_known_events() {
     assert_eq!(
         crate::runs::cli_hook_end_reason("PostToolUseFailure"),
         None,
-        "PostToolUseFailure routes through the counter, not the end-reason classifier",
+        "a failed tool call ends nothing",
     );
 }
 
@@ -352,112 +230,6 @@ fn subtask_ops_add_toggle_rename_and_delete(cx: &mut TestAppContext) {
     assert_eq!(t[0].title, "new title");
 }
 
-// ---------------------------------------------------------------------------
-// TodoWrite hook merge
-// ---------------------------------------------------------------------------
-
-#[gpui::test]
-fn apply_todo_write_merges_auto_items_and_keeps_boundaries(cx: &mut TestAppContext) {
-    let (_wh, workspace) = build_workspace(cx);
-    let auto_task_id = seed_running_task(&workspace, cx, "sess-todo-1");
-    let manual_task_id = seed_running_task(&workspace, cx, "sess-todo-3");
-    let bad_task_id = seed_running_task(&workspace, cx, "sess-todo-bad");
-    let isolated_task_id = seed_cli_task(&workspace, cx, None, &["sess-A", "sess-B"]);
-
-    workspace.update(cx, |ws, cx| {
-        let payload = serde_json::json!({
-            "todos": [
-                { "content": "Inspect session.rs", "status": "in_progress" },
-                { "content": "Add refresh logic", "status": "completed" },
-            ]
-        });
-        ws.apply_todo_write("sess-todo-1", &payload, cx);
-    });
-    cx.run_until_parked();
-    let t = subtasks(&auto_task_id, cx);
-    assert_eq!(t.len(), 2);
-    assert_eq!(t[0].title, "Inspect session.rs");
-    assert!(!t[0].completed);
-    assert_eq!(
-        t[0].source_session_id.as_deref(),
-        Some("sess-todo-1"),
-        "hook-injected items carry the session id (auto namespace)",
-    );
-    assert!(
-        t[1].completed,
-        "status: completed -> SubTask.completed = true",
-    );
-
-    workspace.update(cx, |ws, cx| {
-        let second = serde_json::json!({
-            "todos": [{ "content": "Inspect session.rs", "status": "completed" }]
-        });
-        ws.apply_todo_write("sess-todo-1", &second, cx);
-        // User typed an identical title manually first.
-        ws.add_subtask(&manual_task_id, "step A".into(), cx);
-    });
-    cx.run_until_parked();
-    let t = subtasks(&auto_task_id, cx);
-    assert_eq!(t.len(), 2, "second emission folds into row 1");
-    let inspect = t.iter().find(|s| s.title == "Inspect session.rs").unwrap();
-    assert!(inspect.completed);
-    assert!(
-        t.iter().any(|s| s.title == "Add refresh logic"),
-        "dropped items are preserved"
-    );
-    let manual_id = subtasks(&manual_task_id, cx)[0].id.clone();
-
-    workspace.update(cx, |ws, cx| {
-        let payload = serde_json::json!({
-            "todos": [{ "content": "step A", "status": "completed" }]
-        });
-        ws.apply_todo_write("sess-todo-3", &payload, cx);
-        let payload = serde_json::json!({
-            "todos": [{ "content": "shared title", "status": "in_progress" }]
-        });
-        ws.apply_todo_write("sess-A", &payload, cx);
-        // Same title from a different session -> must push a new row, not fold
-        // into the sess-A entry.
-        ws.apply_todo_write("sess-B", &payload, cx);
-        // `todos` is a string instead of an array — schema drift.
-        let payload = serde_json::json!({ "todos": "not-an-array" });
-        ws.apply_todo_write("sess-todo-bad", &payload, cx);
-        let payload = serde_json::json!({
-            "todos": [{ "content": "x", "status": "completed" }]
-        });
-        ws.apply_todo_write("sess-unknown", &payload, cx);
-    });
-    cx.run_until_parked();
-
-    let t = subtasks(&manual_task_id, cx);
-    assert_eq!(t.len(), 2, "manual + auto coexist");
-    let manual = t.iter().find(|s| s.id == manual_id).unwrap();
-    assert!(
-        !manual.completed,
-        "manual subtask completion is left alone by the hook",
-    );
-    assert!(manual.source_session_id.is_none());
-    let auto = t
-        .iter()
-        .find(|s| s.source_session_id.as_deref() == Some("sess-todo-3"))
-        .unwrap();
-    assert!(auto.completed);
-
-    let t = subtasks(&isolated_task_id, cx);
-    assert_eq!(t.len(), 2);
-    let owners: Vec<&str> = t
-        .iter()
-        .map(|s| s.source_session_id.as_deref().unwrap_or(""))
-        .collect();
-    assert!(owners.contains(&"sess-A"));
-    assert!(owners.contains(&"sess-B"));
-
-    assert!(
-        subtasks(&bad_task_id, cx).is_empty(),
-        "parse failure must not mutate state, and no task owns sess-unknown"
-    );
-}
-
 pub(in crate::workspace::tests) fn git_repo(dir: &std::path::Path) {
     for args in [
         &["init", "-q", "-b", "main"][..],
@@ -494,6 +266,7 @@ fn a_task_starts_in_its_own_project_while_another_is_active(cx: &mut TestAppCont
     );
     ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
     cx.run_until_parked();
+    let _connections = cx.update(super::Workspace::fake_agent_connections_for_test);
     let (task_id, expected, rx) = cx
         .update_window(window.into(), |_, window, cx| {
             ws.update(cx, |ws, cx| {
@@ -501,8 +274,7 @@ fn a_task_starts_in_its_own_project_while_another_is_active(cx: &mut TestAppCont
                 let (a_id, a_uuid) = (a.id, a.uuid);
                 ws.add_project(b_root.clone(), window, cx);
                 assert_ne!(ws.active.project, a_id, "project B is the active one");
-                let mut task = crate::runs::seed::spec(a_uuid, "In A");
-                task.agent_surface = TaskAgentSurface::Terminal;
+                let task = crate::runs::seed::spec(a_uuid, "In A");
                 let expected = crate::workspace::lane_ops::lane_checkout_path(
                     &ws.git_repo_root_for_project(a_id)
                         .expect("A is a git project"),

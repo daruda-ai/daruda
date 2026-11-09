@@ -29,7 +29,7 @@ use daruda_store::project::PaneCwd;
 use daruda_terminal::view::{TerminalInput, TerminalLayout, TerminalView};
 use daruda_terminal::{TerminalDims, TerminalSession};
 use futures::StreamExt as _;
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use futures::channel::mpsc::UnboundedReceiver;
 use futures::future::Either;
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable as _, ScrollHandle, SharedString, Subscription,
@@ -101,15 +101,6 @@ pub(in crate::workspace) struct TerminalContent {
     /// 1337 attention requests) and dispatches them to platform APIs
     /// gated by `[notifications]` config. Dropped with the pane.
     pub(super) _view_event_subscription: Subscription,
-    /// Outgoing channel into the PTY's writer thread, cloned from `stdin_tx`
-    /// so task dispatch can write into the same
-    /// channel as the user's keystrokes. `None` for stub panes.
-    pub(super) pty_input_tx: Option<daruda_terminal::pty::PtyInput>,
-    /// Wakes the stdout poll out of its idle backoff (see
-    /// `stdout_poll_interval`) so output following a PTY write is
-    /// drained at the fast interval. Poked by the keyboard path
-    /// (`TerminalInput` closure) and by `Pane::send_input`.
-    pub(super) poke_tx: UnboundedSender<()>,
     /// Account this pane's shell was spawned under (see
     /// [`daruda_store::accounts::AccountSelection`]). Cached here (it never
     /// changes after construction) purely so the layout serializer can
@@ -370,19 +361,6 @@ impl Pane {
             PaneContent::AgentChat(ac) => Some(ac.account),
             PaneContent::File(_) => None,
         }
-    }
-
-    /// Resolve after the PTY writer accepts the bytes, not after enqueueing.
-    pub(in crate::workspace) fn write_confirmed_input(
-        &self,
-        bytes: Vec<u8>,
-    ) -> Option<mpsc::Receiver<Result<(), daruda_terminal::pty::PtyError>>> {
-        let PaneContent::Terminal(terminal) = &self.content else {
-            return None;
-        };
-        let written = terminal.pty_input_tx.as_ref()?.write_confirmed(bytes);
-        let _ = terminal.poke_tx.unbounded_send(());
-        Some(written)
     }
 
     /// Immutable accessor for the file-viewer state.

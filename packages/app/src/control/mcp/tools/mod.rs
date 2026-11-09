@@ -406,12 +406,6 @@ fn task_create_properties() -> serde_json::Value {
             "type": "string",
             "description": "Notes kept with the task for the person; not sent to the agent.",
         },
-        "surface": {
-            "type": "string",
-            "enum": ["agent_chat", "terminal"],
-            "description": "Run the task as an agent chat (the default) or in a Claude \
-                            terminal. Ignored with `flow`.",
-        },
         "flow": {
             "type": "object",
             "description": "Run the task as this flow instead of one agent: its prompt \

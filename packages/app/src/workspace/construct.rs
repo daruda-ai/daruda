@@ -170,7 +170,6 @@ impl Workspace {
                 status: claude_session_ops::initial_claude_status(config, cx),
                 pty_bindings: HashMap::new(),
                 task_hook_tail: smol::channel::bounded(1).1,
-                tool_use_failure_counts: HashMap::new(),
                 last_pushed_notification: HashMap::new(),
                 open_turns: Default::default(),
             },

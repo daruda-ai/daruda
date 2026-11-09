@@ -73,9 +73,9 @@ impl Workspace {
             notes: request.notes.unwrap_or_default(),
             branch: request.branch.unwrap_or_default(),
             location,
-            agent_surface: request.surface.unwrap_or_default(),
+            agent_surface: daruda_store::tasks::TaskAgentSurface::AgentChat,
             flow: request.flow.clone(),
-            auto_execute: true,
+            auto_execute: false,
         };
         self.task_spec_from(uuid, draft).map_err(|e| match e {
             DraftError::Flow(problem) => flow_problem_answer(request.flow.as_ref(), problem),

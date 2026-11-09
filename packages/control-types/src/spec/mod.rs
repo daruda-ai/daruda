@@ -224,10 +224,8 @@ pub struct NewTask {
     /// default. Ignored with `worktree`, which has its own.
     pub branch: Option<String>,
     pub notes: Option<String>,
-    /// `None` is the default a task the desktop form creates gets.
-    pub surface: Option<daruda_store::tasks::TaskAgentSurface>,
     /// Runs as this flow, the prompt filling one of its inputs, instead of
-    /// on `surface`.
+    /// as an Agent chat.
     pub flow: Option<daruda_store::tasks::TaskFlow>,
 }
 

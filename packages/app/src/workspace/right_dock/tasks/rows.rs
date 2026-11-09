@@ -192,7 +192,6 @@ fn title(task: &TaskRecord, snap: &RightDockSnapshot, cell: Div, cx: &App) -> An
                         .text_size(px(theme::FONT_SIZE_XS))
                         .children(super::duration_cell(task, snap, t))
                         .children(super::session_badge(task, snap, cx))
-                        .children(super::failure_indicator(task, snap))
                         .when(!task.subtasks.is_empty(), |meta| {
                             meta.child(super::subtask_progress_cell(task, cx))
                         }),

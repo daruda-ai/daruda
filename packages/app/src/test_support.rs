@@ -229,7 +229,6 @@ pub(crate) fn new_task(
         worktree,
         branch: None,
         notes: None,
-        surface: None,
         flow: None,
     }
 }

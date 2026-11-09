@@ -1,63 +1,19 @@
-//! CLI pane identity and read-only chat handoff; RunsHost owns tracking.
+//! Read-only chat mirrors of Claude CLI task runs and their Continue
+//! handoff; RunsHost owns tracking.
 
 #[cfg(any(test, feature = "screenshot"))]
 use chrono::Utc;
-use daruda_store::accounts::AccountRecipeId;
 use daruda_store::tasks::{CliProcessState, ExecutionRef};
 use gpui::Context;
 use std::path::Path;
 
-use super::task_start::PaneIdentity;
 use crate::runs::{GlobalTasks, RunsHost};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::LoadIntent;
 
 impl Workspace {
-    /// Make terminal `pane_id` the one that runs `exec`, and read the
-    /// identity the run records. `None` when the pane is not a terminal.
-    pub(super) fn bind_task_cli_execution(
-        &mut self,
-        exec: &ExecutionRef,
-        pane_id: PaneId,
-        cwd: &Path,
-        cx: &mut Context<Self>,
-    ) -> Option<PaneIdentity> {
-        let pane = self
-            .main_area
-            .runtimes
-            .values_mut()
-            .flat_map(|rt| &mut rt.panes)
-            .find(|pane| pane.id == pane_id)?;
-        let PaneContent::Terminal(terminal) = &mut pane.content else {
-            return None;
-        };
-        let account_id = terminal.account.to_persisted().filter(|id| {
-            self.accounts
-                .find(*id)
-                .is_some_and(|a| a.recipe == AccountRecipeId::Claude)
-        });
-        let agent_id = self
-            .mirrors
-            .agents
-            .iter()
-            .find(|agent| agent.launch.account_recipe(false) == Some(AccountRecipeId::Claude))
-            .map(|agent| agent.id.clone())
-            .unwrap_or_else(|| daruda_config::AgentDefinition::claude_default().id);
-        RunsHost::bind_execution(self.run_pane(pane_id), exec.clone(), cx);
-        let terminal_id = RunsHost::terminal_id(self.run_pane(pane_id), cx)?
-            .as_str()
-            .to_owned();
-        Some(PaneIdentity {
-            terminal_id: Some(terminal_id),
-            agent_id,
-            account_id,
-            cwd: cwd.to_path_buf(),
-        })
-    }
-
     #[cfg(test)]
     pub(in crate::workspace) fn restore_task_cli_tracking(&mut self, cx: &mut Context<Self>) {
         RunsHost::restore_cli_tracking(&self.data_dir, cx);

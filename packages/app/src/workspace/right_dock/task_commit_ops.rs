@@ -103,17 +103,6 @@ impl Workspace {
         let Some(pane_id) = pane_id else {
             return false;
         };
-        if let Some(view) = self
-            .main_area
-            .pane(pane_id)
-            .and_then(|pane| pane.terminal_view())
-            .cloned()
-        {
-            view.update(cx, |view, _| {
-                view.send_input(&[daruda_terminal::ansi::INTERRUPT])
-            });
-            return true;
-        }
         self.cancel_agent_turn(pane_id, cx);
         if let Some(view) = self.agent_chat_view(pane_id).cloned() {
             view.update(cx, |view, cx| view.clear_queue(cx));

@@ -333,7 +333,6 @@ task:
   error_remote_lane: "원격 작업 트리에서는 작업을 실행할 수 없습니다. 로컬 작업 트리를 선택하세요."
   error_session_failed: "세션 오류"
   error_tool_use_failure: "tool_use_failure %{count}회"
-  error_write_prompt: "프롬프트 파일 쓰기 실패: %{error}"
   state_starting: "시작 중"
   state_undelivered: "전달 안 됨"
   state_interrupted: "중단됨"
@@ -1099,8 +1098,6 @@ error:
   tasks_settle_failed: "daruda를 다시 시작할 때까지 작업이 읽기 전용입니다: 지난 세션이 남긴 실행을 정리하지 못했습니다"
   tasks_settle_marker_stuck: "작업이 읽기 전용이며 다시 시작해도 그대로입니다: 지난 세션이 남긴 실행을 정리하지 못했습니다. daruda를 종료하고 task-log 폴더의 .reconciling 파일을 삭제하면 복구됩니다"
   task_command_refused: "이 작업 변경은 더 이상 할 수 없습니다"
-  task_escalation_orphan: "도구 사용 실패를 연결할 작업이 없습니다"
-  task_escalation_orphan_detail: "세션 %{session}이(가) 에스컬레이션 임계치에 도달했지만 이 세션을 가진 실행 중 작업이 없습니다 (%{escalation})"
 
 # Notifications
 notification:
@@ -1163,7 +1160,6 @@ terminal:
   task_cancelled: "취소됨"
   task_done_prefix: "완료"
   task_error_prefix: "오류"
-  task_failures_prefix: "실패 "
   task_running: "실행 중"
   target_pane_missing_title: "터미널 패널이 사라졌습니다"
   target_pane_missing_message: "터미널 패널을 더 이상 사용할 수 없습니다."
@@ -1676,7 +1672,6 @@ control:
   usage_say: "사용법: /say <번호> <메시지>"
   usage_task: "사용법: /task, 또는 /task start|stop|open <번호>"
   task_starting: "%{title}을(를) 시작합니다. 실행되면 알려 드릴게요."
-  task_started_terminal: "%{title}이(가) daruda의 터미널에서 실행 중입니다."
   task_started_flow: "%{title}이(가) daruda에서 실행 중입니다: %{flow}."
   task_start_failed: "%{title}이(가) 시작되지 않았습니다: %{reason}"
   approval_lane_create: "daruda가 워크트리 %{name}을(를) 만들려고 합니다. 허용할까요?"
@@ -1728,7 +1723,6 @@ control:
   approval_task_in_new_branch: "새 워크트리, 브랜치 %{branch}"
   approval_task_in_worktree: "워크트리 %{lane}"
   approval_task_as_chat: "에이전트 채팅"
-  approval_task_as_terminal: "Claude 터미널"
   approval_task_as_flow: "플로우 %{flow} (%{modes})"
   approval_task_as_flow_profile: "플로우 %{flow}, 프로필 %{profile} (%{modes})"
   approval_task_as_flow_unresolved: "플로우 %{flow} (daruda가 찾을 수 없음)"

@@ -20,7 +20,7 @@ use lifecycle_text::state_label;
 use crate::ui::theme;
 use chrono::{DateTime, Utc};
 use daruda_agent::SessionStatus;
-use daruda_store::tasks::{Lifecycle, TASK_TOOL_USE_FAILURE_THRESHOLD, TaskRecord};
+use daruda_store::tasks::{Lifecycle, TaskRecord};
 use daruda_terminal::ux::strings as ux_strings;
 use gpui::{AnyElement, Hsla, IntoElement, SharedString, div, prelude::*, px};
 
@@ -286,55 +286,6 @@ fn session_status_glyph(status: SessionStatus, cx: &gpui::App) -> (&'static str,
     }
 }
 
-// ---------------------------------------------------------------------------
-// Failure indicator — `failures N/M` once a session crosses the
-// soft display threshold
-// ---------------------------------------------------------------------------
-
-/// Renders a small `failures 3/5` chip when any session attached to
-/// the task has accumulated at least
-/// [`ux_strings::RIGHT_PANEL_TASK_FAILURE_DISPLAY_THRESHOLD`]
-/// tool-use failures. The denominator is the hard cap
-/// [`TASK_TOOL_USE_FAILURE_THRESHOLD`] beyond which daruda auto-
-/// escalates the row to `Error` — surfacing the ratio gives the user
-/// a visual trend before the state flips.
-///
-/// Aggregates across every `task.session_ids` rather than the leading
-/// one, because Resume / Retry can stack multiple sessions onto a
-/// single Running task and the escalation check itself fires on the
-/// per-session counter — taking the max keeps the row consistent
-/// with the state machine that may flip it.
-///
-/// Drops out for terminal states (the row has already settled) and
-/// when no session has crossed the soft threshold yet.
-fn failure_indicator(task: &TaskRecord, snap: &RightDockSnapshot) -> Option<AnyElement> {
-    if !matches!(task.lifecycle, Lifecycle::Running { .. }) {
-        return None;
-    }
-    let count = task
-        .session_ids
-        .iter()
-        .filter_map(|sid| snap.tool_use_failure_counts.get(sid).copied())
-        .max()?;
-    if count < ux_strings::RIGHT_PANEL_TASK_FAILURE_DISPLAY_THRESHOLD {
-        return None;
-    }
-    let text = format!(
-        "{}{}/{}",
-        strings::terminal::task_failures_prefix(),
-        count,
-        TASK_TOOL_USE_FAILURE_THRESHOLD,
-    );
-    Some(
-        div()
-            .flex_none()
-            .text_size(px(theme::RIGHT_PANEL_TASK_FAILURE_FONT_SIZE))
-            .text_color(theme::WARNING)
-            .child(SharedString::from(text))
-            .into_any_element(),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::{matches_task, pulse_alpha};
@@ -391,8 +342,8 @@ mod tests {
         assert!(matches_task(&t, "refresh"), "second subtask title hit");
     }
 
-    /// Auto-injected subtasks (from the TodoWrite hook merge) carry the
-    /// same title text as manual ones, so they must be searchable too.
+    /// Subtasks a session's TodoWrite merged into the log carry the same
+    /// title text as manual ones, so they must be searchable too.
     #[test]
     fn matches_task_finds_auto_subtasks() {
         let mut t = fresh_task();

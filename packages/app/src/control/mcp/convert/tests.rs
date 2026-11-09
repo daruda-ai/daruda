@@ -402,7 +402,6 @@ fn task_create_reads_its_optional_fields() {
         "prompt": "p",
         "branch": "feat/x",
         "notes": "n",
-        "surface": "terminal",
     });
     let Command::Gated(GatedCommand::TaskCreate { task, .. }) =
         to_command(ToolId::TaskCreate, &args).unwrap()
@@ -411,16 +410,6 @@ fn task_create_reads_its_optional_fields() {
     };
     assert_eq!(task.branch.as_deref(), Some("feat/x"));
     assert_eq!(task.notes.as_deref(), Some("n"));
-    assert_eq!(
-        task.surface,
-        Some(daruda_store::tasks::TaskAgentSurface::Terminal)
-    );
-    let mut bad = args.clone();
-    bad["surface"] = "shell".into();
-    assert_eq!(
-        to_command(ToolId::TaskCreate, &bad),
-        Err(ConvertError::BadArgument { name: "surface" })
-    );
 }
 
 #[test]

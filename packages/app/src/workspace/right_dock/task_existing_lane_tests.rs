@@ -9,13 +9,8 @@ use crate::workspace::tests::build_workspace_with;
 use daruda_store::tasks::{Lifecycle, TaskAgentSurface, TaskRunIn};
 use gpui::{AppContext as _, Context, TestAppContext};
 
-fn existing_lane_task(
-    path: &Path,
-    surface: TaskAgentSurface,
-    cx: &mut Context<Workspace>,
-) -> String {
+fn existing_lane_task(path: &Path, cx: &mut Context<Workspace>) -> String {
     let mut task = crate::runs::seed::spec(daruda_store::project::ProjectUuid::default(), "Fix it");
-    task.agent_surface = surface;
     task.run_in = TaskRunIn::ExistingLane {
         path: path.to_path_buf(),
     };
@@ -83,7 +78,7 @@ fn existing_lane_start_opens_a_tab_there_instead_of_a_worktree(cx: &mut TestAppC
                 let lane_path = ws.active_lane().unwrap().path.clone();
                 let lanes = lane_count(ws);
                 let tabs = ws.active_runtime().tabs.len();
-                let id = existing_lane_task(&lane_path, TaskAgentSurface::AgentChat, cx);
+                let id = existing_lane_task(&lane_path, cx);
                 ws.start_task(&id, window, cx);
                 (id, lane_path, lanes, tabs)
             })
@@ -112,7 +107,7 @@ fn remote_lanes_are_refused_before_dispatch_requested(cx: &mut TestAppContext) {
                 },
                 cx,
             );
-            let id = existing_lane_task(&path, TaskAgentSurface::AgentChat, cx);
+            let id = existing_lane_task(&path, cx);
             let before = crate::runs::RunsHost::sequence_for_test(cx);
             let result = ws
                 .begin_task_start(&id, daruda_store::tasks::StartedBy::Desktop, window, cx)
@@ -129,34 +124,6 @@ fn remote_lanes_are_refused_before_dispatch_requested(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn existing_lane_terminal_start_runs_with_the_prompt_file_in_that_lane(cx: &mut TestAppContext) {
-    let (_root, window, workspace) = project_workspace(cx);
-    let (id, lane_path, lanes, tabs) = cx
-        .update_window(window.into(), |_, window, cx| {
-            workspace.update(cx, |ws, cx| {
-                let lane_path = ws.active_lane().unwrap().path.clone();
-                let lanes = lane_count(ws);
-                let tabs = ws.active_runtime().tabs.len();
-                let id = existing_lane_task(&lane_path, TaskAgentSurface::Terminal, cx);
-                ws.start_task(&id, window, cx);
-                (id, lane_path, lanes, tabs)
-            })
-        })
-        .unwrap();
-    cx.run_until_parked();
-    workspace.read_with(cx, |ws, _| {
-        assert_eq!(lane_count(ws), lanes);
-        assert_eq!(ws.active_runtime().tabs.len(), tabs + 1);
-    });
-    let spec = cx.update(|cx| cx.global::<GlobalTasks>().get(&id).unwrap().spec.clone());
-    let prompt = daruda_store::tasks::prompt_file_path(&spec, &lane_path);
-    assert!(prompt.ends_with(format!("task-{id}.md")));
-    let body = std::fs::read_to_string(prompt).unwrap();
-    assert!(body.starts_with("Task: \"Fix it\" ("));
-    assert_eq!(running_in(&state(&id, cx)), Some(lane_path.as_path()));
-}
-
-#[gpui::test]
 fn existing_lane_start_finds_a_lane_in_an_inactive_project(cx: &mut TestAppContext) {
     let (_root, window, workspace) = project_workspace(cx);
     let other = tempfile::tempdir().unwrap();
@@ -167,7 +134,7 @@ fn existing_lane_start_finds_a_lane_in_an_inactive_project(cx: &mut TestAppConte
                 let lane_path = ws.active_lane().unwrap().path.clone();
                 ws.add_project(other.path().to_path_buf(), window, cx);
                 assert_ne!(ws.active, owner);
-                let id = existing_lane_task(&lane_path, TaskAgentSurface::AgentChat, cx);
+                let id = existing_lane_task(&lane_path, cx);
                 ws.start_task(&id, window, cx);
                 (id, owner)
             })
@@ -186,11 +153,7 @@ fn existing_lane_start_keeps_the_task_in_backlog_when_the_lane_is_gone(cx: &mut 
             workspace.update(cx, |ws, cx| {
                 let lanes = lane_count(ws);
                 let tabs = ws.active_runtime().tabs.len();
-                let id = existing_lane_task(
-                    &PathBuf::from("/nonexistent/daruda-lane"),
-                    TaskAgentSurface::AgentChat,
-                    cx,
-                );
+                let id = existing_lane_task(&PathBuf::from("/nonexistent/daruda-lane"), cx);
                 ws.start_task(&id, window, cx);
                 (id, lanes, tabs)
             })
@@ -300,7 +263,7 @@ fn existing_lane_start_reports_a_registered_lane_whose_directory_is_gone(cx: &mu
                     .unwrap()
                     .lanes
                     .push(crate::lane::Lane::default_for_project(lane, gone.clone()));
-                let id = existing_lane_task(&gone, TaskAgentSurface::AgentChat, cx);
+                let id = existing_lane_task(&gone, cx);
                 ws.start_task(&id, window, cx);
                 id
             })
@@ -352,7 +315,7 @@ fn a_phone_start_runs_in_its_lane_without_taking_the_window(cx: &mut TestAppCont
                 let here = ws.active;
                 assert_ne!(here, owner);
                 let focused = ws.active_runtime().focused_pane_id;
-                let id = existing_lane_task(&lane_path, TaskAgentSurface::AgentChat, cx);
+                let id = existing_lane_task(&lane_path, cx);
                 drop(ws.begin_task_start(&id, daruda_store::tasks::StartedBy::Phone, window, cx));
                 (id, owner, here, focused, owner_tabs)
             })
@@ -405,7 +368,7 @@ fn an_orchestrator_start_in_the_shown_lane_keeps_its_tab_in_front(cx: &mut TestA
                 assert!(ws.show_orchestrator_tab(window, cx));
                 let lane_path = ws.active_lane().unwrap().path.clone();
                 let tabs = ws.active_runtime().tabs.len();
-                let id = existing_lane_task(&lane_path, TaskAgentSurface::AgentChat, cx);
+                let id = existing_lane_task(&lane_path, cx);
                 drop(ws.begin_task_start(
                     &id,
                     daruda_store::tasks::StartedBy::Orchestrator,

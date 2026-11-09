@@ -22,14 +22,6 @@ pub(in crate::workspace) struct ClaudeSessionState {
     pub(in crate::workspace) pty_bindings: HashMap<PaneId, PtyBinding>,
     pub(in crate::workspace) task_hook_tail: smol::channel::Receiver<()>,
 
-    /// Running count of `PostToolUseFailure` hook events per Claude
-    /// session. When a session crosses
-    /// `daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD` the owning task
-    /// is escalated to `Error { message: "tool_use_failure xN" }`.
-    /// Cleared whenever a session is removed or transitioned out of
-    /// `Running`.
-    pub(in crate::workspace) tool_use_failure_counts: HashMap<String, u32>,
-
     /// Last blocking-notification timestamp already handled by this workspace,
     /// per session. The status-dir watcher can re-deliver
     /// the same file (FSEvents coalescing / duplicate events) and every
@@ -103,20 +95,6 @@ pub(in crate::workspace) fn initial_claude_status(
         store.load_initial(initial);
     }
     store
-}
-
-impl ClaudeSessionState {
-    /// Drop the tool-use failure tallies of sessions a task let go of.
-    /// Session ids are never reused, so a tally left behind is only dead
-    /// weight.
-    pub(in crate::workspace) fn forget_tool_use_failures<'a>(
-        &mut self,
-        sessions: impl IntoIterator<Item = &'a String>,
-    ) {
-        for sid in sessions {
-            self.tool_use_failure_counts.remove(sid);
-        }
-    }
 }
 
 impl Workspace {

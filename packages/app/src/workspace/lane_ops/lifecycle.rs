@@ -3,10 +3,9 @@
 
 use crate::runs::RunsHost;
 use daruda_store::project::{LaneId, LaneRef, ProjectId};
-use daruda_store::tasks::TaskAgentSurface;
 use gpui::{Context, Window};
 
-use super::{CreateWorktreePlan, RemoveWorktreePlan, git_repo_root_of};
+use super::{CreateWorktreePlan, InitialPane, RemoveWorktreePlan, git_repo_root_of};
 use crate::lane::availability::LaneAvailability;
 use crate::workspace::LaneRuntime;
 use crate::workspace::Workspace;
@@ -196,7 +195,7 @@ impl Workspace {
         &mut self,
         plan: CreateWorktreePlan,
         project_id: ProjectId,
-        surface: TaskAgentSurface,
+        initial: InitialPane,
         requested_agent: Option<&str>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -204,7 +203,7 @@ impl Workspace {
         self.finalize_create_lane_as(
             plan,
             project_id,
-            surface,
+            initial,
             requested_agent,
             super::LaneReveal::Foreground,
             window,
@@ -219,7 +218,7 @@ impl Workspace {
         &mut self,
         plan: CreateWorktreePlan,
         project_id: ProjectId,
-        surface: TaskAgentSurface,
+        initial: InitialPane,
         requested_agent: Option<&str>,
         reveal: super::LaneReveal,
         window: &mut Window,
@@ -229,11 +228,9 @@ impl Workspace {
             return Err(crate::surface::strings::create_lane::err_no_active_project());
         }
         let new_path = &plan.new_path;
-        // The initial pane mirrors the requested surface: a terminal
-        // (default) or an in-app Agent chat rooted at the new checkout.
         // The agent-chat pane parks Idle until it is connected below.
-        let pane = match surface {
-            TaskAgentSurface::Terminal => {
+        let pane = match initial {
+            InitialPane::Terminal => {
                 let account = self.default_account_selection_for_new_pane(None);
                 let prepared = self.resolve_account(account, pane::AccountDomain::Any);
                 self.create_pane_with_cwd(
@@ -245,7 +242,7 @@ impl Workspace {
                 )
                 .map_err(|e| e.to_string())?
             }
-            TaskAgentSurface::AgentChat => {
+            InitialPane::AgentChat => {
                 // No source pane (new lane), so open under the
                 // session-sticky default. A brand-new lane has neither a
                 // legacy `remote_cwd` nor a `session_host` yet, so an agent
@@ -282,7 +279,7 @@ impl Workspace {
         self.register_created_lane(plan, project_id, Some(runtime), reveal, window, cx);
         // Focusing the pane is what connects an Agent chat's session; one
         // left behind connects here.
-        if reveal == super::LaneReveal::Background && surface == TaskAgentSurface::AgentChat {
+        if reveal == super::LaneReveal::Background && initial == InitialPane::AgentChat {
             self.maybe_connect_agent_chat(pane_id, cx);
         }
         // Return the spawned pane's id so task-driven callers (start_task)

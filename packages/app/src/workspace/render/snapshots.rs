@@ -391,17 +391,6 @@ impl Workspace {
             crate::workspace::claude_status_aggregate::task_session_statuses(
                 &self.claude_sessions.status,
             );
-        // Mirror the per-session failure counters too — only entries
-        // that have actually accumulated failures travel into the
-        // snap so an idle session with 0 failures stays absent from
-        // the map (cheaper hash, no false-positive lookups).
-        let tool_use_failure_counts: std::collections::HashMap<String, u32> = self
-            .claude_sessions
-            .tool_use_failure_counts
-            .iter()
-            .filter(|&(_, &n)| n > 0)
-            .map(|(sid, &n)| (sid.clone(), n))
-            .collect();
         // The Usage tab stacks a section per auth domain, so both providers'
         // limits can be compared without switching panes. Each reads the
         // sticky account for its domain (`usage_account`) rather than the
@@ -600,7 +589,6 @@ impl Workspace {
                     .collect(),
             },
             claude_status_per_session,
-            tool_use_failure_counts,
             now: PerFrame(chrono::Utc::now()),
             right_panel_scroll_handle: Handle(self.right_views.scroll_handle.clone()),
             mcp: library.inventory.mcp.clone(),

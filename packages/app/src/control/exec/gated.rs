@@ -11,7 +11,6 @@ use crate::control::spec::{GatedCommand, NewTask};
 use crate::remote_channel::bridge::PaneRef;
 use crate::runs::GlobalTasks;
 use crate::surface::strings as s;
-use daruda_store::tasks::TaskAgentSurface;
 
 use super::{Dispatch, Pending, in_lane_window, in_pane_window, in_project_window, in_task_window};
 
@@ -297,11 +296,7 @@ fn approval_summary(asked: &Asked, cx: &mut App) -> Result<String, ControlError>
                     };
                     Ok((ws.control_project_name(*project), location, flow))
                 })?;
-            let surface = match (flow, task.surface.unwrap_or_default()) {
-                (Some(flow), _) => flow,
-                (None, TaskAgentSurface::AgentChat) => s::control::approval_task_as_chat(),
-                (None, TaskAgentSurface::Terminal) => s::control::approval_task_as_terminal(),
-            };
+            let surface = flow.unwrap_or_else(s::control::approval_task_as_chat);
             s::control::approval_task_create(task.title.trim(), &name, &location, &surface)
         }
         Asked::TaskStart { task } => match task_flow_summary(task, cx) {

@@ -142,13 +142,15 @@ fn start_task(task: String, cx: &mut App) -> ControlOutcome {
         cx.update(|cx| match outcome {
             // A chat was announced as the phone's new target on the way.
             Ok(ControlResult::TaskStarted { chat: Some(_), .. }) => {}
-            Ok(_) => crate::remote_channel::send_notice_everywhere(
-                match &flow {
-                    Some(flow) => crate::surface::strings::control::task_started_flow(&title, flow),
-                    None => crate::surface::strings::control::task_started_terminal(&title),
-                },
-                cx,
-            ),
+            // Every other start runs as a flow, which `flow` names.
+            Ok(_) => {
+                if let Some(flow) = &flow {
+                    crate::remote_channel::send_notice_everywhere(
+                        crate::surface::strings::control::task_started_flow(&title, flow),
+                        cx,
+                    );
+                }
+            }
             Err(e) => crate::remote_channel::send_notice_everywhere(
                 crate::surface::strings::control::task_start_failed(
                     &title,

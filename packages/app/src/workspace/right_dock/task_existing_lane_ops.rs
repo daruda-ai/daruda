@@ -2,13 +2,13 @@
 //! `TaskRunIn::ExistingLane` arm of `start_task`.
 //!
 //! Nothing touches git here: the lane is already checked out, so the task
-//! only needs a new tab in it, rooted at the lane. An agent chat opens the
-//! way a user's own does, so it keeps the lane's session host.
+//! only needs a new Agent chat tab in it, rooted at the lane. The chat opens
+//! the way a user's own does, so it keeps the lane's session host.
 
 use std::path::Path;
 
 use daruda_store::project::{LaneKind, LaneRef};
-use daruda_store::tasks::{ExecutionRef, TaskAgentSurface, TaskRecord};
+use daruda_store::tasks::{ExecutionRef, TaskRecord};
 use gpui::{Context, Window};
 
 use super::task_start::{StartedOn, TaskStartError, TaskStarted};
@@ -138,20 +138,18 @@ impl Workspace {
             branch,
             reveal,
         } = start;
-        let surface = cx
+        let preparing = cx
             .global::<GlobalTasks>()
             .get(&exec.task_id)
-            .and_then(|task| match &task.lifecycle {
-                daruda_store::tasks::Lifecycle::Preparing { source, .. } => Some(
-                    if matches!(source, daruda_store::tasks::TaskExecutionSource::AgentChat) {
-                        TaskAgentSurface::AgentChat
-                    } else {
-                        TaskAgentSurface::Terminal
-                    },
-                ),
-                _ => None,
-            })
-            .ok_or(TaskStartError::NotFound)?;
+            .is_some_and(|task| {
+                matches!(
+                    task.lifecycle,
+                    daruda_store::tasks::Lifecycle::Preparing { .. }
+                )
+            });
+        if !preparing {
+            return Err(TaskStartError::NotFound);
+        }
         // The lane may have closed while the start was recorded.
         if self.lane_for(lane).is_none() {
             return Err(TaskStartError::LaneMissing { path: root });
@@ -160,11 +158,9 @@ impl Workspace {
         let pane = match reveal {
             LaneReveal::Foreground => {
                 self.activate_lane(lane, window, cx);
-                self.open_task_pane_in_active_lane(surface, root.clone(), window, cx)
+                self.open_task_chat_in_active_lane(window, cx)
             }
-            LaneReveal::Background => {
-                self.open_task_pane_behind(lane, surface, root.clone(), window, cx)
-            }
+            LaneReveal::Background => self.open_task_chat_behind(lane, window, cx),
         }
         .ok_or(TaskStartError::PaneUnavailable)?;
         let dispatched = self.dispatch_claude_for_task(exec, &root, &branch, pane, window, cx)?;
@@ -172,61 +168,37 @@ impl Workspace {
             TaskStarted {
                 exec: exec.clone(),
                 worktree: root,
-                on: StartedOn::Pane { pane, surface },
+                on: StartedOn::Chat(pane),
             },
             dispatched,
         ))
     }
 
-    fn open_task_pane_in_active_lane(
+    fn open_task_chat_in_active_lane(
         &mut self,
-        surface: TaskAgentSurface,
-        root: std::path::PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneId> {
-        match surface {
-            TaskAgentSurface::Terminal => self.insert_terminal_tab(Some(root), window, cx),
-            TaskAgentSurface::AgentChat => {
-                let agent_id = self.open_agent_id(None);
-                let cwds = self.active_lane_cwds();
-                let pane_id = self.insert_agent_chat_pane(agent_id, cwds, window, cx)?;
-                self.reveal_new_agent_chat_pane(pane_id, window, cx);
-                Some(pane_id)
-            }
-        }
+        let agent_id = self.open_agent_id(None);
+        let cwds = self.active_lane_cwds();
+        let pane_id = self.insert_agent_chat_pane(agent_id, cwds, window, cx)?;
+        self.reveal_new_agent_chat_pane(pane_id, window, cx);
+        Some(pane_id)
     }
 
-    /// Open the task's pane as a new tab of `lane` without showing it: that
+    /// Open the task's chat as a new tab of `lane` without showing it: that
     /// lane's selected tab and focus stay, and so does the window's active
     /// lane — which may be `lane` itself, with the orchestrator's tab shown.
-    /// An Agent chat connects here, since no focus will connect it.
-    fn open_task_pane_behind(
+    /// The chat connects here, since no focus will connect it.
+    fn open_task_chat_behind(
         &mut self,
         lane: LaneRef,
-        surface: TaskAgentSurface,
-        root: std::path::PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneId> {
-        let pane = match surface {
-            TaskAgentSurface::Terminal => match self.create_pane_at(Some(root), window, cx) {
-                Ok(pane) => pane,
-                Err(e) => {
-                    self.report_pane_error(
-                        &crate::surface::strings::error::pane_context_new_tab(),
-                        e,
-                        cx,
-                    );
-                    return None;
-                }
-            },
-            TaskAgentSurface::AgentChat => {
-                let agent_id = self.open_agent_id(None);
-                let (local, remote, host) = self.lane_cwds(lane);
-                self.create_new_agent_chat_pane(agent_id, local, remote, host, window, cx)
-            }
-        };
+        let agent_id = self.open_agent_id(None);
+        let (local, remote, host) = self.lane_cwds(lane);
+        let pane = self.create_new_agent_chat_pane(agent_id, local, remote, host, window, cx);
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         let rt = self.main_area.runtimes.entry(lane).or_default();
@@ -244,9 +216,7 @@ impl Workspace {
             rt.focused_pane_id = pane_id;
         }
         self.bump_activity(pane_id);
-        if surface == TaskAgentSurface::AgentChat {
-            self.maybe_connect_agent_chat(pane_id, cx);
-        }
+        self.maybe_connect_agent_chat(pane_id, cx);
         self.mutate_durable(cx, |_, _| {});
         cx.notify();
         Some(pane_id)

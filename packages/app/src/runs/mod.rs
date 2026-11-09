@@ -31,7 +31,7 @@ pub(crate) mod watch;
 pub(crate) use cli::history::record as record_terminal_history;
 pub(crate) use cli::hook_end_reason as cli_hook_end_reason;
 pub(crate) use cli::resume::CliResumeLease;
-pub(crate) use delivery::{DeliveryFailure, RunPane, TerminalDispatchError};
+pub(crate) use delivery::{DeliveryFailure, RunPane};
 pub(crate) use effects::RunsEffects;
 pub(crate) use flow_description::flow_run_name;
 pub(crate) use flow_tasks::{REPO_DIR, runs_dir, task_run_dir};

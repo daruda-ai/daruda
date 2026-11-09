@@ -98,12 +98,6 @@ impl Workspace {
         let handle = spawn_pty(&pty_config).map_err(PaneSpawnError::Pty)?;
         let pty_pid = handle.child_pid;
         let (stdin_tx, stdout_rx, exit_rx, error_rx, master) = handle.into_parts();
-        // Keep a sibling sender so non-keyboard callers
-        // (Workspace::send_to_pane) can write into the same PTY
-        // without going through the TerminalView's keyboard handler.
-        // The original `stdin_tx` is moved into the TerminalInput
-        // closure below, so we clone before that.
-        let pty_input_tx = stdin_tx.clone();
 
         // Create the VT session up front so its error can propagate out
         // of create_pane rather than panicking inside the cx.new closure.
@@ -119,8 +113,7 @@ impl Workspace {
         // bytes head for the PTY, so the echo is drained at the fast
         // interval — typing latency stays at IDLE_POLL even after a
         // long quiet period.
-        let (poke_tx, poke_rx) = futures::channel::mpsc::unbounded::<()>();
-        let input_poke_tx = poke_tx.clone();
+        let (input_poke_tx, poke_rx) = futures::channel::mpsc::unbounded::<()>();
 
         let font_family = self.mirrors.font_family.clone();
         let interrupt_workspace = cx.entity().downgrade();
@@ -194,8 +187,6 @@ impl Workspace {
                 cached_cwd: None,
                 _stdout_task: stdout_task,
                 _view_event_subscription: view_event_sub,
-                pty_input_tx: Some(pty_input_tx),
-                poke_tx,
                 account,
             }),
         })

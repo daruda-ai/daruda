@@ -121,7 +121,6 @@ async fn an_approved_create_adds_a_backlog_task_to_that_project(cx: &mut gpui::T
                 task: crate::control::spec::NewTask {
                     branch: Some("feat/login".into()),
                     notes: Some("for later".into()),
-                    surface: Some(daruda_store::tasks::TaskAgentSurface::Terminal),
                     ..crate::test_support::new_task(" Fix login ", "p", None)
                 },
             },
@@ -147,7 +146,7 @@ async fn an_approved_create_adds_a_backlog_task_to_that_project(cx: &mut gpui::T
         assert_eq!(created.spec.notes, "for later");
         assert_eq!(
             created.spec.agent_surface,
-            daruda_store::tasks::TaskAgentSurface::Terminal
+            daruda_store::tasks::TaskAgentSurface::AgentChat
         );
     });
 }

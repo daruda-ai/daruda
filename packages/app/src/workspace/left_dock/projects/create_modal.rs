@@ -319,13 +319,10 @@ impl CreateWorktreeModal {
                         Ok(()) => match workspace.upgrade() {
                             Some(ws) => ws
                                 .update(app_cx, |ws, cx| {
-                                    // Manual lane creation always spawns a
-                                    // terminal — the Agent-chat surface is a
-                                    // task-only choice.
                                     ws.finalize_create_lane(
                                         plan.clone(),
                                         project_id,
-                                        daruda_store::tasks::TaskAgentSurface::Terminal,
+                                        crate::workspace::lane_ops::InitialPane::Terminal,
                                         None,
                                         window,
                                         cx,

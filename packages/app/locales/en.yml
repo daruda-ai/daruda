@@ -362,7 +362,6 @@ task:
   # Escalation wording — why daruda ended the task itself. Keeps the ACP stop
   # reason verbatim so it still matches what the adapter reported.
   error_tool_use_failure: "tool_use_failure x%{count}"
-  error_write_prompt: "write prompt: %{error}"
   # Lifecycle labels for a run that is starting, never reached its agent, or
   # was stopped before it finished.
   state_starting: "Starting"
@@ -1567,11 +1566,6 @@ error:
   tasks_settle_marker_stuck: "Tasks are read-only, also after a restart: the runs left by the last session could not be settled. Quit daruda and delete .reconciling in the task-log folder to recover"
   # A task change the task log refused, e.g. stopping a task that already ended.
   task_command_refused: "That task change is no longer possible"
-  task_escalation_orphan: "Tool-use-failure escalation has no matching task"
-  # Toast body under [`error_task_escalation_orphan`]. The title alone does not
-  # say which session, and this report is the only trace of the dropped
-  # escalation.
-  task_escalation_orphan_detail: "session %{session} hit the escalation threshold but no Running task owns it (%{escalation})"
 
 # Notifications
 notification:
@@ -1682,7 +1676,6 @@ terminal:
   task_cancelled: "Cancelled"
   task_done_prefix: "Done"
   task_error_prefix: "Error"
-  task_failures_prefix: "failures "
   task_running: "Running"
   # Toast/modal title when the workspace can no longer find the pane
   # that a terminal operation (annotation edit, Copy) targeted.
@@ -2400,10 +2393,8 @@ control:
   # Told when /task start was accepted; the worktree and agent come up next,
   # and the outcome follows as its own message.
   task_starting: "Starting %{title}. I'll tell you when it's running."
-  # The follow-up when a started task runs in a terminal: there is no chat
-  # for the phone to talk to.
-  task_started_terminal: "%{title} is running in a terminal in daruda."
-  # `flow` is one of the approval_task_as_flow phrases.
+  # The follow-up when a started task runs as a flow: there is no chat for
+  # the phone to talk to. `flow` is one of the approval_task_as_flow phrases.
   task_started_flow: "%{title} is running %{flow} in daruda."
   # The follow-up when a start failed after it was accepted.
   task_start_failed: "%{title} did not start: %{reason}"
@@ -2464,7 +2455,6 @@ control:
   approval_task_in_new_branch: "in a new worktree on the branch %{branch}"
   approval_task_in_worktree: "in the worktree %{lane}"
   approval_task_as_chat: "as an agent chat"
-  approval_task_as_terminal: "in a Claude terminal"
   # A task that runs as a flow: the flow, and the permission modes its
   # agents run under (`bypassPermissions` approves every tool by itself).
   # `modes` is approval_flow_modes or approval_flow_no_agents.

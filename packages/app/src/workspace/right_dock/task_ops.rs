@@ -273,15 +273,10 @@ impl Workspace {
         let Some(task) = cx.global::<GlobalTasks>().get(task_id) else {
             return;
         };
-        // Drop pending failure tallies before the task itself disappears,
-        // otherwise the entries stay forever.
-        let stale_sessions = task.session_ids.clone();
         let active = (task.lifecycle.kind() != LifecycleKind::Backlog
             && !task.lifecycle.is_terminal())
         .then(|| task.current_exec().cloned())
         .flatten();
-        self.claude_sessions
-            .forget_tool_use_failures(&stale_sessions);
         let cancelled = active.map(|exec| self.cancel_execution(exec, cx));
         let id = task_id.to_owned();
         cx.spawn_in(window, async move |ws, cx| {

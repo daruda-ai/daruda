@@ -12,14 +12,13 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::tasks::machine::StartFailure;
 use daruda_store::tasks::{
-    CliProcessState, ExecutionRef, Lifecycle, StartedBy, TaskAgentSurface, TaskEvent,
-    TaskExecutionSource, TaskRecord, TaskRunIn,
+    ExecutionRef, Lifecycle, StartedBy, TaskEvent, TaskExecutionSource, TaskRecord, TaskRunIn,
 };
 use gpui::{App, Context, Window};
 
 use crate::runs::{GlobalTasks, RunsHost, TaskCommitError};
 use crate::workspace::Workspace;
-use crate::workspace::lane_ops::{CreateWorktreePlan, LaneReveal};
+use crate::workspace::lane_ops::{CreateWorktreePlan, InitialPane, LaneReveal};
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::AgentSessionStatus;
 
@@ -82,11 +81,8 @@ pub(crate) struct TaskStarted {
 /// What a started run is driven by.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum StartedOn {
-    /// A terminal or Agent chat pane holds the prompt.
-    Pane {
-        pane: PaneId,
-        surface: TaskAgentSurface,
-    },
+    /// An Agent chat pane holds the prompt.
+    Chat(PaneId),
     /// A flow run took the prompt as an input; it has no one pane.
     Flow,
 }
@@ -95,11 +91,8 @@ impl TaskStarted {
     /// The Agent chat a started run talks in, if it has one.
     pub(crate) fn chat(&self) -> Option<PaneId> {
         match self.on {
-            StartedOn::Pane {
-                pane,
-                surface: TaskAgentSurface::AgentChat,
-            } => Some(pane),
-            StartedOn::Pane { .. } | StartedOn::Flow => None,
+            StartedOn::Chat(pane) => Some(pane),
+            StartedOn::Flow => None,
         }
     }
 }
@@ -362,7 +355,7 @@ impl Workspace {
         };
         let source = match &route {
             StartRoute::Flow(start) => start.source(),
-            StartRoute::Existing(_) | StartRoute::New(_) => source_for(task.spec.agent_surface),
+            StartRoute::Existing(_) | StartRoute::New(_) => TaskExecutionSource::AgentChat,
         };
         let requested = RunsHost::task(
             crate::runs::TaskIntent::Start {
@@ -434,7 +427,6 @@ impl Workspace {
         Ok(WorktreeStart {
             plan,
             project_id,
-            surface: spec.agent_surface,
             reveal,
         })
     }
@@ -472,7 +464,6 @@ impl Workspace {
         let WorktreeStart {
             plan,
             project_id,
-            surface,
             reveal,
         } = start;
         let me = cx.weak_entity();
@@ -511,7 +502,7 @@ impl Workspace {
                                 ws.finalize_create_lane_as(
                                     plan.clone(),
                                     project_id,
-                                    surface,
+                                    InitialPane::AgentChat,
                                     None,
                                     reveal,
                                     window,
@@ -532,7 +523,7 @@ impl Workspace {
                                     TaskStarted {
                                         exec: exec.clone(),
                                         worktree: plan.new_path.clone(),
-                                        on: StartedOn::Pane { pane, surface },
+                                        on: StartedOn::Chat(pane),
                                     },
                                     dispatched,
                                 ))
@@ -588,10 +579,9 @@ impl Workspace {
         .detach();
     }
 
-    /// Bind `pane_id` to the run, record the pane's identity, and hand it the
-    /// prompt: a `claude` command over a prompt file for a terminal, an ACP
-    /// turn for an Agent chat. Preparation is durable before delivery; only
-    /// a successful PTY write or tagged PromptSent records Dispatched.
+    /// Bind chat `pane_id` to the run, record the pane's identity, and hand
+    /// it the prompt as an ACP turn. Preparation is durable before delivery;
+    /// only the turn's tagged PromptSent records Dispatched.
     ///
     /// Takes `pane_id` rather than relying on `focused_pane_id`: a start
     /// asked for elsewhere opens its pane behind the one the window shows.
@@ -611,23 +601,12 @@ impl Workspace {
             .filter(|task| matches!(&task.lifecycle, Lifecycle::Preparing { exec: current, .. } if current == exec))
             .cloned()
             .ok_or(TaskStartError::NotBacklog)?;
-        let surface = match &task.lifecycle {
-            Lifecycle::Preparing {
-                source: TaskExecutionSource::AgentChat,
-                ..
-            } => TaskAgentSurface::AgentChat,
-            _ => TaskAgentSurface::Terminal,
-        };
-        let identity = match surface {
-            TaskAgentSurface::Terminal => {
-                self.bind_task_cli_execution(exec, pane_id, worktree_path, cx)
-            }
-            TaskAgentSurface::AgentChat => self.bind_task_chat_execution(exec, pane_id, cx),
-        }
-        .ok_or(TaskStartError::PaneUnavailable)?;
+        let identity = self
+            .bind_task_chat_execution(exec, pane_id, cx)
+            .ok_or(TaskStartError::PaneUnavailable)?;
         let prepared = RunsHost::propose(
             TaskEvent::LanePrepared {
-                terminal_id: identity.terminal_id,
+                terminal_id: None,
                 exec: exec.clone(),
                 worktree: worktree_path.to_path_buf(),
                 agent_id: identity.agent_id,
@@ -638,7 +617,6 @@ impl Workspace {
             cx,
         );
         let exec = exec.clone();
-        let worktree = worktree_path.to_path_buf();
         let branch = branch.to_owned();
         Ok(cx.spawn_in(window, async move |ws, cx| {
             let seq = prepared
@@ -647,9 +625,7 @@ impl Workspace {
                     detail: error.to_string(),
                 })?;
             let result = match ws.update_in(cx, |ws, window, cx| {
-                ws.deliver_prepared_task(
-                    &exec, &task, &worktree, &branch, pane_id, surface, seq, window, cx,
-                )
+                ws.deliver_prepared_task(&exec, &task, &branch, pane_id, seq, window, cx)
             }) {
                 Ok(Ok(dispatched)) => dispatched.await,
                 Ok(Err(error)) => Err(error),
@@ -667,10 +643,8 @@ impl Workspace {
         &mut self,
         exec: &ExecutionRef,
         task: &TaskRecord,
-        worktree_path: &Path,
         branch: &str,
         pane_id: PaneId,
-        surface: TaskAgentSurface,
         prepared_seq: u64,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -679,77 +653,35 @@ impl Workspace {
             return Err(TaskStartError::PaneUnavailable);
         }
         if !cx.global::<GlobalTasks>().get(&exec.task_id).is_some_and(|task| {
-        matches!(&task.lifecycle, Lifecycle::Dispatching { exec: current, .. } if current == exec)
-    }) {
-        return Err(TaskStartError::NotBacklog);
-    }
-        if surface == TaskAgentSurface::Terminal {
-            let recorded = exec
-                .resolve(cx.global::<GlobalTasks>().book())
-                .and_then(|run| run.terminal_id.as_deref());
-            if recorded != RunsHost::terminal_id(self.run_pane(pane_id), cx).map(|id| id.as_str()) {
-                return Err(TaskStartError::PaneUnavailable);
-            }
+            matches!(&task.lifecycle, Lifecycle::Dispatching { exec: current, .. } if current == exec)
+        }) {
+            return Err(TaskStartError::NotBacklog);
         }
         let rendered = daruda_store::tasks::prompt_file::render_task_prompt(task, branch);
-        let dispatched = match surface {
-            TaskAgentSurface::Terminal => {
-                let prompt_path =
-                    daruda_store::tasks::prompt_file::prompt_file_path(&task.spec, worktree_path);
-                daruda_store::tasks::prompt_file::write_prompt_file(&prompt_path, &rendered)
-                    .map_err(|error| TaskStartError::PromptUndelivered {
-                        detail: crate::surface::strings::task::error_write_prompt(
-                            error.to_string(),
-                        ),
-                    })?;
-                let command = daruda_store::tasks::prompt_file::build_claude_command(
-                    &prompt_path,
-                    task.spec.auto_execute,
-                );
-                let Some(written) = self.write_task_input(pane_id, command.into_bytes()) else {
-                    RunsHost::delivery_failed(
-                        exec.clone(),
-                        crate::runs::DeliveryFailure::Dropped(
-                            daruda_store::tasks::machine::UndeliveredReason::PtyWriteFailed,
-                        ),
-                        cx,
-                    );
-                    return Err(TaskStartError::PromptUndelivered {
-                        detail: crate::surface::strings::task::error_prompt_undelivered(),
-                    });
-                };
-                let dispatched = RunsHost::terminal_dispatch(exec.clone(), written, cx);
-                cx.spawn(async move |_, _| {
-                    dispatched.await.map_err(|error| match error {
-                        crate::runs::TerminalDispatchError::Commit(error) => {
-                            TaskStartError::NotRecorded {
-                                detail: error.to_string(),
-                            }
-                        }
-                        crate::runs::TerminalDispatchError::Write(detail) => {
-                            TaskStartError::PromptUndelivered { detail }
-                        }
-                    })
-                })
-            }
-            TaskAgentSurface::AgentChat => {
-                let failed = self.agent_chat_view(pane_id).is_some_and(|view| {
-                    matches!(view.read(cx).status(), AgentSessionStatus::Error { .. })
-                });
-                if failed || !self.deliver_text_to_pane(pane_id, crate::workspace::main_area::pane_input_ops::PaneTextInput {
+        let failed = self
+            .agent_chat_view(pane_id)
+            .is_some_and(|view| matches!(view.read(cx).status(), AgentSessionStatus::Error { .. }));
+        let input = crate::workspace::main_area::pane_input_ops::PaneTextInput {
             body: rendered,
-            intent: crate::workspace::main_area::pane_input_ops::PaneTextIntent::Command { submit: true },
+            intent: crate::workspace::main_area::pane_input_ops::PaneTextIntent::Command {
+                submit: true,
+            },
             task: Some(exec.clone()),
-        }, window, cx) {
-            RunsHost::delivery_failed(exec.clone(), crate::runs::DeliveryFailure::Dropped(daruda_store::tasks::machine::UndeliveredReason::StartFailed), cx);
-            return Err(TaskStartError::PromptUndelivered { detail: crate::surface::strings::task::error_prompt_undelivered() });
-        }
-                gpui::Task::ready(Ok(prepared_seq))
-            }
         };
-
+        if failed || !self.deliver_text_to_pane(pane_id, input, window, cx) {
+            RunsHost::delivery_failed(
+                exec.clone(),
+                crate::runs::DeliveryFailure::Dropped(
+                    daruda_store::tasks::machine::UndeliveredReason::StartFailed,
+                ),
+                cx,
+            );
+            return Err(TaskStartError::PromptUndelivered {
+                detail: crate::surface::strings::task::error_prompt_undelivered(),
+            });
+        }
         cx.notify();
-        Ok(dispatched)
+        Ok(gpui::Task::ready(Ok(prepared_seq)))
     }
 }
 
@@ -757,7 +689,6 @@ impl Workspace {
 pub(super) struct WorktreeStart {
     pub(super) plan: CreateWorktreePlan,
     pub(super) project_id: daruda_store::project::ProjectId,
-    pub(super) surface: TaskAgentSurface,
     pub(super) reveal: LaneReveal,
 }
 
@@ -793,20 +724,9 @@ impl StartRoute {
 
 /// What the pane a run uses is, as `LanePrepared` records it.
 pub(super) struct PaneIdentity {
-    pub(super) terminal_id: Option<String>,
     pub(super) agent_id: String,
     pub(super) account_id: Option<daruda_store::accounts::AccountId>,
     pub(super) cwd: PathBuf,
-}
-
-fn source_for(surface: TaskAgentSurface) -> TaskExecutionSource {
-    match surface {
-        TaskAgentSurface::AgentChat => TaskExecutionSource::AgentChat,
-        TaskAgentSurface::Terminal => TaskExecutionSource::ClaudeCli {
-            transcript_path: None,
-            process: CliProcessState::Discovering,
-        },
-    }
 }
 
 /// Record why a requested start did not dispatch.

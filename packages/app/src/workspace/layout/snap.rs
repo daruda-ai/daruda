@@ -450,12 +450,6 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// Empty when `claude_status.enable` is off or no session has
     /// reported a status yet.
     pub claude_status_per_session: std::collections::HashMap<String, daruda_agent::SessionStatus>,
-    /// Per-session tool-use failure counts mirrored from
-    /// `Workspace::claude.tool_use_failure_counts`. Only sessions
-    /// with a positive count are present. The Tasks-tab renderer
-    /// surfaces a `failures N/M` hint once a count reaches
-    /// [`daruda_terminal::ux::strings::RIGHT_PANEL_TASK_FAILURE_DISPLAY_THRESHOLD`].
-    pub tool_use_failure_counts: std::collections::HashMap<String, u32>,
     /// Reference instant captured once per frame so every row in the
     /// Tasks tab computes its live duration against the same `now`.
     /// `Utc::now()` per row would drift between calls within a single

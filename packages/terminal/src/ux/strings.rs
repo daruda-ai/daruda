@@ -111,11 +111,3 @@ pub const RIGHT_PANEL_TASK_SESSION_STATUS_NEEDS_ATTENTION: &str = "⚠";
 
 /// Trailing glyph for a session that failed and cannot continue.
 pub const RIGHT_PANEL_TASK_SESSION_STATUS_FAILED: &str = "✕";
-
-/// Number of tool-use failures past which the inline `failures N/M`
-/// counter starts surfacing on the row. Below this threshold the
-/// occasional `Bash` retry is too noisy to show. Intentionally lower
-/// than `daruda_store::tasks::TASK_TOOL_USE_FAILURE_THRESHOLD` (the cap
-/// that auto-escalates to `Error`) so the user sees the row trending
-/// before it actually flips state.
-pub const RIGHT_PANEL_TASK_FAILURE_DISPLAY_THRESHOLD: u32 = 3;

@@ -75,11 +75,10 @@ pane registrations but retains observed processes until their exit is confirmed.
 Each spawned terminal also registers a fresh hook terminal ID. Hook events
 resolve that ID through `RunsHost` before the owning workspace binds the
 session; a missing agent PID does not prevent routing or session attachment.
-`LanePrepared` records the CLI terminal ID in `TaskExecution` before PTY
-input is delivered. The task log uses schema 7; older preparation records
-without that optional identity still replay. A hook can attach an unbound run
-only when the live terminal matches its recorded ID and the event is at least
-as new as the start. Replacing a terminal invalidates its previous delivery.
+Every Task starts as an Agent chat or a flow; no start creates a Claude CLI
+run. CLI runs already in the log keep their `LanePrepared` terminal ID (schema
+7; older preparation records without it still replay), and hooks, PID exits
+and startup reconciliation still settle them. Their chats open read-only.
 Only observed PIDs advance CLI process state. The tracker polls those PIDs;
 it has no pane discovery, process-tree walk or session-directory watcher.
 On restart, an already recorded Claude PID is verified against its account's
@@ -615,7 +614,7 @@ pane to the new run once it is committed; a restored pane is matched by the
 run's session. The new run is started by Desktop or Phone, so its relay and
 watch scope are those of a run that person started; the ended run and its
 result stay as they ended. Orchestrator-sent prompts and host notices never
-continue a run. Terminal (CLI) runs are not continued.
+continue a run. Claude CLI runs left in the log are not continued.
 
 ## `surface/`
 

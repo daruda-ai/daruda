@@ -84,7 +84,6 @@ fn right_fixture(window: &mut Window, cx: &mut gpui::App) -> RightDockSnapshot {
         task_projects: TaskProjects::default(),
         task_agents: std::sync::Arc::from([]),
         claude_status_per_session: std::collections::HashMap::new(),
-        tool_use_failure_counts: std::collections::HashMap::new(),
         now: PerFrame(chrono::Utc::now()),
         right_panel_scroll_handle: Handle(ScrollHandle::new()),
         mcp: crate::agent::mcp::McpSnapshot::default(),

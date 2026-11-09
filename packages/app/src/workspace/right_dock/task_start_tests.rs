@@ -7,7 +7,7 @@ use crate::runs::seed::{SeedEnd, SeedRun};
 use crate::workspace::Workspace;
 use crate::workspace::tests::build_workspace_with;
 use daruda_store::project::ProjectUuid;
-use daruda_store::tasks::{TaskAgentSurface, TaskRunIn, TaskSpec};
+use daruda_store::tasks::{TaskRunIn, TaskSpec};
 use gpui::{AppContext as _, Context, TestAppContext};
 
 fn add(task: TaskSpec, cx: &mut Context<Workspace>) -> String {
@@ -15,16 +15,10 @@ fn add(task: TaskSpec, cx: &mut Context<Workspace>) -> String {
 }
 
 fn task(project: ProjectUuid) -> TaskSpec {
-    let mut task = crate::runs::seed::spec(project, "T");
-    task.agent_surface = TaskAgentSurface::Terminal;
-    task
+    crate::runs::seed::spec(project, "T")
 }
 
-async fn dispatch_while_switching_lanes(
-    surface: TaskAgentSurface,
-    release: bool,
-    cx: &mut TestAppContext,
-) {
+async fn dispatch_while_switching_lanes(release: bool, cx: &mut TestAppContext) {
     use crate::runs::{GlobalTasks, RunsHost};
     use daruda_store::tasks::{ExecutionRef, Lifecycle, TaskEvent, TaskExecutionSource};
     let root = tempfile::tempdir().unwrap();
@@ -35,9 +29,7 @@ async fn dispatch_while_switching_lanes(
     let (id, pane, active, focused, dispatched, mut probe) = cx
         .update_window(window.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let mut spec = task(ws.projects[0].uuid);
-                spec.agent_surface = surface;
-                let id = add(spec, cx);
+                let id = add(task(ws.projects[0].uuid), cx);
                 let exec = ExecutionRef {
                     task_id: id.clone(),
                     execution_id: "delivery".into(),
@@ -47,39 +39,28 @@ async fn dispatch_while_switching_lanes(
                         started_by: None,
                         id: id.clone(),
                         execution_id: exec.execution_id.clone(),
-                        source: if surface == TaskAgentSurface::Terminal {
-                            TaskExecutionSource::ClaudeCli {
-                                transcript_path: None,
-                                process: Default::default(),
-                            }
-                        } else {
-                            TaskExecutionSource::AgentChat
-                        },
+                        source: TaskExecutionSource::AgentChat,
                         at: chrono::Utc::now(),
                     }],
                     cx,
                 );
-                let (pane, probe) = if surface == TaskAgentSurface::Terminal {
-                    (ws.active_runtime().panes[0].id, None)
-                } else {
-                    let pane = ws.create_agent_chat_pane(
-                        Some(daruda_store::project::PaneCwd::Local(root.path().into())),
-                        None,
-                        ws.mirrors.agents[0].id.clone(),
-                        None,
-                        window,
-                        cx,
-                    );
-                    let pane_id = pane.id;
-                    let (handle, probe) = daruda_acp::AcpSessionHandle::detached_for_test();
-                    pane.agent_chat_view().unwrap().update(cx, |view, _| {
-                        view.attach_handle(handle);
-                        view.set_status_for_test(daruda_chat::view::AgentSessionStatus::Connected);
-                        view.set_session_id_for_test(Some("parked-session".into()));
-                    });
-                    ws.active_runtime_mut().panes.push(pane);
-                    (pane_id, Some(probe))
-                };
+                let pane = ws.create_agent_chat_pane(
+                    Some(daruda_store::project::PaneCwd::Local(root.path().into())),
+                    None,
+                    ws.mirrors.agents[0].id.clone(),
+                    None,
+                    window,
+                    cx,
+                );
+                let pane_id = pane.id;
+                let (handle, probe) = daruda_acp::AcpSessionHandle::detached_for_test();
+                pane.agent_chat_view().unwrap().update(cx, |view, _| {
+                    view.attach_handle(handle);
+                    view.set_status_for_test(daruda_chat::view::AgentSessionStatus::Connected);
+                    view.set_session_id_for_test(Some("parked-session".into()));
+                });
+                ws.active_runtime_mut().panes.push(pane);
+                let pane = pane_id;
                 let dispatched = ws
                     .dispatch_claude_for_task(&exec, root.path(), "main", pane, window, cx)
                     .unwrap();
@@ -119,33 +100,26 @@ async fn dispatch_while_switching_lanes(
         if release {
             assert!(result.is_err());
             assert!(!matches!(lifecycle, Lifecycle::Running { .. }));
-            assert_eq!(probe.as_mut().unwrap().drain().0, 0);
+            assert_eq!(probe.drain().0, 0);
         } else {
             assert!(result.is_ok(), "{result:?}");
             assert!(
                 matches!(lifecycle, Lifecycle::Running { .. }),
                 "{lifecycle:?}"
             );
-            if let Some(probe) = &mut probe {
-                assert_eq!(probe.drain().0, 1);
-            }
+            assert_eq!(probe.drain().0, 1);
         }
     });
 }
 
 #[gpui::test]
-async fn a_terminal_task_reaches_its_pane_after_switching_lanes(cx: &mut TestAppContext) {
-    dispatch_while_switching_lanes(TaskAgentSurface::Terminal, false, cx).await;
-}
-
-#[gpui::test]
 async fn a_chat_task_reaches_its_pane_after_switching_lanes(cx: &mut TestAppContext) {
-    dispatch_while_switching_lanes(TaskAgentSurface::AgentChat, false, cx).await;
+    dispatch_while_switching_lanes(false, cx).await;
 }
 
 #[gpui::test]
 async fn a_task_unbound_during_preparation_never_reaches_the_chat(cx: &mut TestAppContext) {
-    dispatch_while_switching_lanes(TaskAgentSurface::AgentChat, true, cx).await;
+    dispatch_while_switching_lanes(true, cx).await;
 }
 
 /// A started task is refused before `begin_task_start` returns; every other
@@ -238,6 +212,7 @@ fn an_existing_lane_start_answers_with_where_it_runs(cx: &mut TestAppContext) {
     let project = daruda_store::project::Project::from_path(root.path());
     let (window, workspace) =
         build_workspace_with(cx, &daruda_config::Config::default(), Some(project));
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
     let (id, lane, rx) = cx
         .update_window(window.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
@@ -304,10 +279,7 @@ fn an_existing_lane_start_answers_with_where_it_runs(cx: &mut TestAppContext) {
         Ok(Ok(TaskStarted {
             exec,
             worktree: lane,
-            on: super::StartedOn::Pane {
-                pane,
-                surface: TaskAgentSurface::Terminal,
-            },
+            on: super::StartedOn::Chat(pane),
         }))
     );
 }

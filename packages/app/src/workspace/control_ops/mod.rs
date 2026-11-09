@@ -315,7 +315,7 @@ impl Workspace {
             .finalize_create_lane(
                 plan,
                 project,
-                daruda_store::tasks::TaskAgentSurface::AgentChat,
+                crate::workspace::lane_ops::InitialPane::AgentChat,
                 agent.as_deref(),
                 window,
                 cx,
