@@ -418,6 +418,8 @@ bash ./scripts/lint-modal-fields.sh --self-test
 ./scripts/lint-daruda-path-literals.sh
 ./scripts/lint-env-literals.sh
 ./scripts/lint-env-literals.sh --self-test
+bash ./scripts/lint-real-git-tests.sh
+bash ./scripts/lint-real-git-tests.sh --self-test
 ./scripts/lint-file-size.sh
 ./scripts/lint-mark-dirty-direct-call.sh
 ./scripts/lint-fold-header.sh

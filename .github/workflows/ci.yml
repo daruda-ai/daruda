@@ -122,6 +122,11 @@ jobs:
           ./scripts/lint-env-literals.sh --self-test
           ./scripts/lint-env-literals.sh
 
+      - name: Lint — app tests reach git only through GitHost
+        run: |
+          bash ./scripts/lint-real-git-tests.sh --self-test
+          bash ./scripts/lint-real-git-tests.sh
+
       - name: Lint — no silent update swallowing
         run: ./scripts/lint-no-silent-update.sh
 
