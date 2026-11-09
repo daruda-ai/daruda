@@ -134,7 +134,7 @@ fn start_task(task: String, cx: &mut App) -> ControlOutcome {
     let pending = crate::control::exec::begin_task_start(
         task,
         crate::control::exec::Caller::Phone,
-        None,
+        crate::workspace::ChatOpen::preferred(daruda_store::tasks::StartedBy::Phone),
         cx,
     )?;
     if let Some(outcome) = pending.try_finish(cx) {

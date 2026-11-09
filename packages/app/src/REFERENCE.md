@@ -278,7 +278,10 @@ phone `/task` — runs in its agent's `delegated_mode`
 Claude `bypassPermissions` and Codex `agent-full-access`, else the agent's
 `default_mode`). A desktop Start or menu chat, the orchestrator's own pane
 and flows use `default_mode` or the flow's mode. The split is one function,
-`workspace::mode_for(StartedBy)`, which both the op and its card read. The
+`workspace::mode_for(StartedBy)`. A gated command computes it once, names it
+on its card and hands the work that `ChatOpen`; a task start takes it whole
+(`Workspace::begin_task_start_for`), and a start with no card builds
+`ChatOpen::preferred(StartedBy)` from the same function. The
 pane persists the result as `ModeChoice` (`FollowDefault`,
 `FollowDelegated`, `Picked`), set before its first connect; a live config
 edit moves a following session to the new mode, and a person's pick stands.

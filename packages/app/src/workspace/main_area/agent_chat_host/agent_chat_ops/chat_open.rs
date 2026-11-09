@@ -29,16 +29,6 @@ pub(crate) enum ChatAgent {
     Pinned(String),
 }
 
-impl ChatAgent {
-    /// `Some` is the agent an approval card named; `None` names none.
-    pub(crate) fn pinned_or_preferred(pinned: Option<String>) -> Self {
-        match pinned {
-            Some(id) => Self::Pinned(id),
-            None => Self::Preferred(None),
-        }
-    }
-}
-
 /// A pinned agent the catalog no longer holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct AgentUnavailable;
@@ -48,6 +38,16 @@ pub(crate) struct AgentUnavailable;
 pub(crate) struct ChatOpen {
     pub(crate) agent: ChatAgent,
     pub(crate) mode: ModeChoice,
+}
+
+impl ChatOpen {
+    /// A chat no card pinned an agent for, in the mode `started_by` gets.
+    pub(crate) fn preferred(started_by: StartedBy) -> Self {
+        Self {
+            agent: ChatAgent::Preferred(None),
+            mode: mode_for(started_by),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -133,10 +133,6 @@ mod tests {
         assert_eq!(
             resolve_chat_agent(&agents, Some("other"), &preferred(None)),
             Ok("other".into())
-        );
-        assert_eq!(
-            ChatAgent::pinned_or_preferred(None),
-            ChatAgent::Preferred(None)
         );
     }
 }

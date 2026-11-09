@@ -61,7 +61,15 @@ async fn delayed_announcement(kind: Announcement, cx: &mut TestAppContext) {
                 let task = created.await.unwrap();
                 if matches!(kind, Announcement::TaskOpen) {
                     let pending = cx.update(|cx| {
-                        exec::begin_task_start(task.clone(), exec::Caller::Phone, None, cx).unwrap()
+                        exec::begin_task_start(
+                            task.clone(),
+                            exec::Caller::Phone,
+                            crate::workspace::ChatOpen::preferred(
+                                daruda_store::tasks::StartedBy::Phone,
+                            ),
+                            cx,
+                        )
+                        .unwrap()
                     });
                     cx.run_until_parked();
                     assert!(cx.update(|cx| pending.try_finish(cx)).unwrap().is_ok());

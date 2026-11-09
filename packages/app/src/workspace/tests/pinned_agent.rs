@@ -125,8 +125,7 @@ fn an_existing_lane_task_whose_pinned_agent_left_opens_no_chat(cx: &mut TestAppC
                 let id = crate::runs::seed::task(spec, None, cx);
                 let panes = ws.all_pane_ids();
                 let submitter = crate::runs::FlowSubmitter::Orchestrator { solicited: false };
-                let answer =
-                    ws.begin_task_start_for(&id, submitter, Some(OTHER.into()), window, cx);
+                let answer = ws.begin_task_start_for(&id, submitter, pinned(), window, cx);
                 ws.reload_config(&without_other(), cx);
                 (id, answer, panes)
             })
@@ -182,7 +181,7 @@ async fn a_new_worktree_task_whose_pinned_agent_left_keeps_its_worktree(cx: &mut
                 let panes = ws.all_pane_ids();
                 let lanes = lane_count(ws);
                 let submitter = crate::runs::FlowSubmitter::Orchestrator { solicited: false };
-                let answer = ws.control_task_start(&id, submitter, Some(OTHER.into()), window, cx);
+                let answer = ws.control_task_start(&id, submitter, pinned(), window, cx);
                 ws.reload_config(&without_other(), cx);
                 (id, answer, panes, lanes)
             })

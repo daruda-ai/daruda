@@ -196,17 +196,17 @@ impl Workspace {
 
     /// Start `task`, answering on the returned channel. A refusal is on it
     /// before this returns, as with [`Self::begin_task_start_for`], which
-    /// `agent` is passed to.
+    /// `chat` is passed to.
     pub(crate) fn control_task_start(
         &mut self,
         task: &str,
         submitter: crate::runs::FlowSubmitter,
-        agent: Option<String>,
+        chat: crate::workspace::ChatOpen,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<ControlTaskStart> {
         let (tx, rx) = smol::channel::bounded(1);
-        let started = self.begin_task_start_for(task, submitter, agent, window, cx);
+        let started = self.begin_task_start_for(task, submitter, chat, window, cx);
         // SILENT-OK on each send below: a caller that stopped listening
         // has nothing left to tell.
         if let Ok(outcome) = started.try_recv() {

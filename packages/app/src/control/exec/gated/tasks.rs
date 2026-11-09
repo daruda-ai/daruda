@@ -45,14 +45,14 @@ pub(crate) fn task_flow_summary(
 }
 
 /// A start for the agent: approved already, so this only waits for it.
-/// `agent` is the one its card named.
+/// `chat` is the one its card named.
 pub(super) async fn start_task(
     task: String,
-    agent: String,
+    chat: crate::workspace::ChatOpen,
     caller: Caller,
     cx: &mut gpui::AsyncApp,
 ) -> ControlOutcome {
-    cx.update(|cx| begin_task_start(task, caller, Some(agent), cx))?
+    cx.update(|cx| begin_task_start(task, caller, chat, cx))?
         .finish(cx)
         .await
 }
@@ -68,12 +68,12 @@ pub(crate) struct PendingTaskStart {
 
 /// Start `task` and hand back what to wait on. A refusal taken before git
 /// runs is already in the answer — see [`PendingTaskStart::try_finish`].
-/// `agent` pins the chat's agent, as an approval card named it; `None`
-/// resolves it as a new pane would.
+/// `chat` is the chat a chat task opens: an approval card's pinned agent and
+/// mode, or for a start with no card, the agent a new pane would take.
 pub(crate) fn begin_task_start(
     task: String,
     caller: Caller,
-    agent: Option<String>,
+    chat: crate::workspace::ChatOpen,
     cx: &mut App,
 ) -> Result<PendingTaskStart, ControlError> {
     let title = task_title(&task, cx);
@@ -81,7 +81,7 @@ pub(crate) fn begin_task_start(
         let submitter = caller.flow_submitter();
         Ok((
             ws.uuid(),
-            ws.control_task_start(&task, submitter, agent.clone(), window, cx),
+            ws.control_task_start(&task, submitter, chat.clone(), window, cx),
         ))
     })?;
     Ok(PendingTaskStart {

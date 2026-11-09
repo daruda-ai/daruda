@@ -19,7 +19,7 @@ use gpui::{App, Context, Window};
 use crate::runs::{GlobalTasks, RunsHost, TaskCommitError};
 use crate::workspace::lane_ops::{CreateWorktreePlan, FinalizeError, LaneReveal};
 use crate::workspace::main_area::pane_tree::PaneId;
-use crate::workspace::{ChatAgent, ChatOpen, Workspace, mode_for};
+use crate::workspace::{ChatAgent, ChatOpen, Workspace};
 use daruda_chat::view::AgentSessionStatus;
 
 /// Why a task did not start.
@@ -261,19 +261,21 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<TaskStartOutcome> {
         let submitter = crate::runs::FlowSubmitter::of_task(started_by, false);
-        self.begin_task_start_for(task_id, submitter, None, window, cx)
+        let chat = ChatOpen::preferred(started_by);
+        self.begin_task_start_for(task_id, submitter, chat, window, cx)
     }
 
     /// [`Self::begin_task_start`] for `submitter`, whose solicitation a
     /// flow-backed task's run carries: a control start captured it before
     /// its card, and the run's questions follow it as the task's end does.
-    /// `agent` is the agent a control start's card named; `None` resolves it
-    /// as a new pane would. A flow's nodes name their own agents.
+    /// `chat` is the chat a chat task opens: a gated start's card pinned its
+    /// agent and named its mode. A flow-backed task does not read it; its
+    /// nodes name their own agents and modes.
     pub(crate) fn begin_task_start_for(
         &mut self,
         task_id: &str,
         submitter: crate::runs::FlowSubmitter,
-        agent: Option<String>,
+        chat: ChatOpen,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<TaskStartOutcome> {
@@ -288,7 +290,7 @@ impl Workspace {
         }
         if RunsHost::settled(cx) {
             let started =
-                self.start_task_into(task_id, submitter, agent, answer.clone(), window, cx);
+                self.start_task_into(task_id, submitter, chat, answer.clone(), window, cx);
             if let Err(e) = started {
                 self.finish_task_start(Err(e), None, &answer, cx);
             }
@@ -299,7 +301,7 @@ impl Workspace {
         cx.spawn_in(window, async move |ws, cx| {
             barrier.await;
             let entered = ws.update_in(cx, |ws, window, cx| {
-                let started = ws.start_task_into(&id, submitter, agent, answer.clone(), window, cx);
+                let started = ws.start_task_into(&id, submitter, chat, answer.clone(), window, cx);
                 if let Err(e) = started {
                     ws.finish_task_start(Err(e), None, &answer, cx);
                 }
@@ -342,7 +344,7 @@ impl Workspace {
         &mut self,
         task_id: &str,
         submitter: crate::runs::FlowSubmitter,
-        agent: Option<String>,
+        chat: ChatOpen,
         answer: Answer,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -365,14 +367,14 @@ impl Workspace {
                 // Resolved now, so a desktop start keeps the agent it was
                 // asked under; a pinned one is checked again as its pane opens.
                 let resolved = self
-                    .resolve_chat_agent(&ChatAgent::pinned_or_preferred(agent.clone()))
+                    .resolve_chat_agent(&chat.agent)
                     .map_err(|_| TaskStartError::AgentUnavailable)?;
-                let chat = ChatOpen {
-                    agent: match agent {
-                        Some(pinned) => ChatAgent::Pinned(pinned),
-                        None => ChatAgent::Preferred(Some(resolved.clone())),
+                let chat = match chat.agent {
+                    ChatAgent::Pinned(_) => chat,
+                    ChatAgent::Preferred(_) => ChatOpen {
+                        agent: ChatAgent::Preferred(Some(resolved.clone())),
+                        mode: chat.mode,
                     },
-                    mode: mode_for(started_by),
                 };
                 match &task.spec.run_in {
                     // An existing lane needs no git repo, lock or checkout.
