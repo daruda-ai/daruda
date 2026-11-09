@@ -2477,6 +2477,9 @@ control:
   # `location` is one of the approval_task_in_* phrases, `surface` one of
   # the approval_task_as_* ones.
   approval_task_create: "daruda wants to add the task %{title} to %{project}, to run %{location} %{surface}. Allow?"
+  # The same, quoting the task's prompt: its agents receive it once it
+  # starts. `prompt` is a one-line excerpt of it.
+  approval_task_create_prompt: "daruda wants to add the task %{title} to %{project}, to run %{location} %{surface} with the prompt %{prompt}. Allow?"
   approval_task_in_new_worktree: "in a new worktree"
   approval_task_in_new_branch: "in a new worktree on the branch %{branch}"
   approval_task_in_worktree: "in the worktree %{lane}"

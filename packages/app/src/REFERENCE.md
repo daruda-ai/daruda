@@ -304,9 +304,11 @@ uncounted; worktree and branch names are still quoted on a card the same way.
 A mode name the adapter advertised that daruda's seed does not match
 is shown beside the mode id. Phone `/task` rows quote titles the same way.
 A flow task's start card quotes the prompt too unless the flow was found to
-declare no input for it (`TaskFlowApproval::takes_prompt`); like a chat
-task's announcement, the phone `/task` notice names the flow and its modes,
-not the prompt, since its sender chose the start.
+declare no input for it (`TaskFlowApproval::takes_prompt`). The
+`task_create` card quotes the prompt by the same rule, since a phone `/task`
+start shows no card: like a chat task's announcement, its notice names the
+flow and its modes, not the prompt, which the person either approved on the
+card when the orchestrator created the task or typed on the desktop.
 A card for a chat already open names no mode, since that pane keeps its
 own.
 

@@ -84,13 +84,14 @@ impl Workspace {
         })
     }
 
-    /// How the approval for a new task names the flow it would run as.
+    /// How the approval for a new task names the flow it would run as, and
+    /// whether that flow would be given the task's prompt.
     pub(crate) fn control_new_task_flow_approval(
         &self,
         project: ProjectId,
         worktree: Option<LaneRef>,
         flow: &daruda_store::tasks::TaskFlow,
-    ) -> String {
+    ) -> super::TaskFlowApproval {
         let run_in = match worktree.and_then(|lane| self.lane_for(lane)) {
             Some(lane) => daruda_store::tasks::TaskRunIn::ExistingLane {
                 path: lane.path.clone(),
@@ -98,8 +99,13 @@ impl Workspace {
             None => daruda_store::tasks::TaskRunIn::NewWorktree,
         };
         match self.project_for(project) {
-            Some(p) => self.task_flow_approval(p.uuid, &run_in, None, flow).summary,
-            None => crate::surface::strings::control::approval_task_as_flow_unresolved(&flow.name),
+            Some(p) => self.task_flow_approval(p.uuid, &run_in, None, flow),
+            None => super::TaskFlowApproval {
+                summary: crate::surface::strings::control::approval_task_as_flow_unresolved(
+                    &flow.name,
+                ),
+                takes_prompt: true,
+            },
         }
     }
 

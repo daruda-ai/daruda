@@ -1730,6 +1730,7 @@ control:
   error_lane_create_busy: "그 저장소에 이미 워크트리를 만들고 있습니다. 잠시 후 다시 시도하세요."
   error_self_target_refused: "에이전트가 자기 자신에게 프롬프트를 보내는 셈이 됩니다."
   approval_task_create: "daruda가 %{project}에 작업 %{title}을(를) 추가하려고 합니다(%{location}, %{surface}). 허용할까요?"
+  approval_task_create_prompt: "daruda가 %{project}에 작업 %{title}을(를) 추가하려고 합니다(%{location}, %{surface}). 프롬프트: %{prompt}. 허용할까요?"
   approval_task_in_new_worktree: "새 워크트리"
   approval_task_in_new_branch: "새 워크트리, 브랜치 %{branch}"
   approval_task_in_worktree: "워크트리 %{lane}"

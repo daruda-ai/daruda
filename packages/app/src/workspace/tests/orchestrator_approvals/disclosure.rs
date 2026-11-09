@@ -360,6 +360,48 @@ fn a_task_create_card_names_no_mode(cx: &mut TestAppContext) {
     refuse(id, cx);
 }
 
+/// A task's prompt can reach its agent with no later card (a phone `/task`
+/// start), so the card that adds the task quotes it; a blank one is not.
+#[gpui::test]
+fn a_task_create_card_quotes_the_prompt_it_will_send(cx: &mut TestAppContext) {
+    let (fixture, lane, _claude) = host(cx);
+    let (project, location) = fixture.workspace.read_with(cx, |ws, _| {
+        (
+            ws.control_project_name(lane.project),
+            s::control::approval_task_in_worktree(ws.control_lane_name(lane.lane_ref())),
+        )
+    });
+    let title = s::control::approval_quoted("Login");
+    let surface = s::control::approval_task_as_chat();
+    for (prompt, expected) in [
+        (
+            "Fix the login\nand drop the users table",
+            s::control::approval_task_create_prompt(
+                &title,
+                &project,
+                &location,
+                &surface,
+                s::control::approval_quoted("Fix the login and drop the users table"),
+            ),
+        ),
+        (
+            " \n ",
+            s::control::approval_task_create(&title, &project, &location, &surface),
+        ),
+    ] {
+        let (id, _outcome, card) = ask(
+            GatedCommand::TaskCreate {
+                workspace: lane.workspace,
+                project: lane.project,
+                task: crate::test_support::new_task("Login", prompt, Some(lane)),
+            },
+            cx,
+        );
+        assert_eq!(card, expected);
+        refuse(id, cx);
+    }
+}
+
 /// The agent a card pinned is removed while it waits: approving opens no
 /// other agent in its place, and nothing is recorded, created or opened.
 #[gpui::test]

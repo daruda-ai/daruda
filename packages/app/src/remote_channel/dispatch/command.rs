@@ -128,8 +128,8 @@ fn render_reply(
 fn start_task(task: String, cx: &mut App) -> ControlOutcome {
     // A phone start asks no approval, so the notice says what a desktop
     // approval would have: the flow, and how freely its agents act. Not the
-    // prompt, as a chat task's announcement names only its mode: the person
-    // sending `/task` chose to start it.
+    // prompt: the person approved it on the `task_create` card when the
+    // orchestrator added the task, or typed it on the desktop.
     let flow = crate::control::exec::task_flow_summary(&task, cx).map(|flow| flow.summary);
     let pending = crate::control::exec::begin_task_start(
         task,

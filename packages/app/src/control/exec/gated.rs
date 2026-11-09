@@ -358,8 +358,20 @@ fn approval_summary(
                     };
                     Ok((ws.control_project_name(*project), location, flow))
                 })?;
-            let surface = flow.unwrap_or_else(s::control::approval_task_as_chat);
-            s::control::approval_task_create(quoted_title(&task.title), &name, &location, &surface)
+            // The prompt is what the task's agents will be told once it
+            // starts, which may be without another card (phone `/task`), so
+            // it is quoted now unless the flow takes no input for it.
+            let (surface, takes_prompt) = match flow {
+                Some(flow) => (flow.summary, flow.takes_prompt),
+                None => (s::control::approval_task_as_chat(), true),
+            };
+            let title = quoted_title(&task.title);
+            match takes_prompt.then(|| prompt_phrase(&task.prompt)).flatten() {
+                Some(prompt) => s::control::approval_task_create_prompt(
+                    title, &name, &location, &surface, prompt,
+                ),
+                None => s::control::approval_task_create(title, &name, &location, &surface),
+            }
         }
         // A flow given the prompt hands it to its agents, so its card quotes
         // it as a chat's does.
