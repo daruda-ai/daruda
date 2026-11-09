@@ -143,14 +143,11 @@ fn flatten(raw: &str) -> (String, usize) {
     (line, hidden)
 }
 
-/// Bidi controls (and the deprecated U+206A-206F format controls) reorder
-/// or reshape the text after them; zero-width spaces, invisible operators,
-/// interlinear annotation marks and the soft hyphen hide word breaks; tag
-/// characters and supplementary variation selectors carry data no one sees
-/// but an agent reads. ZWNJ/ZWJ pass: they hide nothing, and
-/// Persian, Indic and emoji sequences need them. Hangul fillers (U+115F,
-/// U+1160, U+3164, U+FFA0) and blank Braille (U+2800) pass as letters that
-/// show a gap at most and reorder nothing; dropping them corrupts real text.
+/// Bidi and deprecated format controls reorder text; zero-width, annotation
+/// and soft-hyphen marks hide breaks; tag characters and supplementary
+/// variation selectors carry data only an agent reads. ZWNJ/ZWJ (Persian,
+/// Indic, emoji), Hangul fillers and blank Braille pass: they show a gap at
+/// most, reorder nothing, and dropping them corrupts real text.
 fn hides_or_reorders(c: char) -> bool {
     matches!(
         c,
