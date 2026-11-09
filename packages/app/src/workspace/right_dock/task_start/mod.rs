@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
-use daruda_store::tasks::machine::StartFailure;
 use daruda_store::tasks::{
     ExecutionRef, Lifecycle, StartedBy, TaskEvent, TaskExecutionSource, TaskRecord, TaskRunIn,
 };
@@ -22,62 +21,9 @@ use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{ChatAgent, ChatOpen, Workspace};
 use daruda_chat::view::AgentSessionStatus;
 
-/// Why a task did not start.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum TaskStartError {
-    RemoteLane,
-    NotFound,
-    /// Only a Backlog task starts; any other has run already.
-    NotBacklog,
-    /// The task's project is not open in the window asked to start it.
-    ProjectNotOpen,
-    NoGitRepo,
-    /// Another worktree is being created in the same repository.
-    RepoBusy,
-    /// The existing lane the task runs in is gone or cannot be read.
-    LaneMissing {
-        path: PathBuf,
-    },
-    /// The lane is there, but no pane could be opened in it. Its own spawn
-    /// path reported why.
-    PaneUnavailable,
-    GitAddFailed {
-        detail: String,
-    },
-    FinalizeFailed {
-        detail: String,
-    },
-    /// The pane opened but the prompt never reached it. The task is now
-    /// `Error`; `detail` says why, for the control surface.
-    PromptUndelivered {
-        detail: String,
-    },
-    /// The window went away while the worktree was being created.
-    WindowClosed,
-    /// The task log did not record the start; nothing was spawned.
-    NotRecorded {
-        detail: String,
-    },
-    /// The agent a control start's card named was removed. Before the start
-    /// was recorded, nothing was; after, no pane opened under another agent.
-    AgentUnavailable,
-    /// `cause`, after git made the task's new worktree and it was
-    /// registered as `lane`: the worktree stays, so the caller can use it
-    /// and the orchestrator's budget counts it. Built by [`Self::kept_in`].
-    WorktreeKept {
-        lane: daruda_store::project::LaneRef,
-        cause: Box<TaskStartError>,
-    },
-    /// The task's flow is not one its lane can run by that name.
-    FlowMissing,
-    /// The task's flow could not run as the task describes it, or refused
-    /// to start. `shown` says why to the person; `detail` says it in the
-    /// fixed English a control answer carries.
-    FlowRefused {
-        shown: String,
-        detail: String,
-    },
-}
+mod error;
+
+pub(crate) use error::TaskStartError;
 
 /// Where an accepted start handed the task's prompt over.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,140 +56,6 @@ impl TaskStarted {
 pub(crate) type TaskStartOutcome = Result<TaskStarted, TaskStartError>;
 
 pub(super) type Answer = smol::channel::Sender<TaskStartOutcome>;
-
-impl TaskStartError {
-    /// This failure, found once the start's new worktree was registered as
-    /// `lane`.
-    pub(in crate::workspace) fn kept_in(self, lane: daruda_store::project::LaneRef) -> Self {
-        match self {
-            kept @ Self::WorktreeKept { .. } => kept,
-            cause => Self::WorktreeKept {
-                lane,
-                cause: Box::new(cause),
-            },
-        }
-    }
-
-    /// The cause the task log records for a start that failed after it was
-    /// requested; `None` where no run was recorded to fail. Only a recorded
-    /// start asks: a refusal taken before recording reaches
-    /// `finish_task_start` with no execution, so its cause is never read.
-    fn failure(&self) -> Option<StartFailure> {
-        Some(match self {
-            Self::NotFound => StartFailure::NotFound,
-            Self::NotBacklog | Self::NotRecorded { .. } | Self::RemoteLane => return None,
-            Self::WorktreeKept { cause, .. } => return cause.failure(),
-            Self::AgentUnavailable => StartFailure::AgentMissing,
-            Self::ProjectNotOpen => StartFailure::ProjectNotOpen,
-            Self::NoGitRepo => StartFailure::NoGitRepo,
-            Self::RepoBusy => StartFailure::RepoBusy,
-            Self::LaneMissing { .. } => StartFailure::LaneMissing,
-            Self::PaneUnavailable => StartFailure::PaneUnavailable,
-            Self::GitAddFailed { .. } => StartFailure::GitAddFailed,
-            Self::FinalizeFailed { .. } => StartFailure::FinalizeFailed,
-            Self::PromptUndelivered { .. } => StartFailure::PromptUndelivered,
-            Self::WindowClosed => StartFailure::WindowClosed,
-            Self::FlowMissing => StartFailure::FlowMissing,
-            Self::FlowRefused { .. } => StartFailure::FlowRefused,
-        })
-    }
-
-    /// The desktop toast for this failure; `None` where the UI already shows
-    /// it — a row in `Error`, a spawn failure its own path reported — or
-    /// where the Tasks UI cannot ask for it (an unknown or started task).
-    fn report(&self) -> Option<ErrorReport> {
-        use crate::surface::strings::error;
-        let (message, severity, dedup) = match self {
-            Self::RemoteLane => (
-                crate::surface::strings::task::error_remote_lane(),
-                ErrorSeverity::Info,
-                "tasks.remote_lane",
-            ),
-            Self::WorktreeKept { cause, .. } => return cause.report(),
-            Self::NotFound
-            | Self::NotBacklog
-            | Self::AgentUnavailable
-            | Self::PaneUnavailable
-            | Self::PromptUndelivered { .. }
-            | Self::WindowClosed => return None,
-            Self::NotRecorded { detail } => {
-                return Some(
-                    ErrorReport::new(error::tasks_save_failed())
-                        .severity(ErrorSeverity::Error)
-                        .message(detail.clone())
-                        .at(file!(), line!())
-                        .dedup("tasks.start.not_recorded")
-                        .build(),
-                );
-            }
-            Self::ProjectNotOpen => (
-                error::task_project_not_open(),
-                ErrorSeverity::Info,
-                "tasks.project_not_open",
-            ),
-            Self::NoGitRepo => (
-                error::tasks_require_git_repo(),
-                ErrorSeverity::Info,
-                "tasks.no_git_repo",
-            ),
-            Self::RepoBusy => (
-                error::lane_create_busy(),
-                ErrorSeverity::Info,
-                "lane.create.busy",
-            ),
-            Self::LaneMissing { path } => {
-                return Some(
-                    ErrorReport::new(error::task_lane_missing())
-                        .severity(ErrorSeverity::Error)
-                        .at(file!(), line!())
-                        .with_context(
-                            "path",
-                            daruda_store::observability::system_info::redact_home(path),
-                        )
-                        .dedup("task.start.lane_missing")
-                        .build(),
-                );
-            }
-            Self::FlowMissing => (
-                crate::surface::strings::task::error_start_flow_missing(),
-                ErrorSeverity::Warning,
-                "tasks.start.flow_missing",
-            ),
-            Self::FlowRefused { shown, .. } => {
-                return Some(
-                    ErrorReport::new(crate::surface::strings::task::error_start_flow_refused())
-                        .severity(ErrorSeverity::Warning)
-                        .message(shown.clone())
-                        .at(file!(), line!())
-                        .dedup("tasks.start.flow_refused")
-                        .build(),
-                );
-            }
-            Self::GitAddFailed { detail } | Self::FinalizeFailed { detail } => {
-                let message = if matches!(self, Self::GitAddFailed { .. }) {
-                    error::lane_create_failed()
-                } else {
-                    error::lane_finalize_failed()
-                };
-                return Some(
-                    ErrorReport::new(message)
-                        .severity(ErrorSeverity::Error)
-                        .at(file!(), line!())
-                        .with_context("detail", detail.clone())
-                        .dedup("lane.create")
-                        .build(),
-                );
-            }
-        };
-        Some(
-            ErrorReport::new(message)
-                .severity(severity)
-                .at(file!(), line!())
-                .dedup(dedup)
-                .build(),
-        )
-    }
-}
 
 impl Workspace {
     /// Start a Backlog task from the Tasks UI. The outcome is dropped: every
@@ -820,5 +632,5 @@ fn abandon_start_now(exec: &ExecutionRef, answer: &Answer, cx: &mut App) {
 }
 
 #[cfg(test)]
-#[path = "task_start_tests.rs"]
+#[path = "../task_start_tests.rs"]
 mod tests;
