@@ -2,8 +2,9 @@
 # Lint: app code reaches git only through the `GitHost` global.
 #
 # Test builds install a scripted `FakeGit` in `GitHost`, so an app test
-# spawns no `git` process unless something bypasses that global. Each
-# bypass below spawned real git from tests: a storm of them hung macOS.
+# spawns no `git` process unless something bypasses that global. The rule
+# covers all app code, production and tests alike: a production bypass is
+# reachable from tests too.
 #
 # Rule: outside packages/app/src/git_host.rs, no file under packages/app/src
 # may name `SystemGit` or build a `git` child (`command("git")`, bare or
@@ -73,9 +74,9 @@ scan() {
 }
 
 self_test() {
-    local temp
-    temp="$(mktemp -d)"
-    trap 'rm -rf "$temp"' RETURN
+    SELF_TEST_DIR="$(mktemp -d)"
+    trap 'rm -rf "$SELF_TEST_DIR"' EXIT
+    local temp="$SELF_TEST_DIR"
     mkdir -p "$temp/packages/app/src/nested"
     local violation="$temp/packages/app/src/nested/spawns.rs"
 
