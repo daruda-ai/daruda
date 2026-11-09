@@ -1,37 +1,6 @@
 //! A scripted [`Git`] for tests: answers come from registered [`FakeRepo`]s,
-//! writes are logged as [`GitCall`]s and never applied, and every call is
-//! counted per [`GitOp`] and handle path. No `git` process is spawned.
-//!
-//! A handle resolves the registered repository whose root contains its path
-//! (the deepest root wins); with none it answers as a plain directory, the
-//! way real git answers outside a repository. A test that wants "after the
-//! commit the tree is clean" says so with [`FakeGit::set_status`].
-//!
-//! | Method | Plain directory | Registered, field unset |
-//! |---|---|---|
-//! | `available` | `true` | `true` |
-//! | `probe` | `None` | `Some`; lanes = one main entry at the root |
-//! | `tracking` | exit 128 | `branch` from [`FakeRepo::branch`], no upstream |
-//! | `worktree_status` | exit 128 | clean (`Default`) |
-//! | `status_scoped`, `diff`, `diff_untracked`, `diff_range` | exit 128 | `""` |
-//! | `show_staged`, `show_at`, `head_message` | exit 128 | exit 128 (nothing there) |
-//! | `default_branch` | `None` | [`FakeRepo::branch`] |
-//! | `dirs` | exit 128 | `<root>/.git` for both |
-//! | `base_tips` | exit 128 as `BaseProblem::Git` | `NotFound(name)` |
-//! | `changes_since` | exit 128 as `BaseProblem::Git` | no files, no commits |
-//! | `init` | logged, `Ok` (registers nothing) | logged, `Ok` |
-//! | other writes | logged, then exit 128 | logged, `Ok` |
-//! | `merge` | logged, then exit 128 | logged, `Success` |
-//!
-//! `base_tips` applies the real one's rules in its order: no base name is
-//! always `NoBaseConfigured`, then a scripted base the current branch names is
-//! `OnBaseBranch`, even when the script is `UnbornHead` (HEAD is read last).
-//! Git-level failures of a base read come from [`FakeGit::fail`]; other
-//! [`BaseProblem`](super::base::BaseProblem)s are scripted through [`FakeRepo::base_tips`].
-//!
-//! Failures and read counts are keyed by the exact path a handle was opened
-//! on (or `init`/`probe` was given), not the repository it resolves to.
-//! `available` is counted under the empty path.
+//! writes are logged as [`GitCall`]s and never applied, and no `git` process
+//! is spawned. [`FakeGit`] lists what it answers by default.
 
 mod handle;
 mod repo;
@@ -188,14 +157,50 @@ impl FakeFailure {
 
 /// What real git says outside a repository.
 fn not_a_repo() -> GitError {
+    fatal("not a git repository (or any of the parent directories): .git".to_owned())
+}
+
+/// Git's fatal-error exit, the class every "nothing there" answer uses.
+fn fatal(message: String) -> GitError {
     GitError::Exit {
         code: Some(128),
-        stderr: "fatal: not a git repository (or any of the parent directories): .git".into(),
+        stderr: format!("fatal: {message}"),
     }
 }
 
 /// A scripted [`Git`]. Clones share one state, so a test keeps a clone to
 /// configure and inspect while the code under test holds `Arc<dyn Git>`.
+///
+/// A handle resolves the registered repository whose root contains its path
+/// (the deepest root wins); with none it answers as a plain directory, the
+/// way real git answers outside a repository. A test that wants "after the
+/// commit the tree is clean" says so with [`FakeGit::set_status`].
+///
+/// | Method | Plain directory | Registered, field unset |
+/// |---|---|---|
+/// | `available` | `true` | `true` |
+/// | `probe` | `None` | `Some`; lanes = one main entry at the root |
+/// | `tracking` | exit 128 | `branch` from [`FakeRepo::branch`], no upstream |
+/// | `worktree_status` | exit 128 | clean (`Default`) |
+/// | `status_scoped`, `diff`, `diff_untracked`, `diff_range` | exit 128 | `""` |
+/// | `show_staged`, `show_at`, `head_message` | exit 128 | exit 128 (nothing there) |
+/// | `default_branch` | `None` | [`FakeRepo::branch`] |
+/// | `dirs` | exit 128 | `<root>/.git` for both |
+/// | `base_tips` | exit 128 as `BaseProblem::Git` | `NotFound(name)` |
+/// | `changes_since` | exit 128 as `BaseProblem::Git` | no files, no commits |
+/// | `init` | logged, `Ok` (registers nothing) | logged, `Ok` |
+/// | other writes | logged, then exit 128 | logged, `Ok` |
+/// | `merge` | logged, then exit 128 | logged, `Success` |
+///
+/// `base_tips` applies the real one's rules in its order: no base name is
+/// always `NoBaseConfigured`, then a scripted base the current branch names is
+/// `OnBaseBranch`, even when the script is `UnbornHead` (HEAD is read last).
+/// Git-level failures of a base read come from [`FakeGit::fail`]; other
+/// [`BaseProblem`](super::base::BaseProblem)s are scripted through [`FakeRepo::base_tips`].
+///
+/// Failures and call counts are keyed by the exact path a handle was opened
+/// on (or `init`/`probe` was given), not the repository it resolves to.
+/// `available` is counted under the empty path.
 #[derive(Debug, Clone)]
 pub struct FakeGit {
     state: Arc<Mutex<FakeState>>,
@@ -244,12 +249,16 @@ impl FakeGit {
     }
 
     /// Model git being installed or missing. Missing git fails every command
-    /// with [`GitError::NotFound`] and probes nothing.
+    /// with [`GitError::NotFound`] and probes nothing. The real
+    /// `diff_untracked`, `show_staged`, and `show_at` skip the `PATH` check
+    /// and fail with `GitError::Spawn(NotFound)` instead.
     pub fn set_available(&self, available: bool) {
         self.lock().available = available;
     }
 
-    /// Fail every later `op` on a handle opened at exactly `path`.
+    /// Fail every later `op` on a handle opened at exactly `path`. `Open` and
+    /// `Available` cannot fail, so a failure aimed at them is ignored; one on
+    /// `default_branch` or `probe` makes it answer `None`.
     pub fn fail(&self, path: impl Into<PathBuf>, op: GitOp, failure: FakeFailure) {
         self.lock().failures.insert((path.into(), op), failure);
     }
@@ -259,7 +268,8 @@ impl FakeGit {
         self.lock().calls.clone()
     }
 
-    /// How many times `op` ran on a handle opened at exactly `path`.
+    /// How many times `op` was called on a handle opened at exactly `path`.
+    /// Every call counts, writes and failed calls included.
     pub fn reads(&self, op: GitOp, path: &Path) -> usize {
         self.lock()
             .counts

@@ -5,8 +5,8 @@
 //! module GPUI-free means it's unit-testable with a temp-directory
 //! fixture and also reusable from CLI tools later.
 //!
-//! Every function shells out to `git`. If `git` isn't installed the
-//! wrappers return `GitError::Spawn`; callers decide whether to fall
+//! Every function shells out to `git`. If `git` isn't on `PATH` the
+//! wrappers return `GitError::NotFound`; callers decide whether to fall
 //! back (e.g. treat as "not a repo") or surface the error in the
 //! status bar.
 //!

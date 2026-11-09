@@ -7,9 +7,10 @@ use super::super::base::{AgainstBase, BaseProblem, BaseTips};
 use super::super::{
     GitDirs, GitError, GitTracking, GitWorktreeInfo, GitWorktreeStatus, MergeOutcome, RepoProbe,
 };
+use super::fatal;
 
 /// A repository [`super::FakeGit`] answers for, built field by field. Unset
-/// fields answer as the module-level table describes.
+/// fields answer as [`super::FakeGit`]'s table describes.
 #[derive(Debug, Clone)]
 pub struct FakeRepo {
     root: PathBuf,
@@ -224,13 +225,5 @@ impl FakeRepo {
     }
     pub(super) fn merge_answer(&self) -> MergeOutcome {
         self.merge_outcome.clone().unwrap_or(MergeOutcome::Success)
-    }
-}
-
-/// Git's fatal-error exit, the class every "nothing there" answer above uses.
-fn fatal(message: String) -> GitError {
-    GitError::Exit {
-        code: Some(128),
-        stderr: format!("fatal: {message}"),
     }
 }

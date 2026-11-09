@@ -17,19 +17,13 @@ impl FakeHandle {
         Self { path, state }
     }
 
-    /// Count `op`, pass the gate, then answer from the enclosing repository.
     fn read<T>(
         &self,
         op: GitOp,
         answer: impl FnOnce(&FakeRepo) -> Result<T, GitError>,
     ) -> Result<T, GitError> {
         let mut state = lock(&self.state);
-        state.count(op, &self.path);
-        state.gate(op, &self.path)?;
-        state
-            .repo_for(&self.path)
-            .ok_or_else(not_a_repo)
-            .and_then(answer)
+        self.answer(&mut state, op, answer)
     }
 
     /// Like [`Self::read`], but the call is logged before anything can fail:
@@ -42,8 +36,22 @@ impl FakeHandle {
     ) -> Result<T, GitError> {
         let mut state = lock(&self.state);
         state.calls.push(call);
-        drop(state);
-        self.read(op, |repo| Ok(answer(repo)))
+        self.answer(&mut state, op, |repo| Ok(answer(repo)))
+    }
+
+    /// Count `op`, pass the gate, then answer from the enclosing repository.
+    fn answer<T>(
+        &self,
+        state: &mut FakeState,
+        op: GitOp,
+        answer: impl FnOnce(&FakeRepo) -> Result<T, GitError>,
+    ) -> Result<T, GitError> {
+        state.count(op, &self.path);
+        state.gate(op, &self.path)?;
+        state
+            .repo_for(&self.path)
+            .ok_or_else(not_a_repo)
+            .and_then(answer)
     }
 
     fn base_read<T>(
