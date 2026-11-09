@@ -2,50 +2,90 @@
 //! tracking refresh.
 
 use super::*;
-use crate::lane::git::base::BaseProblem;
+use crate::lane::git::base::{AgainstBase, BaseProblem, BaseTips, RangeFile, ResolvedBase};
+use crate::lane::git::{FakeGit, FakeRepo, GitTracking};
 use crate::workspace::main_area::file_view_pane::DiffSource;
 
-fn run_git(dir: &std::path::Path, args: &[&str]) {
-    let status = daruda_core::process::command("git")
-        .current_dir(dir)
-        .args(args)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed in {dir:?}");
-}
-
-/// A repo whose `feature` branch committed one file on top of `main`.
-fn feature_repo(temp: &std::path::Path) -> std::path::PathBuf {
-    let root = temp.join("work");
-    std::fs::create_dir_all(&root).unwrap();
-    run_git(&root, &["init", "-q", "-b", "main"]);
-    run_git(&root, &["config", "user.email", "daruda@test"]);
-    run_git(&root, &["config", "user.name", "daruda"]);
-    std::fs::write(root.join("base.txt"), b"base\n").unwrap();
-    run_git(&root, &["add", "base.txt"]);
-    run_git(&root, &["commit", "-qm", "initial"]);
-    run_git(&root, &["checkout", "-qb", "feature"]);
-    std::fs::write(root.join("feature.txt"), b"new\n").unwrap();
-    run_git(&root, &["add", "feature.txt"]);
-    run_git(&root, &["commit", "-qm", "feature"]);
-    root
-}
-
-#[gpui::test]
-fn a_tracking_refresh_reads_what_the_lane_committed_since_its_base(cx: &mut TestAppContext) {
-    if !crate::lane::git::has_git() {
-        return;
+/// What git answers for a `feature` lane that committed `feature.txt` on top
+/// of `main`. How real git computes this is `lane::git::base`'s own tests.
+fn feature_tips(head: &str) -> BaseTips {
+    BaseTips {
+        base: ResolvedBase {
+            label: "main".into(),
+            sha: "b0".into(),
+        },
+        head: head.into(),
     }
+}
+
+fn feature_repo(root: &std::path::Path, head: &str, files: Vec<RangeFile>) -> FakeRepo {
+    let commits = if files.is_empty() { 2 } else { 1 };
+    FakeRepo::at(root)
+        .branch("feature")
+        .default_branch("main")
+        .base_tips(Ok(feature_tips(head)))
+        .changes_since(Ok(AgainstBase {
+            tips: feature_tips(head),
+            merge_base: "b0".into(),
+            files,
+            commits,
+        }))
+        .diff_range(ADDED_DIFF)
+}
+
+fn added_feature_file() -> RangeFile {
+    RangeFile {
+        path: "feature.txt".into(),
+        old_path: None,
+        status: 'A',
+        added: 1,
+        removed: 0,
+    }
+}
+
+/// `git diff -M <merge-base> <head> -- feature.txt` for the added file.
+const ADDED_DIFF: &str = "diff --git a/feature.txt b/feature.txt
+new file mode 100644
+index 0000000..3e75765
+--- /dev/null
++++ b/feature.txt
+@@ -0,0 +1 @@
++new
+";
+
+/// A canonical temp root with `repo(root)` registered, and the workspace
+/// over it with the construction placeholder upgraded to a git lane.
+#[allow(clippy::type_complexity)]
+fn open_feature(
+    cx: &mut TestAppContext,
+    repo: impl FnOnce(&std::path::Path) -> FakeRepo,
+) -> (
+    gpui::WindowHandle<gpui_component::Root>,
+    gpui::Entity<Workspace>,
+    FakeGit,
+    std::path::PathBuf,
+    tempfile::TempDir,
+) {
     let temp = tempfile::tempdir().unwrap();
-    let root = feature_repo(temp.path());
-    let (_wh, ws) = build_workspace_with(
+    // Lanes carry canonical paths; the fake resolves handles by prefix.
+    let root = daruda_core::path::canonicalize(temp.path()).unwrap();
+    let fake = crate::test_support::fake_git(cx);
+    fake.add_repo(repo(&root));
+    let (wh, ws) = build_workspace_with(
         cx,
         &daruda_config::Config::default(),
         Some(daruda_store::project::Project::from_path(&root)),
     );
-    // The construction placeholder becomes a git lane here.
     ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
     cx.run_until_parked();
+    (wh, ws, fake, root, temp)
+}
+
+#[gpui::test]
+fn a_tracking_refresh_reads_what_the_lane_committed_since_its_base(cx: &mut TestAppContext) {
+    let (_wh, ws, fake, root, _temp) = open_feature(cx, |root| {
+        feature_repo(root, "h1", vec![added_feature_file()])
+    });
     let target = ws.update(cx, |ws, cx| {
         ws.projects[0].default_branch = Some("main".to_owned());
         let target = ws.active;
@@ -67,8 +107,15 @@ fn a_tracking_refresh_reads_what_the_lane_committed_since_its_base(cx: &mut Test
         assert_eq!(paths, vec![std::path::PathBuf::from("feature.txt")]);
     });
 
-    // On its own base branch a lane has nothing to compare.
-    run_git(&root, &["checkout", "-q", "main"]);
+    // On its own base branch a lane has nothing to compare: the refresh
+    // hands git the branch it just read.
+    fake.set_tracking(
+        &root,
+        GitTracking {
+            branch: Some("main".into()),
+            ..GitTracking::default()
+        },
+    );
     ws.update(cx, |ws, cx| ws.refresh_git_status(target, cx));
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
@@ -81,19 +128,9 @@ fn a_tracking_refresh_reads_what_the_lane_committed_since_its_base(cx: &mut Test
 
 #[gpui::test]
 fn a_lane_with_no_base_anywhere_says_so(cx: &mut TestAppContext) {
-    if !crate::lane::git::has_git() {
-        return;
-    }
-    let temp = tempfile::tempdir().unwrap();
-    let root = feature_repo(temp.path());
-    let (_wh, ws) = build_workspace_with(
-        cx,
-        &daruda_config::Config::default(),
-        Some(daruda_store::project::Project::from_path(&root)),
-    );
-    // The construction placeholder becomes a git lane here.
-    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
-    cx.run_until_parked();
+    let (_wh, ws, _fake, _root, _temp) = open_feature(cx, |root| {
+        feature_repo(root, "h1", vec![added_feature_file()])
+    });
     let target = ws.update(cx, |ws, cx| {
         // Reconcile detected `main`; a repo with no detectable default is
         // what this case is about.
@@ -113,21 +150,12 @@ fn a_lane_with_no_base_anywhere_says_so(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn an_against_base_row_opens_a_diff_pinned_to_its_commits(cx: &mut TestAppContext) {
-    if !crate::lane::git::has_git() {
-        return;
-    }
     use crate::workspace::main_area::file_view_pane::PaneFileContent;
     use crate::workspace::main_area::tab_ops::OpenIntent;
 
-    let temp = tempfile::tempdir().unwrap();
-    let root = feature_repo(temp.path());
-    let (wh, ws) = build_workspace_with(
-        cx,
-        &daruda_config::Config::default(),
-        Some(daruda_store::project::Project::from_path(&root)),
-    );
-    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
-    cx.run_until_parked();
+    let (wh, ws, fake, root, _temp) = open_feature(cx, |root| {
+        feature_repo(root, "h1", vec![added_feature_file()])
+    });
     let target = ws.update(cx, |ws, cx| {
         ws.projects[0].default_branch = Some("main".to_owned());
         let target = ws.active;
@@ -189,8 +217,7 @@ fn an_against_base_row_opens_a_diff_pinned_to_its_commits(cx: &mut TestAppContex
 
     // The lane moves on and the file leaves the range; the open pane still
     // shows its pinned diff, so it must keep offering it.
-    run_git(&root, &["rm", "-q", "feature.txt"]);
-    run_git(&root, &["commit", "-qm", "drop"]);
+    fake.add_repo(feature_repo(&root, "h2", Vec::new()));
     ws.update(cx, |ws, cx| ws.refresh_git_status(target, cx));
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
@@ -243,18 +270,9 @@ fn a_persisted_range_restores_ahead_of_the_staged_flag_and_round_trips() {
 /// drop its result, not bring the lane's state back into the map.
 #[gpui::test]
 fn a_git_read_that_outlives_its_lane_does_not_revive_its_state(cx: &mut TestAppContext) {
-    if !crate::lane::git::has_git() {
-        return;
-    }
-    let temp = tempfile::tempdir().unwrap();
-    let root = feature_repo(temp.path());
-    let (_wh, ws) = build_workspace_with(
-        cx,
-        &daruda_config::Config::default(),
-        Some(daruda_store::project::Project::from_path(&root)),
-    );
-    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
-    cx.run_until_parked();
+    let (_wh, ws, _fake, _root, _temp) = open_feature(cx, |root| {
+        feature_repo(root, "h1", vec![added_feature_file()])
+    });
     let target = ws.update(cx, |ws, cx| {
         let target = ws.active;
         ws.refresh_git_status(target, cx);

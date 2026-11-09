@@ -187,6 +187,37 @@ fn a_glob_named_file_discards_only_itself() {
     }
 }
 
+/// A file changed only in the index goes back to HEAD on its own; the other
+/// changes beside it are left as they were.
+#[test]
+fn discarding_one_staged_only_file_leaves_the_rest() {
+    if !daruda_project::lane::git::has_git() {
+        return;
+    }
+    let temp = repo();
+    let root = temp.path();
+    for name in ["staged.txt", "edited.txt"] {
+        std::fs::write(root.join(name), "base\n").unwrap();
+    }
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    std::fs::write(root.join("staged.txt"), "staged\n").unwrap();
+    git(root, &["add", "staged.txt"]);
+    std::fs::write(root.join("edited.txt"), "edited\n").unwrap();
+    std::fs::write(root.join("junk.txt"), "junk\n").unwrap();
+
+    discard(root, &[PathBuf::from("staged.txt")]).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("staged.txt")).unwrap(),
+        "base\n"
+    );
+    let left = git(root, &["status", "--porcelain"]);
+    assert!(!left.contains("staged.txt"), "{left}");
+    assert!(left.contains(" M edited.txt"), "{left}");
+    assert!(left.contains("?? junk.txt"), "{left}");
+}
+
 /// Both sides added the file; undoing the conflict keeps HEAD's copy.
 #[test]
 fn discarding_an_add_add_conflict_keeps_heads_copy() {

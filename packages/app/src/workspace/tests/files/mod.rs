@@ -28,6 +28,9 @@ fn build_workspace_with_temp_project(
     std::fs::write(root.join("b.txt"), b"world").unwrap();
     std::fs::create_dir(root.join("sub")).unwrap();
     std::fs::write(root.join("sub").join("nested.txt"), b"deep").unwrap();
+    // A plain directory: the fake answers it as git does outside a repository,
+    // without spawning git for each read.
+    crate::test_support::fake_git(cx);
 
     crate::test_support::init_gpui_component(cx);
     let config = daruda_config::Config::default();

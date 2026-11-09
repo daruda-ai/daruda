@@ -4,6 +4,7 @@ mod availability;
 mod git;
 mod git_command;
 mod git_discard;
+mod git_remote;
 mod history;
 mod lane;
 mod paths;

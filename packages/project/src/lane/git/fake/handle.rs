@@ -218,7 +218,7 @@ impl GitRepo for FakeHandle {
     fn base_tips(
         &self,
         base_name: Option<&str>,
-        _current_branch: Option<&str>,
+        current_branch: Option<&str>,
     ) -> Result<BaseTips, BaseProblem> {
         // The real check precedes any git process, so it holds even
         // without a repository or a git install.
@@ -226,7 +226,14 @@ impl GitRepo for FakeHandle {
             lock(&self.state).count(GitOp::BaseTips, &self.path);
             return Err(BaseProblem::NoBaseConfigured);
         };
-        self.base_read(GitOp::BaseTips, |repo| repo.base_tips_answer(name))
+        self.base_read(GitOp::BaseTips, |repo| {
+            let tips = repo.base_tips_answer(name)?;
+            // As in the real one: a resolved base the lane is checked out on.
+            if current_branch.is_some_and(|b| b == name || b == tips.base.label) {
+                return Err(BaseProblem::OnBaseBranch);
+            }
+            Ok(tips)
+        })
     }
     fn changes_since(&self, tips: BaseTips) -> Result<AgainstBase, BaseProblem> {
         self.base_read(GitOp::ChangesSince, |repo| repo.changes_since_answer(tips))

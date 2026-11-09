@@ -1,96 +1,109 @@
 //! The Git panel's discard: one file, or everything, back to HEAD — staged
-//! changes included, which the per-file action once refused.
+//! changes included, which the per-file action once refused. Driven against a
+//! scripted git; what a real discard leaves on disk is `daruda_project`'s
+//! `tests/it/git_discard.rs`.
 
 use super::*;
+use crate::lane::git::{FakeGit, FakeRepo, GitCall, GitFileEntry, GitOp, GitWorktreeStatus};
 
-fn git(dir: &std::path::Path, args: &[&str]) -> String {
-    let out = daruda_core::process::command("git")
-        .current_dir(dir)
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "git {args:?} failed in {dir:?}");
-    String::from_utf8_lossy(&out.stdout).into_owned()
+fn entry(x: char, y: char, path: &str) -> GitFileEntry {
+    GitFileEntry {
+        x,
+        y,
+        path: path.into(),
+        original_path: None,
+    }
 }
 
 /// `staged.txt` modified and staged only, `edited.txt` modified in the
 /// worktree, `junk.txt` untracked.
-fn changed_repo(temp: &std::path::Path) -> std::path::PathBuf {
-    let root = temp.join("work");
-    std::fs::create_dir_all(&root).unwrap();
-    git(&root, &["init", "-q", "-b", "main"]);
-    git(&root, &["config", "user.email", "daruda@test"]);
-    git(&root, &["config", "user.name", "daruda"]);
-    git(&root, &["config", "core.autocrlf", "false"]);
-    for name in ["staged.txt", "edited.txt"] {
-        std::fs::write(root.join(name), b"base\n").unwrap();
+fn changed() -> GitWorktreeStatus {
+    GitWorktreeStatus {
+        staged: vec![entry('M', ' ', "staged.txt")],
+        unstaged: vec![entry(' ', 'M', "edited.txt"), entry('?', '?', "junk.txt")],
+        ..GitWorktreeStatus::default()
     }
-    git(&root, &["add", "-A"]);
-    git(&root, &["commit", "-qm", "base"]);
-    std::fs::write(root.join("staged.txt"), b"staged\n").unwrap();
-    git(&root, &["add", "staged.txt"]);
-    std::fs::write(root.join("edited.txt"), b"edited\n").unwrap();
-    std::fs::write(root.join("junk.txt"), b"junk\n").unwrap();
-    root
 }
 
-fn open(
-    cx: &mut TestAppContext,
-    root: &std::path::Path,
-) -> (
-    gpui::WindowHandle<gpui_component::Root>,
-    gpui::Entity<Workspace>,
-    daruda_store::project::LaneRef,
-) {
-    let project = daruda_store::project::Project::from_path(root);
+struct Fixture {
+    wh: gpui::WindowHandle<gpui_component::Root>,
+    ws: gpui::Entity<Workspace>,
+    lane: daruda_store::project::LaneRef,
+    fake: FakeGit,
+    root: std::path::PathBuf,
+    _temp: tempfile::TempDir,
+}
+
+fn open(cx: &mut TestAppContext) -> Fixture {
+    let temp = tempfile::tempdir().unwrap();
+    // Lanes carry canonical paths; the fake resolves handles by prefix.
+    let root = daruda_core::path::canonicalize(temp.path()).unwrap();
+    let fake = crate::test_support::fake_git(cx);
+    fake.add_repo(FakeRepo::at(&root).branch("main").status(changed()));
+    let project = daruda_store::project::Project::from_path(&root);
     let (wh, ws) = build_workspace_with(cx, &daruda_config::Config::default(), Some(project));
     ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
     cx.run_until_parked();
-    let id = ws.read_with(cx, |ws, _| ws.active_ref());
-    ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
+    let lane = ws.read_with(cx, |ws, _| ws.active_ref());
+    ws.update(cx, |ws, cx| ws.refresh_git_status(lane, cx));
     cx.run_until_parked();
-    (wh, ws, id)
+    Fixture {
+        wh,
+        ws,
+        lane,
+        fake,
+        root,
+        _temp: temp,
+    }
 }
 
-fn porcelain(root: &std::path::Path) -> String {
-    git(root, &["status", "--porcelain"])
+fn discards(f: &Fixture) -> Vec<GitCall> {
+    f.fake
+        .calls()
+        .into_iter()
+        .filter(|call| matches!(call, GitCall::Discard { .. }))
+        .collect()
+}
+
+/// Discard `pinned` with git scripted to answer `after` from then on, and
+/// check the panel re-read the status rather than keep the one it showed.
+fn discard_and_settle(
+    f: &Fixture,
+    cx: &mut TestAppContext,
+    pinned: Vec<std::path::PathBuf>,
+    after: GitWorktreeStatus,
+) {
+    f.fake.set_status(&f.root, after.clone());
+    let reads = f.fake.reads(GitOp::WorktreeStatus, &f.root);
+    f.ws.update(cx, |ws, cx| ws.discard_changes(f.lane, pinned, cx));
+    cx.run_until_parked();
+    assert!(f.fake.reads(GitOp::WorktreeStatus, &f.root) > reads);
+    f.ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.lane_git_worktree(f.lane), Some(&after));
+    });
 }
 
 #[gpui::test]
 fn discarding_a_staged_only_file_puts_it_back_at_head(cx: &mut TestAppContext) {
-    if !crate::lane::git::has_git() {
-        return;
-    }
-    let temp = tempfile::tempdir().unwrap();
-    let root = changed_repo(temp.path());
-    let (_wh, ws, lane) = open(cx, &root);
-    ws.update(cx, |ws, cx| {
-        ws.discard_changes(lane, vec!["staged.txt".into()], cx)
-    });
-    cx.run_until_parked();
+    let f = open(cx);
+    let mut after = changed();
+    after.staged.clear();
+    discard_and_settle(&f, cx, vec!["staged.txt".into()], after);
     assert_eq!(
-        std::fs::read_to_string(root.join("staged.txt")).unwrap(),
-        "base\n"
-    );
-    let left = porcelain(&root);
-    assert!(!left.contains("staged.txt"), "{left}");
-    assert!(
-        left.contains("edited.txt"),
-        "only the one file is touched: {left}"
+        discards(&f),
+        vec![GitCall::Discard {
+            repo: f.root.clone(),
+            pinned: vec!["staged.txt".into()],
+        }],
+        "only the one file is asked for"
     );
 }
 
 #[gpui::test]
 fn discarding_everything_leaves_nothing_to_commit(cx: &mut TestAppContext) {
-    if !crate::lane::git::has_git() {
-        return;
-    }
-    let temp = tempfile::tempdir().unwrap();
-    let root = changed_repo(temp.path());
-    let (_wh, ws, lane) = open(cx, &root);
-    let every = ws.read_with(cx, |ws, _| {
-        let id = ws.active_ref();
-        let status = ws.lane_git_worktree(id).unwrap();
+    let f = open(cx);
+    let every = f.ws.read_with(cx, |ws, _| {
+        let status = ws.lane_git_worktree(f.lane).unwrap();
         status
             .staged
             .iter()
@@ -98,29 +111,27 @@ fn discarding_everything_leaves_nothing_to_commit(cx: &mut TestAppContext) {
             .map(|e| e.path.clone())
             .collect::<Vec<_>>()
     });
-    ws.update(cx, |ws, cx| ws.discard_changes(lane, every, cx));
-    cx.run_until_parked();
-    assert_eq!(porcelain(&root), "");
-    assert!(!root.join("junk.txt").exists());
+    discard_and_settle(&f, cx, every, GitWorktreeStatus::default());
+    assert_eq!(
+        discards(&f),
+        vec![GitCall::Discard {
+            repo: f.root.clone(),
+            pinned: vec!["staged.txt".into(), "edited.txt".into(), "junk.txt".into()],
+        }]
+    );
 }
 
 #[gpui::test]
 fn discard_all_asks_before_touching_anything(cx: &mut TestAppContext) {
-    if !crate::lane::git::has_git() {
-        return;
-    }
-    let temp = tempfile::tempdir().unwrap();
-    let root = changed_repo(temp.path());
-    let (wh, ws, lane) = open(cx, &root);
-    let before = porcelain(&root);
-    cx.update_window(wh.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| ws.on_discard_all(lane, window, cx));
+    let f = open(cx);
+    cx.update_window(f.wh.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| ws.on_discard_all(f.lane, window, cx));
     })
     .unwrap();
     cx.run_until_parked();
     assert_eq!(
-        porcelain(&root),
-        before,
+        discards(&f),
+        Vec::new(),
         "nothing happens before the confirm"
     );
 }

@@ -232,3 +232,31 @@ fn missing_git_fails_every_command_with_not_found() {
     assert!(matches!(repo.commit("m"), Err(GitError::NotFound)));
     assert_eq!(repo.default_branch(), None);
 }
+
+#[test]
+fn a_lane_on_its_scripted_base_branch_has_no_comparison() {
+    let tips = BaseTips {
+        base: ResolvedBase {
+            label: "origin/main".into(),
+            sha: "b".into(),
+        },
+        head: "h".into(),
+    };
+    let git = FakeGit::new().with(FakeRepo::at(ROOT).base_tips(Ok(tips.clone())));
+    let repo = git.open(Path::new(ROOT));
+    for current in ["main", "origin/main"] {
+        assert_eq!(
+            repo.base_tips(Some("main"), Some(current)),
+            Err(BaseProblem::OnBaseBranch),
+            "{current}"
+        );
+    }
+    assert_eq!(repo.base_tips(Some("main"), Some("feature")), Ok(tips));
+    // A base that resolves to nothing is reported before the branch check.
+    let git = FakeGit::new().with(FakeRepo::at(ROOT));
+    assert_eq!(
+        git.open(Path::new(ROOT))
+            .base_tips(Some("main"), Some("main")),
+        Err(BaseProblem::NotFound("main".into()))
+    );
+}

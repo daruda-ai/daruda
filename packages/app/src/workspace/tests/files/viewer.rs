@@ -1,4 +1,5 @@
 use super::*;
+use crate::lane::git::{FakeRepo, GitFileEntry, GitWorktreeStatus};
 
 #[gpui::test]
 async fn raw_file_load_feeds_editor_text(cx: &mut TestAppContext) {
@@ -49,13 +50,51 @@ async fn raw_file_load_feeds_editor_text(cx: &mut TestAppContext) {
     });
 }
 
-fn run_git(dir: &std::path::Path, args: &[&str]) {
-    let status = daruda_core::process::command("git")
-        .current_dir(dir)
-        .args(args)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed in {dir:?}");
+/// A canonical temp root (the form lanes carry, which the fake resolves
+/// handles by) registered as a repository on `main`.
+fn fake_repo_root(
+    cx: &mut TestAppContext,
+    repo: impl FnOnce(FakeRepo) -> FakeRepo,
+) -> (
+    crate::lane::git::FakeGit,
+    std::path::PathBuf,
+    tempfile::TempDir,
+) {
+    let temp = tempfile::tempdir().unwrap();
+    let root = daruda_core::path::canonicalize(temp.path()).unwrap();
+    let fake = crate::test_support::fake_git(cx);
+    fake.add_repo(repo(FakeRepo::at(&root).branch("main")));
+    (fake, root, temp)
+}
+
+/// What `git diff f.txt` prints once `line 5` of a ten-line `f.txt` changes;
+/// the relative path a git row opens with reads it from git, not in-app.
+const LINE_5_DIFF: &str = "diff --git a/f.txt b/f.txt
+index fa2da6e..b258919 100644
+--- a/f.txt
++++ b/f.txt
+@@ -2,7 +2,7 @@ line 1
+ line 2
+ line 3
+ line 4
+-line 5
++line 5 CHANGED
+ line 6
+ line 7
+ line 8
+";
+
+/// `f.txt` modified on disk, `path` relative, as `git status` reports it.
+fn modified(path: &str) -> GitWorktreeStatus {
+    GitWorktreeStatus {
+        unstaged: vec![GitFileEntry {
+            x: ' ',
+            y: 'M',
+            path: path.into(),
+            original_path: None,
+        }],
+        ..GitWorktreeStatus::default()
+    }
 }
 
 /// Whether `text` has a row equal to `line` (trimmed) — a full-line match,
@@ -73,21 +112,13 @@ async fn toggle_hide_unchanged_swaps_diff_context_in_the_toggled_pane(cx: &mut T
     // focused-pane-only `toggle_hide_unchanged`) — assert the editor text
     // actually swaps between the context-included and context-stripped row
     // sets on each toggle, and flips back cleanly.
-    if !crate::lane::git::has_git() {
-        return;
-    }
-
-    let temp = tempfile::tempdir().unwrap();
-    let root = temp.path().to_path_buf();
-    run_git(&root, &["init"]);
-    run_git(&root, &["config", "user.email", "daruda@test"]);
-    run_git(&root, &["config", "user.name", "daruda"]);
     let lines: Vec<String> = (1..=10).map(|n| format!("line {n}")).collect();
-    std::fs::write(root.join("f.txt"), lines.join("\n") + "\n").unwrap();
-    run_git(&root, &["add", "f.txt"]);
-    run_git(&root, &["commit", "-m", "initial"]);
+    let (_fake, root, _temp) = fake_repo_root(cx, |repo| {
+        repo.diff("f.txt", false, LINE_5_DIFF)
+            .status(modified("f.txt"))
+    });
 
-    // Modify one line in the middle so `git diff` produces a single hunk
+    // Modify one line in the middle so the diff produces a single hunk
     // with unchanged context lines on both sides of the change.
     let mut modified = lines.clone();
     modified[4] = "line 5 CHANGED".to_string();
@@ -219,20 +250,12 @@ async fn toggle_hide_unchanged_for_pane_targets_the_clicked_pane_not_the_focused
     // pane silently hid context on whichever pane happened to be focused
     // instead. Split a Changes-mode pane away from focus, toggle it by id,
     // and assert only that pane changed.
-    if !crate::lane::git::has_git() {
-        return;
-    }
-
-    let temp = tempfile::tempdir().unwrap();
-    let root = temp.path().to_path_buf();
-    run_git(&root, &["init"]);
-    run_git(&root, &["config", "user.email", "daruda@test"]);
-    run_git(&root, &["config", "user.name", "daruda"]);
     let lines: Vec<String> = (1..=10).map(|n| format!("line {n}")).collect();
-    std::fs::write(root.join("f.txt"), lines.join("\n") + "\n").unwrap();
+    let (_fake, root, _temp) = fake_repo_root(cx, |repo| {
+        repo.diff("f.txt", false, LINE_5_DIFF)
+            .status(modified("f.txt"))
+    });
     std::fs::write(root.join("g.txt"), b"unrelated file\n").unwrap();
-    run_git(&root, &["add", "f.txt", "g.txt"]);
-    run_git(&root, &["commit", "-m", "initial"]);
 
     let mut modified = lines.clone();
     modified[4] = "line 5 CHANGED".to_string();
@@ -384,7 +407,7 @@ async fn opening_into_a_missing_lane_opens_nothing(cx: &mut TestAppContext) {
     });
 }
 
-/// A workspace over a real git repo holding one committed `f.txt`, with the
+/// A workspace over a scripted git repo holding one committed `f.txt`, with the
 /// placeholder lane already upgraded to a Git one (`refresh_git_status` is a
 /// no-op otherwise). Returns the repo root plus `f.txt`'s absolute path joined
 /// onto the *lane* root — the base every opener uses. On macOS the raw tempdir
@@ -397,18 +420,12 @@ fn build_committed_git_workspace(
     gpui::WindowHandle<Workspace>,
     gpui::Entity<Workspace>,
     daruda_store::project::LaneRef,
-    std::path::PathBuf,
+    crate::lane::git::FakeGit,
     std::path::PathBuf,
     tempfile::TempDir,
 ) {
-    let temp = tempfile::tempdir().unwrap();
-    let root = temp.path().to_path_buf();
-    run_git(&root, &["init"]);
-    run_git(&root, &["config", "user.email", "daruda@test"]);
-    run_git(&root, &["config", "user.name", "daruda"]);
+    let (fake, root, temp) = fake_repo_root(cx, |repo| repo);
     std::fs::write(root.join("f.txt"), b"one\n").unwrap();
-    run_git(&root, &["add", "f.txt"]);
-    run_git(&root, &["commit", "-m", "initial"]);
 
     crate::test_support::init_gpui_component(cx);
     let config = daruda_config::Config::default();
@@ -430,7 +447,7 @@ fn build_committed_git_workspace(
         .read_with(cx, |ws, _| ws.lane_for(id).map(|l| l.path.clone()))
         .expect("lane exists")
         .join("f.txt");
-    (wh, ws, id, root, abs, temp)
+    (wh, ws, id, fake, abs, temp)
 }
 
 /// `live_status` is written once at open time and is deliberately not
@@ -438,14 +455,11 @@ fn build_committed_git_workspace(
 /// across an edit or a commit would otherwise keep whatever the opening click
 /// saw — the toolbar's mode strip reads it to decide whether to offer Changes
 /// at all. `refresh_git_status` re-derives it via `sync_file_pane_statuses`;
-/// this drives the real fetch and pins both directions.
+/// this drives the status fetch and pins both directions.
 #[gpui::test]
 async fn git_status_refresh_re_derives_open_file_panes_status(cx: &mut TestAppContext) {
-    if !crate::lane::git::has_git() {
-        return;
-    }
-
-    let (wh, ws, id, root, abs, _temp) = build_committed_git_workspace(cx);
+    let (wh, ws, id, fake, abs, _temp) = build_committed_git_workspace(cx);
+    let root = abs.parent().unwrap().to_path_buf();
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
             ws.open_files_entry(
@@ -469,8 +483,9 @@ async fn git_status_refresh_re_derives_open_file_panes_status(cx: &mut TestAppCo
         );
     });
 
-    // Dirty the file, then let a real status fetch land on the open pane.
+    // Dirty the file, then let a status fetch land on the open pane.
     std::fs::write(&abs, b"two\n").unwrap();
+    fake.set_status(&root, modified("f.txt"));
     ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
@@ -485,8 +500,7 @@ async fn git_status_refresh_re_derives_open_file_panes_status(cx: &mut TestAppCo
 
     // Commit it: the pane must drop the badge too, so the toolbar stops
     // offering a Changes view of a file that no longer has one.
-    run_git(&root, &["add", "f.txt"]);
-    run_git(&root, &["commit", "-m", "second"]);
+    fake.set_status(&root, GitWorktreeStatus::default());
     ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
     cx.run_until_parked();
     ws.read_with(cx, |ws, _| {
@@ -562,12 +576,10 @@ async fn opening_a_changed_file_without_git_context_still_resolves_its_status(
 ) {
     use crate::workspace::main_area::file_view_pane::FileViewMode;
 
-    if !crate::lane::git::has_git() {
-        return;
-    }
-    let (wh, ws, id, _root, abs, _temp) = build_committed_git_workspace(cx);
+    let (wh, ws, id, fake, abs, _temp) = build_committed_git_workspace(cx);
 
     std::fs::write(&abs, b"two\n").unwrap();
+    fake.set_status(abs.parent().unwrap(), modified("f.txt"));
     ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
     cx.run_until_parked();
 
