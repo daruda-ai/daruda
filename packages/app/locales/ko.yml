@@ -1679,6 +1679,7 @@ control:
   approval_agent: "%{agent} (요청한 권한 모드: %{mode})"
   approval_prompt_elided: " … (%{n}자 생략) … "
   approval_hidden_chars: " (숨은 문자 %{n}개)"
+  approval_mode_adapter_named: "%{name} (%{id})"
   approval_mode_agent_default: "에이전트 기본값"
   approval_allow: "허용"
   approval_approved_desktop: "데스크톱에서 승인됨"

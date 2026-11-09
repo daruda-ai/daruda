@@ -2411,6 +2411,9 @@ control:
   # Follows a quoted prompt or title: `n` invisible characters the agent
   # receives but the card cannot show.
   approval_hidden_chars: " (+%{n} hidden characters)"
+  # An adapter's own name for a mode daruda names differently or not at
+  # all, with the mode's id beside it so a name cannot pass for another mode.
+  approval_mode_adapter_named: "%{name} (%{id})"
   approval_mode_agent_default: "the agent's default"
   approval_allow: "Allow"
   approval_approved_desktop: "Approved on desktop"
