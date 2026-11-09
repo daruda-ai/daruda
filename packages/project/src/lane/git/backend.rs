@@ -30,19 +30,30 @@ pub trait GitRepo: Send + Sync {
     fn tracking(&self) -> Result<GitTracking, GitError>;
     fn worktree_status(&self) -> Result<GitWorktreeStatus, GitError>;
     fn status_scoped(&self) -> Result<String, GitError>;
+    /// `path` is absolute or relative to [`path`](Self::path); `staged`
+    /// selects index-vs-HEAD (`--cached`) instead of worktree-vs-index.
     fn diff(&self, path: &Path, staged: bool) -> Result<String, GitError>;
+    /// `path` is absolute or relative to [`path`](Self::path).
     fn diff_untracked(&self, path: &Path) -> Result<String, GitError>;
+    /// `path` is relative to the worktree root, whatever the handle path.
     fn show_staged(&self, path: &Path) -> Result<Vec<u8>, GitError>;
     fn head_message(&self) -> Result<String, GitError>;
     fn default_branch(&self) -> Option<String>;
     fn dirs(&self) -> Result<GitDirs, GitError>;
 
+    /// `path` is absolute or relative to [`path`](Self::path).
     fn add(&self, path: &Path) -> Result<(), GitError>;
+    /// Each path is absolute or relative to [`path`](Self::path).
     fn add_paths(&self, paths: &[PathBuf]) -> Result<(), GitError>;
     fn add_all(&self) -> Result<(), GitError>;
+    /// As [`restore_staged_paths`](Self::restore_staged_paths) for one path.
     fn restore_staged(&self, path: &Path) -> Result<(), GitError>;
+    /// Paths in `git status` form, relative to the worktree root: a rename's
+    /// source is found by comparing against that form.
     fn restore_staged_paths(&self, paths: &[PathBuf]) -> Result<(), GitError>;
     fn restore_all_staged(&self) -> Result<(), GitError>;
+    /// `pinned` paths are relative to the worktree root, as `git status`
+    /// reports them; the handle must be rooted at that worktree root.
     fn discard(&self, pinned: &[PathBuf]) -> Result<(), GitError>;
 
     fn commit(&self, message: &str) -> Result<(), GitError>;
@@ -51,12 +62,15 @@ pub trait GitRepo: Send + Sync {
     fn fetch(&self) -> Result<(), GitError>;
     fn pull(&self) -> Result<(), GitError>;
 
+    /// `new_path` is absolute or relative to [`path`](Self::path).
     fn add_lane(
         &self,
         new_path: &Path,
         new_branch: Option<&str>,
         base: Option<&str>,
     ) -> Result<(), GitError>;
+    /// `path` is the lane's absolute worktree directory: an already-removed
+    /// lane is recognized by checking it on the filesystem.
     fn remove_lane(&self, path: &Path, force: bool) -> Result<(), GitError>;
     fn delete_branch(&self, branch: &str) -> Result<(), GitError>;
     fn merge(&self, source_branch: &str) -> Result<MergeOutcome, GitError>;
@@ -69,6 +83,7 @@ pub trait GitRepo: Send + Sync {
     ) -> Result<BaseTips, BaseProblem>;
     fn changes_since(&self, tips: BaseTips) -> Result<AgainstBase, BaseProblem>;
     fn diff_range(&self, from: &str, to: &str, paths: &[&Path]) -> Result<String, GitError>;
+    /// `repo_rel` is relative to the worktree root, whatever the handle path.
     fn show_at(&self, rev: &str, repo_rel: &Path) -> Result<Vec<u8>, GitError>;
 }
 
