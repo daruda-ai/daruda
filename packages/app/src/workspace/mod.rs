@@ -39,6 +39,7 @@ pub(crate) use control_task_ops::ControlTaskStart;
 pub(crate) use main_area::agent_chat_host::agent_chat_ops::chat_open::{
     ChatAgent, ChatOpen, mode_for,
 };
+pub(crate) use task_flow::TaskFlowApproval;
 mod close_guard_ops;
 pub(crate) mod delete_project_modal;
 pub(crate) mod dialog_helpers;

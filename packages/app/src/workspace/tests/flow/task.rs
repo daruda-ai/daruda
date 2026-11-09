@@ -245,10 +245,16 @@ async fn an_invalid_flow_leaves_the_task_in_backlog(cx: &mut TestAppContext) {
 
 /// An approval always says how freely the flow acts: a flow of commands has
 /// no agents to give a permission mode, and one that is not found says so.
+/// It quotes the prompt unless the flow was found to take none.
 #[gpui::test]
 fn a_flow_tasks_approval_names_what_it_runs(cx: &mut TestAppContext) {
     use crate::surface::strings::control as s;
-    let (lane, ws, _path, _wh) = workspace_with_a_flow(cx, FLOW);
+    let (lane, ws, path, _wh) = workspace_with_a_flow(cx, FLOW);
+    std::fs::write(
+        path.with_file_name("plain.yaml"),
+        "version: 1\nnodes:\n  - id: a\n    kind: command\n    run: \"exit 0\"\n",
+    )
+    .expect("write flow");
     ws.read_with(cx, |ws, _| {
         let run_in = TaskRunIn::ExistingLane {
             path: lane.path().to_path_buf(),
@@ -260,13 +266,22 @@ fn a_flow_tasks_approval_names_what_it_runs(cx: &mut TestAppContext) {
         };
         let project = ws.projects[0].uuid;
         assert_eq!(
-            ws.task_flow_approval(project, &run_in, None, &flow("ship")),
+            ws.task_flow_approval(project, &run_in, None, &flow("ship"))
+                .summary,
             s::approval_task_as_flow("ship.yaml", s::approval_flow_no_agents())
         );
         assert_eq!(
-            ws.task_flow_approval(project, &run_in, None, &flow("gone")),
+            ws.task_flow_approval(project, &run_in, None, &flow("gone"))
+                .summary,
             s::approval_task_as_flow_unresolved("gone")
         );
+        let takes_prompt = |name| {
+            ws.task_flow_approval(project, &run_in, None, &flow(name))
+                .takes_prompt
+        };
+        assert!(takes_prompt("ship"), "the flow declares an input for it");
+        assert!(takes_prompt("gone"), "found later, it would still take it");
+        assert!(!takes_prompt("plain"), "the flow declares no input");
     });
 }
 

@@ -51,6 +51,17 @@ impl std::fmt::Display for TaskFlowProblem {
     }
 }
 
+/// How an approval names a task's flow, and whether the flow is given the
+/// task's prompt — which the card must then quote, since the flow's agents
+/// receive it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TaskFlowApproval {
+    pub summary: String,
+    /// True unless the flow was found and declares no input for the prompt:
+    /// a flow found only once the card is answered still takes it.
+    pub takes_prompt: bool,
+}
+
 /// A task's flow, found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) struct TaskFlowTarget {
@@ -128,10 +139,13 @@ impl Workspace {
         run_in: &TaskRunIn,
         base: Option<&Path>,
         flow: &TaskFlow,
-    ) -> String {
+    ) -> TaskFlowApproval {
         use crate::surface::strings::control as s;
         let Ok(target) = self.resolve_task_flow(project, run_in, base, flow) else {
-            return s::approval_task_as_flow_unresolved(&flow.name);
+            return TaskFlowApproval {
+                summary: s::approval_task_as_flow_unresolved(&flow.name),
+                takes_prompt: true,
+            };
         };
         let modes = flow_permission_modes(&target.path, target.profile.as_deref());
         // A flow of commands alone has no agent to give a mode to.
@@ -140,9 +154,13 @@ impl Workspace {
         } else {
             s::approval_flow_modes(modes.join(", "))
         };
-        match &target.profile {
+        let summary = match &target.profile {
             Some(profile) => s::approval_task_as_flow_profile(&target.label, profile, &modes),
             None => s::approval_task_as_flow(&target.label, &modes),
+        };
+        TaskFlowApproval {
+            summary,
+            takes_prompt: target.input.is_some(),
         }
     }
 

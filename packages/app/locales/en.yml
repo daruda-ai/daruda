@@ -2489,6 +2489,9 @@ control:
   approval_task_start_no_prompt: "daruda wants to start the task “%{title}” with %{agent}. Allow?"
   # `flow` is one of the approval_task_as_flow phrases.
   approval_task_start_flow: "daruda wants to start the task “%{title}” %{flow}. Allow?"
+  # A flow given the task's prompt as an input; `prompt` is a one-line
+  # excerpt of it, as its agents receive it.
+  approval_task_start_flow_prompt: "daruda wants to start the task “%{title}” %{flow}, giving it the prompt “%{prompt}”. Allow?"
   # The task's chat is already open, and keeps its own mode.
   approval_task_open: "daruda wants to open the chat of the task “%{title}”. Allow?"
   # The task's chat reopens in a new pane; `agent` is approval_agent.

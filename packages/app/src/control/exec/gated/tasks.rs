@@ -24,7 +24,10 @@ pub(super) fn task_title(task: &str, cx: &App) -> String {
 
 /// How an approval names the flow a Backlog `task` runs as, if it runs as
 /// one: in the window that holds its project, where Start will find it.
-pub(crate) fn task_flow_summary(task: &str, cx: &mut App) -> Option<String> {
+pub(crate) fn task_flow_summary(
+    task: &str,
+    cx: &mut App,
+) -> Option<crate::workspace::TaskFlowApproval> {
     let record = cx.global::<GlobalTasks>().get(task)?.clone();
     let name = record.spec.flow.as_ref()?.name.clone();
     let found = in_task_window(task, cx, |ws, _, _| {
@@ -34,7 +37,10 @@ pub(crate) fn task_flow_summary(task: &str, cx: &mut App) -> Option<String> {
         found
             .ok()
             .flatten()
-            .unwrap_or_else(|| s::control::approval_task_as_flow_unresolved(&name)),
+            .unwrap_or_else(|| crate::workspace::TaskFlowApproval {
+                summary: s::control::approval_task_as_flow_unresolved(&name),
+                takes_prompt: true,
+            }),
     )
 }
 

@@ -296,6 +296,10 @@ start and end around the count it leaves out, and the invisible characters
 dropped (bidi, zero-width, tag) are counted, since the agent still receives
 them. A mode name the adapter advertised that daruda's seed does not match
 is shown beside the mode id. Phone `/task` rows quote titles the same way.
+A flow task's start card quotes the prompt too unless the flow was found to
+declare no input for it (`TaskFlowApproval::takes_prompt`); like a chat
+task's announcement, the phone `/task` notice names the flow and its modes,
+not the prompt, since its sender chose the start.
 A card for a chat already open names no mode, since that pane keeps its
 own.
 

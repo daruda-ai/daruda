@@ -98,17 +98,17 @@ impl Workspace {
             None => daruda_store::tasks::TaskRunIn::NewWorktree,
         };
         match self.project_for(project) {
-            Some(p) => self.task_flow_approval(p.uuid, &run_in, None, flow),
+            Some(p) => self.task_flow_approval(p.uuid, &run_in, None, flow).summary,
             None => crate::surface::strings::control::approval_task_as_flow_unresolved(&flow.name),
         }
     }
 
     /// How the approval to start `task` names the flow it runs as, if it
-    /// runs as one.
+    /// runs as one, and whether that flow is given the task's prompt.
     pub(crate) fn control_task_flow_approval(
         &self,
         task: &daruda_store::tasks::TaskRecord,
-    ) -> Option<String> {
+    ) -> Option<super::TaskFlowApproval> {
         let spec = &task.spec;
         let flow = spec.flow.as_ref()?;
         Some(self.task_flow_approval(

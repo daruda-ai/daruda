@@ -267,6 +267,13 @@ fn left_a_worktree(outcome: &ControlOutcome) -> bool {
     )
 }
 
+/// `task`'s prompt as its start card quotes it; see `prompt_phrase`.
+fn task_prompt(task: &str, cx: &App) -> Option<String> {
+    cx.global::<GlobalTasks>()
+        .get(task)
+        .and_then(|t| disclosure::prompt_phrase(&t.spec.prompt))
+}
+
 fn task_creates_lane(task: &daruda_store::tasks::TaskRecord) -> bool {
     matches!(
         task.spec.run_in,
@@ -347,13 +354,19 @@ fn approval_summary(
             let surface = flow.unwrap_or_else(s::control::approval_task_as_chat);
             s::control::approval_task_create(quoted_title(&task.title), &name, &location, &surface)
         }
+        // A flow given the prompt hands it to its agents, so its card quotes
+        // it as a chat's does.
         Asked::TaskStart { task, agent } => match task_flow_summary(task, cx) {
-            Some(flow) => s::control::approval_task_start_flow(task_title(task, cx), &flow),
+            Some(flow) => match flow.takes_prompt.then(|| task_prompt(task, cx)).flatten() {
+                Some(prompt) => s::control::approval_task_start_flow_prompt(
+                    task_title(task, cx),
+                    &flow.summary,
+                    prompt,
+                ),
+                None => s::control::approval_task_start_flow(task_title(task, cx), &flow.summary),
+            },
             None => {
-                let prompt = cx
-                    .global::<GlobalTasks>()
-                    .get(task)
-                    .and_then(|t| prompt_phrase(&t.spec.prompt));
+                let prompt = task_prompt(task, cx);
                 let agent = in_task_window(task, cx, |ws, _, _| {
                     Ok(agent_phrase(&ws.control_chat_disclosure(agent, mode)))
                 })?;

@@ -1738,6 +1738,7 @@ control:
   approval_task_start: "daruda가 작업 “%{title}”을(를) 시작하려고 합니다. 에이전트: %{agent}. 프롬프트: “%{prompt}”. 허용할까요?"
   approval_task_start_no_prompt: "daruda가 작업 “%{title}”을(를) 시작하려고 합니다. 에이전트: %{agent}. 허용할까요?"
   approval_task_start_flow: "daruda가 작업 “%{title}”을(를) 시작하려고 합니다: %{flow}. 허용할까요?"
+  approval_task_start_flow_prompt: "daruda가 작업 “%{title}”을(를) 시작하려고 합니다: %{flow}. 프롬프트: “%{prompt}”. 허용할까요?"
   approval_task_open: "daruda가 작업 “%{title}”의 대화를 열려고 합니다. 허용할까요?"
   approval_task_open_new: "daruda가 작업 “%{title}”의 대화를 다시 열려고 합니다. 에이전트: %{agent}. 허용할까요?"
   # A flow run the app quit or a crash cut off: `passed` of its `total`
