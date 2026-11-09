@@ -126,7 +126,12 @@ impl Workspace {
         #[allow(clippy::unwrap_or_default)]
         let uuid = find_existing_project_uuid_for_root(&self.workspace_store, &root)
             .unwrap_or_else(ProjectUuid::new);
-        let mut project = crate::project::Project::new_with_uuid(new_id, uuid, root);
+        let mut project = crate::project::Project::new_with_uuid(
+            new_id,
+            uuid,
+            root,
+            &crate::lane::git::SystemGit,
+        );
         project.tab_order = tab_order;
         let target = project.first_lane_ref();
         self.projects.push(project);
@@ -358,7 +363,9 @@ impl Workspace {
         for (project_id, root) in targets {
             crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
                 cx,
-                move || crate::lane::Lane::bootstrap_from_project(&root),
+                move || {
+                    crate::lane::Lane::bootstrap_from_project(&root, &crate::lane::git::SystemGit)
+                },
                 move |ws, lanes, cx| ws.apply_discovered_lanes(project_id, lanes, cx),
             )
             .detach();

@@ -215,6 +215,7 @@ fn navigation_preferences_survive_disk_roundtrip(cx: &mut gpui::TestAppContext) 
             active.project,
             project,
             &decoded.project_overrides[&project.uuid],
+            &crate::lane::git::SystemGit,
         );
         assert_eq!(restored.display_alias.as_deref(), Some("개발"));
         assert!(restored.rail_grouped_lanes.contains(&active.lane));

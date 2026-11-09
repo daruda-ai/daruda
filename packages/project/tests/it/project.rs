@@ -1,5 +1,6 @@
 //! Public API tests for project.
 
+use daruda_project::lane::git::SystemGit;
 use daruda_project::project::Project;
 use daruda_store::project::{ProjectOverride, ProjectState, ProjectUuid};
 
@@ -19,7 +20,7 @@ fn bootstrap_non_git_yields_default_worktree() {
     let dir = std::env::temp_dir().join("daruda_project_bootstrap_non_git");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let p = Project::bootstrap(0, dir.clone());
+    let p = Project::bootstrap(0, dir.clone(), &SystemGit);
     assert_eq!(p.lanes.len(), 1);
     assert_eq!(p.last_active_lane_id, p.lanes[0].id);
     assert!(p.group_id.is_none());
@@ -59,7 +60,7 @@ fn from_disk_empty_lanes_rebootstraps() {
         default_branch: None,
         base_branch: None,
     };
-    let p = Project::from_disk(0, &ps, &ProjectOverride::default());
+    let p = Project::from_disk(0, &ps, &ProjectOverride::default(), &SystemGit);
     assert!(
         !p.lanes.is_empty(),
         "empty persisted lanes must re-bootstrap"
@@ -96,7 +97,7 @@ fn from_disk_empty_lanes_resets_stale_last_active_hint() {
         default_branch: None,
         base_branch: None,
     };
-    let p = Project::from_disk(0, &ps, &ProjectOverride::default());
+    let p = Project::from_disk(0, &ps, &ProjectOverride::default(), &SystemGit);
     assert_eq!(p.lanes.len(), 1);
     assert_eq!(
         p.last_active_lane_id, p.lanes[0].id,
@@ -123,7 +124,7 @@ fn from_disk_nonempty_lanes_hydrated_verbatim() {
         default_branch: None,
         base_branch: None,
     };
-    let p = Project::from_disk(0, &ps, &ProjectOverride::default());
+    let p = Project::from_disk(0, &ps, &ProjectOverride::default(), &SystemGit);
     assert_eq!(p.lanes.len(), 1);
     assert_eq!(
         p.lanes[0].id, 3,
@@ -148,7 +149,7 @@ fn from_disk_reads_persisted_branch_fields() {
         default_branch: Some("main".to_string()),
         base_branch: Some("develop".to_string()),
     };
-    let p = Project::from_disk(0, &ps, &ProjectOverride::default());
+    let p = Project::from_disk(0, &ps, &ProjectOverride::default(), &SystemGit);
     assert_eq!(p.default_branch.as_deref(), Some("main"));
     assert_eq!(p.base_branch.as_deref(), Some("develop"));
 }
@@ -158,7 +159,7 @@ fn snap_target_falls_back_to_first_when_hint_stale() {
     let dir = std::env::temp_dir().join("daruda_project_snap_stale");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let mut p = Project::bootstrap(7, dir.clone());
+    let mut p = Project::bootstrap(7, dir.clone(), &SystemGit);
     p.last_active_lane_id = 999; // not in p.lanes
     let snap = p.snap_target().unwrap();
     assert_eq!(snap.project, 7);

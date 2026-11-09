@@ -109,7 +109,12 @@ impl Workspace {
                     .get(&ps.uuid)
                     .cloned()
                     .unwrap_or_default();
-                let mut p = crate::project::Project::from_disk(runtime_id, ps, &ov);
+                let mut p = crate::project::Project::from_disk(
+                    runtime_id,
+                    ps,
+                    &ov,
+                    &crate::lane::git::SystemGit,
+                );
                 let root = p.root.clone();
                 anchor_lane_paths_to_project_root(&mut p.lanes, &root);
                 p

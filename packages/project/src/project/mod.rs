@@ -20,6 +20,7 @@ use daruda_store::project::{
 
 use crate::lane::Lane;
 use crate::lane::availability::LaneAvailability;
+use crate::lane::git::Git;
 
 mod projects;
 pub use projects::Projects;
@@ -84,8 +85,8 @@ impl Project {
     /// single `Default` lane for non-git paths) via
     /// [`Lane::bootstrap_from_project`]. The default `id` is `0` —
     /// `Workspace::add_project` overwrites it with the monotonic id.
-    pub fn bootstrap(id: ProjectId, root: PathBuf) -> Self {
-        Self::new_with_uuid(id, ProjectUuid::new(), root)
+    pub fn bootstrap(id: ProjectId, root: PathBuf, git: &dyn Git) -> Self {
+        Self::new_with_uuid(id, ProjectUuid::new(), root, git)
     }
 
     /// Build a runtime project without touching git — a single
@@ -111,8 +112,8 @@ impl Project {
     /// field needs different initialization for the fresh-directory case,
     /// override it explicitly in `bootstrap` rather than relying on this
     /// constructor's default.
-    pub fn new_with_uuid(id: ProjectId, uuid: ProjectUuid, root: PathBuf) -> Self {
-        let lanes = Lane::bootstrap_from_project(&root);
+    pub fn new_with_uuid(id: ProjectId, uuid: ProjectUuid, root: PathBuf, git: &dyn Git) -> Self {
+        let lanes = Lane::bootstrap_from_project(&root, git);
         Self::from_parts(id, uuid, root, lanes)
     }
 
@@ -151,7 +152,12 @@ impl Project {
     /// re-discovered from the filesystem so the project self-heals
     /// rather than restoring with zero lanes (which would leave the
     /// left dock with no row to activate).
-    pub fn from_disk(id: ProjectId, ps: &ProjectState, ov: &ProjectOverride) -> Self {
+    pub fn from_disk(
+        id: ProjectId,
+        ps: &ProjectState,
+        ov: &ProjectOverride,
+        git: &dyn Git,
+    ) -> Self {
         // Non-empty `lanes` is an invariant every other construction path
         // upholds; restore is the only one reading an externally-supplied
         // list, so an empty one triggers `bootstrap_from_project` to
@@ -164,7 +170,7 @@ impl Project {
         // `default_branch` — that value is read verbatim; refreshing it
         // against the live repo is a separate reconcile pass.
         let (lanes, last_active_lane_id) = if ps.lanes.is_empty() {
-            let lanes = Lane::bootstrap_from_project(&ps.root);
+            let lanes = Lane::bootstrap_from_project(&ps.root, git);
             let head = lanes.first().map(|w| w.id).unwrap_or(0);
             (lanes, head)
         } else {

@@ -15,6 +15,7 @@
 //! probe, lane lifecycle, and the merge sub-module. [`base`] answers what a
 //! lane committed since the branch it left.
 
+mod backend;
 pub mod base;
 mod command;
 mod environment;
@@ -22,6 +23,7 @@ pub use environment::GitEnvironmentFailure;
 pub mod discard;
 mod status;
 
+pub use backend::{Git, GitRepo, SystemGit};
 pub use command::git_command;
 pub use status::*;
 

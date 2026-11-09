@@ -129,8 +129,8 @@ impl Lane {
     /// filtered out); the one at `project_root` sorts first so it
     /// becomes the active one. Non-git paths yield a single
     /// `Default` lane so the left dock always has at least one row.
-    pub fn bootstrap_from_project(project_root: &std::path::Path) -> Vec<Lane> {
-        match git::probe_repo(project_root) {
+    pub fn bootstrap_from_project(project_root: &std::path::Path, git: &dyn git::Git) -> Vec<Lane> {
+        match git.probe(project_root) {
             Some(probe) => Self::from_repo_probe(project_root, probe)
                 .unwrap_or_else(|| vec![Lane::default_for_project(0, project_root.to_path_buf())]),
             None => vec![Lane::default_for_project(0, project_root.to_path_buf())],

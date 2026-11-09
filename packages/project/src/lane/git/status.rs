@@ -193,6 +193,23 @@ pub fn git_worktree_status(path: &Path) -> Result<GitWorktreeStatus, GitError> {
     Ok(data)
 }
 
+/// `git status --porcelain -- .` limited to `path`'s subtree, trimmed — a
+/// flow node's change list, scoped so nodes sharing a repo differ. Decoded
+/// lossily, so a non-UTF-8 path never drops the whole list.
+pub fn git_status_scoped(path: &Path) -> Result<String, GitError> {
+    let output = super::git_command(path)
+        .args(["status", "--porcelain", "--", "."])
+        .output()
+        .map_err(GitError::Spawn)?;
+    if !output.status.success() {
+        return Err(GitError::Exit {
+            code: output.status.code(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// `git diff HEAD --numstat` — `(added, removed, path)` per tracked file
 /// with any working-tree or staged divergence from HEAD. Binary files
 /// emit `-\t-\t<path>`; the parser maps those to `(0, 0)` so the left dock

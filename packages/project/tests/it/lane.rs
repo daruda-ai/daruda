@@ -43,7 +43,7 @@ fn bootstrap_non_git_returns_single_default() {
     let dir = std::env::temp_dir().join("daruda_boot_non_git");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let wts = Lane::bootstrap_from_project(&dir);
+    let wts = Lane::bootstrap_from_project(&dir, &git::SystemGit);
     assert_eq!(wts.len(), 1);
     assert_eq!(wts[0].id, 0);
     assert_eq!(wts[0].kind, LaneKind::Default);
@@ -76,7 +76,7 @@ fn bootstrap_git_repo_single_worktree() {
         .output()
         .unwrap();
 
-    let wts = Lane::bootstrap_from_project(&dir);
+    let wts = Lane::bootstrap_from_project(&dir, &git::SystemGit);
     assert_eq!(wts.len(), 1);
     assert!(wts[0].is_git());
     let _ = std::fs::remove_dir_all(&dir);
@@ -108,7 +108,7 @@ fn bootstrap_git_repo_multi_worktree_sorts_main_first() {
     let extra = dir.join("wt-side");
     git::add_lane(&dir, &extra, Some("side"), None).unwrap();
 
-    let wts = Lane::bootstrap_from_project(&dir);
+    let wts = Lane::bootstrap_from_project(&dir, &git::SystemGit);
     assert_eq!(wts.len(), 2);
     // The project_root's lane must sort to id 0.
     assert_eq!(wts[0].path, dir);

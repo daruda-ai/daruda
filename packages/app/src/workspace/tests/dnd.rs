@@ -55,7 +55,11 @@ fn make_workspace_with_dirs(
 fn push_project_in_memory(ws: &mut Workspace, root: &str) -> ProjectId {
     let id = ws.next_project_id;
     ws.next_project_id = ws.next_project_id.checked_add(1).unwrap();
-    let mut p = crate::project::Project::bootstrap(id, std::path::PathBuf::from(root));
+    let mut p = crate::project::Project::bootstrap(
+        id,
+        std::path::PathBuf::from(root),
+        &crate::lane::git::SystemGit,
+    );
     p.tab_order = ws.projects.len() as u32;
     ws.projects.push(p);
     id

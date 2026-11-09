@@ -622,3 +622,29 @@ fn base_problem_preserves_environment_failure() {
         None
     );
 }
+
+/// The trait boundary is a pure delegation: a handle from [`SystemGit`]
+/// reads exactly what the free functions it wraps read.
+#[test]
+fn system_git_delegates_to_the_git_cli() {
+    if !require_git() {
+        return;
+    }
+    let dir = unique_tmpdir("system_git");
+    init(&dir).unwrap();
+    commit_initial(&dir);
+    std::fs::write(dir.join("new.txt"), "x\n").unwrap();
+
+    let git = SystemGit;
+    assert!(git.available());
+    let repo = git.open(&dir);
+    assert_eq!(repo.path(), dir.as_path());
+    assert_eq!(
+        repo.worktree_status().unwrap(),
+        git_worktree_status(&dir).unwrap()
+    );
+    assert_eq!(repo.default_branch(), default_branch(&dir));
+    assert!(repo.default_branch().is_some());
+    assert_eq!(repo.status_scoped().unwrap(), "?? new.txt");
+    teardown(&dir);
+}

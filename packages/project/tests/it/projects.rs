@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use daruda_store::project::{ProjectOverride, ProjectState};
 
 use daruda_project::lane::Lane;
+use daruda_project::lane::git::SystemGit;
 use daruda_project::project::{Project, Projects};
 use daruda_store::project::{LaneRef, ProjectId, ProjectUuid};
 
@@ -26,7 +27,7 @@ fn project(id: ProjectId, dir_name: &str) -> (Project, PathBuf) {
         base_branch: None,
     };
     (
-        Project::from_disk(id, &state, &ProjectOverride::default()),
+        Project::from_disk(id, &state, &ProjectOverride::default(), &SystemGit),
         dir,
     )
 }
