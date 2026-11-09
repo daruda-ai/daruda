@@ -12,6 +12,11 @@ use daruda_store::run_ledger::{
 };
 use daruda_store::tasks::ExecutionRef;
 
+/// A hang guard for tests that push past [`UNREPORTED_MAX`]: each of their
+/// ~400 records is synced on its own, which on a Windows CI disk alone
+/// outlasts the few seconds a short test is given.
+const PAST_THE_CAP_FLUSH: Duration = Duration::from_secs(120);
+
 fn flow(id: &str) -> LedgerKey {
     LedgerKey::Flow {
         run_id: id.to_owned(),
@@ -272,7 +277,7 @@ fn an_eviction_drops_only_the_owed_end_of_an_open_run() {
     for event in &events {
         store.record(event.clone());
     }
-    store.flush(Duration::from_secs(5)).unwrap();
+    store.flush(PAST_THE_CAP_FLUSH).unwrap();
     let answered = store.take_answered();
     assert!(answered.failure.is_none() && answered.rejected.is_none());
     assert_eq!(answered.evicted, vec![open.clone()], "counted as evicted");
@@ -540,7 +545,7 @@ fn a_store_answers_which_entries_its_ends_evicted_once() {
         store.record(owned(task(&n.to_string()), false));
         store.record(ended(task(&n.to_string()), n));
     }
-    store.flush(Duration::from_secs(5)).unwrap();
+    store.flush(PAST_THE_CAP_FLUSH).unwrap();
     let answered = store.take_answered();
     assert!(answered.failure.is_none());
     assert_eq!(answered.evicted, vec![task("0")]);
@@ -873,7 +878,7 @@ fn the_cap_evicts_owed_ends_oldest_first_and_records_each() {
     for event in &events {
         store.record(event.clone());
     }
-    store.flush(Duration::from_secs(5)).unwrap();
+    store.flush(PAST_THE_CAP_FLUSH).unwrap();
     let answered = store.take_answered();
     assert!(answered.failure.is_none() && answered.rejected.is_none());
     assert_eq!(answered.evicted, vec![key.clone(), key.clone()]);
