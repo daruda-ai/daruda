@@ -83,3 +83,33 @@ fn set_scanned_ports_classifies_orders_and_skips_unchanged_updates(cx: &mut Test
     let second = ws.read_with(cx, |ws, _| ws.ports.entries.clone());
     assert_eq!(first, second);
 }
+
+/// A test workspace must not poll the OS. The test scheduler jumps the clock
+/// to the next timer whenever a test blocks, so a scan pump left running in
+/// fixtures spawned `lsof`/`ps` back to back for as long as any test waited —
+/// tens of thousands of processes per suite, enough to stall syspolicyd.
+#[gpui::test]
+fn a_test_workspace_never_scans_ports_however_long_the_clock_runs(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    let (_wh, ws) = build_workspace_with(cx, &config, None);
+    ws.read_with(cx, |ws, _| {
+        assert!(
+            ws.mirrors
+                .status_bar
+                .is_visible(daruda_config::StatusBarItem::Ports),
+            "a hidden Ports item would idle the pump and prove nothing"
+        );
+    });
+
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(60 * 60));
+    cx.run_until_parked();
+
+    ws.read_with(cx, |ws, _| {
+        assert_eq!(
+            ws.ports.status,
+            PortScanStatus::Pending,
+            "no scan ever landed"
+        );
+    });
+}

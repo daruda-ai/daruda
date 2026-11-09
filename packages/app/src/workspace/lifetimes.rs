@@ -42,18 +42,22 @@ pub(in crate::workspace) struct Pumps {
     /// respawned.
     pub(in crate::workspace) task_live_tick: Option<Task<()>>,
     /// Port scanning has nothing to re-target, so it is started once and never
-    /// touched again.
-    _ports: Task<()>,
+    /// touched again. Unset in test workspaces: each scan spawns `lsof`/`ps`.
+    _ports: Option<Task<()>>,
 }
 
 impl Pumps {
     /// Every watch starts unset; each `respawn_*` fills its own.
-    pub(in crate::workspace) fn new(ports: Task<()>) -> Self {
+    pub(in crate::workspace) fn new() -> Self {
         Self {
             flow: None,
             task_live_tick: None,
-            _ports: ports,
+            _ports: None,
         }
+    }
+
+    pub(in crate::workspace) fn start_ports(&mut self, ports: Task<()>) {
+        self._ports = Some(ports);
     }
 }
 

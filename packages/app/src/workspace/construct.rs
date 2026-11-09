@@ -13,16 +13,10 @@ use super::{
 };
 
 impl Workspace {
-    #[allow(dead_code)]
-    pub fn new(
-        config: &daruda_config::Config,
-        data_dir: std::path::PathBuf,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        Self::new_with_project(config, None, data_dir, window, cx)
-    }
-
+    /// Absent from test builds: a test window that started the production
+    /// watchers, PTY and port polling spawned processes for the whole run.
+    /// Tests build through [`Self::new_with_project_for_test`] and opt in.
+    #[cfg(not(test))]
     pub fn new_with_project(
         config: &daruda_config::Config,
         project: Option<daruda_store::project::Project>,
@@ -290,7 +284,7 @@ impl Workspace {
                     })
                 }),
             ),
-            pumps: lifetimes::Pumps::new(sync::ports::spawn(cx)),
+            pumps: lifetimes::Pumps::new(),
         };
         // Invariant seed: the active lane's runtime must always exist in
         // `runtimes` so `active_runtime()` (read unconditionally by
@@ -317,6 +311,9 @@ impl Workspace {
             Self::install_task_effects(cx);
             return ws;
         }
+        // The test scheduler jumps the clock to the next timer whenever a test
+        // blocks, so this poll would spawn `lsof`/`ps` back to back.
+        ws.pumps.start_ports(sync::ports::spawn(cx));
         // Seed the first tab only when there is a project to root it at.
         // With no project there is no working directory, so the shell would
         // land in `$HOME` — somewhere nobody asked for, and it would cover
@@ -389,13 +386,20 @@ impl Workspace {
         // harmless.
         main_area::bottom_dock::macro_ops::register_macro_shortcuts(&ws.panels, cx);
 
-        // Register this Workspace in the WindowRegistry so broadcasts
-        // and window-lifecycle helpers can find it without iterating
-        // all windows. The weak is captured at construction time rather
-        // than inside the on_release closure: by the time on_release
-        // fires, cx.entity() refers to an entity in the process of being
-        // dropped, so pre-building the weak here is the safe pattern
-        // (mirrors Zed's WorkspaceStore deregistration).
+        Self::join_window_registry(window, cx);
+
+        ws
+    }
+
+    /// Register this Workspace in the WindowRegistry so broadcasts and
+    /// window-lifecycle helpers can find it, and leave it on release.
+    ///
+    /// One function so a test window joins exactly as production does
+    /// without the watchers, PTY and polling the rest of construction
+    /// starts. The weak is captured now rather than inside `on_release`:
+    /// by then `cx.entity()` is being dropped (mirrors Zed's
+    /// WorkspaceStore deregistration).
+    pub(crate) fn join_window_registry(window: &Window, cx: &mut Context<Self>) {
         let weak = cx.entity().downgrade();
         let window_handle = window.window_handle();
         crate::window_registry::WindowRegistry::register(window_handle, weak.clone(), cx);
@@ -415,7 +419,5 @@ impl Workspace {
             crate::keep_awake::refresh(cx);
         })
         .detach();
-
-        ws
     }
 }

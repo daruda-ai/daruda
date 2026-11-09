@@ -1179,9 +1179,9 @@ pub(super) fn prompt(
     }
 }
 
-/// Construct a Workspace wrapped in `gpui_component::Root` — matches the
-/// production windowing path so APIs that walk the window root don't
-/// panic during construction. Local adaptation of
+/// Construct a Workspace wrapped in `gpui_component::Root` and joined to the
+/// registry — matches the production windowing path so APIs that walk the
+/// window root don't panic during construction. Local adaptation of
 /// `window_registry.rs`'s test-only `make_window` helper (that helper is
 /// private to its own module, so it isn't reachable from here).
 pub(super) fn make_window(
@@ -1208,7 +1208,15 @@ pub(super) fn make_window(
     let workspace_for_root = std::cell::RefCell::new(None);
     let wh = cx.add_window(|window, cx| {
         let workspace = cx.new(|cx| {
-            super::Workspace::new_with_project(config, Some(project.clone()), data_dir, window, cx)
+            let ws = super::Workspace::new_with_project_for_test(
+                config,
+                Some(project.clone()),
+                data_dir,
+                window,
+                cx,
+            );
+            super::Workspace::join_window_registry(window, cx);
+            ws
         });
         *workspace_for_root.borrow_mut() = Some(workspace.clone());
         gpui_component::Root::new(workspace, window, cx)

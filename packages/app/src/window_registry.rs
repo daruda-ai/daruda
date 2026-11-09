@@ -318,12 +318,19 @@ mod tests {
         gpui::Entity<Workspace>,
     );
 
-    /// Construct the same `Root`-wrapped Workspace shape used in production.
+    /// Construct the same `Root`-wrapped Workspace shape used in production,
+    /// joined to the registry the way production joins it. The test
+    /// constructor keeps the watchers, PTY and polling out of these tests.
     fn make_window(cx: &mut TestAppContext, config: &daruda_config::Config) -> TestWindow {
         crate::test_support::init_gpui_component(cx);
         let workspace_for_root = std::cell::RefCell::new(None);
         let wh = cx.add_window(|window, cx| {
-            let workspace = cx.new(|cx| Workspace::new(config, test_data_dir(), window, cx));
+            let workspace = cx.new(|cx| {
+                let ws =
+                    Workspace::new_with_project_for_test(config, None, test_data_dir(), window, cx);
+                Workspace::join_window_registry(window, cx);
+                ws
+            });
             *workspace_for_root.borrow_mut() = Some(workspace.clone());
             gpui_component::Root::new(workspace, window, cx)
         });
@@ -395,8 +402,8 @@ mod tests {
 
     /// Two workspaces, one hosting the orchestrator. Both stay live for the caller.
     fn register_user_and_orchestrator(cx: &mut TestAppContext) -> (TestWindow, TestWindow) {
-        // `make_window` goes through the production `Workspace::new`, which
-        // registers itself, so only the host registration below is explicit here.
+        // `make_window` joins the registry the way production does, so only
+        // the host registration below is explicit here.
         let config = daruda_config::Config::default();
         let user = make_window(cx, &config);
         let orch = make_window(cx, &config);
