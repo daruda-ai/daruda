@@ -135,6 +135,7 @@ impl Workspace {
             .map(|(target, lane)| (target, lane.path.clone()))
             .collect();
 
+        let git = crate::git_host::GitHost::global(cx);
         for (target, path) in pending {
             let Some(permit) = self.git.health.admit(
                 super::health::ReadOrigin::Automatic,
@@ -143,7 +144,7 @@ impl Workspace {
                 break;
             };
             self.lane_scoped_mut(target).git.dirs = GitDirsState::Probing;
-            let repo = crate::git_host::GitHost::global(cx).open(&path);
+            let repo = git.open(&path);
             crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
                 cx,
                 move || repo.dirs(),

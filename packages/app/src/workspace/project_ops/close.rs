@@ -124,13 +124,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let git = crate::git_host::GitHost::global(cx);
         let Some(project) = self.active_project() else {
             return;
         };
+        let git = crate::git_host::GitHost::global(cx);
         let project_id = project.id;
         let project_path = project.root.clone();
-        // Snapshot the (repo_root, worktree_root) pairs for the git
+        // Snapshot (repo handle, worktree_root, lock dir) for the git
         // lanes we'll remove. Default-kind lanes are skipped —
         // they're not git-managed, so `fs::remove_dir_all` on
         // `project_path` is sufficient.

@@ -192,12 +192,13 @@ impl MergeModal {
         let workspace = self.workspace.clone();
         let source_branch = self.source_branch.clone();
         let source_path = self.source_path.clone();
-        let source_repo = crate::git_host::GitHost::global(cx).open(&self.source_repo_root);
+        let git = crate::git_host::GitHost::global(cx);
+        let source_repo = git.open(&self.source_repo_root);
         let source_lock_dir = workspace.upgrade().and_then(|ws| {
             crate::workspace::flow_paths::lane_lock_dir(&ws.read(cx).lock_root, &self.source_path)
         });
         let target = &self.target_options[self.selected_idx];
-        let target_repo = crate::git_host::GitHost::global(cx).open(&target.wt_path);
+        let target_repo = git.open(&target.wt_path);
         let remove_after_merge = self.remove_after_merge;
         // Both refs resolve against this modal's own project, not the
         // active one — see `MergeModal::project`.

@@ -95,7 +95,8 @@ impl Workspace {
         // `refresh_skills_watcher` / `refresh_mcp_watcher`. The
         // `Theme` Global is also needed at first paint by the dock's
         // TabBar and by `theme::current(cx)` reads inside any
-        // wrapped-widget render path.
+        // wrapped-widget render path. `GitHost` backs every git op and
+        // test fixture; test builds get the scripted fake.
         crate::ui::theme::init_if_missing(cx);
         crate::agent::skills::global::init(cx);
         crate::agent::mcp::global::init(cx);
