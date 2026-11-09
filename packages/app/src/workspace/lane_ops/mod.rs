@@ -56,7 +56,9 @@ pub(in crate::workspace) enum FinalizeError {
     Failed(String),
     /// The chat's pinned agent is gone. `lane` is registered with nothing
     /// open, so the worktree on disk is not lost to the person.
-    AgentUnavailable { lane: daruda_store::project::LaneRef },
+    AgentUnavailable {
+        lane: daruda_store::project::LaneRef,
+    },
 }
 
 /// Counterpart to `CreateWorktreePlan` for the remove path.
