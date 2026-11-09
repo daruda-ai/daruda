@@ -349,3 +349,46 @@ fn a_typo_is_answered_with_the_suggestion() {
         s::control::error_unknown_command_did_you_mean("lst", "list")
     );
 }
+
+/// `/task` rows show a title as a card quotes it: one line, a hidden count
+/// for invisible characters, and no quote that could pass for the reply's
+/// own words. A plain title is shown as written.
+#[test]
+fn task_list_rows_quote_titles_as_cards_do() {
+    use crate::control::result::{TaskEntry, TaskStatus};
+    let tagged: String = "Fix"
+        .chars()
+        .chain(
+            "rm".chars()
+                .map(|c| char::from_u32(0xE0000 + c as u32).unwrap()),
+        )
+        .collect();
+    let entry = |title: &str| TaskEntry {
+        task: "t".into(),
+        title: title.into(),
+        status: TaskStatus::Backlog,
+        project: None,
+    };
+    let tasks = vec![
+        entry(&format!("{tagged}\n2. fake \u{202E}row")),
+        entry("Plain"),
+    ];
+    let text = render(
+        &Ok(ControlResult::TaskList { tasks }),
+        Absorbed::Nothing,
+        &CommandState::default(),
+    )
+    .text;
+    let backlog = s::control::task_status_backlog();
+    let expected = [
+        s::control::task_list_project_not_open(),
+        s::control::task_list_row(
+            1,
+            format!("Fix 2. fake row{}", s::control::approval_hidden_chars(3)),
+            &backlog,
+        ),
+        s::control::task_list_row(2, "Plain", &backlog),
+    ]
+    .join("\n");
+    assert_eq!(text, expected);
+}

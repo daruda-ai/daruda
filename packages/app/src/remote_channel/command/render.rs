@@ -234,9 +234,11 @@ fn render_task_list(tasks: &[TaskEntry]) -> String {
             });
             current = Some(project);
         }
+        // Titles travel raw in tool results; a person reads them as a card
+        // quotes them, so a row cannot break or hide what follows it.
         lines.push(s::control::task_list_row(
             index + 1,
-            &task.title,
+            crate::control::exec::quoted_title(&task.title),
             task_status_label(task.status),
         ));
     }
