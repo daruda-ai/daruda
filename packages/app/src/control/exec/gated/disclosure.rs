@@ -108,6 +108,24 @@ mod tests {
         );
     }
 
+    /// One left-out or hidden character is named in the singular.
+    #[test]
+    fn a_count_of_one_takes_the_singular_marker() {
+        assert_eq!(
+            s::control::approval_hidden_chars(1),
+            s::control::approval_hidden_chars_one()
+        );
+        assert_eq!(
+            s::control::approval_prompt_elided(1),
+            s::control::approval_prompt_elided_one()
+        );
+        assert_ne!(
+            s::control::approval_hidden_chars(2),
+            s::control::approval_hidden_chars_one()
+        );
+        assert!(s::control::approval_prompt_elided(2).contains('2'));
+    }
+
     /// A long title reaches the agent whole, so the card quotes both ends.
     #[test]
     fn a_long_title_quotes_its_end_and_the_hidden_count() {
