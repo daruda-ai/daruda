@@ -10,6 +10,11 @@ description = "Runtime project and lane model for daruda — worktree/git operat
 [lints]
 workspace = true
 
+[features]
+# `FakeGit` and the isolated git config, for crates whose tests must not
+# spawn git or read the developer's own config. Never a shipping default.
+test-support = []
+
 [dependencies]
 daruda_config = { workspace = true }
 daruda_core = { workspace = true }
@@ -17,6 +22,7 @@ daruda_store = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
+daruda_project = { workspace = true, features = ["test-support"] }
 serde_json = { workspace = true }
 shell-words = { workspace = true }
 tempfile = { workspace = true }

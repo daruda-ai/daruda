@@ -25,6 +25,12 @@ mod status;
 
 pub use backend::{Git, GitRepo, SystemGit};
 pub use command::git_command;
+#[cfg(any(test, feature = "test-support"))]
+pub use command::isolated_git_env;
+#[cfg(any(test, feature = "test-support"))]
+pub mod fake;
+#[cfg(any(test, feature = "test-support"))]
+pub use fake::{FakeFailure, FakeGit, FakeRepo, GitCall, GitOp};
 pub use status::*;
 
 use std::ffi::OsStr;
@@ -552,7 +558,7 @@ fn parse_worktree_list(text: &str) -> Result<Vec<GitWorktreeInfo>, GitError> {
 // Git status + diff + commit
 // ----------------------------------------------------------------
 /// Outcome of a `git merge` operation.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MergeOutcome {
     /// `git merge` reported "Already up to date."
     AlreadyUpToDate,

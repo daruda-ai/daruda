@@ -1831,6 +1831,7 @@ version = "0.2.22"
 dependencies = [
  "daruda_config",
  "daruda_core",
+ "daruda_project",
  "daruda_store",
  "serde_json",
  "shell-words",

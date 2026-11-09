@@ -61,16 +61,19 @@ fn bootstrap_git_repo_single_worktree() {
     let dir = daruda_core::path::canonicalize(&dir).unwrap();
     git::init(&dir).unwrap();
     daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
         .args(["config", "user.email", "daruda@test"])
         .output()
         .unwrap();
     daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
         .args(["config", "user.name", "daruda"])
         .output()
         .unwrap();
     daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
         .args(["commit", "--allow-empty", "-m", "initial"])
         .output()
@@ -93,14 +96,17 @@ fn bootstrap_git_repo_multi_worktree_sorts_main_first() {
     let dir = daruda_core::path::canonicalize(&dir).unwrap();
     git::init(&dir).unwrap();
     let _ = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
         .args(["config", "user.email", "daruda@test"])
         .output();
     let _ = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
         .args(["config", "user.name", "daruda"])
         .output();
     let _ = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
         .args(["commit", "--allow-empty", "-m", "initial"])
         .output();

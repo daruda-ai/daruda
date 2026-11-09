@@ -255,6 +255,7 @@ fn delete_branch_after_worktree_removal() {
 
     // Branch still exists post-remove (git keeps it).
     let pre = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
         .args(["rev-parse", "--verify", "temp/work"])
         .output()
@@ -264,6 +265,7 @@ fn delete_branch_after_worktree_removal() {
     delete_branch(&dir, "temp/work").unwrap();
 
     let post = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
         .args(["rev-parse", "--verify", "temp/work"])
         .output()
@@ -377,10 +379,12 @@ fn add_worktree_with_explicit_base_ref() {
     // Branch "side" at the initial commit, then advance "main"
     // by another empty commit so HEAD diverges from "side".
     let _ = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
         .args(["branch", "side"])
         .output();
     let _ = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
         .args(["commit", "--allow-empty", "-m", "advance-main"])
         .output();
@@ -391,12 +395,14 @@ fn add_worktree_with_explicit_base_ref() {
     add_lane(&dir, &wt_path, Some("feat/from-side"), Some("side")).unwrap();
 
     let side_sha = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
         .args(["rev-parse", "side"])
         .output()
         .unwrap()
         .stdout;
     let wt_sha = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&wt_path)
         .args(["rev-parse", "HEAD"])
         .output()

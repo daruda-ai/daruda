@@ -74,6 +74,7 @@ fn a_path_listed_staged_and_unstaged_is_planned_once() {
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(dir)
         .args(args)
         .output()
@@ -206,6 +207,7 @@ fn discarding_an_add_add_conflict_keeps_heads_copy() {
     git(root, &["add", "both"]);
     git(root, &["commit", "-qm", "main"]);
     let _ = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(root)
         .args(["merge", "-q", "side"])
         .output();

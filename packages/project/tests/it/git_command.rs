@@ -5,6 +5,7 @@ use std::path::Path;
 
 fn run(dir: &Path, args: &[&str]) {
     let status = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(dir)
         .args(args)
         .status()
@@ -51,6 +52,7 @@ fn a_status_read_does_not_rewrite_the_index() {
     );
 
     daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(root)
         .args(["status", "--porcelain=v1"])
         .output()

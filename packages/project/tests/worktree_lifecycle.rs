@@ -9,6 +9,7 @@ use daruda_project::lane::git::{
 
 fn commit_empty(repo: &Path) {
     let status = daruda_core::process::command("git")
+        .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(repo)
         .args(["-c", "user.email=daruda@test", "-c", "user.name=daruda"])
         .args(["commit", "--allow-empty", "--quiet", "-m", "initial"])
