@@ -19,7 +19,7 @@ use crate::runs::GlobalTasks;
 #[cfg(test)]
 use crate::control::spec::GatedCommand;
 use crate::control::spec::{ResolvedCommand, ResolvedFlowCommand, WaitingCommand};
-use crate::telegram::bridge::PaneRef;
+use crate::remote_channel::bridge::PaneRef;
 use crate::window_registry::WindowRegistry;
 use crate::workspace::Workspace;
 

@@ -70,22 +70,31 @@ where
     /// Serve cards as `owner`. The same identity keeps every record and token.
     /// Another can neither edit the old messages nor receive their taps, so
     /// their records, tokens and tombstones go, and a still-waiting request
-    /// can be offered once to the new identity.
-    pub(crate) fn bind(&mut self, owner: Owner) {
-        if self.cards.owner() != Some(&owner) {
+    /// can be offered once to the new identity. Whether the identity changed:
+    /// the caller then has the requests offered again
+    /// ([`crate::remote_channel::offer_unseen_cards_again`]).
+    #[must_use]
+    pub(crate) fn bind(&mut self, owner: Owner) -> bool {
+        let changed = self.cards.owner() != Some(&owner);
+        if changed {
             self.tokens.clear_settled();
         }
         for card in self.cards.bind(owner) {
             self.tokens.forget(&card);
         }
+        changed
     }
 
-    /// End the identity: nobody serves these cards any more.
-    pub(crate) fn retire(&mut self) {
+    /// End the identity: nobody serves these cards any more. Whether one was
+    /// serving, the same signal [`Self::bind`] gives.
+    #[must_use]
+    pub(crate) fn retire(&mut self) -> bool {
+        let changed = self.cards.owner().is_some();
         self.tokens.clear_settled();
         for card in self.cards.retire() {
             self.tokens.forget(&card);
         }
+        changed
     }
 
     /// Claim `card` for one send. Its tokens are minted by [`Self::begin`].

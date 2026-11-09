@@ -1,7 +1,7 @@
 use crate::view::tests::make_test_view;
 
 #[gpui::test]
-fn turn_end_resolves_telegram_watch_after_finalizing_streaming_text(cx: &mut gpui::TestAppContext) {
+fn turn_end_resolves_phone_watch_after_finalizing_streaming_text(cx: &mut gpui::TestAppContext) {
     let window = make_test_view(cx);
     window
         .update(cx, |view, _window, cx| {

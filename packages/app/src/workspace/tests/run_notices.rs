@@ -40,7 +40,7 @@ fn sent(cx: &mut TestAppContext) -> Vec<String> {
 }
 /// Give the orchestrator pane a live session, so a notice is sent rather than queued.
 fn connect(
-    pane: crate::telegram::bridge::PaneRef,
+    pane: crate::remote_channel::bridge::PaneRef,
     cx: &mut TestAppContext,
 ) -> daruda_acp::HandleProbe {
     let (handle, probe) = daruda_acp::AcpSessionHandle::detached_for_test();
@@ -56,7 +56,7 @@ fn connect(
     probe
 }
 /// End the orchestrator's turn at its reconciled completion.
-fn complete(pane: crate::telegram::bridge::PaneRef, cx: &mut TestAppContext) {
+fn complete(pane: crate::remote_channel::bridge::PaneRef, cx: &mut TestAppContext) {
     host(cx).update(cx, |ws, cx| {
         ws.agent_chat_view(pane.pane)
             .unwrap()

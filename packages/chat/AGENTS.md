@@ -2,7 +2,7 @@
 
 The agent chat pane: `AgentChatView`, its transcript rows and folds, and the
 turn, activity and prompt-queue state behind them. The app keeps the host —
-pane construction, the connection lifecycle, queue routing, the Telegram
+pane construction, the connection lifecycle, queue routing, the phone
 relay — in `packages/app/src/workspace/main_area/agent_chat_host/`.
 
 ## The host boundary

@@ -408,8 +408,8 @@ impl Workspace {
             .filter_map(|pane| pane.agent_chat_view().map(|view| (pane.id, view)))
     }
 
-    pub(crate) fn orchestrator_chat_pane(&self) -> Option<crate::telegram::bridge::PaneRef> {
-        Some(crate::telegram::bridge::PaneRef {
+    pub(crate) fn orchestrator_chat_pane(&self) -> Option<crate::remote_channel::bridge::PaneRef> {
+        Some(crate::remote_channel::bridge::PaneRef {
             workspace: self.uuid(),
             pane: self.orchestrator.chat.as_ref()?.pane_id,
         })

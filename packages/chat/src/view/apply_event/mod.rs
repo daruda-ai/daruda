@@ -74,7 +74,7 @@ impl AgentChatView {
         }
         let mut changes = EventChanges::default();
         // Returned to the host only after mutation, phone handling and reconciliation.
-        let mut telegram_first_response_effect = PhoneAckEffect::None;
+        let mut phone_first_response_effect = PhoneAckEffect::None;
 
         match event {
             AcpEvent::ConnectProgress(phase) => {
@@ -202,11 +202,11 @@ impl AgentChatView {
             PhoneTurnAction::Answer => self.answer_phone_turn_for_card(),
             PhoneTurnAction::CheckUpdate => {
                 if let Some(outcome) = self.take_phone_first_response() {
-                    telegram_first_response_effect = PhoneAckEffect::Relay(outcome);
+                    phone_first_response_effect = PhoneAckEffect::Relay(outcome);
                 }
             }
             PhoneTurnAction::Finish => {
-                telegram_first_response_effect = self.finish_phone_turn();
+                phone_first_response_effect = self.finish_phone_turn();
             }
         }
         // Gate the reconciles on what the event actually changed: diff editors
@@ -268,7 +268,7 @@ impl AgentChatView {
         // reconciles are unchanged, so replay cost is no better than live-
         // streaming the same events; this only removes the redundant rebuilds.)
         if self.replay.is_loading() {
-            return telegram_first_response_effect;
+            return phone_first_response_effect;
         }
         // Reproject rows + sync the virtualized list. `FollowMode::Tail` keeps
         // the bottom pinned while streaming — no manual scroll needed.
@@ -316,7 +316,7 @@ impl AgentChatView {
             self.resync_all_row_heights("turn-settled");
         }
         cx.notify();
-        telegram_first_response_effect
+        phone_first_response_effect
     }
 
     /// Release a stuck replay gate: if a misbehaving adapter closes the event

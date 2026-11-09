@@ -52,7 +52,7 @@ impl Workspace {
 
     /// The pane's display title for a notification: its live session title, or
     /// the static tab-title fallback before the session reports one. Stays
-    /// `pub(super)` because `telegram_ops` also reads it.
+    /// `pub(super)` because `remote_ops` also reads it.
     pub(in crate::workspace::main_area::agent_chat_host) fn pane_title(
         &self,
         pane_id: PaneId,
@@ -110,7 +110,7 @@ impl Workspace {
         else {
             return;
         };
-        self.relay_permission_wait_to_telegram(pane_id, &card, cx);
+        self.relay_permission_wait_to_remote(pane_id, &card, cx);
     }
 
     /// A question's answer timeout ran out: the agent went on without the
@@ -191,13 +191,13 @@ impl Workspace {
             // `None` = the phone already has this turn's answer; the
             // first-response relay sent the very message this would report.
             if relay_completion
-                && let Some((header, tail)) = self.telegram_completion_parts(pane_id, cx)
+                && let Some((header, tail)) = self.remote_completion_parts(pane_id, cx)
             {
                 self.relay_when_presence_allows(pane_id, header, tail, None, cx);
             }
         }
         if relay_completion && matches!(outcome, TurnOutcome::Errored) {
-            let (header, tail) = self.telegram_failure_parts(pane_id, cx);
+            let (header, tail) = self.remote_failure_parts(pane_id, cx);
             self.relay_when_presence_allows(pane_id, header, tail, None, cx);
         }
         // Every outcome, not just `Completed`: a turn that errored or was
@@ -253,7 +253,7 @@ impl Workspace {
         outcome: TurnOutcome,
         cx: &mut Context<Self>,
     ) {
-        let target = crate::telegram::bridge::PaneRef {
+        let target = crate::remote_channel::bridge::PaneRef {
             workspace: self.uuid(),
             pane: pane_id,
         };

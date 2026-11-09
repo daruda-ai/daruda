@@ -7,7 +7,7 @@
 //! The ACP connection + event pump live in the sibling
 //! [`super::agent_chat_connect_ops`]; the prompt-queue send/edit/cancel
 //! routing lives in [`super::agent_chat_queue_ops`]. Telegram relay lives in
-//! [`super::telegram_ops`]; `agent_chat_ops/notify.rs` only tees into it from
+//! [`super::remote_ops`]; `agent_chat_ops/notify.rs` only tees into it from
 //! `maybe_notify_agent_event` and `fire_activity_completion`.
 //!
 //! [`AgentChatView`]: daruda_chat::view::AgentChatView

@@ -1,4 +1,4 @@
-//! Chat wording the host shows too — a Telegram relay, an attachment refusal —
+//! Chat wording the host shows too — a phone relay, an attachment refusal —
 //! so the two say it in the same words. The `test-support` ones exist for the
 //! host's tests to compare against, not for the host to show.
 

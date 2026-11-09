@@ -15,7 +15,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneRef, ProjectId};
 
 use crate::control::result::ControlError;
-use crate::telegram::bridge::PaneRef;
+use crate::remote_channel::bridge::PaneRef;
 use crate::workspace::Workspace;
 
 /// What a finished creation reports: the worktree, and the chat that came with

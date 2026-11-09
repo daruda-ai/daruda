@@ -1611,69 +1611,69 @@ notification:
   agent_question_waiting: "%{agent} is asking: %{question}"
   # A question timed out and was skipped; `question` is its one-line summary.
   agent_question_expired: "%{agent} went on without your answer: %{question}"
-  telegram_truncated_marker: "…(truncated)…"
+  remote_truncated_marker: "…(truncated)…"
   # Body for the fixed Telegram ack sent when a phone-triggered turn goes 60s
   # without producing text or a tool call, or settles with nothing having
   # appeared at all — the fallback behind the agent's own first-response text
   # or tool-ack (see `Workspace::relay_first_response_fallback_to_telegram`).
-  telegram_reply_ack: "Agent received — generating response / working…"
+  remote_reply_ack: "Agent received — generating response / working…"
   # Body for the Telegram notice sent when a phone-relayed reply has to wait
   # behind an in-flight turn — it hasn't reached the agent yet, so there is
   # nothing to watch for a first response from.
-  telegram_reply_queued: "Received — queued behind the current turn…"
-  telegram_queue_full: "Not sent — that chat already has too many prompts waiting."
+  remote_reply_queued: "Received — queued behind the current turn…"
+  remote_queue_full: "Not sent — that chat already has too many prompts waiting."
   # Body for the Telegram ack sent when a phone-triggered turn goes straight to
   # a tool call with no preceding text.
-  telegram_first_tool_ack: "Checking using a tool…"
+  remote_first_tool_ack: "Checking using a tool…"
   # Feedback shown on the phone (callback toast + rewritten message line) when a
   # phone-tapped permission button resolves to Allow.
-  telegram_permission_allowed: "✅ Allowed"
+  remote_permission_allowed: "✅ Allowed"
   # Feedback for a phone-tapped Reject.
-  telegram_permission_rejected: "🚫 Rejected"
-  telegram_permission_cancelled: "Cancelled"
+  remote_permission_rejected: "🚫 Rejected"
+  remote_permission_cancelled: "Cancelled"
   # A phone card the app could still edit when it quit, before anyone answered.
   card_cancelled_at_quit: "Cancelled — the app quit"
   # Feedback when the tapped request is no longer outstanding: answered,
   # cancelled, or sent before the app restarted, which a new run cannot tell apart.
-  telegram_permission_stale: "No longer valid — handled already or the app restarted"
+  remote_permission_stale: "No longer valid — handled already or the app restarted"
   # Feedback when the target pane/session is gone (closed since the prompt sent).
-  telegram_permission_gone: "This session is no longer available"
+  remote_permission_gone: "This session is no longer available"
   # First tail line of a phone card relaying an agent's question; `agent`
   # is the chat's agent name.
-  telegram_question_asks: "❓ %{agent} asks"
+  remote_question_asks: "❓ %{agent} asks"
   # The same line when the form has several questions, e.g. "2/3".
-  telegram_question_asks_position: "❓ %{agent} asks · %{n}/%{total}"
+  remote_question_asks_position: "❓ %{agent} asks · %{n}/%{total}"
   # Under a question card whose field takes free text.
-  telegram_question_reply_hint: "Reply to this message to answer in your own words."
+  remote_question_reply_hint: "Reply to this message to answer in your own words."
   # Under a question card while the answer timeout runs; `time` is e.g. "4:12".
-  telegram_question_current_text: "Current text: %{text}"
-  telegram_question_time_left: "⏳ At sending: %{time} left. It is skipped on expiry unless you start answering."
+  remote_question_current_text: "Current text: %{text}"
+  remote_question_time_left: "⏳ At sending: %{time} left. It is skipped on expiry unless you start answering."
   # A choice button on a multi-select question card, chosen or not.
-  telegram_question_picked: "☑ %{label}"
-  telegram_question_unpicked: "☐ %{label}"
+  remote_question_picked: "☑ %{label}"
+  remote_question_unpicked: "☐ %{label}"
   # Ends a multi-select question card's choosing.
-  telegram_question_send: "Send"
+  remote_question_send: "Send"
   # Leaves an optional question blank and moves on to the next one.
-  telegram_question_skip_one: "Skip this one"
+  remote_question_skip_one: "Skip this one"
   # Declines the whole form.
-  telegram_question_skip: "Skip all"
+  remote_question_skip: "Skip all"
   # Appended to a question card once its field is taken and the next field
   # went out as a new card; the second after a multi-select toggle.
-  telegram_question_next: "✅ Taken — next below"
-  telegram_question_updated: "↻ Updated below"
+  remote_question_next: "✅ Taken — next below"
+  remote_question_updated: "↻ Updated below"
   # Appended to a question card when the question ends.
-  telegram_question_answered: "✅ Answered"
-  telegram_question_answered_on_desktop: "✅ Answered on the desktop"
-  telegram_question_skipped: "Skipped"
-  telegram_question_skipped_for_prompt: "Skipped — answered in chat"
-  telegram_question_cancelled: "Stopped before an answer"
-  telegram_question_withdrawn: "Withdrawn by the agent"
-  telegram_question_expired: "Expired"
+  remote_question_answered: "✅ Answered"
+  remote_question_answered_on_desktop: "✅ Answered on the desktop"
+  remote_question_skipped: "Skipped"
+  remote_question_skipped_for_prompt: "Skipped — answered in chat"
+  remote_question_cancelled: "Stopped before an answer"
+  remote_question_withdrawn: "Withdrawn by the agent"
+  remote_question_expired: "Expired"
   # Feedback when a phone answer reached a question already answered,
   # skipped or closed in the app.
-  telegram_question_stale: "This question card is no longer active."
+  remote_question_stale: "This question card is no longer active."
   # Feedback when a text reply reached a question that takes a button.
-  telegram_question_text_not_taken: "This question takes a button — tap one on the card."
+  remote_question_text_not_taken: "This question takes a button — tap one on the card."
 
 # Terminal annotations (SP-1)
 terminal:

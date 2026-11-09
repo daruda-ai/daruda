@@ -131,7 +131,7 @@ fn surroundings(
     })
 }
 
-fn orchestrator_pane(cx: &mut TestAppContext) -> Option<crate::telegram::bridge::PaneRef> {
+fn orchestrator_pane(cx: &mut TestAppContext) -> Option<crate::remote_channel::bridge::PaneRef> {
     cx.update(|cx| crate::orchestrator::pane(cx))
 }
 

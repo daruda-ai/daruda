@@ -8,9 +8,9 @@ use crate::remote_channel::bridge::{
     BotQuestionOutcome, PingPrompt, QuestionButton, QuestionPrompt, QuestionPromptRef,
     QuestionReply,
 };
+use crate::remote_channel::bridge::{BridgePing, MessageTail};
 use crate::remote_channel::cards::tests::EditCapture;
 use crate::surface::strings as s;
-use crate::telegram::bridge::{BridgePing, TelegramTail};
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_acp::{QuestionField, QuestionFieldKind, QuestionOption, QuestionRequest};
 use daruda_chat::view::QuestionEnd;
@@ -102,8 +102,8 @@ fn question_card(ping: &BridgePing) -> &QuestionPrompt {
 
 fn tail_text(ping: &BridgePing) -> &str {
     match &ping.tail {
-        TelegramTail::Plain(text) => text,
-        TelegramTail::Markdown(_) => panic!("a question card is plain: the agent's words verbatim"),
+        MessageTail::Plain(text) => text,
+        MessageTail::Markdown(_) => panic!("a question card is plain: the agent's words verbatim"),
     }
 }
 
@@ -169,7 +169,7 @@ async fn a_phone_option_answers_and_relays_the_next_field(cx: &mut gpui::TestApp
             [
                 vec!["CLIPPY".to_owned()],
                 vec!["TEST".to_owned()],
-                vec![s::notification::telegram_question_skip()],
+                vec![s::notification::remote_question_skip()],
             ]
         );
         assert!(tail_text(&first).contains("Which check?"));
@@ -186,7 +186,7 @@ async fn a_phone_option_answers_and_relays_the_next_field(cx: &mut gpui::TestApp
             .agent_name()
             .to_owned();
         assert!(
-            tail_text(&second).contains(&s::notification::telegram_question_asks_position(
+            tail_text(&second).contains(&s::notification::remote_question_asks_position(
                 &agent, 2, 2
             ))
         );
@@ -212,7 +212,7 @@ async fn a_late_phone_answer_is_rejected_after_a_desktop_answer(cx: &mut gpui::T
     cx.update(|cx| {
         let edits = &cx.global::<EditCapture>().edits;
         assert_eq!(edits.len(), 1);
-        assert_eq!(edits[0].label, s::notification::telegram_question_skipped());
+        assert_eq!(edits[0].label, s::notification::remote_question_skipped());
     });
     workspace.update(cx, |ws, cx| {
         let card = QuestionPromptRef {
@@ -242,7 +242,7 @@ async fn a_late_phone_answer_is_rejected_after_a_desktop_answer(cx: &mut gpui::T
         let edits = &cx.global::<EditCapture>().edits;
         assert_eq!(
             edits.last().map(|edit| edit.label.clone()),
-            Some(s::notification::telegram_question_answered_on_desktop())
+            Some(s::notification::remote_question_answered_on_desktop())
         );
     });
 }
@@ -279,7 +279,7 @@ async fn the_phone_message_says_who_asks(cx: &mut gpui::TestAppContext) {
         assert!(ping.header.contains(&agent), "{}", ping.header);
         let tail = tail_text(&ping);
         assert!(
-            tail.contains(&s::notification::telegram_question_asks(&agent)),
+            tail.contains(&s::notification::remote_question_asks(&agent)),
             "{tail}"
         );
         assert!(tail.contains("Before I ship"), "{tail}");
@@ -303,11 +303,11 @@ async fn a_multi_select_is_toggled_and_sent_from_the_phone(cx: &mut gpui::TestAp
             cx,
         );
         let multi = sent(&mut outbox).unwrap();
-        let unpicked = s::notification::telegram_question_unpicked;
-        let picked = s::notification::telegram_question_picked;
-        let send = s::notification::telegram_question_send();
-        let skip_one = s::notification::telegram_question_skip_one();
-        let skip = s::notification::telegram_question_skip();
+        let unpicked = s::notification::remote_question_unpicked;
+        let picked = s::notification::remote_question_picked;
+        let send = s::notification::remote_question_send();
+        let skip_one = s::notification::remote_question_skip_one();
+        let skip = s::notification::remote_question_skip();
         assert_eq!(
             labels(question_card(&multi)),
             [
@@ -430,8 +430,8 @@ async fn skipping_one_optional_field_from_the_phone_keeps_earlier_answers(
         assert_eq!(
             labels(question_card(&text)),
             [vec![
-                s::notification::telegram_question_skip_one(),
-                s::notification::telegram_question_skip(),
+                s::notification::remote_question_skip_one(),
+                s::notification::remote_question_skip(),
             ]]
         );
         assert_eq!(

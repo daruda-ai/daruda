@@ -288,11 +288,11 @@ fn settle(id: ApprovalId, settlement: Settlement, cx: &mut App) -> bool {
         &label,
         cx,
     );
-    crate::telegram::trace::delivery("approval.settled", || {
+    crate::remote_channel::trace::delivery("approval.settled", || {
         format!(
             "id={id:?} outcome={outcome:?} by={} summary={}",
             settlement.trace_key(),
-            crate::telegram::trace::digest(&waiting.summary)
+            crate::remote_channel::trace::digest(&waiting.summary)
         )
     });
     let _ = waiting.tx.try_send(outcome);

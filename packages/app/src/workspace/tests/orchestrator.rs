@@ -8,7 +8,8 @@ use gpui::{BorrowAppContext as _, TestAppContext};
 
 use crate::control::result::{AskDisposition, ControlError, ControlResult};
 use crate::control::spec::{ControlCommand, ResolvedCommand};
-use crate::telegram::bridge::{BridgeCore, InboundAction, PaneRef};
+use crate::remote_channel::bridge::{InboundAction, PaneRef};
+use crate::telegram::bridge::BridgeCore;
 use crate::telegram::client::{Update, UpdateKind};
 use crate::test_support::workspace_with_agent_chat;
 use crate::window_registry::WindowRegistry;

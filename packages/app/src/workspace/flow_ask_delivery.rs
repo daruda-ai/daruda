@@ -61,10 +61,10 @@ pub(super) fn deliver(change: &FlowChange, cx: &mut App) {
         } => {
             let label = match outcome {
                 FlowAskOutcome::Answered(daruda_acp::PermissionDecision::Allow { .. }) => {
-                    s::notification::telegram_permission_allowed()
+                    s::notification::remote_permission_allowed()
                 }
                 FlowAskOutcome::Answered(daruda_acp::PermissionDecision::Reject { .. }) => {
-                    s::notification::telegram_permission_rejected()
+                    s::notification::remote_permission_rejected()
                 }
                 FlowAskOutcome::Answered(daruda_acp::PermissionDecision::Cancelled)
                 | FlowAskOutcome::Withdrawn => s::flow::ask_withdrawn(),

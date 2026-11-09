@@ -20,16 +20,17 @@ use std::sync::{Arc, Weak};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
-use super::super::bridge::{InboundAction, RouteResult};
 use super::super::client;
 use super::super::keychain;
-use super::super::trace;
 use super::bot::{self, Ownership, ReadyBot};
 use super::control::{answer_only, log_unauthorized_inbound, send_command_reply};
 use super::{IDLE_RECHECK, POLL_TIMEOUT_SECS, TelegramBridge};
 use crate::platform::attention::is_app_active;
+use crate::remote_channel::bridge::{InboundAction, RouteResult};
+use crate::remote_channel::trace;
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
+use crate::telegram::update_trace;
 
 #[derive(Debug, PartialEq, Eq)]
 enum ClaimOutcome {
@@ -167,10 +168,10 @@ pub(super) fn spawn_poll_task(cx: &mut App) {
                     format!(
                         "update_id={update_id} kind={} chat_id={} app_active={} \
                          payload={}",
-                        trace::update_kind_name(&update.kind),
-                        trace::opt(trace::update_chat_id(&update.kind)),
+                        update_trace::kind_name(&update.kind),
+                        trace::opt(update_trace::chat_id(&update.kind)),
                         trace::opt(app_active),
-                        trace::update_payload(&update.kind)
+                        update_trace::payload(&update.kind)
                     )
                 });
                 let dispatched = cx.update(|cx| dispatch_update(&bot, chat_id, update, cx));
@@ -264,7 +265,7 @@ fn answer_for(effect: dispatch::Effect, tapped: Option<Tapped>) -> Option<Answer
             callback_id: tapped.callback_id,
             label,
         }),
-        (Some(tapped), _) => Some(stale(tapped, s::notification::telegram_permission_stale())),
+        (Some(tapped), _) => Some(stale(tapped, s::notification::remote_permission_stale())),
         (None, dispatch::Effect::Reply(reply)) => Some(Answer::Reply(reply)),
         _ => None,
     }

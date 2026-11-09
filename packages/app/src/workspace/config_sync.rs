@@ -112,13 +112,6 @@ pub(in crate::workspace) struct ConfigMirrors {
     /// `[git]` — whether the Git panel's commit and push ask first.
     pub git_config: daruda_config::GitConfig,
 
-    /// Telegram bot bridge settings — gates `relay_to_telegram` (both
-    /// `enabled` and a completed pairing are required before a ping is
-    /// queued). Mirrored from the live config the same way
-    /// `notifications` is, so a Settings-window toggle takes effect
-    /// without any extra plumbing.
-    pub telegram: daruda_config::TelegramConfig,
-
     /// Agent chat configuration — permission mode applied on connect.
     pub agent: daruda_config::AgentConfig,
 
@@ -220,7 +213,6 @@ impl ConfigMirrors {
             preferred_editor: config.editor.preferred.clone(),
             notifications: config.notifications.clone(),
             git_config: config.git.clone(),
-            telegram: config.telegram.clone(),
             agent: config.agent.clone(),
             agents: config.resolved_agents().into(),
             flow_config: config.flow.clone(),

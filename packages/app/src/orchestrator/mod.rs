@@ -22,7 +22,7 @@ use gpui::{App, AppContext as _, Global};
 
 use crate::control::mcp::socket;
 use crate::control::result::ControlError;
-use crate::telegram::bridge::PaneRef;
+use crate::remote_channel::bridge::PaneRef;
 use crate::window_registry::WindowRegistry;
 
 /// Why the orchestrator cannot take a prompt. Returned rather than reported:

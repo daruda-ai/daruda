@@ -203,8 +203,8 @@ fn drained_plain_texts(outbound: &mut Outbox) -> Vec<String> {
     use futures::{FutureExt as _, StreamExt as _};
     let mut texts = Vec::new();
     while let Some(Some(out)) = outbound.next().now_or_never() {
-        if let crate::telegram::bridge::Outbound::Ping(ping) = out
-            && let crate::telegram::bridge::TelegramTail::Plain(text) = ping.tail
+        if let crate::remote_channel::bridge::Outbound::Ping(ping) = out
+            && let crate::remote_channel::bridge::MessageTail::Plain(text) = ping.tail
         {
             texts.push(text);
         }

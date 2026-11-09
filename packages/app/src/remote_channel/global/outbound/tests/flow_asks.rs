@@ -164,7 +164,7 @@ fn a_phone_flow_answer_closes_the_modal_and_settles_all_channels(cx: &mut gpui::
                 .edits
                 .iter()
                 .all(|edit| edit.label
-                    == crate::surface::strings::notification::telegram_permission_allowed())
+                    == crate::surface::strings::notification::remote_permission_allowed())
         );
         for connection in cx.global_mut::<RemoteChannels>().connections.values_mut() {
             assert!(matches!(

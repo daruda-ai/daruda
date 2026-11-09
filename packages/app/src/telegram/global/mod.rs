@@ -2,7 +2,7 @@
 //!
 //! Owns the long-poll loop, outbound send loop, and routed re-entry into
 //! workspaces. Bot API details stay in `client.rs`; routing policy stays in
-//! `bridge.rs`.
+//! `crate::remote_channel::bridge`.
 //!
 //! `BridgeCore` is a plain field on the GPUI Global, not `Arc<Mutex<_>>`:
 //! globals are mutated on the foreground executor via atomic `cx.update(...)`
@@ -12,9 +12,10 @@ use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{App, Global};
 use std::cell::RefCell;
 
-use super::bridge::{BridgeCore, BridgePing, Outbound, PaneRef, TelegramTail};
-use super::trace;
+use super::bridge::BridgeCore;
+use crate::remote_channel::bridge::{BridgePing, MessageTail, Outbound, PaneRef};
 use crate::remote_channel::global::Delivery;
+use crate::remote_channel::trace;
 use crate::settings_store::SettingsStore;
 use crate::surface::strings as s;
 
@@ -45,8 +46,8 @@ const IDLE_RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
 /// Process-wide Telegram bridge state.
 pub struct TelegramBridge {
     core: BridgeCore,
-    // `Workspace::relay_to_telegram` sends into this via
-    // `cx.try_global::<TelegramBridge>()`.
+    // `remote_channel::send_ping` sends into this through
+    // `TelegramBridge::send_ping`.
     outbound_tx: UnboundedSender<QueuedOutbound>,
     bot: Ownership,
     desk: RefCell<outbound::Desk>,
@@ -70,9 +71,8 @@ impl TelegramBridge {
     }
 
     /// Whether a message can actually go out: the feature is on, someone has
-    /// paired, and this daruda is the one serving the bot. The first two are
-    /// the conditions `Workspace::telegram_bridge` asks, kept in one place so
-    /// the two answers cannot drift apart; the third is enforced again inside
+    /// paired, and this daruda is the one serving the bot. Every caller asks
+    /// here, so no two of them can disagree; the third is enforced again inside
     /// [`Self::send`] and [`Self::send_notice`], which every relay reaches
     /// without passing here.
     fn deliverable(cx: &App) -> bool {
@@ -95,7 +95,7 @@ impl TelegramBridge {
     ) -> bool {
         if matches!(delivery, Delivery::Presence { .. }) {
             return Self::notify_with_delivery(
-                plain_body(&header, &TelegramTail::Plain(tail)),
+                plain_body(&header, &MessageTail::Plain(tail)),
                 delivery,
                 cx,
             );
@@ -110,7 +110,7 @@ impl TelegramBridge {
             BridgePing {
                 pane,
                 header,
-                tail: TelegramTail::Plain(tail),
+                tail: MessageTail::Plain(tail),
                 prompt: None,
             },
             cx,
@@ -241,8 +241,8 @@ impl TelegramBridge {
         // about whether a message can actually go out — and the send task
         // drops an unsendable card silently, which would leave the caller
         // waiting out the whole approval timeout for a question the user
-        // never saw. Same three conditions `Workspace::telegram_bridge`
-        // asks, for the same reason: they must not disagree.
+        // never saw. The same three conditions every send asks, for the same
+        // reason: they must not disagree.
         let deliverable = Self::deliverable(cx);
         if !deliverable
             || !Self::allows_delivery(delivery, cx)
@@ -290,7 +290,7 @@ impl TelegramBridge {
             .claim_approval(id)
             .ok_or(())?;
         trace::state("approval.tokens", || format!("id={id:?} minted=2"));
-        let prompt = crate::telegram::bridge::ApprovalPrompt {
+        let prompt = crate::remote_channel::bridge::ApprovalPrompt {
             id,
             summary,
             buttons: [
@@ -494,24 +494,24 @@ impl TelegramBridge {
 /// or markdown parsing. What [`spawn_send_task`] falls back to when the
 /// HTML attempt fails. Split out so the header/tail composition is
 /// unit-testable without a network mock.
-fn plain_body(header: &str, tail: &TelegramTail) -> String {
+fn plain_body(header: &str, tail: &MessageTail) -> String {
     let tail_text = match tail {
-        TelegramTail::Plain(t) | TelegramTail::Markdown(t) => t.as_str(),
+        MessageTail::Plain(t) | MessageTail::Markdown(t) => t.as_str(),
     };
     format!("{header}\n{tail_text}")
 }
 
 /// The Telegram-HTML body for `header`/`tail`. `header` and a
-/// `TelegramTail::Plain` tail are HTML-escaped only, never markdown-parsed;
-/// a `TelegramTail::Markdown` tail is run through the full converter — see
-/// [`TelegramTail`]'s doc comment (`bridge.rs`) for why running the
+/// `MessageTail::Plain` tail are HTML-escaped only, never markdown-parsed;
+/// a `MessageTail::Markdown` tail is run through the full converter — see
+/// [`MessageTail`]'s doc comment (`remote_channel::bridge`) for why running the
 /// markdown parser over plain administrative text (a pane title, a tool
 /// name, a raw command) is wrong, not just unnecessary.
-fn html_body(header: &str, tail: &TelegramTail) -> String {
+fn html_body(header: &str, tail: &MessageTail) -> String {
     let html_header = super::markdown::escape_text(header);
     let html_tail = match tail {
-        TelegramTail::Plain(t) => super::markdown::escape_text(t),
-        TelegramTail::Markdown(t) => super::markdown::to_telegram_html(t),
+        MessageTail::Plain(t) => super::markdown::escape_text(t),
+        MessageTail::Markdown(t) => super::markdown::to_telegram_html(t),
     };
     format!("{html_header}\n{html_tail}")
 }
@@ -576,7 +576,7 @@ mod tests {
                 BridgePing {
                     pane,
                     header: "daruda/main".into(),
-                    tail: TelegramTail::Plain("done".into()),
+                    tail: MessageTail::Plain("done".into()),
                     prompt: None,
                 },
                 cx,
@@ -705,11 +705,11 @@ mod tests {
     #[test]
     fn plain_body_uses_the_tail_text_verbatim_for_either_variant() {
         assert_eq!(
-            plain_body("title", &TelegramTail::Plain("file: a_b.txt".to_string())),
+            plain_body("title", &MessageTail::Plain("file: a_b.txt".to_string())),
             "title\nfile: a_b.txt"
         );
         assert_eq!(
-            plain_body("title", &TelegramTail::Markdown("**bold**".to_string())),
+            plain_body("title", &MessageTail::Markdown("**bold**".to_string())),
             "title\n**bold**"
         );
     }
@@ -722,7 +722,7 @@ mod tests {
         // get reformatted as CommonMark emphasis.
         let out = html_body(
             "Deploy: rm -rf *.log",
-            &TelegramTail::Plain("file: my_file_name.txt".to_string()),
+            &MessageTail::Plain("file: my_file_name.txt".to_string()),
         );
         assert_eq!(out, "Deploy: rm -rf *.log\nfile: my_file_name.txt");
         assert!(
@@ -735,14 +735,14 @@ mod tests {
     fn html_body_markdown_parses_only_the_markdown_tail() {
         let out = html_body(
             "project\nagent",
-            &TelegramTail::Markdown("**bold** and `code`".to_string()),
+            &MessageTail::Markdown("**bold** and `code`".to_string()),
         );
         assert_eq!(out, "project\nagent\n<b>bold</b> and <code>code</code>");
     }
 
     #[test]
     fn html_body_escapes_html_special_chars_in_the_header() {
-        let out = html_body("A & B <panel>", &TelegramTail::Plain("ok".to_string()));
+        let out = html_body("A & B <panel>", &MessageTail::Plain("ok".to_string()));
         assert_eq!(out, "A &amp; B &lt;panel&gt;\nok");
     }
 

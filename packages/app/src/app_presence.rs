@@ -50,7 +50,7 @@ fn track_new_windows<T: 'static>(cx: &App) {
 
 fn observe_window_activation(window: &Window, cx: &mut App) {
     observe(cx);
-    crate::telegram::trace::state("window.activation", || {
+    crate::remote_channel::trace::state("window.activation", || {
         let state = snapshot(cx);
         let away_secs = state.away_secs(Instant::now());
         format!(
@@ -59,8 +59,8 @@ fn observe_window_activation(window: &Window, cx: &mut App) {
             window.window_handle().window_id(),
             window.is_window_active(),
             away_secs.is_none(),
-            crate::telegram::trace::opt(away_secs),
-            crate::telegram::trace::opt(state.idle().map(|i| i.as_secs())),
+            crate::remote_channel::trace::opt(away_secs),
+            crate::remote_channel::trace::opt(state.idle().map(|i| i.as_secs())),
         )
     });
 }

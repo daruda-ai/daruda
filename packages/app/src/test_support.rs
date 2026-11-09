@@ -64,8 +64,8 @@ impl ControlFixture {
 
     /// The same pane as a cross-window [`PaneRef`], which is what every
     /// bridge-facing surface routes by.
-    pub(crate) fn pane_ref(&self, cx: &TestAppContext) -> crate::telegram::bridge::PaneRef {
-        crate::telegram::bridge::PaneRef {
+    pub(crate) fn pane_ref(&self, cx: &TestAppContext) -> crate::remote_channel::bridge::PaneRef {
+        crate::remote_channel::bridge::PaneRef {
             workspace: self.workspace.read_with(cx, |ws, _| ws.uuid()),
             pane: self.pane(),
         }
@@ -132,7 +132,7 @@ pub(crate) fn workspace_for_control(cx: &mut TestAppContext) -> ControlFixture {
 /// Stand up a registered host with a hidden session and no live adapter or PTY.
 pub(crate) fn register_test_orchestrator(
     cx: &mut TestAppContext,
-) -> crate::telegram::bridge::PaneRef {
+) -> crate::remote_channel::bridge::PaneRef {
     crate::test_support::init_gpui_component(cx);
     let config = daruda_config::Config::default();
     let holder = std::cell::RefCell::new(None);

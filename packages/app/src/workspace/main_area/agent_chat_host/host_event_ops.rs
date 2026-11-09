@@ -34,7 +34,7 @@ impl Workspace {
                     pane_ref,
                     view.permission_session(),
                     None,
-                    &crate::surface::strings::notification::telegram_question_cancelled(),
+                    &crate::surface::strings::notification::remote_question_cancelled(),
                     cx,
                 );
                 crate::runs::RunsHost::release_execution(
@@ -134,9 +134,9 @@ fn on_app_chat_event(
             use crate::surface::strings as s;
             use daruda_chat::view::PermissionOutcome;
             let label = match outcome {
-                PermissionOutcome::Allowed => s::notification::telegram_permission_allowed(),
-                PermissionOutcome::Rejected => s::notification::telegram_permission_rejected(),
-                PermissionOutcome::Cancelled => s::notification::telegram_permission_cancelled(),
+                PermissionOutcome::Allowed => s::notification::remote_permission_allowed(),
+                PermissionOutcome::Rejected => s::notification::remote_permission_rejected(),
+                PermissionOutcome::Cancelled => s::notification::remote_permission_cancelled(),
             };
             crate::remote_channel::settle_card(
                 crate::remote_channel::cards::CardId::Permission {
@@ -200,13 +200,13 @@ fn question_settled_label(end: daruda_chat::view::QuestionEnd, from_phone: bool)
     use crate::surface::strings::notification as n;
     use daruda_chat::view::QuestionEnd;
     match end {
-        QuestionEnd::Answered if from_phone => n::telegram_question_answered(),
-        QuestionEnd::Answered => n::telegram_question_answered_on_desktop(),
-        QuestionEnd::Skipped => n::telegram_question_skipped(),
-        QuestionEnd::SkippedForPrompt => n::telegram_question_skipped_for_prompt(),
-        QuestionEnd::Cancelled => n::telegram_question_cancelled(),
-        QuestionEnd::Withdrawn => n::telegram_question_withdrawn(),
-        QuestionEnd::Expired => n::telegram_question_expired(),
+        QuestionEnd::Answered if from_phone => n::remote_question_answered(),
+        QuestionEnd::Answered => n::remote_question_answered_on_desktop(),
+        QuestionEnd::Skipped => n::remote_question_skipped(),
+        QuestionEnd::SkippedForPrompt => n::remote_question_skipped_for_prompt(),
+        QuestionEnd::Cancelled => n::remote_question_cancelled(),
+        QuestionEnd::Withdrawn => n::remote_question_withdrawn(),
+        QuestionEnd::Expired => n::remote_question_expired(),
     }
 }
 

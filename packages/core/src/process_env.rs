@@ -58,8 +58,8 @@ pub const ACP_WIRE_LOG_PAYLOADS: Key = Key::new("DARUDA_ACP_WIRE_LOG_PAYLOADS");
 /// ACP wire-log field spill threshold in bytes. Zero disables elision.
 pub const ACP_WIRE_LOG_MAX_FIELD: Key = Key::new("DARUDA_ACP_WIRE_LOG_MAX_FIELD");
 
-/// Telegram diagnostic trace path. Unset leaves the trace disabled.
-pub const TELEGRAM_LOG: Key = Key::new("DARUDA_TELEGRAM_LOG");
+/// Remote-channel diagnostic trace path. Unset leaves the trace disabled.
+pub const REMOTE_LOG: Key = Key::new("DARUDA_REMOTE_LOG");
 
 /// Diagnostic sinks the app reads once at bootstrap and then removes from its
 /// own environment. Each names a file owned by the process that opened it; a
@@ -69,7 +69,7 @@ pub const PROCESS_LOCAL_SINKS: [Key; 4] = [
     ACP_WIRE_LOG,
     ACP_WIRE_LOG_PAYLOADS,
     ACP_WIRE_LOG_MAX_FIELD,
-    TELEGRAM_LOG,
+    REMOTE_LOG,
 ];
 
 /// Screenshot post-launch settle delay in milliseconds.

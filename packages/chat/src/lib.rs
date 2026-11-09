@@ -7,7 +7,7 @@
 //!   closures one-line dispatch into view ops.
 //!
 //! The host side — pane construction, the connection lifecycle, the queue
-//! routing and the Telegram relay — lives in the app. It reaches the view only
+//! routing and the phone relay — lives in the app. It reaches the view only
 //! through `view::host_surface` / `host_commands` and the `AgentChatEvent`s
 //! the view emits.
 

@@ -261,7 +261,7 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
             edit: Edit::StaleCard,
         },
         InboundAction::StaleQuestion => Effect::Reply(RenderedReply {
-            text: s::notification::telegram_question_stale(),
+            text: s::notification::remote_question_stale(),
             keyboard: None,
         }),
         InboundAction::StaleListing => Effect::Feedback {
@@ -280,13 +280,13 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
 /// gets a reply so it does not read as accepted.
 fn question_effect(reply: &QuestionReply, outcome: BotQuestionOutcome) -> Effect {
     let label = match outcome {
-        BotQuestionOutcome::Next => s::notification::telegram_question_next(),
-        BotQuestionOutcome::Updated => s::notification::telegram_question_updated(),
-        BotQuestionOutcome::Submitted => s::notification::telegram_question_answered(),
-        BotQuestionOutcome::Skipped => s::notification::telegram_question_skipped(),
-        BotQuestionOutcome::AlreadySettled => s::notification::telegram_question_stale(),
-        BotQuestionOutcome::TextNotTaken => s::notification::telegram_question_text_not_taken(),
-        BotQuestionOutcome::Gone => s::notification::telegram_permission_gone(),
+        BotQuestionOutcome::Next => s::notification::remote_question_next(),
+        BotQuestionOutcome::Updated => s::notification::remote_question_updated(),
+        BotQuestionOutcome::Submitted => s::notification::remote_question_answered(),
+        BotQuestionOutcome::Skipped => s::notification::remote_question_skipped(),
+        BotQuestionOutcome::AlreadySettled => s::notification::remote_question_stale(),
+        BotQuestionOutcome::TextNotTaken => s::notification::remote_question_text_not_taken(),
+        BotQuestionOutcome::Gone => s::notification::remote_permission_gone(),
     };
     match (reply, outcome) {
         (QuestionReply::Button(_), _) => Effect::Feedback {

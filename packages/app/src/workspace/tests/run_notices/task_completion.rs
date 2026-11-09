@@ -58,7 +58,7 @@ async fn a_manual_continuation_after_task_settlement_keeps_its_completion(cx: &m
 
 fn finish_chat(
     workspace: &gpui::Entity<crate::workspace::Workspace>,
-    pane: crate::telegram::bridge::PaneRef,
+    pane: crate::remote_channel::bridge::PaneRef,
     failed: bool,
     text: &str,
     cx: &mut TestAppContext,
@@ -166,7 +166,7 @@ async fn task_completion(
             .unwrap();
         (
             execution,
-            crate::telegram::bridge::PaneRef {
+            crate::remote_channel::bridge::PaneRef {
                 workspace: ws.uuid(),
                 pane,
             },

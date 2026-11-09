@@ -555,7 +555,7 @@ fn posted_with(
     let message = OutboundMsg {
         chat_id: 42,
         header: "header".into(),
-        tail: crate::telegram::bridge::TelegramTail::Markdown("**tail**".into()),
+        tail: crate::remote_channel::bridge::MessageTail::Markdown("**tail**".into()),
         keyboard: Some(client::InlineKeyboard {
             rows: vec![vec![("Allow".into(), "token".into())]],
         }),

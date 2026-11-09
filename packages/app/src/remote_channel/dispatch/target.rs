@@ -2,8 +2,8 @@ use crate::control::resolve as control_resolve;
 use crate::remote_channel::bridge::{
     BotPermissionOutcome, InboundAction, PaneRef, PermissionDecision, Routed, Unaimed,
 };
+use crate::remote_channel::trace;
 use crate::surface::strings as s;
-use crate::telegram::trace;
 use crate::window_registry::WindowRegistry;
 use crate::workspace::Workspace;
 
@@ -16,11 +16,11 @@ pub(crate) fn permission_feedback(
 ) -> String {
     match outcome {
         BotPermissionOutcome::Applied => match decision {
-            PermissionDecision::Allow(_) => s::notification::telegram_permission_allowed(),
-            PermissionDecision::Reject(_) => s::notification::telegram_permission_rejected(),
+            PermissionDecision::Allow(_) => s::notification::remote_permission_allowed(),
+            PermissionDecision::Reject(_) => s::notification::remote_permission_rejected(),
         },
-        BotPermissionOutcome::Stale => s::notification::telegram_permission_stale(),
-        BotPermissionOutcome::Gone => s::notification::telegram_permission_gone(),
+        BotPermissionOutcome::Stale => s::notification::remote_permission_stale(),
+        BotPermissionOutcome::Gone => s::notification::remote_permission_gone(),
     }
 }
 

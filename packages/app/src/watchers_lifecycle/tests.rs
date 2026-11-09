@@ -35,7 +35,7 @@ fn the_presence_pump_relays_waiting_approvals_without_a_workspace(cx: &mut gpui:
             cx,
         );
         away(cx);
-        spawn_presence_and_telegram_pump(cx);
+        spawn_presence_and_phone_pump(cx);
         (remote, telegram, id)
     });
     cx.run_until_parked();
@@ -49,7 +49,7 @@ fn the_presence_pump_relays_waiting_approvals_without_a_workspace(cx: &mut gpui:
     assert_eq!(channels, ["personal", "work"]);
     assert!(matches!(
         telegram.try_recv(),
-        Ok(crate::telegram::bridge::Outbound::Approval(_))
+        Ok(crate::remote_channel::bridge::Outbound::Approval(_))
     ));
     cx.executor().advance_clock(Duration::from_secs(15));
     cx.run_until_parked();
@@ -76,7 +76,7 @@ fn the_presence_pump_does_not_relay_a_cancelled_approval(cx: &mut gpui::TestAppC
         assert_eq!(remote.try_recv().unwrap().id, "personal");
         assert!(approval::withdraw(id, cx));
         away(cx);
-        spawn_presence_and_telegram_pump(cx);
+        spawn_presence_and_phone_pump(cx);
         (remote, telegram, answer)
     });
     cx.run_until_parked();
@@ -104,7 +104,7 @@ fn an_away_relay_near_expiry_leaves_two_minutes_to_answer(cx: &mut gpui::TestApp
     cx.executor().advance_clock(Duration::from_secs(284));
     cx.update(|cx| {
         away(cx);
-        spawn_presence_and_telegram_pump(cx);
+        spawn_presence_and_phone_pump(cx);
     });
     cx.run_until_parked();
     cx.executor().advance_clock(Duration::from_secs(15));

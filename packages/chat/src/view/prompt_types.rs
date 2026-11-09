@@ -14,12 +14,12 @@ impl std::fmt::Display for PromptId {
 }
 
 /// Where a prompt came from: the composer, a phone relay, the orchestrator,
-/// or a host notice. Only Telegram arms the phone first-response watch when
+/// or a host notice. Only a phone prompt arms the phone first-response watch when
 /// dispatched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptOrigin {
     InApp,
-    Telegram,
+    Phone,
     /// Sent by the orchestrator's `daruda_chat_send`, not typed by a person.
     Orchestrator,
     /// Host-generated literal prompt; never queued, never an edit commit.
@@ -39,7 +39,7 @@ pub enum InternalDispatch {
 }
 
 /// Whether a send put the prompt on the wire immediately or only queued it
-/// behind an in-flight turn — the Telegram relay needs this to decide whether
+/// behind an in-flight turn — the phone relay needs this to decide whether
 /// a "queued" notice is owed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptDispatch {
@@ -55,7 +55,7 @@ pub enum PromptDispatch {
     QueueFull,
 }
 
-/// Which Telegram watch action `apply_event`'s tail owes, decided once per
+/// Which phone watch action `apply_event`'s tail owes, decided once per
 /// event arm so the three lifecycle methods (clear/check/finish) each have
 /// exactly one call site instead of being duplicated at every arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -88,7 +88,7 @@ pub struct QueuedPrompt {
     pub(crate) origin: PromptOrigin,
     /// The task run this prompt delivers, reported to the host when it
     /// reaches the wire or is dropped unsent. Separate from `origin`: a task
-    /// prompt is in-app, and the Telegram watch keys on `origin` alone.
+    /// prompt is in-app, and the phone watch keys on `origin` alone.
     pub(crate) task: Option<daruda_store::tasks::ExecutionRef>,
 }
 

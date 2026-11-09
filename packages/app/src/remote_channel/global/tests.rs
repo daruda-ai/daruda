@@ -238,8 +238,28 @@ fn a_queued_message_cannot_move_to_a_replacement_session_with_the_same_config(
             .get_mut("personal")
             .unwrap();
         connection.bot.as_ref().unwrap().revoke();
-        connection.publish_bot(ready_bot());
+        assert!(
+            !connection.publish_bot(ready_bot()),
+            "a replacement session of the same bot keeps its cards"
+        );
         assert!(outbound::prepare(&pending, cx).is_none());
+    });
+}
+
+#[gpui::test]
+fn another_bot_takes_the_cards_as_a_new_identity(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        setup(cx);
+        let connection = cx
+            .global_mut::<RemoteChannels>()
+            .connections
+            .get_mut("personal")
+            .unwrap();
+        assert!(connection.publish_bot(ready_bot_as("other")));
+        assert!(
+            !connection.publish_bot(ready_bot_as("other")),
+            "its next session is the same identity"
+        );
     });
 }
 

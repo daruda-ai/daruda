@@ -11,7 +11,7 @@
 //! `exec.rs` already uses throughout; what lives here is the *policy* folded
 //! over it.
 
-use crate::telegram::bridge::PaneRef;
+use crate::remote_channel::bridge::PaneRef;
 use crate::window_registry::WindowRegistry;
 use crate::workspace::SlashClaim;
 

@@ -9,7 +9,7 @@ use std::time::Duration;
 #[path = "orchestrator_approvals/announcements.rs"]
 mod announcements;
 
-fn setup(cx: &mut TestAppContext) -> Receiver<crate::telegram::bridge::Outbound> {
+fn setup(cx: &mut TestAppContext) -> Receiver<crate::remote_channel::bridge::Outbound> {
     setup_bridge(cx, true, Some(42))
 }
 
@@ -17,7 +17,7 @@ fn setup_bridge(
     cx: &mut TestAppContext,
     enabled: bool,
     chat_id: Option<i64>,
-) -> Receiver<crate::telegram::bridge::Outbound> {
+) -> Receiver<crate::remote_channel::bridge::Outbound> {
     let (tx, rx) = smol::channel::unbounded();
     cx.update(|cx| {
         let mut config = crate::settings_store::SettingsStore::global(cx)

@@ -31,7 +31,7 @@ use gpui::{App, Global};
 use smol::channel::{Receiver, Sender};
 
 use crate::control::result::PaneAnswer;
-use crate::telegram::bridge::PaneRef;
+use crate::remote_channel::bridge::PaneRef;
 
 /// How long a call waits for the turn it started.
 ///

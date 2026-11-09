@@ -118,7 +118,7 @@ enum Access {
 /// The process-wide owner of the task log.
 pub(crate) struct RunsHost {
     access: Access,
-    pub(super) delivery: super::delivery::Delivery,
+    pub(super) executions: super::delivery::ExecutionBindings,
     pub(super) cli: Option<super::cli::CliTracker>,
     pub(super) cli_resumes: super::cli::resume::ResumeClaims,
     pub(super) effects: Option<Rc<dyn RunsEffects>>,
@@ -222,7 +222,7 @@ impl RunsHost {
             ledger: None,
             host: RunsHost {
                 access,
-                delivery: Default::default(),
+                executions: Default::default(),
                 cli: None,
                 cli_resumes: Default::default(),
                 effects: None,
@@ -597,7 +597,7 @@ impl OpenedRuns {
             ledger: None,
             host: RunsHost {
                 access: Access::Unavailable,
-                delivery: Default::default(),
+                executions: Default::default(),
                 cli: None,
                 cli_resumes: Default::default(),
                 effects: None,

@@ -22,7 +22,7 @@ use crate::workspace::flow_paths;
 fn outcome_reaches_the_phone(
     outbound: &mut crate::telegram::global::TestOutbox,
     cx: &mut TestAppContext,
-) -> Option<crate::telegram::bridge::Outbound> {
+) -> Option<crate::remote_channel::bridge::Outbound> {
     // The real engine is the point here: hand-settling would skip
     // `apply_flow_event`, the only production caller of the relay under test.
     // It wakes this app from its own thread, so the caller allowed parking
@@ -1137,7 +1137,7 @@ async fn started_run_reports_its_outcome(
         return;
     }
     match sent.expect("the direct phone caller receives its outcome") {
-        crate::telegram::bridge::Outbound::Notice(text) => {
+        crate::remote_channel::bridge::Outbound::Notice(text) => {
             assert_eq!(
                 text,
                 crate::surface::strings::control::flow_finished_notice()
@@ -1145,13 +1145,13 @@ async fn started_run_reports_its_outcome(
         }
         // A ping would register a reply-to, so answering "flow finished" would
         // prompt whichever agent spoke last.
-        crate::telegram::bridge::Outbound::Approval(prompt) => {
+        crate::remote_channel::bridge::Outbound::Approval(prompt) => {
             panic!("a flow outcome asks nothing: {prompt:?}")
         }
-        crate::telegram::bridge::Outbound::FlowAsk(prompt) => {
+        crate::remote_channel::bridge::Outbound::FlowAsk(prompt) => {
             panic!("a flow outcome asks nothing: {prompt:?}")
         }
-        crate::telegram::bridge::Outbound::Ping(ping) => {
+        crate::remote_channel::bridge::Outbound::Ping(ping) => {
             panic!("a flow outcome must not be attributed to a pane: {ping:?}")
         }
     }
@@ -1217,7 +1217,7 @@ async fn a_cancelled_phone_started_run_still_reports_back(cx: &mut TestAppContex
     })
     .expect("window is live");
     let sent = outcome_reaches_the_phone(&mut outbound, cx).expect("a stopped run still answers");
-    let crate::telegram::bridge::Outbound::Notice(text) = sent else {
+    let crate::remote_channel::bridge::Outbound::Notice(text) = sent else {
         panic!("a flow outcome must not be attributed to a pane");
     };
     assert!(
@@ -1258,7 +1258,7 @@ async fn a_phone_started_run_answers_with_no_window_open(cx: &mut TestAppContext
     cx.run_until_parked();
 
     match outbound.next().now_or_never().flatten() {
-        Some(crate::telegram::bridge::Outbound::Notice(text)) => {
+        Some(crate::remote_channel::bridge::Outbound::Notice(text)) => {
             assert_eq!(
                 text,
                 crate::surface::strings::control::flow_finished_notice()

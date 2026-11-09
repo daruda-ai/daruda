@@ -6,8 +6,8 @@ use daruda_chat::view::OverageNotice;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::Context;
 
+use crate::remote_channel::bridge::MessageTail;
 use crate::surface::strings as s;
-use crate::telegram::bridge::TelegramTail;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -52,8 +52,8 @@ impl Workspace {
         );
         self.mark_lane_unread_for_pane(pane_id, cx);
         if phone_owed {
-            let header = self.telegram_header(pane_id, cx);
-            self.relay_to_telegram(pane_id, header, TelegramTail::Plain(text), None, cx);
+            let header = self.remote_header(pane_id, cx);
+            self.relay_to_remote(pane_id, header, MessageTail::Plain(text), None, cx);
         }
     }
 }

@@ -1,11 +1,11 @@
-//! Inbound Telegram relay: phone-relayed replies, permission decisions and
+//! Inbound phone relay: phone-relayed replies, permission decisions and
 //! question answers routed back into the triggering pane.
 
+use crate::remote_channel::bridge::BotPermissionOutcome;
 use crate::remote_channel::bridge::{
     BotQuestionOutcome, QuestionButton, QuestionPromptRef, QuestionReply,
 };
 use crate::surface::strings as s;
-use crate::telegram::bridge::BotPermissionOutcome;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::{PhoneAnswerResult, PhoneReply, PromptDispatch};
@@ -35,16 +35,14 @@ impl Workspace {
         if self.agent_chat_view(pane_id).is_none() {
             return false;
         }
-        match self.send_agent_prompt_text_from_telegram(pane_id, text, cx) {
-            Some(PromptDispatch::Queued) => self.relay_queued_notice_to_telegram(pane_id, cx),
+        match self.send_agent_prompt_text_from_phone(pane_id, text, cx) {
+            Some(PromptDispatch::Queued) => self.relay_queued_notice_to_remote(pane_id, cx),
             // Reported, not lost: the sender is on a phone and would otherwise
             // read the silence as the prompt having been accepted.
-            Some(PromptDispatch::QueueFull) => {
-                self.relay_queue_full_notice_to_telegram(pane_id, cx)
-            }
+            Some(PromptDispatch::QueueFull) => self.relay_queue_full_notice_to_remote(pane_id, cx),
             Some(PromptDispatch::SentNow) => {}
             Some(PromptDispatch::ReadOnly | PromptDispatch::Unavailable) => return false,
-            None => self.relay_first_response_fallback_to_telegram(pane_id, cx),
+            None => self.relay_first_response_fallback_to_remote(pane_id, cx),
         }
         true
     }
@@ -64,7 +62,7 @@ impl Workspace {
         pane_id: PaneId,
         session: u64,
         perm_id: u64,
-        decision: crate::telegram::bridge::PermissionDecision,
+        decision: crate::remote_channel::bridge::PermissionDecision,
         cx: &mut Context<Self>,
     ) -> BotPermissionOutcome {
         let Some(view) = self.agent_chat_view(pane_id).cloned() else {
@@ -76,10 +74,10 @@ impl Workspace {
             return BotPermissionOutcome::Stale;
         }
         let (option_id, kind) = match decision {
-            crate::telegram::bridge::PermissionDecision::Allow(id) => {
+            crate::remote_channel::bridge::PermissionDecision::Allow(id) => {
                 (id, daruda_acp::PermissionKindView::AllowOnce)
             }
-            crate::telegram::bridge::PermissionDecision::Reject(id) => {
+            crate::remote_channel::bridge::PermissionDecision::Reject(id) => {
                 (id, daruda_acp::PermissionKindView::RejectOnce)
             }
         };
@@ -121,12 +119,12 @@ impl Workspace {
             PhoneAnswerResult::Next(next) => {
                 let (label, outcome) = if next.field == question.field {
                     (
-                        s::notification::telegram_question_updated(),
+                        s::notification::remote_question_updated(),
                         BotQuestionOutcome::Updated,
                     )
                 } else {
                     (
-                        s::notification::telegram_question_next(),
+                        s::notification::remote_question_next(),
                         BotQuestionOutcome::Next,
                     )
                 };

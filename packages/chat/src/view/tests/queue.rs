@@ -1,5 +1,5 @@
 //! The prompt queue — parking, the resume gesture, edits, removal and the cap —
-//! and the phone watch a prompt from Telegram arms when it leaves the queue.
+//! and the phone watch a prompt from the phone arms when it leaves the queue.
 
 use super::*;
 
@@ -126,7 +126,7 @@ fn empty_submit_ignored_without_parked_prompts(cx: &mut gpui::TestAppContext) {
 
 /// Every way out of an armed resume gesture leaves the queue unarmed, so a
 /// later park cannot land in a pre-armed queue that one Enter would fire. Stop
-/// matters most: Telegram and macro prompts start turns without a composer
+/// matters most: phone and macro prompts start turns without a composer
 /// change to disarm. A composer change disarms too — the next Enter is a new
 /// prompt, and the gesture starts over at arm.
 #[gpui::test]
@@ -363,7 +363,7 @@ fn a_full_queue_refuses_instead_of_growing_or_dropping(cx: &mut gpui::TestAppCon
                     crate::view::PromptDispatch::QueueFull
                 );
                 assert_eq!(
-                    view.send_prompt_text_for_telegram("from phone".to_string(), cx),
+                    view.send_prompt_text_from_phone("from phone".to_string(), cx),
                     crate::view::PromptDispatch::QueueFull
                 );
             })
@@ -371,17 +371,17 @@ fn a_full_queue_refuses_instead_of_growing_or_dropping(cx: &mut gpui::TestAppCon
     }
 }
 
-// The phone watch a Telegram-originated prompt arms.
+// The phone watch a phone-originated prompt arms.
 
 /// Only a prompt that came from the phone arms the phone watch, and only once
 /// it actually goes out: queuing alone arms nothing, and draining an in-app
 /// prompt never does.
 #[gpui::test]
-fn a_drained_telegram_prompt_arms_the_watch_and_an_in_app_one_never_does(
+fn a_drained_phone_prompt_arms_the_watch_and_an_in_app_one_never_does(
     cx: &mut gpui::TestAppContext,
 ) {
     use crate::view::PromptOrigin;
-    for (origin, arms) in [(PromptOrigin::Telegram, true), (PromptOrigin::InApp, false)] {
+    for (origin, arms) in [(PromptOrigin::Phone, true), (PromptOrigin::InApp, false)] {
         let window = make_test_view(cx);
         window
             .update(cx, |view, _window, cx| {
@@ -402,7 +402,7 @@ fn a_drained_telegram_prompt_arms_the_watch_and_an_in_app_one_never_does(
 }
 
 #[gpui::test]
-fn telegram_prompt_does_not_replace_in_app_queue_edit(cx: &mut gpui::TestAppContext) {
+fn phone_prompt_does_not_replace_in_app_queue_edit(cx: &mut gpui::TestAppContext) {
     let window = make_test_view(cx);
     window
         .update(cx, |view, _window, cx| {
@@ -412,7 +412,7 @@ fn telegram_prompt_does_not_replace_in_app_queue_edit(cx: &mut gpui::TestAppCont
                 .expect("room in the queue");
             view.begin_edit(id, cx);
 
-            let dispatch = view.send_prompt_text_for_telegram("from phone".to_string(), cx);
+            let dispatch = view.send_prompt_text_from_phone("from phone".to_string(), cx);
 
             assert_eq!(dispatch, crate::view::PromptDispatch::Queued);
             assert_eq!(

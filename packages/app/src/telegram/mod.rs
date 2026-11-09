@@ -11,4 +11,4 @@ pub(crate) mod command;
 pub mod global;
 pub mod keychain;
 mod markdown;
-pub(crate) mod trace;
+mod update_trace;

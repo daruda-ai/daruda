@@ -4,11 +4,11 @@
 
 use gpui::Context;
 
+use crate::remote_channel::bridge::MessageTail;
 use crate::remote_channel::bridge::{
     PingPrompt, QuestionButton, QuestionPrompt, QuestionPromptRef,
 };
 use crate::surface::strings as s;
-use crate::telegram::bridge::TelegramTail;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::PhoneQuestion;
@@ -21,22 +21,22 @@ use daruda_chat::view::PhoneQuestion;
 fn question_wait_text(question: &PhoneQuestion) -> String {
     let lead = match question.position {
         (n, total) if total > 1 => {
-            s::notification::telegram_question_asks_position(&question.asked_by, n, total)
+            s::notification::remote_question_asks_position(&question.asked_by, n, total)
         }
-        _ => s::notification::telegram_question_asks(&question.asked_by),
+        _ => s::notification::remote_question_asks(&question.asked_by),
     };
     let mut lines = vec![lead, question.message.clone()];
     if question.header != question.message {
         lines.push(question.header.clone());
     }
     if let Some(text) = &question.answer_text {
-        lines.push(s::notification::telegram_question_current_text(text));
+        lines.push(s::notification::remote_question_current_text(text));
     }
     if question.takes_text {
-        lines.push(s::notification::telegram_question_reply_hint());
+        lines.push(s::notification::remote_question_reply_hint());
     }
     if let Some(left) = question.time_left {
-        lines.push(s::notification::telegram_question_time_left(left.clock()));
+        lines.push(s::notification::remote_question_time_left(left.clock()));
     }
     lines.join("\n")
 }
@@ -48,9 +48,9 @@ fn question_rows(question: &PhoneQuestion) -> Vec<Vec<(String, QuestionButton)>>
     let choices = question.options.iter().enumerate().map(|(ix, label)| {
         let label = match (question.multi, question.picked.contains(&ix)) {
             (false, false) => label.clone(),
-            (false, true) => s::notification::telegram_question_picked(label),
-            (true, true) => s::notification::telegram_question_picked(label),
-            (true, false) => s::notification::telegram_question_unpicked(label),
+            (false, true) => s::notification::remote_question_picked(label),
+            (true, true) => s::notification::remote_question_picked(label),
+            (true, false) => s::notification::remote_question_unpicked(label),
         };
         (label, QuestionButton::Option(ix))
     });
@@ -58,18 +58,18 @@ fn question_rows(question: &PhoneQuestion) -> Vec<Vec<(String, QuestionButton)>>
     let mut last = Vec::new();
     if question.multi || question.answer_text.is_some() {
         last.push((
-            s::notification::telegram_question_send(),
+            s::notification::remote_question_send(),
             QuestionButton::Send,
         ));
     }
     if question.optional {
         last.push((
-            s::notification::telegram_question_skip_one(),
+            s::notification::remote_question_skip_one(),
             QuestionButton::SkipField,
         ));
     }
     last.push((
-        s::notification::telegram_question_skip(),
+        s::notification::remote_question_skip(),
         QuestionButton::Skip,
     ));
     rows.push(last);
@@ -79,14 +79,14 @@ fn question_rows(question: &PhoneQuestion) -> Vec<Vec<(String, QuestionButton)>>
 impl Workspace {
     /// The header of a question card: the worktree it runs in, then the
     /// agent, so the phone can tell which of several chats is asking.
-    fn telegram_question_header(&self, pane_id: PaneId, cx: &Context<Self>) -> String {
+    fn remote_question_header(&self, pane_id: PaneId, cx: &Context<Self>) -> String {
         let place = self.lane_ref_for_pane(pane_id).map(|lane| {
             s::control::lane_path(
                 self.control_project_name(lane.project),
                 self.control_lane_name(lane),
             )
         });
-        self.telegram_header_at(pane_id, place, cx)
+        self.remote_header_at(pane_id, place, cx)
     }
 
     fn question_ping_parts(
@@ -94,7 +94,7 @@ impl Workspace {
         pane_id: PaneId,
         question: &PhoneQuestion,
         cx: &Context<Self>,
-    ) -> (String, TelegramTail, Option<PingPrompt>) {
+    ) -> (String, MessageTail, Option<PingPrompt>) {
         let session = self
             .agent_chat_view(pane_id)
             .map(|view| view.read(cx).permission_session())
@@ -109,8 +109,8 @@ impl Workspace {
             rows: question_rows(question),
         };
         (
-            self.telegram_question_header(pane_id, cx),
-            TelegramTail::Plain(question_wait_text(question)),
+            self.remote_question_header(pane_id, cx),
+            MessageTail::Plain(question_wait_text(question)),
             Some(PingPrompt::Question(prompt)),
         )
     }
@@ -119,7 +119,7 @@ impl Workspace {
     /// presence rule as a permission wait: a phone-started turn always hears
     /// it, otherwise only an absent user does. Marked told once it went out,
     /// so the sweep does not repeat it.
-    pub(super) fn relay_question_wait_to_telegram(
+    pub(super) fn relay_question_wait_to_remote(
         &mut self,
         pane_id: PaneId,
         question: &PhoneQuestion,
@@ -142,7 +142,7 @@ impl Workspace {
         cx: &Context<Self>,
     ) {
         let (header, tail, prompt) = self.question_ping_parts(pane_id, question, cx);
-        self.relay_to_telegram(pane_id, header, tail, prompt, cx);
+        self.relay_to_remote(pane_id, header, tail, prompt, cx);
     }
 
     /// Offer each open question of `pane_id` the phone has not been sent.
@@ -159,7 +159,7 @@ impl Workspace {
         }
         let untold = view.update(cx, |v, _| v.take_questions_untold_to_phone());
         for question in untold {
-            self.relay_question_wait_to_telegram(pane_id, &question, cx);
+            self.relay_question_wait_to_remote(pane_id, &question, cx);
         }
     }
 }
@@ -202,17 +202,14 @@ mod tests {
                 vec![QuestionButton::Skip],
             ]
         );
-        assert_eq!(rows[1][0].0, s::notification::telegram_question_picked("b"));
+        assert_eq!(rows[1][0].0, s::notification::remote_question_picked("b"));
     }
 
     #[test]
     fn a_multi_select_marks_its_picks_and_ends_with_send() {
         let rows = question_rows(&card(&["a", "b"], true, false));
-        assert_eq!(
-            rows[0][0].0,
-            s::notification::telegram_question_unpicked("a")
-        );
-        assert_eq!(rows[1][0].0, s::notification::telegram_question_picked("b"));
+        assert_eq!(rows[0][0].0, s::notification::remote_question_unpicked("a"));
+        assert_eq!(rows[1][0].0, s::notification::remote_question_picked("b"));
         assert_eq!(
             rows[2].iter().map(|(_, b)| *b).collect::<Vec<_>>(),
             [QuestionButton::Send, QuestionButton::Skip]
@@ -226,10 +223,10 @@ mod tests {
         assert_eq!(
             lines,
             [
-                s::notification::telegram_question_asks("Claude").as_str(),
+                s::notification::remote_question_asks("Claude").as_str(),
                 "Before I ship",
                 "Which?",
-                s::notification::telegram_question_reply_hint().as_str(),
+                s::notification::remote_question_reply_hint().as_str(),
             ]
         );
     }
@@ -242,7 +239,7 @@ mod tests {
         };
         assert!(
             question_wait_text(&question)
-                .contains(&s::notification::telegram_question_current_text("src/"))
+                .contains(&s::notification::remote_question_current_text("src/"))
         );
         assert!(
             question_rows(&question)
@@ -267,7 +264,7 @@ mod tests {
         });
         assert_eq!(
             text.lines().last(),
-            Some(s::notification::telegram_question_time_left("4:12").as_str())
+            Some(s::notification::remote_question_time_left("4:12").as_str())
         );
     }
 }

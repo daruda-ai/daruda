@@ -320,7 +320,7 @@ lookup. The override and profile are captured once per process.
 
 Old `~/.daruda/logs/<profile>` files remain untouched. The Help menu's diagnostic
 export reads bounded, sanitized events from both old and new default logs;
-an isolated override reads only its own logs. Explicit ACP/Telegram trace
+an isolated override reads only its own logs. Explicit ACP/remote-channel trace
 environment overrides still select their requested destinations.
 
 Profiles (`release`, `debug`, or a named profile) share one application log

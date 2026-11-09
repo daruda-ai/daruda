@@ -87,8 +87,8 @@ pub(crate) fn init_observability() {
         .then(daruda_store::observability::log_writer::log_dir)
         .flatten();
     daruda_acp::wire_log::configure_from_env(log_dir.as_ref().map(|d| d.join("acp-wire.log")));
-    crate::telegram::trace::configure_from_env(
-        log_dir.map(|d| d.join(crate::telegram::trace::TRACE_FILE_NAME)),
+    crate::remote_channel::trace::configure_from_env(
+        log_dir.map(|d| d.join(crate::remote_channel::trace::TRACE_FILE_NAME)),
     );
     // Both are fixed in-process now, so no child — an adapter, a terminal
     // shell, a `cargo test` an agent runs — may inherit a sink this process

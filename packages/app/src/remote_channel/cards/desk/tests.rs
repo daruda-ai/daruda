@@ -24,16 +24,16 @@ struct Harness {
 impl Harness {
     fn bound(owner: &'static str) -> Self {
         let mut harness = Self::default();
-        harness.bind(owner);
+        assert!(harness.bind(owner), "a first owner is a new identity");
         harness
     }
 
-    fn bind(&mut self, owner: &'static str) {
-        self.desk.bind(owner);
+    fn bind(&mut self, owner: &'static str) -> bool {
+        self.desk.bind(owner)
     }
 
-    fn retire(&mut self) {
-        self.desk.retire();
+    fn retire(&mut self) -> bool {
+        self.desk.retire()
     }
 
     fn claim(&mut self, card: CardId) -> Option<SendClaim> {
@@ -373,13 +373,13 @@ fn rebinding_the_same_owner_keeps_tokens_and_another_drops_them() {
     let (card, outbound) = flow_ask(3);
     let (_, flow) = sending(&mut harness, (card.clone(), outbound));
     harness.settle(&card, "Done");
-    harness.bind("a");
+    assert!(!harness.bind("a"), "the same owner is the same identity");
     assert_eq!(harness.tap(&approve), resolve(ApprovalChoice::Approved));
     assert!(matches!(
         harness.tap(&flow[0]),
         InboundAction::ResolveFlowAsk { .. }
     ));
-    harness.bind("b");
+    assert!(harness.bind("b"), "another owner is a new identity");
     assert_eq!(harness.tap(&approve), InboundAction::StaleApproval);
     assert_eq!(
         harness.tap(&flow[0]),
@@ -396,7 +396,8 @@ fn retiring_forgets_every_token_and_tombstone() {
     let (card, outbound) = flow_ask(3);
     let (_, flow) = sending(&mut harness, (card.clone(), outbound));
     harness.settle(&card, "Done");
-    harness.retire();
+    assert!(harness.retire(), "retiring a serving identity ends it");
+    assert!(!harness.retire(), "nothing served, nothing ended");
     assert_eq!(harness.tap(&approve), InboundAction::StaleApproval);
     assert_eq!(harness.tap(&flow[0]), InboundAction::Ignore);
     assert!(harness.claim_approval(ApprovalId(1)).is_some());

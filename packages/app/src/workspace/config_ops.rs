@@ -84,7 +84,7 @@ impl Workspace {
         self.store_mirrors(mirrors);
         self.refresh_flow_form_catalog(cx);
         self.apply_config_to_left_dock(cx);
-        self.apply_config_to_agent_chat_defaults(delta.telegram_recipient, cx);
+        self.apply_config_to_agent_chat_defaults(cx);
         self.apply_config_to_agent_sessions(&previous_agents, cx);
         self.apply_config_to_input_dock(config, cx);
         self.apply_config_to_terminals(config, cx);

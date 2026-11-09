@@ -17,7 +17,7 @@ use crate::control::exec::{self, Dispatch, Pending};
 use crate::control::guards;
 use crate::control::mcp::convert::{self, Command};
 use crate::control::mcp::protocol::{self, Session};
-use crate::telegram::bridge::PaneRef;
+use crate::remote_channel::bridge::PaneRef;
 
 /// The handshake state of whichever connection is currently served, plus the
 /// calls it is still waiting on.
@@ -272,10 +272,10 @@ fn answer_frame(
     cx: &mut App,
 ) -> Answer {
     // Read per frame rather than cached: the catalog is live config, and a
-    // `tools/list` after the user adds an agent must advertise it. `try_` for
-    // the reason `Workspace::telegram_bridge` uses it — a frame handler must
-    // not panic on a global that is merely not up yet; an empty catalog just
-    // advertises the `agent` argument without its choices.
+    // `tools/list` after the user adds an agent must advertise it. `try_`
+    // because a frame handler must not panic on a global that is merely not
+    // up yet; an empty catalog just advertises the `agent` argument without
+    // its choices.
     let agents = cx
         .try_global::<crate::settings_store::SettingsStore>()
         .map(|s| s.user().resolved_agents())

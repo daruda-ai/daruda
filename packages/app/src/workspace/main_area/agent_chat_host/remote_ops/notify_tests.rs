@@ -4,8 +4,8 @@
 use futures::{FutureExt as _, StreamExt as _};
 
 use super::tests::{expect_ping, make_window, prompt};
+use crate::remote_channel::bridge::{MessageTail, Outbound};
 use crate::surface::strings as s;
-use crate::telegram::bridge::{Outbound, TelegramTail};
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_acp::{ChatItem, PermissionChoice, PermissionKindView};
 
@@ -30,7 +30,7 @@ fn bridged_pane(cx: &mut gpui::TestAppContext) -> (Outbox, gpui::Entity<super::W
     (outbound, workspace, pane)
 }
 
-fn sent(outbound: &mut Outbox) -> crate::telegram::bridge::BridgePing {
+fn sent(outbound: &mut Outbox) -> crate::remote_channel::bridge::BridgePing {
     expect_ping(
         outbound
             .next()
@@ -68,7 +68,7 @@ async fn a_permission_wait_says_which_project_agent_and_tab_asks(cx: &mut gpui::
     }];
     workspace.update(cx, |ws, cx| {
         name_tab(ws, pane, "review", cx);
-        ws.relay_permission_wait_to_telegram(pane, &prompt(7, &options, Some("Write x.rs")), cx);
+        ws.relay_permission_wait_to_remote(pane, &prompt(7, &options, Some("Write x.rs")), cx);
         let ping = sent(&mut outbound);
         let project = ws.project_name_for_pane(pane).expect("an owning project");
         let agent = ws
@@ -105,8 +105,8 @@ async fn a_failed_turn_tells_the_phone_why(cx: &mut gpui::TestAppContext) {
         });
         ws.fire_activity_completion(pane, daruda_chat::view::TurnOutcome::Errored, cx);
         let ping = sent(&mut outbound);
-        assert_eq!(ping.header, ws.telegram_header(pane, cx));
-        let TelegramTail::Plain(tail) = ping.tail else {
+        assert_eq!(ping.header, ws.remote_header(pane, cx));
+        let MessageTail::Plain(tail) = ping.tail else {
             panic!("a failure is our own copy, not agent markdown");
         };
         assert!(tail.starts_with(&s::control::turn_failed()), "{tail}");
@@ -130,7 +130,7 @@ async fn a_dead_session_tells_the_phone_its_error(cx: &mut gpui::TestAppContext)
             });
         });
         ws.fire_activity_completion(pane, daruda_chat::view::TurnOutcome::Errored, cx);
-        let TelegramTail::Plain(tail) = sent(&mut outbound).tail else {
+        let MessageTail::Plain(tail) = sent(&mut outbound).tail else {
             panic!("plain");
         };
         assert!(tail.contains("adapter exited with 137"), "{tail}");
@@ -198,7 +198,7 @@ async fn a_completed_run_is_summarised_in_one_line(cx: &mut gpui::TestAppContext
         ws.fire_activity_completion(pane, daruda_chat::view::TurnOutcome::Completed, cx);
         let ping = sent(&mut outbound);
         let summary = ping.header.lines().last().expect("a header").to_string();
-        assert!(ping.header.starts_with(&ws.telegram_header(pane, cx)));
+        assert!(ping.header.starts_with(&ws.remote_header(pane, cx)));
         let took = s::notification::format_duration_compact(std::time::Duration::from_secs(125));
         assert!(summary.contains(&took), "{summary}");
         assert!(
@@ -243,8 +243,8 @@ async fn a_permission_to_edit_a_file_shows_the_edit(cx: &mut gpui::TestAppContex
             }];
             v.seed_items_for_test([ChatItem::ToolCall(call)], cx);
         });
-        ws.relay_permission_wait_to_telegram(pane, &prompt, cx);
-        let TelegramTail::Markdown(tail) = sent(&mut outbound).tail else {
+        ws.relay_permission_wait_to_remote(pane, &prompt, cx);
+        let MessageTail::Markdown(tail) = sent(&mut outbound).tail else {
             panic!("a diff preview is intentional markdown");
         };
         assert!(
@@ -297,7 +297,7 @@ async fn a_permission_no_channel_took_is_offered_once_one_can(cx: &mut gpui::Tes
                 v.hold_permission_card_for_test(request.clone(), cx)
             });
             let take_back = crate::telegram::global::lend_bot_elsewhere_for_test(cx);
-            ws.relay_permission_wait_to_telegram(pane, &request, cx);
+            ws.relay_permission_wait_to_remote(pane, &request, cx);
             assert!(outbound.next().now_or_never().is_none());
 
             take_back(cx);

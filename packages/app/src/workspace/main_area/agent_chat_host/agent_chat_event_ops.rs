@@ -129,13 +129,13 @@ impl Workspace {
             view.read(cx).is_read_only(),
         );
         let asked = matches!(&event, daruda_acp::AcpEvent::QuestionAsked { .. });
-        let telegram_first_response = view.update(cx, |v, cx| {
+        let phone_first_response = view.update(cx, |v, cx| {
             v.apply_event(event, &syntax_theme, is_light, cx)
         });
         if is_error {
             self.release_cli_resume(pane_id);
         }
-        self.relay_phone_ack_effect(pane_id, telegram_first_response, cx);
+        self.relay_phone_ack_effect(pane_id, phone_first_response, cx);
         // At arrival as well as on the periodic sweep, as a permission wait
         // is: a phone-started turn should not wait a pump tick for its card.
         if asked {

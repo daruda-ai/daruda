@@ -201,7 +201,7 @@ impl RunsHost {
                 .is_some_and(|task| matches!(task.lifecycle, Lifecycle::Running { .. }))
                 && !cx
                     .global::<Self>()
-                    .delivery
+                    .executions
                     .bindings
                     .values()
                     .any(|owner| owner == &exec);
@@ -219,7 +219,7 @@ impl RunsHost {
     }
 
     fn settle_unfinished_cli_exit(exec: ExecutionRef, pid: u32, cx: &mut App) {
-        if cx.global::<Self>().delivery.settling.contains(&exec) {
+        if cx.global::<Self>().executions.settling.contains(&exec) {
             return;
         }
         // A queued filesystem notification must not turn normal completion
@@ -271,7 +271,7 @@ impl RunsHost {
             });
         let attached = cx
             .global::<Self>()
-            .delivery
+            .executions
             .bindings
             .values()
             .any(|bound| bound == &exec);
@@ -336,7 +336,7 @@ impl RunsHost {
                             && terminal
                                 .as_deref()
                                 .is_none_or(|id| run.terminal_id.as_deref() == Some(id))
-                            && !cx.global::<Self>().delivery.settling.contains(exec)
+                            && !cx.global::<Self>().executions.settling.contains(exec)
                             && (run.session_id.as_deref() == Some(&session)
                                 || task.session_ids.contains(&session))
                     })
@@ -355,7 +355,7 @@ impl RunsHost {
                     .collect();
                 for (exec, path) in runs {
                     cx.update_global::<Self, _>(|host, _| {
-                        host.delivery.settling.insert(exec.clone());
+                        host.executions.settling.insert(exec.clone());
                     });
                     let Some(path) = path.filter(|_| reason != SessionEndReason::Error) else {
                         Self::finish_cli_result(exec, reason, None, at, cx);
@@ -425,7 +425,7 @@ impl RunsHost {
             // `propose` resolves only after the durable event is projected.
             cx.update(|cx| {
                 cx.update_global::<Self, _>(|host, _| {
-                    host.delivery.settling.remove(&exec);
+                    host.executions.settling.remove(&exec);
                 });
                 Self::reconcile_lost_cli(exec, cx);
             });
@@ -436,12 +436,12 @@ impl RunsHost {
     pub(super) fn reconcile_lost_cli(exec: ExecutionRef, cx: &mut App) {
         Self::after_projection(
             move |cx| {
-                if cx.global::<Self>().delivery.settling.contains(&exec) {
+                if cx.global::<Self>().executions.settling.contains(&exec) {
                     return;
                 }
                 if cx
                     .global::<Self>()
-                    .delivery
+                    .executions
                     .bindings
                     .values()
                     .any(|bound| bound == &exec)

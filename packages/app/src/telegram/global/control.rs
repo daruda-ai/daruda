@@ -8,9 +8,9 @@
 //!
 //! Everything here is `pub(super)`: the poll loop is the only caller.
 
+use crate::remote_channel::trace;
 use crate::telegram::client;
 use crate::telegram::command;
-use crate::telegram::trace;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 

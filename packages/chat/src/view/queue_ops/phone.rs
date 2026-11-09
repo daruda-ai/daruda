@@ -4,12 +4,12 @@ use super::super::super::phone_turn::PhoneTurn;
 use super::super::{AgentChatView, FirstResponseOutcome, PhoneAckEffect, PromptOrigin};
 
 impl AgentChatView {
-    /// Arms the Telegram turn ledger the instant a Telegram-origin prompt
+    /// Arms the phone turn ledger the instant a phone-origin prompt
     /// reaches the wire — called from both dispatch paths so it starts at the
     /// true dispatch point, never at enqueue time. No-op for
     /// [`PromptOrigin::InApp`].
     pub(in crate::view) fn arm_phone_turn_if(&mut self, origin: PromptOrigin) {
-        if origin == PromptOrigin::Telegram {
+        if origin == PromptOrigin::Phone {
             self.phone_turn_state = Some(PhoneTurn::start(
                 std::time::Instant::now(),
                 self.items.len(),
@@ -18,7 +18,7 @@ impl AgentChatView {
     }
 
     /// Whether this pane is still waiting to produce the first phone-visible
-    /// response for a Telegram-origin prompt.
+    /// response for a phone-origin prompt.
     pub fn is_phone_turn_waiting(&self) -> bool {
         self.phone_turn_state
             .as_ref()

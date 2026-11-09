@@ -32,7 +32,7 @@ pub(crate) fn spawn_all(cx: &mut App) {
     spawn_claude_status(cx);
     spawn_needs_attention_demote(cx);
     spawn_status_pulse(cx);
-    spawn_presence_and_telegram_pump(cx);
+    spawn_presence_and_phone_pump(cx);
     spawn_panels_reload(cx);
     spawn_keep_awake_expiry(cx);
 }
@@ -97,7 +97,7 @@ fn spawn_needs_attention_demote(cx: &mut App) {
 /// turns against their fallback window, and re-offer permission prompts the
 /// phone was never shown. Idle work is a pair of cheap OS samples plus two
 /// per-pane emptiness checks.
-fn spawn_presence_and_telegram_pump(cx: &mut App) {
+fn spawn_presence_and_phone_pump(cx: &mut App) {
     watcher_pumps::spawn_periodic_pump(
         std::time::Duration::from_secs(15),
         |cx: &mut App| {
@@ -108,7 +108,7 @@ fn spawn_presence_and_telegram_pump(cx: &mut App) {
             crate::app_presence::observe(cx);
             crate::control::approval::relay_outstanding(cx);
             WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-                ws.flush_telegram_first_response_fallbacks(cx);
+                ws.flush_remote_first_response_fallbacks(cx);
                 ws.relay_outstanding_permissions(cx);
             });
         },

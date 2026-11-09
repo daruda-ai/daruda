@@ -2,8 +2,8 @@ use crate::control::{
     result::{ControlOutcome, ControlResult},
     spec::ControlCommand,
 };
+use crate::remote_channel::trace;
 use crate::remote_channel::{bridge::PaneRef, command};
-use crate::telegram::trace;
 use gpui::App;
 
 /// Resolve, run, and render one command.

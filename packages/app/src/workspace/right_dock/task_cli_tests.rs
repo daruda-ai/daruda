@@ -755,7 +755,7 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
             ws.send_agent_prompt_text(id, "must not send".into(), cx);
             ws.send_agent_prompt_text(id, "/clear".into(), cx);
             assert!(matches!(
-                ws.send_agent_prompt_text_from_telegram(id, "phone".into(), cx),
+                ws.send_agent_prompt_text_from_phone(id, "phone".into(), cx),
                 Some(PromptDispatch::ReadOnly)
             ));
             assert!(matches!(

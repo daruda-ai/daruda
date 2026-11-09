@@ -184,9 +184,9 @@ fn switching_worktrees_closes_the_orchestrator_tab_and_keeps_the_session(cx: &mu
                 ));
             let pane = seed(ws, window, cx);
             let view = ws.agent_chat_view(pane).unwrap().entity_id();
-            let header = ws.telegram_header(pane, cx);
+            let header = ws.remote_header(pane, cx);
             assert!(ws.show_orchestrator_tab(window, cx));
-            assert_eq!(ws.telegram_header(pane, cx), header);
+            assert_eq!(ws.remote_header(pane, cx), header);
             assert_eq!(
                 ws.lane_ref_for_pane(pane),
                 None,
@@ -216,7 +216,7 @@ fn switching_worktrees_closes_the_orchestrator_tab_and_keeps_the_session(cx: &mu
             // The session is what must survive: the slot still owns the same
             // view, and the chip can put it back.
             assert_eq!(ws.agent_chat_view(pane).unwrap().entity_id(), view);
-            assert_eq!(ws.telegram_header(pane, cx), header);
+            assert_eq!(ws.remote_header(pane, cx), header);
             assert!(ws.show_orchestrator_tab(window, cx), "the chip reopens it");
             assert_eq!(ws.agent_chat_view(pane).unwrap().entity_id(), view);
         })
@@ -747,7 +747,7 @@ fn hidden_orchestrator_preserves_user_tabs_and_resolves_its_account(cx: &mut Tes
 
 #[gpui::test]
 fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::agent_chat_host::telegram_ops::FIRST_RESPONSE_FALLBACK_SECS;
+    use crate::workspace::main_area::agent_chat_host::remote_ops::FIRST_RESPONSE_FALLBACK_SECS;
     use daruda_chat::view::TurnOutcome;
     let (window, workspace) = build_workspace(cx);
     let mut outbound =
@@ -755,9 +755,6 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
     let pane = cx
         .update_window(window.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                ws.mirrors.telegram.enabled = true;
-                ws.mirrors.telegram.authorized_chat_id = Some(42);
-                ws.mirrors.telegram.only_when_away = false;
                 let pane = ws
                     .seed_orchestrator_chat_pane_unrevealed_for_test(
                         ws.mirrors.agents[0].id.clone(),
@@ -783,7 +780,7 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
                 // ends) and the one the turn ledger encodes: the completion
                 // closes the turn's phone conversation, so an ack owed to it
                 // has to have gone out already.
-                ws.flush_telegram_first_response_fallbacks(cx);
+                ws.flush_remote_first_response_fallbacks(cx);
                 ws.pulse_agent_chats(cx);
                 let view = ws.agent_chat_view(pane).unwrap().read(cx);
                 assert!(!view.last_reconciled_busy());
@@ -795,7 +792,7 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
         .unwrap();
     cx.run_until_parked();
     for _ in 0..2 {
-        let Some(Some(crate::telegram::bridge::Outbound::Ping(ping))) =
+        let Some(Some(crate::remote_channel::bridge::Outbound::Ping(ping))) =
             outbound.next().now_or_never()
         else {
             panic!("both completion and fallback must be emitted for the hidden session");
@@ -803,7 +800,7 @@ fn hidden_orchestrator_pulse_emits_completion_and_phone_fallback(cx: &mut TestAp
         assert_eq!(ping.pane.pane, pane);
     }
     workspace.update(cx, |ws, cx| {
-        ws.flush_telegram_first_response_fallbacks(cx);
+        ws.flush_remote_first_response_fallbacks(cx);
         ws.pulse_agent_chats(cx);
     });
     cx.run_until_parked();

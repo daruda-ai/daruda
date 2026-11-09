@@ -1,5 +1,5 @@
-//! Telegram relay — `Workspace` ops that push agent-chat pings out to the
-//! Telegram bridge (`crate::telegram::global::TelegramBridge`) and route
+//! Phone relay — `Workspace` ops that push agent-chat pings out through
+//! every remote channel (`crate::remote_channel`) and route
 //! phone-tapped replies / permission decisions back into the triggering pane.
 //!
 //! Sibling of [`super::agent_chat_ops`], whose `maybe_notify_agent_event`
@@ -10,9 +10,9 @@ use std::time::Instant;
 
 use gpui::{App, Context};
 
+use crate::remote_channel::bridge::MessageTail;
+use crate::remote_channel::trace;
 use crate::surface::strings as s;
-use crate::telegram::bridge::TelegramTail;
-use crate::telegram::trace;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -26,14 +26,14 @@ pub(in crate::workspace) use daruda_chat::phone_turn::{FirstResponseOutcome, Pho
 /// the ask, tail carries the result; the elided middle is usually tool-output
 /// detail already visible in the app. Their sum is the threshold below which
 /// text goes verbatim.
-const TELEGRAM_PREVIEW_HEAD_CHARS: usize = 1000;
-const TELEGRAM_PREVIEW_TAIL_CHARS: usize = 1000;
-/// Maximum time a phone-triggered turn can stay silent before Telegram receives
+const REMOTE_PREVIEW_HEAD_CHARS: usize = 1000;
+const REMOTE_PREVIEW_TAIL_CHARS: usize = 1000;
+/// Maximum time a phone-triggered turn can stay silent before the phone receives
 /// the fixed fallback acknowledgement.
 pub(in crate::workspace) const FIRST_RESPONSE_FALLBACK_SECS: u64 = 60;
 
 /// The phone's slice of an agent response: the first
-/// [`TELEGRAM_PREVIEW_HEAD_CHARS`] and last [`TELEGRAM_PREVIEW_TAIL_CHARS`]
+/// [`REMOTE_PREVIEW_HEAD_CHARS`] and last [`REMOTE_PREVIEW_TAIL_CHARS`]
 /// characters around `marker` (the caller's localized "…(truncated)…" string).
 ///
 /// This file owns the *budget* and the localized marker; the elision itself is
@@ -42,8 +42,8 @@ pub(in crate::workspace) const FIRST_RESPONSE_FALLBACK_SECS: u64 = 60;
 fn preview_for(text: &str, marker: &str) -> String {
     daruda_control_types::agent_text::elide_middle(
         text,
-        TELEGRAM_PREVIEW_HEAD_CHARS,
-        TELEGRAM_PREVIEW_TAIL_CHARS,
+        REMOTE_PREVIEW_HEAD_CHARS,
+        REMOTE_PREVIEW_TAIL_CHARS,
         marker,
     )
 }
@@ -85,7 +85,7 @@ fn permission_wait_text(tool_title: Option<&str>, raw_input_summary: Option<&str
 fn permission_wait_tail(
     prompt: &daruda_acp::PermissionItem,
     diffs: &[daruda_acp::DiffView],
-) -> TelegramTail {
+) -> MessageTail {
     let text = permission_wait_text(
         prompt.tool_title.as_deref(),
         prompt.raw_input_summary.as_deref(),
@@ -93,9 +93,9 @@ fn permission_wait_tail(
     let Some(preview) =
         diff_preview::diff_preview(diffs, daruda_chat::labels::diff_fallback_truncated)
     else {
-        return TelegramTail::Plain(text);
+        return MessageTail::Plain(text);
     };
-    TelegramTail::Markdown(format!(
+    MessageTail::Markdown(format!(
         "{}\n\n{}",
         diff_preview::escape_markdown_text(&text),
         diff_preview::fenced_diff(&preview)
@@ -124,7 +124,7 @@ fn permission_diffs<'a>(
 /// fixed i18n label, plus the tool's title on its own line when the agent
 /// supplied a non-empty one.
 fn first_tool_ack_tail(tool_title: Option<&str>) -> String {
-    let mut tail = s::notification::telegram_first_tool_ack();
+    let mut tail = s::notification::remote_first_tool_ack();
     if let Some(title) = tool_title.filter(|t| !t.is_empty()) {
         tail.push('\n');
         tail.push_str(title);
@@ -132,7 +132,7 @@ fn first_tool_ack_tail(tool_title: Option<&str>) -> String {
     tail
 }
 
-/// Build one Telegram button per permission choice, in the same order and with
+/// Build one phone button per permission choice, in the same order and with
 /// the same labels the in-app card uses (the same `daruda_acp::PermissionChoice`
 /// list). A richer option set (e.g. codex-acp's "Allow Once" / "Allow for
 /// Session" / execpolicy amendment, alongside Reject) stays fully choosable from
@@ -142,8 +142,8 @@ fn first_tool_ack_tail(tool_title: Option<&str>) -> String {
 /// only when the agent supplied no options (caller then skips the relay).
 fn permission_buttons(
     options: &[daruda_acp::PermissionChoice],
-) -> Vec<(String, crate::telegram::bridge::PermissionDecision)> {
-    use crate::telegram::bridge::PermissionDecision;
+) -> Vec<(String, crate::remote_channel::bridge::PermissionDecision)> {
+    use crate::remote_channel::bridge::PermissionDecision;
     use daruda_acp::PermissionKindView as Kind;
     options
         .iter()
@@ -169,19 +169,19 @@ impl Workspace {
         self.project_for(project_id).map(|p| p.name.clone())
     }
 
-    /// The header line(s) for a pane's Telegram pings: project name + agent name
+    /// The header line(s) for a pane's phone pings: project name + agent name
     /// when the pane's view is live, else the pane title. Shared by the
     /// completion and ack relays so they all read identically.
-    pub(in crate::workspace) fn telegram_header(
+    pub(in crate::workspace) fn remote_header(
         &self,
         pane_id: PaneId,
         cx: &Context<Self>,
     ) -> String {
-        self.telegram_header_at(pane_id, self.project_name_for_pane(pane_id), cx)
+        self.remote_header_at(pane_id, self.project_name_for_pane(pane_id), cx)
     }
 
-    /// [`Self::telegram_header`] with `project_line` as its first line.
-    fn telegram_header_at(
+    /// [`Self::remote_header`] with `project_line` as its first line.
+    fn remote_header_at(
         &self,
         pane_id: PaneId,
         project_line: Option<String>,
@@ -205,9 +205,9 @@ impl Workspace {
 
     /// Compose the turn-completion ping's header + tail: the plain header, and
     /// the agent's last response ([`preview_for`] truncates past 2000 chars) as
-    /// a [`TelegramTail::Markdown`] tail so the phone shows what the agent
+    /// a [`MessageTail::Markdown`] tail so the phone shows what the agent
     /// actually said with its markdown rendered. Falls back to a
-    /// [`TelegramTail::Plain`] "finished responding" tail when the turn produced
+    /// [`MessageTail::Plain`] "finished responding" tail when the turn produced
     /// no assistant text (e.g. tool-only) or the view is gone — that fallback is
     /// plain i18n copy, not agent markdown, so it must not be parsed as such.
     ///
@@ -220,12 +220,12 @@ impl Workspace {
     /// once. [`Self::close_phone_turn`] is what ends the turn, and
     /// `fire_activity_completion` calls it whether or not this returned
     /// something to send.
-    pub(super) fn telegram_completion_parts(
+    pub(super) fn remote_completion_parts(
         &self,
         pane_id: PaneId,
         cx: &Context<Self>,
-    ) -> Option<(String, TelegramTail)> {
-        let mut header = self.telegram_header(pane_id, cx);
+    ) -> Option<(String, MessageTail)> {
+        let mut header = self.remote_header(pane_id, cx);
         if let Some(line) = self
             .agent_chat_view(pane_id)
             .and_then(|view| view.read(cx).last_run_summary())
@@ -237,7 +237,7 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane_id) else {
             return Some((
                 self.pane_title(pane_id, cx),
-                TelegramTail::Plain(s::notification::agent_completed()),
+                MessageTail::Plain(s::notification::agent_completed()),
             ));
         };
         let view = view.read(cx);
@@ -270,20 +270,20 @@ impl Workspace {
             }
             Some((text, _)) => Some((
                 header,
-                TelegramTail::Markdown(preview_for(
+                MessageTail::Markdown(preview_for(
                     text,
-                    &s::notification::telegram_truncated_marker(),
+                    &s::notification::remote_truncated_marker(),
                 )),
             )),
             None => Some((
                 header,
-                TelegramTail::Plain(s::notification::agent_completed()),
+                MessageTail::Plain(s::notification::agent_completed()),
             )),
         }
     }
 
     /// End the turn's phone conversation. Separate from
-    /// [`Self::telegram_completion_parts`] because that one is a question and
+    /// [`Self::remote_completion_parts`] because that one is a question and
     /// this is the effect: composing a ping must not be what retires the turn,
     /// or a second reader of the same question would silently retire it.
     pub(super) fn close_phone_turn(&self, pane_id: PaneId, cx: &mut Context<Self>) {
@@ -306,19 +306,19 @@ impl Workspace {
     /// through the ledger check in [`Self::relay_when_presence_allows`].
     /// The tail stays plain unless a file diff is available. With a diff, the
     /// administrative text is escaped and the preview alone is fenced.
-    pub(super) fn relay_permission_wait_to_telegram(
+    pub(super) fn relay_permission_wait_to_remote(
         &mut self,
         pane_id: PaneId,
         prompt: &daruda_acp::PermissionItem,
         cx: &mut Context<Self>,
     ) {
-        let is_telegram_first_response = self
+        let is_phone_first_response = self
             .agent_chat_view(pane_id)
             .is_some_and(|view| view.read(cx).is_phone_turn_waiting());
         let buttons = permission_buttons(&prompt.options);
         if buttons.is_empty() {
-            if is_telegram_first_response {
-                self.relay_first_response_fallback_to_telegram(pane_id, cx);
+            if is_phone_first_response {
+                self.relay_first_response_fallback_to_remote(pane_id, cx);
             }
             return;
         }
@@ -329,9 +329,9 @@ impl Workspace {
                 permission_wait_tail(prompt, permission_diffs(view, &prompt.tool_call_id))
             })
             .unwrap_or_else(|| permission_wait_tail(prompt, &[]));
-        let header = self.telegram_header(pane_id, cx);
-        let permission = Some(crate::telegram::bridge::PingPrompt::Permission(
-            crate::telegram::bridge::PermissionPromptRef {
+        let header = self.remote_header(pane_id, cx);
+        let permission = Some(crate::remote_channel::bridge::PingPrompt::Permission(
+            crate::remote_channel::bridge::PermissionPromptRef {
                 session: self
                     .agent_chat_view(pane_id)
                     .map(|view| view.read(cx).permission_session())
@@ -340,8 +340,8 @@ impl Workspace {
                 buttons,
             },
         ));
-        let told = if is_telegram_first_response {
-            self.relay_to_telegram(pane_id, header, tail, permission, cx)
+        let told = if is_phone_first_response {
+            self.relay_to_remote(pane_id, header, tail, permission, cx)
         } else {
             self.relay_when_presence_allows(pane_id, header, tail, permission, cx)
         };
@@ -372,7 +372,7 @@ impl Workspace {
     /// so a resolved request simply stops appearing.
     ///
     /// Level-triggered on the periodic pump, mirroring
-    /// [`Self::flush_telegram_first_response_fallbacks`].
+    /// [`Self::flush_remote_first_response_fallbacks`].
     pub(crate) fn relay_outstanding_permissions(&mut self, cx: &mut Context<Self>) {
         let panes: Vec<PaneId> = self.every_agent_chat().map(|(id, _)| id).collect();
         for pane_id in panes {
@@ -400,7 +400,7 @@ impl Workspace {
             }
             let untold = view.update(cx, |v, _| v.take_permissions_untold_to_phone());
             for prompt in untold {
-                self.relay_permission_wait_to_telegram(pane_id, &prompt, cx);
+                self.relay_permission_wait_to_remote(pane_id, &prompt, cx);
             }
             self.relay_untold_questions(pane_id, cx);
         }
@@ -413,7 +413,7 @@ impl Workspace {
     /// resurrect a ping this call declined.
     ///
     /// First-response acks and first-response permission waits deliberately
-    /// bypass this and call [`Self::relay_to_telegram`] directly: the phone
+    /// bypass this and call [`Self::relay_to_remote`] directly: the phone
     /// asked for those, so presence is not what decides them. The same
     /// reasoning covers the rest of a phone-started turn — while the pane's
     /// [`PhoneTurn`] ledger is open, every relay here is solicited too, and
@@ -426,8 +426,8 @@ impl Workspace {
         &mut self,
         pane_id: PaneId,
         header: String,
-        tail: TelegramTail,
-        prompt: Option<crate::telegram::bridge::PingPrompt>,
+        tail: MessageTail,
+        prompt: Option<crate::remote_channel::bridge::PingPrompt>,
         cx: &mut Context<Self>,
     ) -> bool {
         // The ledger closes at the completion tee, after the completion relay
@@ -487,12 +487,12 @@ impl Workspace {
 
     /// Relay a ping every channel hears, whatever presence says: the phone
     /// asked for it. Returns whether any channel took the ping.
-    pub(super) fn relay_to_telegram(
+    pub(super) fn relay_to_remote(
         &self,
         pane_id: PaneId,
         header: String,
-        tail: TelegramTail,
-        prompt: Option<crate::telegram::bridge::PingPrompt>,
+        tail: MessageTail,
+        prompt: Option<crate::remote_channel::bridge::PingPrompt>,
         cx: &Context<Self>,
     ) -> bool {
         self.relay_ping(
@@ -511,7 +511,7 @@ impl Workspace {
         &self,
         pane_id: PaneId,
         header: String,
-        tail: TelegramTail,
+        tail: MessageTail,
         prompt: Option<crate::remote_channel::bridge::PingPrompt>,
         delivery: crate::remote_channel::global::Delivery,
         cx: &Context<Self>,
@@ -566,11 +566,11 @@ impl Workspace {
 
     /// The ping a turn that ended in an error sends: the usual who-is-this
     /// header, then the failure lead line and why. Our own copy, so plain.
-    pub(super) fn telegram_failure_parts(
+    pub(super) fn remote_failure_parts(
         &self,
         pane_id: PaneId,
         cx: &Context<Self>,
-    ) -> (String, TelegramTail) {
+    ) -> (String, MessageTail) {
         let mut tail = s::control::turn_failed();
         if let Some(reason) = self
             .agent_chat_view(pane_id)
@@ -579,26 +579,26 @@ impl Workspace {
             tail.push('\n');
             tail.push_str(&preview_for(
                 &reason,
-                &s::notification::telegram_truncated_marker(),
+                &s::notification::remote_truncated_marker(),
             ));
         }
-        (self.telegram_header(pane_id, cx), TelegramTail::Plain(tail))
+        (self.remote_header(pane_id, cx), MessageTail::Plain(tail))
     }
 
     /// Send the "queued behind the current turn" notice — fires the instant
-    /// `AgentChatView::send_prompt_text_for_telegram` reports
+    /// `AgentChatView::send_prompt_text_from_phone` reports
     /// [`PromptDispatch::Queued`], since a queued reply hasn't reached the
     /// agent yet and there is nothing to watch a first response for. Plain
-    /// tail (fixed i18n copy). Goes through [`Self::relay_to_telegram`], so
+    /// tail (fixed i18n copy). Goes through [`Self::relay_to_remote`], so
     /// the bridge gate applies but presence does not.
     ///
     /// [`PromptDispatch::Queued`]: daruda_chat::view::PromptDispatch::Queued
-    pub(super) fn relay_queued_notice_to_telegram(&self, pane_id: PaneId, cx: &Context<Self>) {
-        let header = self.telegram_header(pane_id, cx);
-        self.relay_to_telegram(
+    pub(super) fn relay_queued_notice_to_remote(&self, pane_id: PaneId, cx: &Context<Self>) {
+        let header = self.remote_header(pane_id, cx);
+        self.relay_to_remote(
             pane_id,
             header,
-            TelegramTail::Plain(s::notification::telegram_reply_queued()),
+            MessageTail::Plain(s::notification::remote_reply_queued()),
             None,
             cx,
         );
@@ -607,12 +607,12 @@ impl Workspace {
     /// Send the "queue is full" notice. Same shape as the queued notice next
     /// door, but a different fact: that one says "later", this one says "not
     /// at all".
-    pub(super) fn relay_queue_full_notice_to_telegram(&self, pane_id: PaneId, cx: &Context<Self>) {
-        let header = self.telegram_header(pane_id, cx);
-        self.relay_to_telegram(
+    pub(super) fn relay_queue_full_notice_to_remote(&self, pane_id: PaneId, cx: &Context<Self>) {
+        let header = self.remote_header(pane_id, cx);
+        self.relay_to_remote(
             pane_id,
             header,
-            TelegramTail::Plain(s::notification::telegram_queue_full()),
+            MessageTail::Plain(s::notification::remote_queue_full()),
             None,
             cx,
         );
@@ -621,53 +621,62 @@ impl Workspace {
     /// Relay a phone-triggered turn's resolved first response: the agent's own
     /// text (markdown, truncated like the completion ping) or a fixed
     /// "checking via tool" note naming it. Bypasses the presence-defer gate
-    /// (calls `relay_to_telegram` directly) — the whole point of this relay is
+    /// (calls `relay_to_remote` directly) — the whole point of this relay is
     /// a phone-originated interaction, so instant delivery is what the sender
     /// wants regardless of whether the app happens to be foreground right now.
-    pub(super) fn relay_first_response_to_telegram(
+    pub(super) fn relay_first_response_to_remote(
         &self,
         pane_id: PaneId,
         outcome: FirstResponseOutcome,
         cx: &Context<Self>,
     ) {
-        let header = self.telegram_header(pane_id, cx);
+        let header = self.remote_header(pane_id, cx);
         let tail = match outcome {
-            FirstResponseOutcome::Text { text, .. } => TelegramTail::Markdown(preview_for(
+            FirstResponseOutcome::Text { text, .. } => MessageTail::Markdown(preview_for(
                 &text,
-                &s::notification::telegram_truncated_marker(),
+                &s::notification::remote_truncated_marker(),
             )),
             FirstResponseOutcome::Tool { tool_title } => {
-                TelegramTail::Plain(first_tool_ack_tail(tool_title.as_deref()))
+                MessageTail::Plain(first_tool_ack_tail(tool_title.as_deref()))
             }
         };
-        self.relay_to_telegram(pane_id, header, tail, None, cx);
+        self.relay_to_remote(pane_id, header, tail, None, cx);
     }
 
     /// Relay the fixed fallback ack for a phone-triggered turn that went 60s
     /// without producing text or a tool call, or settled with nothing having
     /// appeared at all. Plain tail (fixed i18n copy, not agent-authored
     /// markdown) — the same copy the old always-immediate ack used. Gated by
-    /// `relay_to_telegram`.
-    pub(super) fn relay_first_response_fallback_to_telegram(
+    /// `relay_to_remote`.
+    pub(super) fn relay_first_response_fallback_to_remote(
         &self,
         pane_id: PaneId,
         cx: &Context<Self>,
     ) {
-        let header = self.telegram_header(pane_id, cx);
-        self.relay_to_telegram(
+        let header = self.remote_header(pane_id, cx);
+        self.relay_to_remote(
             pane_id,
             header,
-            TelegramTail::Plain(s::notification::telegram_reply_ack()),
+            MessageTail::Plain(s::notification::remote_reply_ack()),
             None,
             cx,
         );
+    }
+
+    /// Forget, in every chat, which waiting requests the phone was shown: the
+    /// identity that showed them no longer serves those cards
+    /// ([`crate::remote_channel::offer_unseen_cards_again`]).
+    pub(crate) fn forget_told_to_phone(&mut self, cx: &mut Context<Self>) {
+        for (_, view) in self.every_agent_chat() {
+            view.update(cx, |view, _| view.forget_told_to_phone());
+        }
     }
 
     /// Periodic safety net for phone-triggered turns that produce no completed
     /// assistant text or tool call within [`FIRST_RESPONSE_FALLBACK_SECS`].
     /// The view moves each turn it takes to `Answered`, so a pane can emit
     /// this fallback at most once per phone-dispatched turn.
-    pub(crate) fn flush_telegram_first_response_fallbacks(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn flush_remote_first_response_fallbacks(&mut self, cx: &mut Context<Self>) {
         let now = std::time::Instant::now();
         let panes: Vec<PaneId> = self.every_agent_chat().map(|(id, _)| id).collect();
 
@@ -679,7 +688,7 @@ impl Workspace {
                 v.take_phone_fallback_if_overdue(now, FIRST_RESPONSE_FALLBACK_SECS)
             });
             if overdue {
-                self.relay_first_response_fallback_to_telegram(pane_id, cx);
+                self.relay_first_response_fallback_to_remote(pane_id, cx);
             }
         }
     }

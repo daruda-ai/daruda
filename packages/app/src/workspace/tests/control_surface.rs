@@ -9,7 +9,8 @@
 use gpui::TestAppContext;
 
 use crate::control::spec::{ControlCommand, Ordinal, ResolvedCommand, UseTarget};
-use crate::telegram::bridge::{BridgeCore, InboundAction, PaneRef, Routed, Unaimed};
+use crate::remote_channel::bridge::{InboundAction, PaneRef, Routed, Unaimed};
+use crate::telegram::bridge::BridgeCore;
 use crate::telegram::client::{Update, UpdateKind};
 use crate::telegram::command::{Resolution, absorb, resolve_command};
 use crate::test_support::{ControlFixture, workspace_for_control, workspace_with_agent_chat};

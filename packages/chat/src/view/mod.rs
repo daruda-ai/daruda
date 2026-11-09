@@ -234,7 +234,7 @@ impl Replay {
     }
 }
 
-/// A Telegram-origin turn's first-response watch side effect, returned by
+/// A phone-origin turn's first-response watch side effect, returned by
 /// [`AgentChatView::apply_event`] so the Workspace event pump can relay exactly
 /// one phone-visible acknowledgement.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -457,10 +457,10 @@ pub struct AgentChatView {
     /// prunes resolved requests and relays outstanding ids absent here.
     pub(super) permissions_told_to_phone: HashSet<u64>,
     /// The phone's side of the in-flight turn — see [`PhoneTurn`]. Armed the
-    /// instant a Telegram-origin prompt dispatches, answered once a report
+    /// instant a phone-origin prompt dispatches, answered once a report
     /// goes out, and `None` when the turn is not the phone's, was consumed by
     /// a permission request, or has been completed. Read by the connect-ops
-    /// event pump, the periodic Telegram flush pump, and the completion
+    /// event pump, the periodic phone flush pump, and the completion
     /// relay. Transitions go through the methods in `view/queue_ops/phone.rs`; the
     /// type itself is sealed.
     phone_turn_state: Option<PhoneTurn>,

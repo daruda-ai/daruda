@@ -25,7 +25,7 @@ use daruda_chat::view::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UserPromptOrigin {
     InApp,
-    Telegram,
+    Phone,
     Orchestrator,
 }
 
@@ -111,25 +111,25 @@ impl Workspace {
         match effect {
             PhoneAckEffect::None => {}
             PhoneAckEffect::Relay(outcome) => {
-                self.relay_first_response_to_telegram(pane_id, outcome, cx);
+                self.relay_first_response_to_remote(pane_id, outcome, cx);
             }
             PhoneAckEffect::Fallback => {
-                self.relay_first_response_fallback_to_telegram(pane_id, cx);
+                self.relay_first_response_fallback_to_remote(pane_id, cx);
             }
         }
     }
 
-    /// Telegram-specific submit shim. It uses the same Workspace funnel as the
+    /// Phone submit shim. It uses the same Workspace funnel as the
     /// bottom-dock composer (slash handling, activity reconcile)
     /// but preserves the dispatch result so `inject_bot_reply` knows whether the
     /// reply reached the agent now or only entered the pane queue.
-    pub(in crate::workspace) fn send_agent_prompt_text_from_telegram(
+    pub(in crate::workspace) fn send_agent_prompt_text_from_phone(
         &mut self,
         pane_id: PaneId,
         text: String,
         cx: &mut Context<Self>,
     ) -> Option<PromptDispatch> {
-        self.send_agent_prompt_text_with_origin(pane_id, text, UserPromptOrigin::Telegram, None, cx)
+        self.send_agent_prompt_text_with_origin(pane_id, text, UserPromptOrigin::Phone, None, cx)
     }
 
     pub(in crate::workspace) fn send_agent_prompt_text_from_orchestrator(
@@ -173,8 +173,8 @@ impl Workspace {
             SlashDispatch::Forward => {
                 let view = self.agent_chat_view(pane_id).cloned()?;
                 let prompt_dispatch = match (origin, task) {
-                    (UserPromptOrigin::Telegram, _) => {
-                        view.update(cx, |v, cx| v.send_prompt_text_for_telegram(text, cx))
+                    (UserPromptOrigin::Phone, _) => {
+                        view.update(cx, |v, cx| v.send_prompt_text_from_phone(text, cx))
                     }
                     (UserPromptOrigin::Orchestrator, _) => {
                         view.update(cx, |v, cx| v.send_orchestrator_prompt_text(text, cx))

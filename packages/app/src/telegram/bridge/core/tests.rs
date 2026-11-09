@@ -3,8 +3,8 @@
 
 use super::*;
 // Shapes only the tests build; `core` itself never names them.
+use crate::remote_channel::bridge::{MessageTail, Outbound, PermissionPromptRef};
 use crate::remote_channel::cards::Begun;
-use crate::telegram::bridge::{Outbound, PermissionPromptRef, TelegramTail};
 use daruda_store::project::WorkspaceUuid;
 
 type Desk = CardDesk<i64, (), ()>;
@@ -21,7 +21,7 @@ fn permission_ping(perm_id: u64, buttons: Vec<(String, PermissionDecision)>) -> 
     BridgePing {
         pane: pane(1, 1),
         header: "Approve this?".to_string(),
-        tail: TelegramTail::Plain(String::new()),
+        tail: MessageTail::Plain(String::new()),
         prompt: Some(crate::remote_channel::bridge::PingPrompt::Permission(
             PermissionPromptRef {
                 session: 1,
@@ -594,7 +594,7 @@ fn build_ping_plain_completion_has_no_keyboard() {
         BridgePing {
             pane: pane(1, 1),
             header: "Turn finished".to_string(),
-            tail: TelegramTail::Plain(String::new()),
+            tail: MessageTail::Plain(String::new()),
             prompt: None,
         },
     ));

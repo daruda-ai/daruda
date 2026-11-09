@@ -154,7 +154,7 @@ fn a_replaced_session_in_the_same_pane_hears_unreported_episodes_again(cx: &mut 
 
 /// End the orchestrator's current turn as the agent does, so the chat pumps
 /// its next queued prompt and the reconciled completion edge fires.
-fn end_turn(pane: crate::telegram::bridge::PaneRef, cx: &mut TestAppContext) {
+fn end_turn(pane: crate::remote_channel::bridge::PaneRef, cx: &mut TestAppContext) {
     host(cx).update(cx, |ws, cx| {
         let outcome = ws
             .agent_chat_view(pane.pane)

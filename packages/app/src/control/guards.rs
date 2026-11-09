@@ -27,7 +27,7 @@ use gpui::{App, Global};
 use std::{cell::Cell, rc::Rc};
 
 use crate::control::result::ControlError;
-use crate::telegram::bridge::PaneRef;
+use crate::remote_channel::bridge::PaneRef;
 use crate::window_registry::WindowRegistry;
 
 pub(crate) use daruda_chat::QUEUE_DEPTH_MAX;

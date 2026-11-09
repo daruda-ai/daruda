@@ -9,7 +9,7 @@
 //! The state is sealed. [`PhoneTurn`](crate::phone_turn::PhoneTurn) is a
 //! newtype over a private `State`, so every transition goes through a method
 //! here and no caller can put a turn into a shape the relays would misread.
-//! GPUI-free: it reads `ChatItem`s and answers questions, and the Telegram
+//! GPUI-free: it reads `ChatItem`s and answers questions, and the phone
 //! relay renders and sends.
 
 use daruda_acp::ChatItem;
@@ -89,11 +89,11 @@ enum State {
 ///
 /// # Known limitation
 ///
-/// `answer` records that a report was *composed*, not that Telegram
+/// `answer` records that a report was *composed*, not that the phone
 /// received it. A report can still be dropped downstream by the bridge gate
 /// (feature off, nobody paired). That gate is shared with the completion
 /// relay, so a closed gate drops both and the sender sees no difference; only
-/// disabling Telegram mid-turn and re-enabling it before the turn ends can
+/// disabling the phone channels mid-turn and re-enabling it before the turn ends can
 /// lose an answer. Recording on delivery instead would split the decision and
 /// the transition across two calls, and a caller that took the first without
 /// the second would re-ack on every pump tick — a likelier failure than the

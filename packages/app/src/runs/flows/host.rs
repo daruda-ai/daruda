@@ -182,22 +182,44 @@ impl RunsHost {
         cx.global::<RunsHost>().flows.wait_ended(until)
     }
 
+    /// Change the run held in `worktree`, if `keep` accepts it, and tell the
+    /// watch what it now waits on. Every change to a run that stays held goes
+    /// through here, so the watch cannot fall behind what the windows show;
+    /// the end that retires a run mirrors it once more on its way out.
+    /// A no-op `change` mirrors the run as it stands, before a change that
+    /// has to start a new episode.
+    fn with_flow_run<R>(
+        &mut self,
+        worktree: &Path,
+        keep: impl FnOnce(&FlowRun) -> bool,
+        change: impl FnOnce(&mut FlowRun) -> R,
+    ) -> Option<(CanonicalTree, R)> {
+        let key = self.flows.key_for(worktree)?;
+        let run = self.flows.runs.get_mut(&key).filter(|run| keep(run))?;
+        let changed = change(run);
+        self.watch.observe_waiting(run.result());
+        Some((key, changed))
+    }
+
     /// Stop the run in `worktree`. Its questions go with it: they belong to
     /// a stopped run, and buttons left up would read as a Stop that did not
     /// land. The entry stays until the run says it ended.
     pub(crate) fn stop_flow(worktree: &Path, cx: &mut App) -> bool {
         let stopped = cx.update_global::<RunsHost, _>(|host, _| {
-            let key = host.flows.key_for(worktree)?;
-            let run = host.flows.runs.get_mut(&key)?;
-            let run_dir = run.view.run_dir().to_path_buf();
-            let questions = run.view.questions().map(ParkedAsk::ask_id).collect();
-            run.cancel.cancel();
-            run.view.withdraw_questions();
-            host.watch.observe_waiting(run.result());
-            Some((key, run_dir, questions))
+            host.with_flow_run(
+                worktree,
+                |_| true,
+                |run| {
+                    let run_dir = run.view.run_dir().to_path_buf();
+                    let questions = run.view.questions().map(ParkedAsk::ask_id).collect();
+                    run.cancel.cancel();
+                    run.view.withdraw_questions();
+                    (run_dir, questions)
+                },
+            )
         });
         match stopped {
-            Some((key, run_dir, questions)) => {
+            Some((key, (run_dir, questions))) => {
                 Self::close_flow_asks(&key, &run_dir, questions, cx);
                 Self::tell_windows(key, FlowChanged::Repainted, cx);
                 true
@@ -216,16 +238,13 @@ impl RunsHost {
         cx: &mut App,
     ) -> Result<(), AnswerRefused> {
         let answered = cx.update_global::<RunsHost, _>(|host, _| {
-            let Some(key) = host.flows.key_for(worktree) else {
-                return (None, Err(AnswerRefused::NotOpen));
-            };
-            match host.flows.runs.get_mut(&key) {
-                Some(run) if run.view.run_dir() == run_dir => {
-                    let answer = run.view.answer(ask_id, decision.clone());
-                    host.watch.observe_waiting(run.result());
-                    (Some(key), answer)
-                }
-                _ => (None, Err(AnswerRefused::NotOpen)),
+            match host.with_flow_run(
+                worktree,
+                |run| run.view.run_dir() == run_dir,
+                |run| run.view.answer(ask_id, decision.clone()),
+            ) {
+                Some((key, answer)) => (Some(key), answer),
+                None => (None, Err(AnswerRefused::NotOpen)),
             }
         });
         // Only a question this call took down changes what anyone shows.
@@ -261,24 +280,21 @@ impl RunsHost {
     ) {
         let ask_id = pending.ask_id;
         let parked = cx.update_global::<RunsHost, _>(|host, _| {
-            let key = host.flows.key_for(worktree)?;
-            let run = host
-                .flows
-                .runs
-                .get_mut(&key)
-                .filter(|run| run.view.run_dir() == run_dir && !run.cancel.is_canceled())?;
-            // A closed question followed immediately by a new ask is a new episode.
-            host.watch.observe_waiting(run.result());
-            let before: Vec<_> = run.view.questions().map(ParkedAsk::ask_id).collect();
-            let parked = run.view.park(ParkedAsk::new(pending));
-            let closed = before
-                .into_iter()
-                .filter(|id| run.view.question(*id).is_none())
-                .collect();
-            host.watch.observe_waiting(run.result());
-            Some((key, parked, closed, run.submitter))
+            let open = |run: &FlowRun| run.view.run_dir() == run_dir && !run.cancel.is_canceled();
+            // A closed question followed immediately by a new ask is a new
+            // episode: the watch sees the run as it was before this one parks.
+            host.with_flow_run(worktree, open, |_| ())?;
+            host.with_flow_run(worktree, open, |run| {
+                let before: Vec<_> = run.view.questions().map(ParkedAsk::ask_id).collect();
+                let parked = run.view.park(ParkedAsk::new(pending));
+                let closed = before
+                    .into_iter()
+                    .filter(|id| run.view.question(*id).is_none())
+                    .collect::<Vec<_>>();
+                (parked, closed, run.submitter)
+            })
         });
-        if let Some((key, parked, closed, submitter)) = parked {
+        if let Some((key, (parked, closed, submitter))) = parked {
             Self::close_flow_asks(&key, run_dir, closed, cx);
             let what = FlowChanged::Asked {
                 run_dir: run_dir.to_path_buf(),
@@ -292,16 +308,15 @@ impl RunsHost {
 
     pub(super) fn withdraw_flow_asks(worktree: &Path, run_dir: &Path, cx: &mut App) {
         let changed = cx.update_global::<RunsHost, _>(|host, _| {
-            let key = host.flows.key_for(worktree)?;
-            let run = host
-                .flows
-                .runs
-                .get_mut(&key)
-                .filter(|run| run.view.run_dir() == run_dir)?;
-            let questions = run.view.questions().map(ParkedAsk::ask_id).collect();
-            run.view.withdraw_questions();
-            host.watch.observe_waiting(run.result());
-            Some((key, questions))
+            host.with_flow_run(
+                worktree,
+                |run| run.view.run_dir() == run_dir,
+                |run| {
+                    let questions: Vec<_> = run.view.questions().map(ParkedAsk::ask_id).collect();
+                    run.view.withdraw_questions();
+                    questions
+                },
+            )
         });
         if let Some((key, questions)) = changed {
             Self::close_flow_asks(&key, run_dir, questions, cx);
@@ -350,15 +365,20 @@ impl RunsHost {
                 }));
                 return Some((key, closed, Some(ended)));
             }
-            let run = host.flows.runs.get_mut(&key)?;
-            let before: Vec<_> = run.view.questions().map(ParkedAsk::ask_id).collect();
-            let advanced = run.view.advance(event);
-            let closed = before
-                .into_iter()
-                .filter(|id| run.view.question(*id).is_none())
-                .collect();
-            let reconciled = from_log.is_some_and(|states| run.view.reconcile(states));
-            host.watch.observe_waiting(run.result());
+            let (key, (closed, advanced, reconciled)) = host.with_flow_run(
+                key.as_path(),
+                |_| true,
+                |run| {
+                    let before: Vec<_> = run.view.questions().map(ParkedAsk::ask_id).collect();
+                    let advanced = run.view.advance(event);
+                    let closed = before
+                        .into_iter()
+                        .filter(|id| run.view.question(*id).is_none())
+                        .collect::<Vec<_>>();
+                    let reconciled = from_log.is_some_and(|states| run.view.reconcile(states));
+                    (closed, advanced, reconciled)
+                },
+            )?;
             let what = match (advanced, reconciled) {
                 (Advanced::Moved { left_setup }, _) => Some(FlowChanged::Progressed { left_setup }),
                 (Advanced::Nothing, true) => Some(FlowChanged::Progressed { left_setup: false }),

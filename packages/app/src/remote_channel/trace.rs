@@ -1,20 +1,21 @@
-//! Env-gated Telegram debug trace.
+//! Env-gated remote-channel debug trace.
 //!
-//! A Telegram message that never arrived raises two questions — *did it
+//! A phone message that never arrived raises two questions — *did it
 //! move?* and *what did the bridge think its state was?* — and this file
 //! answers both into its own append-only log, separate from the NDJSON
 //! error log. Separate because these lines are not failures: folding
 //! per-message traffic into the error log would drown the reports that
 //! are, and `LogWriter`'s retention/rolling policy is sized for those.
+//! Every channel's routing, delivery and approval relay writes here.
 //!
-//! Off unless `DARUDA_TELEGRAM_LOG` names a writable path when
+//! Off unless `DARUDA_REMOTE_LOG` names a writable path when
 //! `bootstrap.rs` calls [`configure_from_env`]. Debug builds default it to
-//! `<log dir>/telegram.log`, matching the ACP wire tap. Every entry point
+//! `<log dir>/remote.log`, matching the ACP wire tap. Every entry point
 //! takes its detail as a closure, so when the trace is off a call site costs
 //! one `OnceLock` read and builds no string at all.
 //!
-//! Volume: the poll loop traces one `poll` line per `getUpdates` return —
-//! roughly one per `global::POLL_TIMEOUT_SECS` while idle, well under a
+//! Volume: Telegram's poll loop traces one `poll` line per `getUpdates`
+//! return — roughly one per its `POLL_TIMEOUT_SECS` while idle, well under a
 //! megabyte a day. Deliberate: an investigation into a message
 //! that never showed up has to separate "the loop is alive and Telegram
 //! sent nothing" from "the loop is gone", and only a line on the empty
@@ -26,8 +27,9 @@
 use daruda_core::process_env;
 use daruda_store::project::LaneRef;
 
-use super::bridge::{InboundAction, Outbound, PaneRef, Routed, TelegramTail, Unaimed};
-use super::client::UpdateKind;
+use crate::remote_channel::bridge::{
+    InboundAction, MessageTail, Outbound, PaneRef, Routed, Unaimed,
+};
 
 use std::fs::{File, OpenOptions};
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
@@ -38,7 +40,7 @@ use std::sync::{Mutex, OnceLock};
 
 /// Default file name a debug build's `bootstrap` traces to, beside the
 /// NDJSON logs.
-pub(crate) const TRACE_FILE_NAME: &str = "telegram.log";
+pub(crate) const TRACE_FILE_NAME: &str = "remote.log";
 
 /// How much of a message body a preview keeps: long enough to tell which
 /// message a line is about, short enough that one happening stays one line.
@@ -68,14 +70,14 @@ static DRAINED: AtomicU64 = AtomicU64::new(0);
 static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 static SINK: OnceLock<Option<Mutex<File>>> = OnceLock::new();
 
-/// Fix this process's trace path from [`process_env::TELEGRAM_LOG`], falling
+/// Fix this process's trace path from [`process_env::REMOTE_LOG`], falling
 /// back to `default` when it is unset. Only the first call decides.
 ///
 /// Held in-process for the reason the ACP wire tap is: a child inheriting
 /// the variable must not write into this process's trace.
 pub(crate) fn configure_from_env(default: Option<PathBuf>) {
     PATH.get_or_init(|| {
-        process_env::TELEGRAM_LOG
+        process_env::REMOTE_LOG
             .read_os()
             .map(PathBuf::from)
             .or(default)
@@ -185,9 +187,9 @@ pub(crate) fn digest(text: &str) -> String {
 }
 
 /// [`digest`] of a ping's body, whichever tail variant carries it.
-pub(crate) fn tail_digest(tail: &TelegramTail) -> String {
+pub(crate) fn tail_digest(tail: &MessageTail) -> String {
     match tail {
-        TelegramTail::Plain(t) | TelegramTail::Markdown(t) => digest(t),
+        MessageTail::Plain(t) | MessageTail::Markdown(t) => digest(t),
     }
 }
 
@@ -263,7 +265,7 @@ pub(crate) fn pane(pane: PaneRef) -> String {
 /// `target.none` lines that follow say which way that went.
 ///
 /// Lives here rather than on [`Routed`] because it is trace vocabulary, not
-/// routing policy: `bridge.rs` is a pure state machine and gains nothing from
+/// routing policy: `remote_channel::bridge` is a pure state machine and gains nothing from
 /// knowing how its decisions are spelled in a log.
 pub(crate) fn action_name(routed: &Routed) -> &'static str {
     let action = match routed {
@@ -299,35 +301,6 @@ pub(crate) fn action_target(routed: &Routed) -> Option<PaneRef> {
             InboundAction::InjectPrompt { pane, .. } | InboundAction::UnknownSlash { pane, .. },
         ) => Some(*pane),
         _ => None,
-    }
-}
-
-/// A stable short name per inbound update shape, for the `inbound` line.
-pub(crate) fn update_kind_name(kind: &UpdateKind) -> &'static str {
-    match kind {
-        UpdateKind::Message { .. } => "message",
-        UpdateKind::Callback { .. } => "callback",
-        UpdateKind::Unsupported => "unsupported",
-    }
-}
-
-/// The chat an inbound update came from, when its shape names one.
-pub(crate) fn update_chat_id(kind: &UpdateKind) -> Option<i64> {
-    match kind {
-        UpdateKind::Message { chat_id, .. } | UpdateKind::Callback { chat_id, .. } => {
-            Some(*chat_id)
-        }
-        UpdateKind::Unsupported => None,
-    }
-}
-
-/// What an inbound update carries: a message's body, or a callback's payload
-/// token. Previewed, so a long prompt does not take the line over.
-pub(crate) fn update_payload(kind: &UpdateKind) -> String {
-    match kind {
-        UpdateKind::Message { text, .. } => preview(text),
-        UpdateKind::Callback { data, .. } => preview(data),
-        UpdateKind::Unsupported => String::new(),
     }
 }
 
@@ -441,40 +414,6 @@ mod tests {
     }
 
     #[test]
-    fn an_inbound_message_traces_its_chat_and_body() {
-        let kind = UpdateKind::Message {
-            chat_id: -1001,
-            text: "ship it".to_string(),
-            reply_to_message_id: None,
-        };
-        assert_eq!(update_kind_name(&kind), "message");
-        assert_eq!(update_chat_id(&kind), Some(-1001));
-        assert_eq!(update_payload(&kind), "ship it");
-    }
-
-    #[test]
-    fn an_inbound_callback_traces_its_opaque_token() {
-        let kind = UpdateKind::Callback {
-            chat_id: 42,
-            callback_id: "cb".to_string(),
-            data: "perm:9:allow".to_string(),
-            message_id: 7,
-            message_text: "Allow?".to_string(),
-        };
-        assert_eq!(update_kind_name(&kind), "callback");
-        assert_eq!(update_chat_id(&kind), Some(42));
-        assert_eq!(update_payload(&kind), "perm:9:allow");
-    }
-
-    #[test]
-    fn an_unsupported_update_names_no_chat_and_carries_no_payload() {
-        let kind = UpdateKind::Unsupported;
-        assert_eq!(update_kind_name(&kind), "unsupported");
-        assert_eq!(update_chat_id(&kind), None);
-        assert_eq!(update_payload(&kind), "");
-    }
-
-    #[test]
     fn a_digest_distinguishes_two_messages_of_the_same_length() {
         let a = digest("deploy the thing");
         let b = digest("deploy the thang");
@@ -497,8 +436,8 @@ mod tests {
     #[test]
     fn either_tail_variant_digests_its_own_body() {
         assert_eq!(
-            tail_digest(&TelegramTail::Plain("x".to_string())),
-            tail_digest(&TelegramTail::Markdown("x".to_string()))
+            tail_digest(&MessageTail::Plain("x".to_string())),
+            tail_digest(&MessageTail::Markdown("x".to_string()))
         );
     }
 
@@ -560,7 +499,7 @@ mod tests {
     #[test]
     fn opening_creates_the_parent_directory_and_appends() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("nested").join("telegram.log");
+        let path = dir.path().join("nested").join("remote.log");
         {
             let sink = open(&path).expect("first open");
             writeln!(sink.lock().expect("lock"), "one").expect("write");
@@ -581,6 +520,6 @@ mod tests {
         let blocker = dir.path().join("not-a-dir");
         std::fs::write(&blocker, b"").expect("write blocker");
         // The parent component is a regular file, so `create_dir_all` fails.
-        assert!(open(&blocker.join("telegram.log")).is_none());
+        assert!(open(&blocker.join("remote.log")).is_none());
     }
 }

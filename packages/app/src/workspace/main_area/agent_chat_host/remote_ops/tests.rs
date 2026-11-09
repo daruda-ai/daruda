@@ -2,8 +2,8 @@ use futures::{FutureExt as _, StreamExt as _};
 use gpui::AppContext as _;
 
 use super::{permission_buttons, permission_wait_text, preview_for};
+use crate::remote_channel::bridge::PermissionDecision;
 use crate::surface::strings as s;
-use crate::telegram::bridge::PermissionDecision;
 use daruda_acp::{PermissionChoice, PermissionKindView};
 use daruda_store::project::PaneCwd;
 
@@ -11,17 +11,17 @@ use daruda_store::project::PaneCwd;
 /// leave the queue as a pane-attributed ping — a `Notice` here would mean an
 /// agent's own message stopped registering a reply-to.
 pub(super) fn expect_ping(
-    outbound: crate::telegram::bridge::Outbound,
-) -> crate::telegram::bridge::BridgePing {
+    outbound: crate::remote_channel::bridge::Outbound,
+) -> crate::remote_channel::bridge::BridgePing {
     match outbound {
-        crate::telegram::bridge::Outbound::FlowAsk(prompt) => {
+        crate::remote_channel::bridge::Outbound::FlowAsk(prompt) => {
             panic!("expected a chat ping, got flow question {prompt:?}")
         }
-        crate::telegram::bridge::Outbound::Ping(ping) => ping,
-        crate::telegram::bridge::Outbound::Notice(text) => {
+        crate::remote_channel::bridge::Outbound::Ping(ping) => ping,
+        crate::remote_channel::bridge::Outbound::Notice(text) => {
             panic!("an agent relay must be a ping, not a standalone notice: {text}")
         }
-        crate::telegram::bridge::Outbound::Approval(prompt) => {
+        crate::remote_channel::bridge::Outbound::Approval(prompt) => {
             panic!("an agent relay must be a ping, not an approval card: {prompt:?}")
         }
     }
@@ -64,7 +64,7 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
         ws.relay_when_presence_allows(
             pane,
             "chat".into(),
-            crate::telegram::bridge::TelegramTail::Markdown("while present".into()),
+            crate::remote_channel::bridge::MessageTail::Markdown("while present".into()),
             None,
             cx,
         );
@@ -81,7 +81,7 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
         ws.relay_when_presence_allows(
             pane,
             "chat".into(),
-            crate::telegram::bridge::TelegramTail::Markdown("while blurred but busy".into()),
+            crate::remote_channel::bridge::MessageTail::Markdown("while blurred but busy".into()),
             None,
             cx,
         );
@@ -98,7 +98,7 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
         ws.relay_when_presence_allows(
             pane,
             "chat".into(),
-            crate::telegram::bridge::TelegramTail::Markdown("while reading".into()),
+            crate::remote_channel::bridge::MessageTail::Markdown("while reading".into()),
             None,
             cx,
         );
@@ -114,7 +114,7 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
         ws.relay_when_presence_allows(
             pane,
             "chat".into(),
-            crate::telegram::bridge::TelegramTail::Markdown("while away".into()),
+            crate::remote_channel::bridge::MessageTail::Markdown("while away".into()),
             None,
             cx,
         );
@@ -136,7 +136,9 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
         ws.relay_when_presence_allows(
             pane,
             "chat".into(),
-            crate::telegram::bridge::TelegramTail::Markdown("away from a frontmost daruda".into()),
+            crate::remote_channel::bridge::MessageTail::Markdown(
+                "away from a frontmost daruda".into(),
+            ),
             None,
             cx,
         );
@@ -189,7 +191,7 @@ async fn a_phone_turn_relays_while_the_user_is_present(cx: &mut gpui::TestAppCon
             ws.relay_when_presence_allows(
                 pane,
                 "h".into(),
-                crate::telegram::bridge::TelegramTail::Plain("in turn".into()),
+                crate::remote_channel::bridge::MessageTail::Plain("in turn".into()),
                 None,
                 cx,
             ),
@@ -207,7 +209,7 @@ async fn a_phone_turn_relays_while_the_user_is_present(cx: &mut gpui::TestAppCon
             !ws.relay_when_presence_allows(
                 pane,
                 "h".into(),
-                crate::telegram::bridge::TelegramTail::Plain("after".into()),
+                crate::remote_channel::bridge::MessageTail::Plain("after".into()),
                 None,
                 cx,
             ),
@@ -274,7 +276,7 @@ async fn a_permission_wait_keeps_the_phone_turn_open(cx: &mut gpui::TestAppConte
             ws.relay_when_presence_allows(
                 pane,
                 "h".into(),
-                crate::telegram::bridge::TelegramTail::Plain("after the card".into()),
+                crate::remote_channel::bridge::MessageTail::Plain("after the card".into()),
                 None,
                 cx,
             ),
@@ -322,7 +324,7 @@ async fn opting_out_of_the_presence_gate_sends_while_the_user_is_present(
         ws.relay_when_presence_allows(
             pane,
             "chat".into(),
-            crate::telegram::bridge::TelegramTail::Markdown("sent regardless".into()),
+            crate::remote_channel::bridge::MessageTail::Markdown("sent regardless".into()),
             None,
             cx,
         );
@@ -382,19 +384,19 @@ fn first_tool_ack_tail_formats_title_empty_and_absent_cases() {
         super::first_tool_ack_tail(Some("Write /tmp/x.rs")),
         format!(
             "{}\n{}",
-            s::notification::telegram_first_tool_ack(),
+            s::notification::remote_first_tool_ack(),
             "Write /tmp/x.rs"
         )
     );
 
     assert_eq!(
         super::first_tool_ack_tail(Some("")),
-        s::notification::telegram_first_tool_ack()
+        s::notification::remote_first_tool_ack()
     );
 
     assert_eq!(
         super::first_tool_ack_tail(None),
-        s::notification::telegram_first_tool_ack()
+        s::notification::remote_first_tool_ack()
     );
 }
 
@@ -546,7 +548,7 @@ async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui:
             );
         });
         assert_eq!(
-            ws.telegram_completion_parts(pane_id, cx),
+            ws.remote_completion_parts(pane_id, cx),
             None,
             "the sender already has this turn's only message"
         );
@@ -562,11 +564,11 @@ async fn a_turn_whose_only_answer_was_acked_is_not_reported_twice(cx: &mut gpui:
             v.seed_items_for_test([answer("m3", "here is the answer")], cx);
         });
         let (_, tail) = ws
-            .telegram_completion_parts(pane_id, cx)
+            .remote_completion_parts(pane_id, cx)
             .expect("a later message is news the sender does not have");
         assert_eq!(
             tail,
-            super::TelegramTail::Markdown("here is the answer".to_string())
+            super::MessageTail::Markdown("here is the answer".to_string())
         );
     });
 }
@@ -636,11 +638,11 @@ async fn a_turn_that_errored_does_not_leave_its_ledger_behind(cx: &mut gpui::Tes
     // The next turn is nobody's phone turn, so its answer is news.
     workspace.update(cx, |ws, cx| {
         let (_, tail) = ws
-            .telegram_completion_parts(pane_id, cx)
+            .remote_completion_parts(pane_id, cx)
             .expect("a turn with no ledger owes the sender its answer");
         assert_eq!(
             tail,
-            super::TelegramTail::Markdown("partial answer".to_string()),
+            super::MessageTail::Markdown("partial answer".to_string()),
             "with the stale ledger gone, nothing suppresses this"
         );
     });
@@ -651,7 +653,7 @@ async fn a_turn_that_errored_does_not_leave_its_ledger_behind(cx: &mut gpui::Tes
 /// one-shot fallback ack; and a permission wait with no buttons also falls back
 /// to the same ack instead of leaving the phone silent.
 #[gpui::test]
-async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
+async fn remote_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     cx: &mut gpui::TestAppContext,
 ) {
     let mut outbound =
@@ -713,7 +715,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     );
     assert_eq!(
         sent.tail,
-        super::TelegramTail::Plain(s::notification::telegram_reply_queued())
+        super::MessageTail::Plain(s::notification::remote_reply_queued())
     );
 
     let started = std::time::Instant::now()
@@ -721,7 +723,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     workspace.update(cx, |ws, cx| {
         let view = ws.agent_chat_view(pane_id).cloned().expect("view present");
         view.update(cx, |v, _| v.start_phone_turn_for_test(started));
-        ws.flush_telegram_first_response_fallbacks(cx);
+        ws.flush_remote_first_response_fallbacks(cx);
     });
     cx.run_until_parked();
 
@@ -741,11 +743,11 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     assert_eq!(sent.pane.pane, pane_id);
     assert_eq!(
         sent.tail,
-        super::TelegramTail::Plain(s::notification::telegram_reply_ack())
+        super::MessageTail::Plain(s::notification::remote_reply_ack())
     );
 
     workspace.update(cx, |ws, cx| {
-        ws.flush_telegram_first_response_fallbacks(cx);
+        ws.flush_remote_first_response_fallbacks(cx);
     });
     cx.run_until_parked();
     assert!(outbound.next().now_or_never().is_none());
@@ -755,7 +757,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
         view.update(cx, |v, _| {
             v.start_phone_turn_for_test(std::time::Instant::now());
         });
-        ws.relay_permission_wait_to_telegram(
+        ws.relay_permission_wait_to_remote(
             pane_id,
             &prompt(7, &[], Some("Tool without choices")),
             cx,
@@ -772,7 +774,7 @@ async fn telegram_reply_ack_paths_cover_queue_overdue_and_empty_permission(
     assert_eq!(sent.pane.pane, pane_id);
     assert_eq!(
         sent.tail,
-        super::TelegramTail::Plain(s::notification::telegram_reply_ack())
+        super::MessageTail::Plain(s::notification::remote_reply_ack())
     );
 }
 
@@ -826,11 +828,7 @@ async fn an_outstanding_permission_declined_while_present_is_offered_once_the_us
 
         // Fires while the user is at the desk: declined, nothing queued.
         crate::app_presence::seed_for_test(AwaySignal::HERE, true, Some(Duration::ZERO), cx);
-        ws.relay_permission_wait_to_telegram(
-            pane,
-            &prompt(7, &options, Some("Write /tmp/x.rs")),
-            cx,
-        );
+        ws.relay_permission_wait_to_remote(pane, &prompt(7, &options, Some("Write /tmp/x.rs")), cx);
         assert!(outbound.next().now_or_never().is_none());
         // A sweep while still present must not change that.
         ws.relay_outstanding_permissions(cx);
@@ -960,6 +958,26 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
         });
     }
 
+    // Switching a channel off and on serves its cards as a new identity too:
+    // the request waiting through it is offered again.
+    for (enabled, should_send) in [(false, false), (true, true)] {
+        config.telegram.enabled = enabled;
+        cx.update(|cx| {
+            cx.global_mut::<crate::settings_store::SettingsStore>()
+                .set_user_for_testing(config.clone());
+        });
+        cx.run_until_parked();
+        workspace.update(cx, |ws, cx| {
+            ws.apply_config(&config, cx);
+            ws.relay_outstanding_permissions(cx);
+            assert_eq!(
+                outbound.next().now_or_never().flatten().is_some(),
+                should_send,
+                "enabled={enabled}"
+            );
+        });
+    }
+
     workspace.update(cx, |ws, cx| {
         config.telegram.only_when_away = true;
         cx.global_mut::<crate::settings_store::SettingsStore>()
@@ -976,7 +994,7 @@ async fn permission_delivery_history_tracks_recipient_and_connection(
             // A new connection reuses id 0 before any cleanup sweep. Its first
             // offer is declined while present and must remain eligible later.
             crate::app_presence::seed_for_test(AwaySignal::HERE, true, Some(Duration::ZERO), cx);
-            ws.relay_permission_wait_to_telegram(
+            ws.relay_permission_wait_to_remote(
                 pane,
                 &prompt(0, &options, Some("Write /tmp/x.rs")),
                 cx,
@@ -1202,7 +1220,7 @@ pub(super) fn make_window(
 fn test_data_dir() -> std::path::PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!("daruda_telegram_ops_test_{id}"))
+    std::env::temp_dir().join(format!("daruda_remote_ops_test_{id}"))
 }
 
 #[gpui::test]

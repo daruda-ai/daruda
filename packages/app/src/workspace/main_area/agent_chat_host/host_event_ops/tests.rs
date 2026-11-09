@@ -85,7 +85,7 @@ fn desktop_permission_and_stop_settle_the_phone_cards_through_host_events(cx: &m
         assert_eq!(cx.global::<EditCapture>().edits.len(), 1);
         assert_eq!(
             cx.global::<EditCapture>().edits[0].label,
-            crate::surface::strings::notification::telegram_permission_allowed()
+            crate::surface::strings::notification::remote_permission_allowed()
         );
     });
     view.update(cx, |view, cx| view.cancel_turn(cx));
@@ -97,7 +97,7 @@ fn desktop_permission_and_stop_settle_the_phone_cards_through_host_events(cx: &m
             edits
                 .iter()
                 .filter(|edit| edit.label
-                    == crate::surface::strings::notification::telegram_permission_cancelled())
+                    == crate::surface::strings::notification::remote_permission_cancelled())
                 .count(),
             2
         );
@@ -157,11 +157,11 @@ fn a_replaced_sessions_late_receipt_and_button_cannot_answer_its_reused_request_
         assert_eq!(edits.len(), 2);
         assert_eq!(
             edits[0].label,
-            crate::surface::strings::notification::telegram_permission_cancelled()
+            crate::surface::strings::notification::remote_permission_cancelled()
         );
         assert_eq!(
             edits[1].label,
-            crate::surface::strings::notification::telegram_permission_rejected()
+            crate::surface::strings::notification::remote_permission_rejected()
         );
     });
 }

@@ -199,7 +199,7 @@ fn notice_completion(solicited: bool, failed: bool, cx: &mut TestAppContext) {
 /// fallback, and the turn's end reaches each channel its solicitation allows
 /// exactly once.
 pub(super) fn answer_reaches_phone_once(
-    pane: crate::telegram::bridge::PaneRef,
+    pane: crate::remote_channel::bridge::PaneRef,
     outbound: &mut futures::channel::mpsc::UnboundedReceiver<
         crate::remote_channel::global::Pending,
     >,

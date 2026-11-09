@@ -19,7 +19,7 @@ use crate::control::result::{ControlOutcome, LaneHandle};
 use crate::control::spec::{
     GatedCommand, NewTask, ResolvedCommand, ResolvedFlowCommand, WaitingCommand,
 };
-use crate::telegram::bridge::PaneRef;
+use crate::remote_channel::bridge::PaneRef;
 
 /// Why a call could not become a command. Reported as a tool error, not a
 /// protocol one, so the model can fix its arguments and retry.

@@ -22,7 +22,6 @@ pub(super) struct ConfigDelta {
     painted_ui_preset: bool,
     syntax_theme: bool,
     preferred_editor: bool,
-    pub(super) telegram_recipient: bool,
     files_filter: bool,
     files_icon: bool,
     panels_grid: bool,
@@ -65,7 +64,6 @@ impl Workspace {
             // The chat diff header names this editor in its open-externally
             // tooltip, so a change has to dirty those cached views.
             preferred_editor: was.preferred_editor != now.preferred_editor,
-            telegram_recipient: was.telegram.authorized_chat_id != now.telegram.authorized_chat_id,
             files_filter: was.files_show_hidden != now.files_show_hidden
                 || was.files_use_gitignore != now.files_use_gitignore,
             files_icon: was.files_icon_color_mode != now.files_icon_color_mode,
@@ -102,11 +100,7 @@ impl Workspace {
     /// well as at pane creation, so an open, untouched pane tracks a config
     /// edit live. Resolved per pane: the defaults are per agent, and a window
     /// holds panes on different agents.
-    pub(super) fn apply_config_to_agent_chat_defaults(
-        &mut self,
-        telegram_recipient_changed: bool,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn apply_config_to_agent_chat_defaults(&mut self, cx: &mut Context<Self>) {
         let agent_names = self
             .mirrors
             .agents
@@ -115,9 +109,6 @@ impl Workspace {
             .collect::<Vec<_>>();
         for (_, view) in self.every_agent_chat() {
             view.update(cx, |view, cx| {
-                if telegram_recipient_changed {
-                    view.forget_told_to_phone();
-                }
                 let name = agent_names
                     .iter()
                     .find(|(id, _)| id == view.agent_id())

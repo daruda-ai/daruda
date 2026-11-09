@@ -41,7 +41,7 @@ fn flow_question_fanout_attempts_every_eligible_channel(cx: &mut gpui::TestAppCo
             assert_eq!(channels.len(), expected);
             assert!(channels.contains(&"personal".to_string()));
             if expected == 2 {
-                let crate::telegram::bridge::Outbound::FlowAsk(queued) =
+                let crate::remote_channel::bridge::Outbound::FlowAsk(queued) =
                     telegram.try_recv().unwrap()
                 else {
                     panic!("flow question");

@@ -1,14 +1,10 @@
-//! Telegram compatibility exports for the shared remote-control vocabulary.
+//! Telegram's own bridge types. The vocabulary every channel shares lives in
+//! [`crate::remote_channel::bridge`].
 
 use crate::remote_channel::bridge::{InlineKeyboard, MessageTail};
 
 mod core;
-pub use crate::remote_channel::bridge::*;
 pub use core::BridgeCore;
-
-/// Telegram's name for the shared [`MessageTail`], kept so the relay call
-/// sites that predate the other channels still read as they did.
-pub type TelegramTail = MessageTail;
 
 /// What the caller should actually send to Telegram. Telegram-only: it names
 /// its recipient by `chat_id`, where the other channels carry a

@@ -63,8 +63,8 @@ impl AgentChatView {
     /// Send `text` from the bottom-dock composer. Sugar over
     /// `send_prompt_text_inner` with [`PromptOrigin::InApp`] — the
     /// dispatch outcome is uninteresting since an in-app prompt never arms
-    /// the Telegram watch.
-    /// Returns the dispatch for the same reason the Telegram form does: a
+    /// the phone watch.
+    /// Returns the dispatch for the same reason the phone form does: a
     /// full queue refuses the prompt, and a caller that discarded that would
     /// tell the user it was sent.
     pub fn send_prompt_text(&mut self, text: String, cx: &mut Context<Self>) -> PromptDispatch {
@@ -204,22 +204,22 @@ impl AgentChatView {
         )
     }
 
-    /// Send `text` relayed from a phone-tapped Telegram reply. Sugar over
-    /// `send_prompt_text_inner` with [`PromptOrigin::Telegram`] — the
+    /// Send `text` relayed from a phone-tapped reply. Sugar over
+    /// `send_prompt_text_inner` with [`PromptOrigin::Phone`] — the
     /// caller needs the returned [`PromptDispatch`] to know whether a
     /// "queued" notice is owed.
-    pub fn send_prompt_text_for_telegram(
+    pub fn send_prompt_text_from_phone(
         &mut self,
         text: String,
         cx: &mut Context<Self>,
     ) -> PromptDispatch {
-        self.send_prompt_text_inner(text, PromptOrigin::Telegram, None, EditSource::External, cx)
+        self.send_prompt_text_inner(text, PromptOrigin::Phone, None, EditSource::External, cx)
     }
 
     /// Send `text`. When connected and idle, echo it and forward it over the
     /// session, marking a turn in flight. Otherwise enqueue it WITHOUT
     /// echoing — [`Self::pump_pending_prompt`] drains and echoes it later.
-    /// `origin` arms the Telegram watch at whichever point it dispatches;
+    /// `origin` arms the phone watch at whichever point it dispatches;
     /// `task` is reported to the host when the prompt is sent or dropped.
     fn send_prompt_text_inner(
         &mut self,
@@ -343,7 +343,7 @@ impl AgentChatView {
         let session_id = self.session_id.clone();
         let started_by = match origin {
             PromptOrigin::InApp => daruda_store::tasks::StartedBy::Desktop,
-            PromptOrigin::Telegram => daruda_store::tasks::StartedBy::Phone,
+            PromptOrigin::Phone => daruda_store::tasks::StartedBy::Phone,
             PromptOrigin::Orchestrator | PromptOrigin::Internal => {
                 if let Some(task) = task {
                     self.emit_task_event(AgentChatEvent::PromptSent { task, session_id }, cx);
@@ -459,7 +459,7 @@ impl AgentChatView {
 
     /// Push `text` onto the pending-prompt queue with a freshly minted
     /// [`PromptId`]. Does NOT echo or notify — the caller does that once after
-    /// mutating. `origin` travels with the entry to arm the Telegram watch
+    /// mutating. `origin` travels with the entry to arm the phone watch
     /// when it actually dispatches.
     /// Both queues' depth — what the cap is measured against, and what the
     /// control surface reports. A paused prompt still has to drain before a

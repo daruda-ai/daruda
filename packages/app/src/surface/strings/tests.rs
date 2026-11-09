@@ -29,9 +29,9 @@ fn locale_en_ko_placeholder_parity() {
 
 #[test]
 fn telegram_notification_labels_are_non_empty() {
-    assert!(!super::notification::telegram_reply_ack().is_empty());
-    assert!(!super::notification::telegram_reply_queued().is_empty());
-    assert!(!super::notification::telegram_first_tool_ack().is_empty());
+    assert!(!super::notification::remote_reply_ack().is_empty());
+    assert!(!super::notification::remote_reply_queued().is_empty());
+    assert!(!super::notification::remote_first_tool_ack().is_empty());
 }
 
 #[test]

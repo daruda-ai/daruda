@@ -5,7 +5,7 @@ use gpui::{BorrowAppContext as _, TestAppContext};
 /// because an undeliverable one settles the request immediately — which
 /// is the point of `undeliverable_settles_instead_of_waiting` below, not
 /// the state the waiting/settling tests want.
-fn setup(cx: &mut TestAppContext) -> Receiver<crate::telegram::bridge::Outbound> {
+fn setup(cx: &mut TestAppContext) -> Receiver<crate::remote_channel::bridge::Outbound> {
     setup_bridge(cx, true, Some(42))
 }
 
@@ -13,7 +13,7 @@ fn setup_bridge(
     cx: &mut TestAppContext,
     enabled: bool,
     chat_id: Option<i64>,
-) -> Receiver<crate::telegram::bridge::Outbound> {
+) -> Receiver<crate::remote_channel::bridge::Outbound> {
     let (tx, rx) = smol::channel::unbounded();
     cx.update(|cx| {
         crate::settings_store::SettingsStore::init(cx);
@@ -218,7 +218,7 @@ async fn a_deliverable_request_queues_one_card_with_two_tokens(cx: &mut TestAppC
     let (_id, _rx) = cx.update(|cx| request("create worktree x".into(), Delivery::Explicit, cx));
     cx.run_until_parked();
     let sent = outbound.recv().await.expect("a card was queued");
-    let crate::telegram::bridge::Outbound::Approval(prompt) = sent else {
+    let crate::remote_channel::bridge::Outbound::Approval(prompt) = sent else {
         panic!("an approval must queue as a card, not as {sent:?}");
     };
     assert!(prompt.summary.contains('x'));

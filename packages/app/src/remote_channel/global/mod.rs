@@ -99,21 +99,26 @@ impl Connection {
     /// speaks as: the same bot keeps its cards across reconnects and inbox
     /// recovery, and another bot's arrival forgets the old cards' callback
     /// tokens with their records.
-    pub(crate) fn publish_bot(&mut self, bot: Arc<BotSession>) {
+    ///
+    /// Whether the cards now belong to another identity
+    /// ([`crate::remote_channel::cards::CardDesk::bind`]).
+    pub(crate) fn publish_bot(&mut self, bot: Arc<BotSession>) -> bool {
         if self
             .bot
             .as_ref()
             .is_some_and(|current| Arc::ptr_eq(current, &bot))
         {
-            return;
+            return false;
         }
         if let Some(previous) = self.bot.take() {
             previous.revoke();
         }
-        self.desk
+        let changed = self
+            .desk
             .get_mut()
             .bind(super::lock::digest_of(&bot.credentials.bot));
         self.bot = Some(bot);
+        changed
     }
 
     /// What a button tap answers: a card's, or else a listing row's.

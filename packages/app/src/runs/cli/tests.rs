@@ -92,7 +92,7 @@ fn cli_result_read_protects_the_execution_from_exit_reconciliation(cx: &mut Test
         let settled_by = Utc::now();
         assert!(
             cx.global::<RunsHost>()
-                .delivery
+                .executions
                 .settling
                 .contains(&run.exec(&id))
         );
@@ -114,7 +114,7 @@ fn cli_result_read_protects_the_execution_from_exit_reconciliation(cx: &mut Test
             Some("completed CLI answer")
         );
         assert!(task.ended_executions.last().unwrap().finished_at <= settled_by);
-        assert!(cx.global::<RunsHost>().delivery.settling.is_empty());
+        assert!(cx.global::<RunsHost>().executions.settling.is_empty());
         assert_eq!(store.current().unwrap().1.get(&id), Some(task));
     });
 }
@@ -162,7 +162,7 @@ fn a_cli_result_read_cannot_settle_a_restarted_execution(cx: &mut TestAppContext
         assert!(matches!(&record.lifecycle, Lifecycle::Running { exec, .. } if exec == &replacement.exec(&id)));
         assert_eq!(record.ended_executions.len(), 1);
         assert_eq!(record.ended_executions[0].result, None);
-        assert!(cx.global::<RunsHost>().delivery.settling.is_empty());
+        assert!(cx.global::<RunsHost>().executions.settling.is_empty());
     });
 }
 

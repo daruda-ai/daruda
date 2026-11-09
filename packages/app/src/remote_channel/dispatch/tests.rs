@@ -25,11 +25,11 @@ fn question_answers_are_told_what_their_card_says() {
     };
     assert_eq!(
         label(super::question_effect(&tap, BotQuestionOutcome::Updated)),
-        Some(s::notification::telegram_question_updated())
+        Some(s::notification::remote_question_updated())
     );
     assert_eq!(
         label(super::question_effect(&tap, BotQuestionOutcome::Next)),
-        Some(s::notification::telegram_question_next())
+        Some(s::notification::remote_question_next())
     );
     let text = QuestionReply::Text("teal".into());
     assert_eq!(
@@ -41,7 +41,7 @@ fn question_answers_are_told_what_their_card_says() {
             &text,
             BotQuestionOutcome::AlreadySettled
         )),
-        Some(s::notification::telegram_question_stale())
+        Some(s::notification::remote_question_stale())
     );
 }
 

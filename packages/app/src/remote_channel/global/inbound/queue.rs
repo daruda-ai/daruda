@@ -62,12 +62,13 @@ pub(super) fn serve_events<F: Future<Output = ClaimResult> + 'static>(
                 }
                 WorkerPayload::Ready(bot) => {
                     cx.update(|cx| {
-                        if let Some(connection) = cx
+                        let changed = cx
                             .global_mut::<RemoteChannels>()
                             .connections
                             .get_mut(&event.id)
-                        {
-                            connection.publish_bot(bot.clone());
+                            .is_some_and(|connection| connection.publish_bot(bot.clone()));
+                        if changed {
+                            crate::remote_channel::offer_unseen_cards_again(cx);
                         }
                         super::super::outbound::flush_edits(cx);
                     });

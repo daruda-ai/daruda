@@ -9,13 +9,15 @@ use gpui::App;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 
+use crate::remote_channel::bridge::{Outbound, PaneRef};
 use crate::remote_channel::cards::quit::QuitEdit;
 use crate::remote_channel::cards::{
     Begun, CardId, CardScope, EditOutcome, SendClaim, SendOutcome, Settlement,
 };
+use crate::remote_channel::trace;
 use crate::settings_store::SettingsStore;
-use crate::telegram::bridge::{Outbound, OutboundMsg, PaneRef};
-use crate::telegram::{client, keychain, trace};
+use crate::telegram::bridge::OutboundMsg;
+use crate::telegram::{client, keychain};
 
 use super::bot::ReadyBot;
 use super::{TelegramBridge, html_body, plain_body};
@@ -442,10 +444,13 @@ impl TelegramBridge {
             .zip(bridge.bot.ready())
             .map(|(chat_id, bot)| CardOwner::of(bot, chat_id));
         let desk = cx.global_mut::<Self>().desk.get_mut();
-        match (paired, owner) {
+        let changed = match (paired, owner) {
             (None, _) => desk.retire(),
             (Some(_), Some(owner)) => desk.bind(owner),
-            (Some(_), None) => {}
+            (Some(_), None) => false,
+        };
+        if changed {
+            crate::remote_channel::offer_unseen_cards_again(cx);
         }
     }
 

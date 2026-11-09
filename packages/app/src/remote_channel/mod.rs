@@ -12,6 +12,7 @@ pub(crate) mod lock;
 mod pairing;
 pub(crate) mod runtime;
 pub(crate) mod settings;
+pub(crate) mod trace;
 pub(crate) mod transport;
 
 pub(crate) fn send_approval_card(
@@ -64,7 +65,7 @@ pub(crate) fn apply_card_completion<Receipt>(
 }
 
 pub(crate) fn settle_permissions(pane: bridge::PaneRef, session: u64, cx: &mut gpui::App) {
-    let label = crate::surface::strings::notification::telegram_permission_cancelled();
+    let label = crate::surface::strings::notification::remote_permission_cancelled();
     crate::telegram::global::TelegramBridge::settle_permissions(pane, session, &label, cx);
     global::RemoteChannels::settle_permissions(pane, session, &label, cx);
 }
@@ -123,11 +124,24 @@ pub(crate) fn announce_chat_created(
             ErrorReport::new("Chat announcement not sent: no remote channel can deliver it")
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
-                .with_context("pane", crate::telegram::trace::pane(pane).to_string())
+                .with_context("pane", crate::remote_channel::trace::pane(pane).to_string())
                 .dedup("announce.undeliverable")
                 .build(),
         );
     }
+}
+
+/// A channel's cards now belong to another identity: a new recipient, bot or
+/// connection, or none. Every chat forgets which of its waiting requests the
+/// phone was shown, so the next sweep offers them again; a channel that still
+/// holds a request's card refuses the repeat. Deferred, because the change is
+/// seen while a bridge global is being updated.
+pub(crate) fn offer_unseen_cards_again(cx: &mut gpui::App) {
+    cx.defer(|cx| {
+        crate::window_registry::WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
+            ws.forget_told_to_phone(cx);
+        });
+    });
 }
 
 /// Send a pane's ping to every channel `delivery` reaches, each under its own

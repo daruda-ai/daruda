@@ -331,7 +331,7 @@ fn an_untagged_prompt_emits_nothing_new(cx: &mut TestAppContext) {
             .push(untagged(10, PromptOrigin::InApp));
         v.queue
             .pending_prompts
-            .push(untagged(11, PromptOrigin::Telegram));
+            .push(untagged(11, PromptOrigin::Phone));
         v.set_turn_idle();
         v.pump_pending_prompt(cx);
         v.queue
@@ -344,7 +344,7 @@ fn an_untagged_prompt_emits_nothing_new(cx: &mut TestAppContext) {
         v.clear_queue(cx);
         v.queue
             .pending_prompts
-            .push(untagged(14, PromptOrigin::Telegram));
+            .push(untagged(14, PromptOrigin::Phone));
         v.retry_for_reconnect(None, cx);
         v.queue
             .pending_prompts
@@ -419,7 +419,7 @@ fn only_a_persons_prompt_is_reported_as_theirs(cx: &mut TestAppContext) {
         v.set_turn_idle();
         v.send_task_prompt_text("the task's own".into(), run("t1"), cx);
         v.set_turn_idle();
-        v.send_prompt_text_for_telegram("from the phone".into(), cx);
+        v.send_prompt_text_from_phone("from the phone".into(), cx);
         assert_eq!(
             v.send_prompt_text("queued".into(), cx),
             PromptDispatch::Queued

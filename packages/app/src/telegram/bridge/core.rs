@@ -8,12 +8,14 @@
 
 use uuid::Uuid;
 
-use super::{InboundAction, OutboundMsg, PaneRef, PreparedPing, RouteResult, Routed};
-use crate::remote_channel::bridge::RoutingCore;
+use super::OutboundMsg;
 #[cfg(test)]
 use crate::remote_channel::bridge::core::SENT_PINGS_CAP;
 #[cfg(test)]
 use crate::remote_channel::bridge::{BridgePing, InlineKeyboard, PermissionDecision, Unaimed};
+use crate::remote_channel::bridge::{
+    InboundAction, PaneRef, PreparedPing, RouteResult, Routed, RoutingCore,
+};
 use crate::remote_channel::cards::CardDesk;
 #[cfg(test)]
 use crate::remote_channel::cards::{APPROVAL_TOKEN_PREFIX, TOKENS_PER_KIND_CAP};

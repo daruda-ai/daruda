@@ -14,8 +14,9 @@
 //! - [`agent_chat_queue_ops`] — bottom-dock prompt send / queue / edit /
 //!   cancel routing.
 //! - [`host_event_ops`] — what the view asks of its host (`AgentChatEvent`).
-//! - [`telegram_ops`] — Telegram relay: outbound pings and inbound
-//!   phone-relayed replies / permission decisions routed back into a pane.
+//! - [`remote_ops`] — phone relay over every remote channel: outbound
+//!   pings, and phone-relayed replies / permission decisions routed back
+//!   into a pane.
 
 pub(super) mod agent_chat_connect_ops;
 pub(in crate::workspace) mod agent_chat_event_ops;
@@ -29,4 +30,4 @@ mod attachment_ops;
 mod host_event_ops;
 pub(in crate::workspace) mod lane_status;
 mod overage_stop;
-pub(in crate::workspace) mod telegram_ops;
+pub(in crate::workspace) mod remote_ops;

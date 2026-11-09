@@ -13,8 +13,9 @@ pub(crate) struct RunPane {
     pub(crate) pane: u64,
 }
 
+/// Which pane carries which task execution, and the executions settling.
 #[derive(Default)]
-pub(super) struct Delivery {
+pub(super) struct ExecutionBindings {
     pub(super) bindings: HashMap<RunPane, ExecutionRef>,
     pub(super) settling: HashSet<ExecutionRef>,
     pending_writes: Vec<(ExecutionRef, smol::channel::Receiver<()>)>,
@@ -46,16 +47,16 @@ pub(crate) enum DeliveryFailure {
 impl RunsHost {
     pub(crate) fn bind_execution(pane: RunPane, exec: ExecutionRef, cx: &mut App) {
         cx.update_global::<Self, _>(|host, _| {
-            host.delivery.bindings.insert(pane, exec);
+            host.executions.bindings.insert(pane, exec);
         });
     }
 
     pub(crate) fn pane_execution(pane: RunPane, cx: &App) -> Option<&ExecutionRef> {
-        cx.global::<Self>().delivery.bindings.get(&pane)
+        cx.global::<Self>().executions.bindings.get(&pane)
     }
 
     pub(crate) fn unbind_execution(pane: RunPane, cx: &mut App) -> Option<ExecutionRef> {
-        cx.update_global::<Self, _>(|host, _| host.delivery.bindings.remove(&pane))
+        cx.update_global::<Self, _>(|host, _| host.executions.bindings.remove(&pane))
     }
 
     pub(crate) fn release_execution(pane: RunPane, reason: UndeliveredReason, cx: &mut App) {
@@ -74,7 +75,7 @@ impl RunsHost {
     pub(crate) fn release_workspace(workspace: WorkspaceUuid, cx: &mut App) {
         let panes: Vec<_> = cx
             .global::<Self>()
-            .delivery
+            .executions
             .bindings
             .keys()
             .filter(|pane| pane.workspace == workspace)
@@ -111,7 +112,7 @@ impl RunsHost {
     pub(crate) fn delivery_failed(exec: ExecutionRef, failure: DeliveryFailure, cx: &mut App) {
         let pending = cx
             .global::<Self>()
-            .delivery
+            .executions
             .pending_writes
             .iter()
             .find(|(writing, _)| writing == &exec)
@@ -147,7 +148,7 @@ impl RunsHost {
     ) -> gpui::Task<Result<u64, TerminalDispatchError>> {
         let (done, pending) = smol::channel::bounded(1);
         cx.update_global::<Self, _>(|host, _| {
-            host.delivery.pending_writes.push((exec.clone(), pending))
+            host.executions.pending_writes.push((exec.clone(), pending))
         });
         let write = cx.background_executor().spawn(async move {
             written
@@ -191,7 +192,7 @@ impl RunsHost {
                 }
             };
             cx.update_global::<Self, _>(|host, _| {
-                host.delivery
+                host.executions
                     .pending_writes
                     .retain(|(writing, _)| writing != &exec)
             });

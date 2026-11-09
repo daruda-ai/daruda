@@ -331,7 +331,7 @@ fn a_stale_tap_strips_only_a_card_no_settlement_owns(cx: &mut TestAppContext) {
         assert!(matches!(
             answer_for(effect, tapped),
             Some(Answer::AckAndEdit { label, .. })
-                if label == s::notification::telegram_permission_stale()
+                if label == s::notification::remote_permission_stale()
         ));
     });
 }

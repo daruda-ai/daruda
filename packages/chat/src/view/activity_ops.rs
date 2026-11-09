@@ -163,7 +163,7 @@ impl AgentChatView {
     }
 
     /// Whether the permission request `id` is still outstanding (its card
-    /// unresolved). Used by the Telegram relay to drop a phone decision for a
+    /// unresolved). Used by the phone relay to drop a phone decision for a
     /// request the user already answered in-app (or that was cancelled).
     pub fn is_permission_outstanding(&self, id: u64) -> bool {
         self.pending_permissions.contains(&id)

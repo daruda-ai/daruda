@@ -73,12 +73,12 @@ async fn the_remote_header_names_the_tab_beside_the_agent(cx: &mut TestAppContex
             .read(cx)
             .agent_name()
             .to_owned();
-        (ws.telegram_header(pane, cx), agent)
+        (ws.remote_header(pane, cx), agent)
     });
     ws.update(cx, |ws, cx| {
         ws.rename_tab(tab_id, Some("review".into()), cx)
     });
-    let after = ws.update(cx, |ws, cx| ws.telegram_header(pane, cx));
+    let after = ws.update(cx, |ws, cx| ws.remote_header(pane, cx));
     assert_eq!(
         after,
         before.replace(

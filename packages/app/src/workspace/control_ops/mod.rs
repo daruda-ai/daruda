@@ -12,95 +12,18 @@ use crate::control::result::{
     Activity, ChatSummary, ControlError, Health, LaneEntry, LaneHandle, SendDisposition,
     StopDisposition,
 };
-use crate::telegram::bridge::PaneRef;
+use crate::remote_channel::bridge::PaneRef;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::{ActivityState, AgentChatView, AgentSessionStatus, PromptDispatch};
 use daruda_control_types::agent_text::{bound_agent_text, sanitize_title};
 use daruda_store::project::{LaneRef, ProjectId};
 
-/// What an agent says about a `/name` daruda does not own.
-///
-/// Three-valued because the two questions asked of it want different things
-/// from the middle. "The session has not advertised yet" cannot claim the
-/// name, but it cannot rule it out either, and folding that into either
-/// answer makes one of the callers wrong: as a claim, one cold pane vetoes
-/// every name for the whole window — and after a restart every pane but the
-/// focused one is cold, since a restored chat stays `Idle` until first focus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SlashClaim {
-    /// The agent advertises the name. It is not ours to answer.
-    Claims,
-    /// The agent has advertised its list and the name is not on it.
-    Disclaims,
-    /// Nobody has said — cold, connecting, or no agent at all. An abstention:
-    /// it never outvotes an agent that did answer, and on its own it earns no
-    /// conclusion in either direction.
-    Unsaid,
-}
-
-impl SlashClaim {
-    /// Fold two answers. A claim anywhere settles it; failing that a
-    /// disclaimer counts; silence yields to either.
-    pub(crate) fn merge(self, other: Self) -> Self {
-        match (self, other) {
-            (Self::Claims, _) | (_, Self::Claims) => Self::Claims,
-            (Self::Disclaims, _) | (_, Self::Disclaims) => Self::Disclaims,
-            (Self::Unsaid, Self::Unsaid) => Self::Unsaid,
-        }
-    }
-
-    /// Whether this answer earns the typo suggestion: some agent positively
-    /// ruled the name out, and none claimed it. Silence alone never does —
-    /// the honest answer with no evidence is the missing target.
-    pub(crate) fn rules_out(self) -> bool {
-        self == Self::Disclaims
-    }
-}
-
+mod slash;
 #[cfg(test)]
-mod slash_claim_tests {
-    use super::SlashClaim::{self, Claims, Disclaims, Unsaid};
+mod test_hooks;
 
-    /// `merge` is folded over panes and again over windows, so the answer must
-    /// not depend on how the panes were grouped or ordered, and an empty fold
-    /// must come out `Unsaid`. Associative, commutative, idempotent, with
-    /// `Unsaid` as the identity — checked exhaustively, since there are nine
-    /// pairs.
-    #[test]
-    fn merge_is_a_semilattice_with_unsaid_as_identity() {
-        let all = [Claims, Disclaims, Unsaid];
-        for a in all {
-            assert_eq!(a.merge(Unsaid), a, "identity");
-            assert_eq!(a.merge(a), a, "idempotent");
-            for b in all {
-                assert_eq!(a.merge(b), b.merge(a), "commutative");
-                for c in all {
-                    assert_eq!(
-                        a.merge(b).merge(c),
-                        a.merge(b.merge(c)),
-                        "associative: grouping must not change the answer"
-                    );
-                }
-            }
-        }
-        // Precedence, stated once rather than inferred from the fold.
-        assert_eq!(Claims.merge(Disclaims), Claims, "a claim outranks a denial");
-        assert_eq!(
-            Disclaims.merge(Unsaid),
-            Disclaims,
-            "an answer outranks silence"
-        );
-    }
-
-    /// Only a positive denial earns the suggestion.
-    #[test]
-    fn only_disclaims_rules_out() {
-        assert!(SlashClaim::Disclaims.rules_out());
-        assert!(!SlashClaim::Claims.rules_out());
-        assert!(!SlashClaim::Unsaid.rules_out());
-    }
-}
+pub(crate) use slash::SlashClaim;
 
 /// What a newly opened chat is called, for the two surfaces that have to name
 /// it: the phone ping and the tool result.
@@ -453,7 +376,7 @@ impl Workspace {
             return Err(ControlError::TargetGone);
         }
         let dispatch = match origin {
-            CommandOrigin::Phone => self.send_agent_prompt_text_from_telegram(pane, text, cx),
+            CommandOrigin::Phone => self.send_agent_prompt_text_from_phone(pane, text, cx),
             CommandOrigin::Orchestrator => {
                 self.send_agent_prompt_text_from_orchestrator(pane, text, cx)
             }
@@ -477,7 +400,7 @@ impl Workspace {
     ///
     /// A still-streaming message does not count as said. This surface can be
     /// called mid-turn, so it needs the filter that
-    /// `telegram_completion_parts` does not: that one runs only at the
+    /// `remote_completion_parts` does not: that one runs only at the
     /// completion tee, where nothing is in flight. Reporting half a sentence
     /// as the agent's answer is the worse of the two failures — a caller
     /// wanting the answer to its *own* prompt has `daruda_chat_ask`, and one
@@ -491,30 +414,6 @@ impl Workspace {
             return Err(ControlError::TargetGone);
         };
         Ok(last_assistant_text(view.read(cx)).and_then(|t| bound_agent_text(&t)))
-    }
-
-    /// Whether a `/name` from outside should go to this pane's agent.
-    ///
-    /// The agent advertises its own slash commands over ACP, and the in-app
-    /// completion menu already offers them from this same list — so a phone
-    /// answering "unknown command" for one the menu would happily complete is
-    /// the surface disagreeing with itself.
-    ///
-    /// A pane that has not advertised yet forwards too — [`SlashClaim::Unsaid`]
-    /// is not "it does not have that command", and a name daruda does not own
-    /// is far likelier the agent's than a typo of one of ours. So does a pane
-    /// that is not there, so the answer comes from the delivery attempt, which
-    /// can say `target_gone`, rather than from a guess here.
-    ///
-    /// Asked about a *named* pane, so it answers about that pane whatever it
-    /// is — including the orchestrator's, which can be `last_pinged` and so
-    /// can be the target of a reply. [`Self::rules_out_slash_command`] asks
-    /// about the population instead and scopes itself accordingly.
-    pub(crate) fn agent_takes_slash_command(&self, pane: PaneId, name: &str, cx: &App) -> bool {
-        match self.agent_chat_view(pane) {
-            Some(view) => pane_slash_claim(view.read(cx), name) != SlashClaim::Disclaims,
-            None => true,
-        }
     }
 
     /// The agent chat a phone message falls back to when nothing names a
@@ -546,30 +445,6 @@ impl Workspace {
         })
     }
 
-    /// What this window's agents say about `/name` — asked when nothing names
-    /// a target, so there is no one pane to ask.
-    ///
-    /// Scoped to [`Self::lane_agent_chats`]: every lane's chats, minus the
-    /// orchestrator. The orchestrator exclusion is the part
-    /// [`Self::fallback_agent_chat`] shares — an unowned slash can only ever
-    /// be delivered to a pane `/list` offers, so a chat the phone is never
-    /// shown must not decide the answer, and being usually cold and hidden it
-    /// would decide every one.
-    ///
-    /// The lane scope deliberately does *not* match: a fallback target must
-    /// come from the lane the user is in, but a vocabulary answer is about
-    /// what the agents know, and `/list` offers every lane's chat. A
-    /// background lane that claims the name suppresses the typo answer, which
-    /// is the conservative direction.
-    ///
-    /// Folded rather than reduced to a bool because silence has to stay
-    /// distinguishable: see [`SlashClaim`].
-    pub(crate) fn slash_claim(&self, name: &str, cx: &App) -> SlashClaim {
-        self.lane_agent_chats()
-            .map(|(_, view)| pane_slash_claim(view.read(cx), name))
-            .fold(SlashClaim::Unsaid, SlashClaim::merge)
-    }
-
     /// Stop whatever this pane has in flight. `cancel_agent_turn_if_active`
     /// owns the settle edge and the completion firing, so nothing here
     /// duplicates the activity state machine.
@@ -586,44 +461,6 @@ impl Workspace {
         } else {
             Ok(StopDisposition::AlreadyIdle)
         }
-    }
-
-    /// Test hook: put `names` on `pane`'s advertised command list. Slash
-    /// ownership turns on that one field, and a test outside
-    /// `crate::workspace` cannot reach the view that holds it.
-    #[cfg(test)]
-    pub(crate) fn advertise_slash_commands_for_test(
-        &self,
-        pane: PaneId,
-        names: &[&str],
-        cx: &mut App,
-    ) {
-        let view = self.agent_chat_view(pane).expect("pane").clone();
-        let commands = names
-            .iter()
-            .map(|n| daruda_acp::SlashCommand {
-                name: (*n).to_string(),
-                description: String::new(),
-                input: daruda_acp::SlashCommandInput::NoInput,
-            })
-            .collect();
-        view.update(cx, |v, _| v.advertise_commands_for_test(commands));
-    }
-}
-
-/// What one pane's agent says about `/name`: an empty advertised list is
-/// [`SlashClaim::Unsaid`] (the session has not spoken, which is neither a
-/// claim nor a denial), a list naming it is `Claims`, and any other list is
-/// `Disclaims`. The one predicate both slash-ownership questions aggregate —
-/// one pane's answer, and every pane's.
-fn pane_slash_claim(view: &AgentChatView, name: &str) -> SlashClaim {
-    let advertised = view.session_config().available_commands();
-    if advertised.is_empty() {
-        SlashClaim::Unsaid
-    } else if advertised.iter().any(|c| c.name == name) {
-        SlashClaim::Claims
-    } else {
-        SlashClaim::Disclaims
     }
 }
 
@@ -675,118 +512,6 @@ fn last_activity_unix(view: &AgentChatView) -> Option<u64> {
     let raw = view.session_updated_at()?;
     let parsed = chrono::DateTime::parse_from_rfc3339(raw).ok()?;
     u64::try_from(parsed.timestamp()).ok()
-}
-
-/// Scaffolding for the control-surface tests, which need scenarios the pane
-/// ops can reach but `crate::test_support` cannot — everything driven below is
-/// `pub(in crate::workspace)` at its source.
-#[cfg(test)]
-impl Workspace {
-    /// Insert a pane the way [`Self::control_insert_chat`] does — *without*
-    /// revealing it.
-    ///
-    /// Same reason: revealing focuses the pane, focusing starts a real ACP
-    /// adapter, and its task outlives the test and then trips gpui's
-    /// determinism assert in whichever test runs next. Every control test
-    /// addresses panes by id, so none of them needs the focus.
-    pub(crate) fn open_agent_chat_pane_for_test(
-        &mut self,
-        window: &mut gpui::Window,
-        cx: &mut Context<Self>,
-    ) -> PaneId {
-        let agent_id = self.open_agent_id(None);
-        let cwds = self.active_lane_cwds();
-        self.insert_agent_chat_pane(agent_id, cwds, window, cx)
-            .expect("pane opened")
-    }
-
-    /// Add `count` lanes to the active project, each holding one agent-chat
-    /// pane, and return their pane ids. What makes `main_area.runtimes` big
-    /// enough for hash iteration order to diverge from the order a listing
-    /// must report.
-    pub(crate) fn open_agent_chat_panes_in_fresh_lanes_for_test(
-        &mut self,
-        count: u32,
-        window: &mut gpui::Window,
-        cx: &mut Context<Self>,
-    ) -> Vec<PaneId> {
-        let project = self.active.project;
-        let root = self
-            .project_for(project)
-            .map(|p| p.root.clone())
-            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-        (0..count)
-            .map(|i| {
-                let lane_id = self.alloc_id();
-                let mut lane = crate::lane::Lane::default_for_project(lane_id, root.clone());
-                lane.tab_order = i + 1;
-                let target = LaneRef {
-                    project,
-                    lane: lane_id,
-                };
-                self.project_for_mut(project)
-                    .expect("active project")
-                    .lanes
-                    .push(lane);
-                self.activate_lane(target, window, cx);
-                self.open_agent_chat_pane_for_test(window, cx)
-            })
-            .collect()
-    }
-
-    /// Drive one pane into each of the three states `/brief` counts. Each
-    /// writes the field the sanctioned predicate reads — `activity_state`
-    /// folds turn + permissions, and `map_health` reads `status`.
-    pub(crate) fn set_pane_working_for_test(&mut self, pane: PaneId, cx: &mut Context<Self>) {
-        let view = self.agent_chat_view(pane).expect("pane").clone();
-        view.update(cx, |v, _| v.set_turn_in_flight());
-    }
-
-    pub(crate) fn set_pane_awaiting_permission_for_test(
-        &mut self,
-        pane: PaneId,
-        cx: &mut Context<Self>,
-    ) {
-        let view = self.agent_chat_view(pane).expect("pane").clone();
-        view.update(cx, |v, _| v.hold_permission_for_shot(1));
-    }
-
-    pub(crate) fn set_pane_awaiting_answer_for_test(
-        &mut self,
-        pane: PaneId,
-        cx: &mut Context<Self>,
-    ) {
-        let view = self.agent_chat_view(pane).expect("pane").clone();
-        let question = daruda_acp::QuestionRequest {
-            message: "Which?".into(),
-            tool_call_id: None,
-            delivery: daruda_acp::QuestionDelivery::Blocking,
-            fields: vec![daruda_acp::QuestionField {
-                key: "question_0".into(),
-                title: None,
-                description: None,
-                required: false,
-                kind: daruda_acp::QuestionFieldKind::Text,
-                companion_of: None,
-                default: None,
-            }],
-        };
-        view.update(cx, |v, cx| {
-            v.apply_event(
-                daruda_acp::AcpEvent::QuestionAsked { id: 1, question },
-                "",
-                false,
-                cx,
-            );
-        });
-    }
-
-    pub(crate) fn set_pane_errored_for_test(&mut self, pane: PaneId, cx: &mut Context<Self>) {
-        let view = self.agent_chat_view(pane).expect("pane").clone();
-        view.update(cx, |v, cx| {
-            v.set_error("boom".into(), daruda_acp::Remedy::NoneAvailable, cx)
-        });
-    }
 }
 
 #[cfg(test)]

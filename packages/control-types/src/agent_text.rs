@@ -11,7 +11,7 @@
 //! one a model reads must not be — so [`elide_middle`] takes the budget and
 //! the marker as arguments. The orchestrator's policy lives here beside it
 //! (`bound_agent_text`, fixed English) because it has no other home; the
-//! phone's lives at its call site in `telegram_ops`, which owns the localized
+//! phone's lives at its call site in `remote_ops`, which owns the localized
 //! string.
 //!
 //! GPUI-free.
