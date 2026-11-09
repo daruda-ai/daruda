@@ -260,16 +260,7 @@ impl Workspace {
 mod tests {
     use gpui::TestAppContext;
 
-    use crate::lane::git::{FakeRepo, GitDirs, GitWorktreeInfo};
-
-    fn lane(path: &std::path::Path, branch: &str) -> GitWorktreeInfo {
-        GitWorktreeInfo {
-            path: path.to_path_buf(),
-            branch: Some(branch.into()),
-            head: None,
-            bare: false,
-        }
-    }
+    use crate::lane::git::FakeRepo;
 
     /// The watch set is what decides whether an outside commit or fetch ever
     /// reaches the UI. A repo with a linked worktree is the shape that gets
@@ -277,38 +268,17 @@ mod tests {
     /// only the common dir and staging in the linked lane is.
     #[gpui::test]
     fn every_lane_is_watched_through_its_own_dir_and_the_shared_one(cx: &mut TestAppContext) {
-        let temp = tempfile::tempdir().unwrap();
-        // The lanes carry canonical paths — on macOS the raw tempdir is the
-        // `/var` alias of `/private/var`.
-        let root = daruda_core::path::canonicalize(temp.path()).unwrap();
-        let linked = root.join("side-wt");
-        // Git's own layout for a linked worktree (asserted against real git in
-        // `git_dirs_separate_a_linked_worktree_from_the_shared_repository`), as
-        // plain directories so the real watchers attach.
-        let common = root.join(".git");
-        let side = common.join("worktrees").join("side");
-        for dir in [&linked, &side] {
-            std::fs::create_dir_all(dir).unwrap();
-        }
-        let fake = crate::test_support::fake_git(cx);
-        fake.add_repo(
-            FakeRepo::at(&root)
-                .branch("main")
-                .worktrees(vec![lane(&root, "main"), lane(&linked, "side")])
-                .dirs(GitDirs {
-                    git_dir: common.clone(),
-                    common_dir: common.clone(),
-                }),
-        );
-        fake.add_repo(FakeRepo::at(&linked).branch("side").dirs(GitDirs {
-            git_dir: side.clone(),
-            common_dir: common.clone(),
-        }));
+        let lanes = crate::workspace::tests::fake_linked_worktree(cx, |root, linked| {
+            (
+                FakeRepo::at(root).branch("main"),
+                FakeRepo::at(linked).branch("side"),
+            )
+        });
 
         let (_wh, ws) = crate::workspace::tests::build_workspace_with(
             cx,
             &daruda_config::Config::default(),
-            Some(daruda_store::project::Project::from_path(&root)),
+            Some(daruda_store::project::Project::from_path(&lanes.root)),
         );
         ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
         cx.run_until_parked();
@@ -325,7 +295,7 @@ mod tests {
             );
             let mut watched: Vec<_> = ws.git.watch.live.keys().cloned().collect();
             watched.sort();
-            let mut expected = vec![common, side];
+            let mut expected = vec![lanes.common.clone(), lanes.side.clone()];
             expected.sort();
             assert_eq!(
                 watched, expected,

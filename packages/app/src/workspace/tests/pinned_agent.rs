@@ -5,7 +5,6 @@
 
 use super::*;
 use crate::control::result::ControlError;
-use crate::lane::git::GitCall;
 use crate::workspace::right_dock::task_start::TaskStartError;
 use crate::workspace::{ChatAgent, ChatOpen};
 use daruda_config::{AgentDefinition, AgentEntry, ModeChoice};
@@ -55,13 +54,8 @@ fn lane_count(ws: &Workspace) -> usize {
 /// is told which worktree it kept.
 #[gpui::test]
 async fn a_worktree_whose_pinned_agent_left_during_git_opens_no_chat(cx: &mut TestAppContext) {
-    let temp = tempfile::tempdir().unwrap();
-    let fake = crate::test_support::fake_git(cx);
-    let root = super::tasks::fake_repo(&fake, &temp.path().join("repo"));
-    let project = daruda_store::project::Project::from_path(&root);
-    let (window, workspace) = build_workspace_with(cx, &with_other(), Some(project));
-    workspace.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
-    cx.run_until_parked();
+    let fx = GitFixture::open(cx, &with_other(), |repo| repo);
+    let (window, workspace, fake) = (fx.window, &fx.ws, &fx.fake);
     let _connections = cx.update(Workspace::fake_agent_connections_for_test);
     let (panes, lanes) = workspace.read_with(cx, |ws, _| (ws.all_pane_ids(), lane_count(ws)));
     let (answer, checkout) = cx
@@ -72,7 +66,7 @@ async fn a_worktree_whose_pinned_agent_left_during_git_opens_no_chat(cx: &mut Te
                     .control_lane_plan(project, "pinned", None)
                     .unwrap()
                     .new_path;
-                super::tasks::fake_lane(&fake, &checkout, "pinned");
+                fake_lane(fake, &checkout, "pinned");
                 // The agent is there when the create is asked for, so git
                 // runs; it is gone by the time git is done.
                 let answer =
@@ -85,15 +79,9 @@ async fn a_worktree_whose_pinned_agent_left_during_git_opens_no_chat(cx: &mut Te
     cx.executor().allow_parking();
     let refused = answer.recv().await.expect("answered");
     cx.run_until_parked();
-    assert!(
-        matches!(
-            super::tasks::added_lanes(&fake).as_slice(),
-            [GitCall::AddLane { new_path, new_branch: Some(branch), .. }]
-                if *new_path == checkout && branch == "pinned"
-        ),
-        "git made the worktree: {:?}",
-        fake.calls()
-    );
+    let added = crate::test_support::added_lane(fake);
+    assert_eq!(added.new_path, checkout, "git made the worktree");
+    assert_eq!(added.new_branch.as_deref(), Some("pinned"));
     workspace.read_with(cx, |ws, _| {
         assert_eq!(lane_count(ws), lanes + 1, "and it is kept as a lane");
         let lane = ws.lane_ref_at(&checkout).expect("registered");
@@ -169,13 +157,8 @@ fn an_existing_lane_task_whose_pinned_agent_left_opens_no_chat(cx: &mut TestAppC
 /// names the worktree it left.
 #[gpui::test]
 async fn a_new_worktree_task_whose_pinned_agent_left_keeps_its_worktree(cx: &mut TestAppContext) {
-    let temp = tempfile::tempdir().unwrap();
-    let fake = crate::test_support::fake_git(cx);
-    let root = super::tasks::fake_repo(&fake, &temp.path().join("repo"));
-    let project = daruda_store::project::Project::from_path(&root);
-    let (window, workspace) = build_workspace_with(cx, &with_other(), Some(project));
-    workspace.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
-    cx.run_until_parked();
+    let fx = GitFixture::open(cx, &with_other(), |repo| repo);
+    let (window, workspace, fake, root) = (fx.window, &fx.ws, &fx.fake, &fx.root);
     let _connections = cx.update(Workspace::fake_agent_connections_for_test);
     let (id, answer, panes, lanes) = cx
         .update_window(window.into(), |_, window, cx| {
@@ -184,8 +167,8 @@ async fn a_new_worktree_task_whose_pinned_agent_left_keeps_its_worktree(cx: &mut
                 spec.run_in = TaskRunIn::NewWorktree;
                 spec.branch_name = "pinned-task".into();
                 let checkout =
-                    crate::workspace::lane_ops::lane_checkout_path(&root, &spec.branch_name);
-                super::tasks::fake_lane(&fake, &checkout, &spec.branch_name);
+                    crate::workspace::lane_ops::lane_checkout_path(root, &spec.branch_name);
+                fake_lane(fake, &checkout, &spec.branch_name);
                 let id = crate::runs::seed::task(spec, None, cx);
                 let panes = ws.all_pane_ids();
                 let lanes = lane_count(ws);
@@ -211,15 +194,9 @@ async fn a_new_worktree_task_whose_pinned_agent_left_keeps_its_worktree(cx: &mut
         assert_eq!(worktree.workspace, ws.uuid());
         let lane = worktree.lane_ref();
         let kept = ws.lane_for(lane).expect("the task's worktree is registered");
-        assert!(
-            matches!(
-                super::tasks::added_lanes(&fake).as_slice(),
-                [GitCall::AddLane { new_path, new_branch: Some(branch), .. }]
-                    if *new_path == kept.path && branch == "pinned-task"
-            ),
-            "git made it: {:?}",
-            fake.calls()
-        );
+        let added = crate::test_support::added_lane(fake);
+        assert_eq!(added.new_path, kept.path, "git made it");
+        assert_eq!(added.new_branch.as_deref(), Some("pinned-task"));
         assert!(
             matches!(&kept.kind, daruda_store::project::LaneKind::Git { branch: Some(b), .. } if b == "pinned-task"),
             "on the task's branch: {:?}",

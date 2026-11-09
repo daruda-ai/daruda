@@ -5,10 +5,7 @@
 //! `tests/it/git_remote.rs`.
 
 use super::*;
-use crate::lane::git::{
-    FakeGit, FakeRepo, GitCall, GitDirs, GitFileEntry, GitOp, GitTracking, GitWorktreeInfo,
-    GitWorktreeStatus,
-};
+use crate::lane::git::{FakeRepo, GitCall, GitFileEntry, GitOp, GitTracking, GitWorktreeStatus};
 
 const WATCH_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
@@ -18,65 +15,6 @@ fn behind(n: u32) -> GitTracking {
         upstream: Some("origin/main".into()),
         ahead: 0,
         behind: n,
-    }
-}
-
-fn lane_info(path: &std::path::Path, branch: &str) -> GitWorktreeInfo {
-    GitWorktreeInfo {
-        path: path.to_path_buf(),
-        branch: Some(branch.into()),
-        head: None,
-        bare: false,
-    }
-}
-
-/// A main worktree at `<temp>/work` and a linked one at `<temp>/side-wt`,
-/// with git's own dir layout (`work/.git` shared, `work/.git/worktrees/side`
-/// the linked lane's) as plain directories.
-struct TwoLanes {
-    fake: FakeGit,
-    linked: std::path::PathBuf,
-    common: std::path::PathBuf,
-    side: std::path::PathBuf,
-    root: std::path::PathBuf,
-    _temp: tempfile::TempDir,
-}
-
-/// `repos` scripts the two repositories from their roots; the layout and the
-/// lane list are added here.
-fn two_lanes_with(
-    cx: &mut TestAppContext,
-    repos: impl FnOnce(&std::path::Path, &std::path::Path) -> (FakeRepo, FakeRepo),
-) -> TwoLanes {
-    let temp = tempfile::tempdir().unwrap();
-    let base = daruda_core::path::canonicalize(temp.path()).unwrap();
-    let root = base.join("work");
-    let linked = base.join("side-wt");
-    let common = root.join(".git");
-    let side = common.join("worktrees").join("side");
-    for dir in [&linked, &side] {
-        std::fs::create_dir_all(dir).unwrap();
-    }
-    let (main, linked_repo) = repos(&root, &linked);
-    let fake = crate::test_support::fake_git(cx);
-    fake.add_repo(
-        main.worktrees(vec![lane_info(&root, "main"), lane_info(&linked, "side")])
-            .dirs(GitDirs {
-                git_dir: common.clone(),
-                common_dir: common.clone(),
-            }),
-    );
-    fake.add_repo(linked_repo.dirs(GitDirs {
-        git_dir: side.clone(),
-        common_dir: common.clone(),
-    }));
-    TwoLanes {
-        fake,
-        linked,
-        common,
-        side,
-        root,
-        _temp: temp,
     }
 }
 
@@ -131,26 +69,10 @@ fn wait_for_watch_refresh(
 /// byte-identical and reads to the user as a dead button.
 #[gpui::test]
 fn fetch_refreshes_the_tracking_indicator(cx: &mut TestAppContext) {
-    let temp = tempfile::tempdir().unwrap();
-    let root = daruda_core::path::canonicalize(temp.path()).unwrap();
-    let fake = crate::test_support::fake_git(cx);
-    fake.add_repo(FakeRepo::at(&root).branch("main").tracking(behind(0)));
-
-    init_gpui_component(cx);
-    let config = daruda_config::Config::default();
-    let project = daruda_store::project::Project::from_path(&root);
-    let wh = cx.add_window(|window, cx| {
-        Workspace::new_with_project_for_test(
-            &config,
-            Some(project),
-            fresh_test_data_dir(),
-            window,
-            cx,
-        )
+    let f = GitFixture::open(cx, &daruda_config::Config::default(), |repo| {
+        repo.tracking(behind(0))
     });
-    let ws = wh.root(cx).unwrap();
-    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
-    cx.run_until_parked();
+    let (ws, fake, root) = (&f.ws, &f.fake, &f.root);
 
     let id = ws.read_with(cx, |ws, _| ws.active_ref());
     ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
@@ -162,9 +84,9 @@ fn fetch_refreshes_the_tracking_indicator(cx: &mut TestAppContext) {
     });
 
     // What the remote holds once fetched; nothing but a re-read can show it.
-    fake.set_tracking(&root, behind(1));
+    fake.set_tracking(root, behind(1));
     cx.run_until_parked();
-    let reads = fake.reads(GitOp::Tracking, &root);
+    let reads = fake.reads(GitOp::Tracking, root);
     ws.read_with(cx, |ws, _| assert_eq!(tracking_behind(ws, &id), 0));
 
     ws.update(cx, |ws, cx| ws.on_fetch(cx));
@@ -172,7 +94,7 @@ fn fetch_refreshes_the_tracking_indicator(cx: &mut TestAppContext) {
 
     assert_eq!(fake.calls(), vec![GitCall::Fetch { repo: root.clone() }]);
     assert!(
-        fake.reads(GitOp::Tracking, &root) > reads,
+        fake.reads(GitOp::Tracking, root) > reads,
         "the fetch must re-read tracking"
     );
     ws.read_with(cx, |ws, _| {
@@ -198,7 +120,7 @@ fn external_commit_refreshes_linked_lane_through_the_git_dir_watcher(cx: &mut Te
         }],
         ..GitWorktreeStatus::default()
     };
-    let lanes = two_lanes_with(cx, |root, linked| {
+    let lanes = fake_linked_worktree(cx, |root, linked| {
         (
             FakeRepo::at(root).branch("main"),
             FakeRepo::at(linked).branch("side").status(staged),
@@ -266,7 +188,7 @@ fn external_commit_refreshes_linked_lane_through_the_git_dir_watcher(cx: &mut Te
 /// fan that event out so every lane recomputes its own divergence.
 #[gpui::test]
 fn external_fetch_refreshes_tracking_for_every_lane(cx: &mut TestAppContext) {
-    let lanes = two_lanes_with(cx, |root, linked| {
+    let lanes = fake_linked_worktree(cx, |root, linked| {
         (
             FakeRepo::at(root).branch("main").tracking(behind(0)),
             FakeRepo::at(linked).branch("side").tracking(GitTracking {

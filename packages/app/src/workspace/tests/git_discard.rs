@@ -4,7 +4,7 @@
 //! `tests/it/git_discard.rs`.
 
 use super::*;
-use crate::lane::git::{FakeGit, FakeRepo, GitCall, GitFileEntry, GitOp, GitWorktreeStatus};
+use crate::lane::git::{GitCall, GitFileEntry, GitOp, GitWorktreeStatus};
 
 fn entry(x: char, y: char, path: &str) -> GitFileEntry {
     GitFileEntry {
@@ -26,39 +26,23 @@ fn changed() -> GitWorktreeStatus {
 }
 
 struct Fixture {
-    wh: gpui::WindowHandle<gpui_component::Root>,
-    ws: gpui::Entity<Workspace>,
+    git: GitFixture,
     lane: daruda_store::project::LaneRef,
-    fake: FakeGit,
-    root: std::path::PathBuf,
-    _temp: tempfile::TempDir,
 }
 
 fn open(cx: &mut TestAppContext) -> Fixture {
-    let temp = tempfile::tempdir().unwrap();
-    // Lanes carry canonical paths; the fake resolves handles by prefix.
-    let root = daruda_core::path::canonicalize(temp.path()).unwrap();
-    let fake = crate::test_support::fake_git(cx);
-    fake.add_repo(FakeRepo::at(&root).branch("main").status(changed()));
-    let project = daruda_store::project::Project::from_path(&root);
-    let (wh, ws) = build_workspace_with(cx, &daruda_config::Config::default(), Some(project));
-    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
+    let git = GitFixture::open(cx, &daruda_config::Config::default(), |repo| {
+        repo.status(changed())
+    });
+    let lane = git.ws.read_with(cx, |ws, _| ws.active_ref());
+    git.ws.update(cx, |ws, cx| ws.refresh_git_status(lane, cx));
     cx.run_until_parked();
-    let lane = ws.read_with(cx, |ws, _| ws.active_ref());
-    ws.update(cx, |ws, cx| ws.refresh_git_status(lane, cx));
-    cx.run_until_parked();
-    Fixture {
-        wh,
-        ws,
-        lane,
-        fake,
-        root,
-        _temp: temp,
-    }
+    Fixture { git, lane }
 }
 
 fn discards(f: &Fixture) -> Vec<GitCall> {
-    f.fake
+    f.git
+        .fake
         .calls()
         .into_iter()
         .filter(|call| matches!(call, GitCall::Discard { .. }))
@@ -73,12 +57,14 @@ fn discard_and_settle(
     pinned: Vec<std::path::PathBuf>,
     after: GitWorktreeStatus,
 ) {
-    f.fake.set_status(&f.root, after.clone());
-    let reads = f.fake.reads(GitOp::WorktreeStatus, &f.root);
-    f.ws.update(cx, |ws, cx| ws.discard_changes(f.lane, pinned, cx));
+    f.git.fake.set_status(&f.git.root, after.clone());
+    let reads = f.git.fake.reads(GitOp::WorktreeStatus, &f.git.root);
+    f.git
+        .ws
+        .update(cx, |ws, cx| ws.discard_changes(f.lane, pinned, cx));
     cx.run_until_parked();
-    assert!(f.fake.reads(GitOp::WorktreeStatus, &f.root) > reads);
-    f.ws.read_with(cx, |ws, _| {
+    assert!(f.git.fake.reads(GitOp::WorktreeStatus, &f.git.root) > reads);
+    f.git.ws.read_with(cx, |ws, _| {
         assert_eq!(ws.lane_git_worktree(f.lane), Some(&after));
     });
 }
@@ -92,7 +78,7 @@ fn discarding_a_staged_only_file_puts_it_back_at_head(cx: &mut TestAppContext) {
     assert_eq!(
         discards(&f),
         vec![GitCall::Discard {
-            repo: f.root.clone(),
+            repo: f.git.root.clone(),
             pinned: vec!["staged.txt".into()],
         }],
         "only the one file is asked for"
@@ -102,7 +88,7 @@ fn discarding_a_staged_only_file_puts_it_back_at_head(cx: &mut TestAppContext) {
 #[gpui::test]
 fn discarding_everything_leaves_nothing_to_commit(cx: &mut TestAppContext) {
     let f = open(cx);
-    let every = f.ws.read_with(cx, |ws, _| {
+    let every = f.git.ws.read_with(cx, |ws, _| {
         let status = ws.lane_git_worktree(f.lane).unwrap();
         status
             .staged
@@ -115,7 +101,7 @@ fn discarding_everything_leaves_nothing_to_commit(cx: &mut TestAppContext) {
     assert_eq!(
         discards(&f),
         vec![GitCall::Discard {
-            repo: f.root.clone(),
+            repo: f.git.root.clone(),
             pinned: vec!["staged.txt".into(), "edited.txt".into(), "junk.txt".into()],
         }]
     );
@@ -124,13 +110,15 @@ fn discarding_everything_leaves_nothing_to_commit(cx: &mut TestAppContext) {
 #[gpui::test]
 fn discard_all_asks_before_touching_anything(cx: &mut TestAppContext) {
     let f = open(cx);
-    cx.update_window(f.wh.into(), |_, window, cx| {
-        f.ws.update(cx, |ws, cx| ws.on_discard_all(f.lane, window, cx));
+    cx.update_window(f.git.window.into(), |_, window, cx| {
+        f.git
+            .ws
+            .update(cx, |ws, cx| ws.on_discard_all(f.lane, window, cx));
     })
     .unwrap();
     cx.run_until_parked();
     assert_eq!(
-        f.fake.calls(),
+        f.git.fake.calls(),
         Vec::new(),
         "nothing is written before the confirm"
     );

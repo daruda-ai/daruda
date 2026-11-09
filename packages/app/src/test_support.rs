@@ -46,6 +46,37 @@ pub(crate) fn fake_git(cx: &mut TestAppContext) -> crate::lane::git::FakeGit {
     fake
 }
 
+/// The one `git worktree add` the code under test asked for.
+#[derive(Debug)]
+pub(crate) struct AddedLane {
+    pub repo: std::path::PathBuf,
+    pub new_path: std::path::PathBuf,
+    pub new_branch: Option<String>,
+}
+
+/// The single `AddLane` among `fake`'s recorded writes; other writes are
+/// ignored. Panics, listing every call, unless exactly one lane was added.
+pub(crate) fn added_lane(fake: &crate::lane::git::FakeGit) -> AddedLane {
+    let calls = fake.calls();
+    let mut added = calls.iter().filter_map(|call| match call {
+        crate::lane::git::GitCall::AddLane {
+            repo,
+            new_path,
+            new_branch,
+            ..
+        } => Some(AddedLane {
+            repo: repo.clone(),
+            new_path: new_path.clone(),
+            new_branch: new_branch.clone(),
+        }),
+        _ => None,
+    });
+    match (added.next(), added.next()) {
+        (Some(lane), None) => lane,
+        _ => panic!("expected exactly one lane added: {calls:?}"),
+    }
+}
+
 /// A window built for the external control surface: the workspace, its window
 /// handle, and — for the variants that open one — an agent-chat pane.
 ///

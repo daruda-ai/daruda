@@ -188,7 +188,7 @@ async fn task_start_runs_the_task_the_listing_numbered(cx: &mut gpui::TestAppCon
 #[gpui::test]
 async fn a_task_start_that_fails_later_is_told_as_a_notice(cx: &mut gpui::TestAppContext) {
     use crate::control::spec::{ControlCommand, Ordinal, TaskCommand};
-    use crate::lane::git::{FakeFailure, FakeRepo, GitCall, GitOp};
+    use crate::lane::git::{FakeFailure, FakeRepo, GitOp};
     use gpui::BorrowAppContext as _;
     let fake = crate::test_support::fake_git(cx);
     let fixture = crate::test_support::workspace_for_control(cx);
@@ -285,14 +285,12 @@ async fn a_task_start_that_fails_later_is_told_as_a_notice(cx: &mut gpui::TestAp
         }
     }
     assert_eq!(notices, vec![expected]);
-    assert!(
-        matches!(
-            fake.calls().as_slice(),
-            [GitCall::AddLane { new_branch: Some(branch), .. }] if branch == "main"
-        ),
-        "the start asked git for the checked-out branch: {:?}",
-        fake.calls()
+    assert_eq!(
+        crate::test_support::added_lane(&fake).new_branch.as_deref(),
+        Some("main"),
+        "the start asked git for the checked-out branch"
     );
+    assert_eq!(fake.calls().len(), 1, "the only write: {:?}", fake.calls());
 }
 
 /// An approval tap is settled under the surface it came from, so the card

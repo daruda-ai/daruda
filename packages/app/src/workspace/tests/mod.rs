@@ -27,6 +27,7 @@ mod git_changes_nav;
 mod git_changes_virtualized;
 mod git_commit_flow;
 mod git_discard;
+mod git_fixture;
 mod git_remote;
 mod keep_awake;
 mod lane_unread;
@@ -68,6 +69,9 @@ use super::*;
 use gpui::{AppContext, TestAppContext};
 
 use crate::test_support::init_gpui_component;
+pub(in crate::workspace) use git_fixture::{
+    GitFixture, fake_lane, fake_linked_worktree, fake_repo, fake_repo_with,
+};
 // Re-export workspace-internal types needed by sub-modules.
 pub(super) use crate::workspace::main_area::pane_tree::{PaneLayout, SplitDirection};
 pub(super) use crate::workspace::main_area::tab_ops::NewPaneKind;

@@ -50,8 +50,8 @@ async fn raw_file_load_feeds_editor_text(cx: &mut TestAppContext) {
     });
 }
 
-/// A canonical temp root (the form lanes carry, which the fake resolves
-/// handles by) registered as a repository on `main`.
+/// A fresh fake git with one repository on `main` (see `fake_repo_with`),
+/// for tests that build their own bare `Workspace` window.
 fn fake_repo_root(
     cx: &mut TestAppContext,
     repo: impl FnOnce(FakeRepo) -> FakeRepo,
@@ -61,9 +61,8 @@ fn fake_repo_root(
     tempfile::TempDir,
 ) {
     let temp = tempfile::tempdir().unwrap();
-    let root = daruda_core::path::canonicalize(temp.path()).unwrap();
     let fake = crate::test_support::fake_git(cx);
-    fake.add_repo(repo(FakeRepo::at(&root).branch("main")));
+    let root = fake_repo_with(&fake, temp.path(), repo);
     (fake, root, temp)
 }
 

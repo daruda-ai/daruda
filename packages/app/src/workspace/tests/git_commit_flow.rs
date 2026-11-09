@@ -3,27 +3,16 @@
 //! real commit and push do is `daruda_project`'s `tests/it/git_remote.rs`.
 
 use super::*;
-use crate::lane::git::{FakeGit, FakeRepo, GitCall, GitFileEntry, GitWorktreeStatus};
+use crate::lane::git::{GitCall, GitFileEntry, GitWorktreeStatus};
 use crate::workspace::{CommitChanges, PushChanges};
 
-/// A repository at a canonical temp root with `staged` files staged, the
-/// workspace over it, and the fake that records what it was asked to do.
-struct Fixture {
-    wh: gpui::WindowHandle<gpui_component::Root>,
-    ws: gpui::Entity<Workspace>,
-    fake: FakeGit,
-    root: std::path::PathBuf,
-    _temp: tempfile::TempDir,
-}
-
+/// A repository with `staged` files staged, the workspace over it (Root-hosted
+/// like the app: the commit confirm is a Root dialog), its status read.
 fn workspace_on(
     cx: &mut TestAppContext,
     staged: &[&str],
     config: daruda_config::Config,
-) -> Fixture {
-    let temp = tempfile::tempdir().unwrap();
-    // Lanes carry canonical paths; the fake resolves handles by prefix.
-    let root = daruda_core::path::canonicalize(temp.path()).unwrap();
+) -> GitFixture {
     let status = GitWorktreeStatus {
         staged: staged
             .iter()
@@ -36,28 +25,16 @@ fn workspace_on(
             .collect(),
         ..GitWorktreeStatus::default()
     };
-    let fake = crate::test_support::fake_git(cx);
-    fake.add_repo(FakeRepo::at(&root).branch("main").status(status));
-    // Root-hosted like the app: the commit confirm is a Root dialog.
-    let project = daruda_store::project::Project::from_path(&root);
-    let (wh, ws) = build_workspace_with(cx, &config, Some(project));
-    ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
+    let f = GitFixture::open(cx, &config, |repo| repo.status(status));
+    let id = f.ws.read_with(cx, |ws, _| ws.active_ref());
+    f.ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
     cx.run_until_parked();
-    let id = ws.read_with(cx, |ws, _| ws.active_ref());
-    ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
-    cx.run_until_parked();
-    Fixture {
-        wh,
-        ws,
-        fake,
-        root,
-        _temp: temp,
-    }
+    f
 }
 
-fn commit(f: &Fixture, cx: &mut TestAppContext, message: &str) {
+fn commit(f: &GitFixture, cx: &mut TestAppContext, message: &str) {
     let message = message.to_string();
-    cx.update_window(f.wh.into(), |_, window, cx| {
+    cx.update_window(f.window.into(), |_, window, cx| {
         f.ws.update(cx, |ws, cx| {
             ws.git
                 .commit_input
@@ -70,7 +47,7 @@ fn commit(f: &Fixture, cx: &mut TestAppContext, message: &str) {
 }
 
 /// The messages of every commit the workspace asked git for.
-fn commits(f: &Fixture) -> Vec<String> {
+fn commits(f: &GitFixture) -> Vec<String> {
     f.fake
         .calls()
         .into_iter()
@@ -140,7 +117,7 @@ fn an_empty_message_is_refused_with_the_default_off(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_push_with_the_confirm_off_lands_at_once(cx: &mut TestAppContext) {
     let f = workspace_on(cx, &["a.txt"], config_with(|g| g.confirm_push = false));
-    cx.update_window(f.wh.into(), |_, window, cx| {
+    cx.update_window(f.window.into(), |_, window, cx| {
         f.ws.update(cx, |ws, cx| ws.on_push_changes(&PushChanges, window, cx));
     })
     .unwrap();
