@@ -41,8 +41,9 @@ const ORCHESTRATOR_TAIL_CHARS: usize = 2000;
 pub const PROMPT_EXCERPT_HEAD_CHARS: usize = 80;
 pub const PROMPT_EXCERPT_TAIL_CHARS: usize = 40;
 
-/// The same for a task title, which the agent receives whole: a title up to
-/// [`TITLE_MAX_CHARS`] is quoted whole, a longer one by both ends.
+/// The same for a task title, which the agent receives whole: one up to
+/// `head + tail` characters is quoted whole, a longer one by both ends.
+/// Unrelated to [`TITLE_MAX_CHARS`], which caps a session's own title.
 pub const TITLE_EXCERPT_HEAD_CHARS: usize = 60;
 pub const TITLE_EXCERPT_TAIL_CHARS: usize = 20;
 
