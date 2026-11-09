@@ -27,11 +27,6 @@ pub(super) struct CliTracker {
     /// The live terminal of each registered pane, by the id its agent hooks
     /// report. One entry per pane: a respawn replaces the old id.
     terminals: HashMap<TerminalId, RunPane>,
-    /// Where routed hooks write status files. A test gets a scratch one: other
-    /// test apps sweep the shared profile directory on their first window.
-    status_dir: Option<PathBuf>,
-    #[cfg(test)]
-    _status_scratch: tempfile::TempDir,
     history: history::Writer,
     _pump: gpui::Task<()>,
 }
@@ -93,20 +88,11 @@ impl RunsHost {
                 }
             }
         });
-        #[cfg(test)]
-        let scratch = tempfile::tempdir().expect("scratch status directory");
-        #[cfg(test)]
-        let status_dir = Some(scratch.path().to_path_buf());
-        #[cfg(not(test))]
-        let status_dir = daruda_agent::hooks::status_file::default_dir().ok();
         cx.update_global::<Self, _>(|host, cx| {
             host.cli = Some(CliTracker {
                 tracker,
                 history: history::Writer::spawn(cx),
                 terminals: HashMap::new(),
-                status_dir,
-                #[cfg(test)]
-                _status_scratch: scratch,
                 _pump: pump,
             })
         });
@@ -119,11 +105,6 @@ impl RunsHost {
             .as_ref()
             .expect("installed CLI tracker")
             .tracker
-    }
-
-    /// The directory routed hooks write their status files to.
-    pub(crate) fn status_dir(cx: &App) -> Option<&Path> {
-        cx.global::<Self>().cli.as_ref()?.status_dir.as_deref()
     }
 
     pub(crate) fn register_terminal(pane: RunPane, terminal: TerminalId, cx: &mut App) {

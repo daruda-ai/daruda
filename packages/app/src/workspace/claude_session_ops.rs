@@ -214,23 +214,16 @@ impl Workspace {
                     .last_pushed_notification
                     .remove(&identity);
                 self.claude_sessions.open_turns.forget(&identity);
-                if let Some(file) = self.claude_sessions.status.get(&identity).cloned() {
-                    let session = file.session_id;
-                    let terminal = file.terminal_id.map(|id| id.as_str().to_owned());
-                    self.after_task_projection(
-                        move |_, cx| {
-                            crate::runs::RunsHost::settle_cli_terminal(
-                                &session,
-                                terminal,
-                                daruda_store::tasks::SessionEndReason::Other,
-                                cx,
-                            );
-                        },
-                        cx,
-                    );
-                } else {
+                let ended = match self.claude_sessions.status.get(&identity) {
+                    // A routed file names a terminal of this launch, which no
+                    // CLI run recorded; only an unrouted one can end a run.
+                    Some(file) if file.terminal_id.is_some() => None,
+                    Some(file) => Some(file.session_id.clone()),
+                    None => Some(session_id),
+                };
+                if let Some(session) = ended {
                     self.apply_task_session_ended(
-                        &session_id,
+                        &session,
                         daruda_store::tasks::SessionEndReason::Other,
                         cx,
                     );

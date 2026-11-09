@@ -10,7 +10,7 @@ use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::tasks::{CliProcessState, ExecutionRef, Lifecycle, SessionEndReason, TaskEvent};
 use gpui::{App, BorrowAppContext as _};
 
-use super::{cli_runs, hook_end_reason};
+use super::cli_runs;
 use crate::runs::{GlobalTasks, RunsHost};
 
 impl RunsHost {
@@ -156,50 +156,11 @@ impl RunsHost {
                 daruda_store::tasks::CliSessionEndReason::ProcessExited
             };
             Self::record_cli_session_end(exec.clone(), reason, cx);
-            Self::after_projection(
-                move |cx| Self::settle_unfinished_cli_exit(exec, pid, cx),
-                cx,
-            );
+            // Its final hook is gone: the first window's cold restore deletes
+            // every routed status file before this tracker's first poll, and
+            // the run's terminal belongs to an earlier launch.
+            Self::reconcile_lost_cli(exec, cx);
         }
-    }
-
-    fn settle_unfinished_cli_exit(exec: ExecutionRef, pid: u32, cx: &mut App) {
-        if cx.global::<Self>().executions.settling.contains(&exec) {
-            return;
-        }
-        // A queued filesystem notification must not turn normal completion
-        // into an error merely because the PID queue was consumed first.
-        let final_hook = cx
-            .global::<GlobalTasks>()
-            .get(&exec.task_id)
-            .and_then(|task| {
-                let run = task.execution.as_ref()?;
-                let terminal = run.terminal_id.as_ref()?;
-                let dir = Self::status_dir(cx)?;
-                let path = daruda_agent::hooks::status_file::path_for(dir, terminal);
-                let file = daruda_agent::hooks::status_file::read(&path).ok()??;
-                (task.current_exec() == Some(&exec)
-                    && file.storage_key() == terminal
-                    && run.session_id.as_ref() == Some(&file.session_id)
-                    && file.agent_pid.is_none_or(|observed| observed == pid)
-                    && task
-                        .started_at
-                        .is_none_or(|started| file.timestamp >= started))
-                .then_some(file)
-            });
-        if let Some(file) = final_hook {
-            let reason = hook_end_reason(&file.last_event);
-            if let Some(reason) = reason {
-                Self::settle_cli_terminal(
-                    &file.session_id,
-                    file.terminal_id.map(|id| id.as_str().to_owned()),
-                    reason,
-                    cx,
-                );
-                return;
-            }
-        }
-        Self::reconcile_lost_cli(exec, cx);
     }
 
     pub(crate) fn attach_cli_session(session: &str, cx: &mut App) {
@@ -228,15 +189,6 @@ impl RunsHost {
     }
 
     pub(crate) fn settle_cli_session(session: &str, reason: SessionEndReason, cx: &mut App) {
-        Self::settle_cli_terminal(session, None, reason, cx);
-    }
-
-    pub(crate) fn settle_cli_terminal(
-        session: &str,
-        terminal: Option<String>,
-        reason: SessionEndReason,
-        cx: &mut App,
-    ) {
         // The session ended now; the transcript read below must not extend it.
         let at = Utc::now();
         let session = session.to_owned();
@@ -245,9 +197,6 @@ impl RunsHost {
                 let runs: Vec<_> = cli_runs(cx.global::<GlobalTasks>(), |_| true)
                     .filter(|(task, run, exec)| {
                         matches!(task.lifecycle, Lifecycle::Running { .. })
-                            && terminal
-                                .as_deref()
-                                .is_none_or(|id| run.terminal_id.as_deref() == Some(id))
                             && !cx.global::<Self>().executions.settling.contains(exec)
                             && (run.session_id.as_deref() == Some(&session)
                                 || task.session_ids.contains(&session))
