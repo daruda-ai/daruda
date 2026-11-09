@@ -435,25 +435,10 @@ pub fn resolved_registry_id(
 }
 
 /// The bare adapter command a launch runs, independent of any host embedded
-/// in the launch itself — the input [`wrap`] expects, so the lane's own host
-/// decides where it runs rather than whatever host (if any) `launch` names.
-///
-/// **Not for a `Raw` command carrying the legacy `{{cwd}}` token**
-/// (`launch.needs_remote_cwd()` true via that token): that command is a
-/// hand-written `cd`-then-launch string predating this host axis entirely,
-/// and returning it here would drop the token unexpanded into another `cd`
-/// wrapper. Callers must route that case through [`AgentLaunch::wrap`]
-/// directly — see `connect_agent_chat`.
+/// in the launch itself — [`AgentLaunch::adapter_command`], the input [`wrap`]
+/// expects. Its caveat for the legacy `{{cwd}}` token applies here too.
 pub fn adapter_command(launch: &AgentLaunch) -> &str {
-    match launch {
-        AgentLaunch::Raw(command) => command,
-        AgentLaunch::Ssh {
-            adapter_command, ..
-        }
-        | AgentLaunch::Docker {
-            adapter_command, ..
-        } => adapter_command,
-    }
+    launch.adapter_command()
 }
 
 /// The transport `host` names, in the vocabulary

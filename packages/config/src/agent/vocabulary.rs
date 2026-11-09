@@ -30,6 +30,21 @@ pub fn seed_for_command(command: &str) -> Option<AgentVocabularySeed> {
     }
 }
 
+/// The display name of mode `id` for the adapter `command` launches: what
+/// the agent last advertised (`known`), else the adapter seed, else `id`.
+/// Looked up in both lists, unlike a picker's options: an adapter that
+/// advertised no modes, or not this one, does not make the seed's name wrong.
+pub fn mode_display_name(known: Option<&[VocabEntry]>, command: &str, id: &str) -> String {
+    let seed = seed_for_command(command);
+    let seeded = seed.as_ref().map(|seed| seed.modes.as_slice());
+    [known, seeded]
+        .into_iter()
+        .flatten()
+        .flatten()
+        .find(|entry| entry.id == id)
+        .map_or_else(|| id.to_string(), |entry| entry.name.clone())
+}
+
 /// `@agentclientprotocol/claude-agent-acp@0.70.0`, `dist/acp-agent.js:5393`
 /// (`buildAvailableModes`). `auto` is advertised only for a model reporting
 /// `supportsAutoMode` and `bypassPermissions` only off root; both are listed
@@ -113,5 +128,22 @@ mod tests {
         let pinned = seed_for_command("env FOO=1 npx @agentclientprotocol/claude-agent-acp@0.70.0")
             .expect("a version pin and an env prefix still resolve");
         assert_eq!(ids(&pinned.modes), ids(&claude_seed().modes));
+    }
+
+    /// A name the agent advertised wins; one it did not advertise is still
+    /// the seed's; an id nothing names is shown as itself.
+    #[test]
+    fn a_mode_is_named_from_what_was_advertised_then_the_seed() {
+        let claude = "npx -y @agentclientprotocol/claude-agent-acp@latest";
+        let advertised = [VocabEntry::new("plan", "Planning")];
+        assert_eq!(
+            mode_display_name(Some(&advertised), claude, "plan"),
+            "Planning"
+        );
+        assert_eq!(
+            mode_display_name(Some(&[]), claude, "bypassPermissions"),
+            "Bypass Permissions"
+        );
+        assert_eq!(mode_display_name(None, "other --acp", "yolo"), "yolo");
     }
 }

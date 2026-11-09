@@ -22,14 +22,16 @@ pub use chat_config::{
     READING_WIDTH_MAX, READING_WIDTH_MIN, SessionPreferences, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
     TAIL_WINDOW_DEFAULT, USE_READING_WIDTH_DEFAULT,
 };
-pub use delegated::{delegated_default, effective_delegated_mode};
+pub use delegated::{delegated_default, delegated_default_for_command, effective_delegated_mode};
 pub use entry::{AgentEntry, AgentSource, PresetOverrides};
 pub use preset::{
     ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentPreset, CODEX_CONFIG_ENV, PresetLaunchability,
     preset as agent_preset, presets as agent_presets,
 };
 pub use transcript_default::{TranscriptDefault, with_transcript_default};
-pub use vocabulary::{AgentVocabularySeed, seed_for_command as agent_vocabulary_seed};
+pub use vocabulary::{
+    AgentVocabularySeed, mode_display_name, seed_for_command as agent_vocabulary_seed,
+};
 
 /// A selectable ACP agent: an id, a display name, and how its ACP adapter is
 /// launched.
@@ -319,8 +321,16 @@ impl AgentLaunch {
     }
 
     /// The bare adapter command whichever launch shape carries, without its
-    /// host — what identifies the adapter, wherever it runs.
-    pub(crate) fn adapter_command(&self) -> &str {
+    /// host — what identifies the adapter, wherever it runs, and the input
+    /// a session host's wrapper expects, so the lane's own host decides
+    /// where it runs rather than whatever host (if any) the launch names.
+    ///
+    /// **Not for a `Raw` command carrying the legacy `{{cwd}}` token** as the
+    /// command to run: that is a hand-written `cd`-then-launch string
+    /// predating the host axis, and wrapping it would drop the token
+    /// unexpanded into another `cd`. Run that one through
+    /// [`AgentLaunch::wrap`] directly.
+    pub fn adapter_command(&self) -> &str {
         match self {
             AgentLaunch::Raw(command) => command,
             AgentLaunch::Ssh {

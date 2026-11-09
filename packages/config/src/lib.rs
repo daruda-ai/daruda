@@ -58,7 +58,8 @@ pub use agent::{
     READING_WIDTH_MAX, READING_WIDTH_MIN, SessionPreferences, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
     TAIL_WINDOW_DEFAULT, TranscriptDefault, account_recipe_for_local_command, agent_preset,
     agent_presets, agent_vocabulary_seed, assemble_launch_command, canonical_env,
-    delegated_default, effective_delegated_mode, is_valid_env_name, with_transcript_default,
+    delegated_default, delegated_default_for_command, effective_delegated_mode, is_valid_env_name,
+    mode_display_name, with_transcript_default,
 };
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;

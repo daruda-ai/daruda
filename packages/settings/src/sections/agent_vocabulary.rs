@@ -143,10 +143,8 @@ pub(crate) fn agent_row_vocabulary_options(
 }
 
 /// The delegated-mode picker's options: the row's mode vocabulary, led by a
-/// "no override" entry naming what [`daruda_config::delegated_default`] picks.
-///
-/// The row's command is the adapter command whatever its transport, which is
-/// all `delegated_default` reads, so a `Raw` launch stands in for any of them.
+/// "no override" entry naming what [`daruda_config::delegated_default`] picks,
+/// by the name an approval card gives it.
 pub(crate) fn agent_row_delegated_options(
     vocabulary: &AgentVocabularyCache,
     agent_id: &str,
@@ -155,12 +153,12 @@ pub(crate) fn agent_row_delegated_options(
 ) -> Vec<SelectOption> {
     let seed = daruda_config::agent_vocabulary_seed(command);
     let seed_modes = seed.as_ref().map_or(&[][..], |seed| seed.modes.as_slice());
-    let entries = known_axis(vocabulary.known_modes_for(agent_id, command), seed_modes);
-    let launch = daruda_config::AgentLaunch::Raw(command.to_string());
-    let sentinel = match daruda_config::delegated_default(&launch) {
-        Some(id) => {
-            s::settings::agent_delegated_mode_default_named(entry_label(entries, id, mode_label))
-        }
+    let known = vocabulary.known_modes_for(agent_id, command);
+    let entries = known_axis(known, seed_modes);
+    let sentinel = match daruda_config::delegated_default_for_command(command) {
+        Some(id) => s::settings::agent_delegated_mode_default_named(
+            daruda_config::mode_display_name(known, command, id),
+        ),
         None => s::settings::agent_delegated_mode_follows_session_mode(),
     };
     options_with_sentinel(entries, sentinel, saved, mode_label)

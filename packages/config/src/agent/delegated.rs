@@ -23,7 +23,13 @@ const CODEX_DELEGATED_MODE: &str = "agent-full-access";
 /// Keyed on the adapter command whatever host it runs on: the mode is the
 /// adapter's vocabulary, and an SSH or Docker launch runs the same adapter.
 pub fn delegated_default(launch: &AgentLaunch) -> Option<&'static str> {
-    match account_recipe_for_local_command(launch.adapter_command())? {
+    delegated_default_for_command(launch.adapter_command())
+}
+
+/// [`delegated_default`] for a bare adapter command, as an editor that holds
+/// only the command reads it.
+pub fn delegated_default_for_command(adapter_command: &str) -> Option<&'static str> {
+    match account_recipe_for_local_command(adapter_command)? {
         AccountRecipeId::Claude => Some(CLAUDE_DELEGATED_MODE),
         AccountRecipeId::Codex => Some(CODEX_DELEGATED_MODE),
     }
@@ -56,6 +62,7 @@ mod tests {
         ] {
             let launch = AgentLaunch::Raw(command.to_string());
             let mode = delegated_default(&launch).expect("a known adapter");
+            assert_eq!(delegated_default_for_command(command), Some(mode));
             let seed = seed_for_command(command).expect("a seeded adapter");
             assert!(seed.modes.iter().any(|entry| entry.id == mode), "{mode}");
         }
