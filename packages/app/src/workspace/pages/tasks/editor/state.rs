@@ -2,8 +2,8 @@
 //! off them, and the checks that gate Save.
 
 use daruda_store::project::ProjectUuid;
-use daruda_store::tasks::{TaskAgentSurface, TaskId};
-use gpui::{App, Entity, FocusHandle, ScrollHandle, SharedString, Subscription, Task};
+use daruda_store::tasks::TaskId;
+use gpui::{App, Entity, FocusHandle, ScrollHandle, SharedString, Subscription};
 
 /// Markdown-form editor for a single Task — the Tasks page's detail (see
 /// `pages::tasks`). `task_id = None` means a draft: nothing is persisted to
@@ -36,13 +36,7 @@ pub(in crate::workspace) struct TaskEditContent {
     /// `crate::ui::markdown_editor(&state)`.
     pub(in crate::workspace) prompt_state: Entity<crate::ui::TextareaState>,
     pub(in crate::workspace) notes_state: Entity<crate::ui::TextareaState>,
-    pub(in crate::workspace::pages::tasks) auto_execute: bool,
-    /// Execution surface the task will run on when started — mirrors
-    /// `Task::agent_surface`. Terminal CLI (default) or in-app Agent
-    /// chat (ACP). Flipped in-place by the form's surface selector, the
-    /// same plain-data pattern as `auto_execute`.
-    pub(in crate::workspace::pages::tasks) agent_surface: TaskAgentSurface,
-    /// Whether the task runs on `agent_surface` or as the flow `flow_choice`
+    /// Whether the task runs as an agent chat or as the flow `flow_choice`
     /// picks.
     pub(in crate::workspace::pages::tasks) run_as: super::flow_choice::RunAs,
     pub(in crate::workspace) flow_choice: super::flow_choice::FlowChoice,
@@ -52,15 +46,6 @@ pub(in crate::workspace) struct TaskEditContent {
     /// `current_snapshot()` after every successful save.
     pub(in crate::workspace::pages::tasks) saved_snapshot: TaskEditValues,
     pub(in crate::workspace::pages::tasks) _subscriptions: Vec<Subscription>,
-    /// FS watcher on `<lane>/.daruda/task-<id>.md`. `None`
-    /// when the task is still in `Backlog` (no lane yet) or the
-    /// file didn't exist when the editor opened. Dropped with the editor —
-    /// `PromptFileWatcherHandle` shuts down the underlying threads.
-    pub(super) _prompt_watcher: Option<super::prompt_watcher::PromptFileWatcherHandle>,
-    /// GPUI-side pump that polls the watcher's debounced channel and
-    /// dispatches `handle_prompt_file_changed`. Dropped with
-    /// the editor.
-    pub(in crate::workspace::pages::tasks) _prompt_pump: Option<Task<()>>,
     /// Trailing `[+ Add subtask…]` row input. `Submit` (Enter)
     /// dispatches `Workspace::add_subtask` and clears the buffer for
     /// the next entry; the input stays focused so the user can chain
@@ -71,9 +56,6 @@ pub(in crate::workspace) struct TaskEditContent {
     /// across rows to avoid IME composition-state churn when switching rows.
     pub(in crate::workspace::pages::tasks) editing_subtask: Option<String>,
     pub(in crate::workspace::pages::tasks) editing_subtask_input: Entity<crate::ui::InputState>,
-    /// The prompt file as it is on disk, shown read-only beside the prompt
-    /// after the conflict prompt's `[Diff]`, so both versions are in view.
-    pub(in crate::workspace::pages::tasks) disk_copy: Option<Entity<crate::ui::TextareaState>>,
     /// Scroll handle for the form-body absolute scroll container.
     /// `vertical_scrollbar(&handle)` on the relative parent renders
     /// the visible thumb; `track_scroll(&handle)` on the scroll
@@ -134,8 +116,6 @@ pub(in crate::workspace) struct TaskEditValues {
     pub(in crate::workspace::pages::tasks) branch: String,
     pub(in crate::workspace::pages::tasks) prompt: String,
     pub(in crate::workspace::pages::tasks) notes: String,
-    pub(in crate::workspace::pages::tasks) auto_execute: bool,
-    pub(in crate::workspace::pages::tasks) agent_surface: TaskAgentSurface,
     pub(in crate::workspace::pages::tasks) run_as: super::flow_choice::RunAs,
     pub(in crate::workspace::pages::tasks) flow: super::flow_choice::FlowChoiceValues,
     /// Empty string ↔ `Task::base_worktree_path == None`; non-empty ↔
@@ -157,12 +137,6 @@ pub(in crate::workspace) fn project_value(uuid: ProjectUuid) -> SharedString {
 
 fn project_from_value(value: &str) -> Option<ProjectUuid> {
     uuid::Uuid::parse_str(value).ok().map(ProjectUuid)
-}
-
-/// CRLF → LF normaliser, so comparisons never trip on line-ending
-/// differences.
-pub(in crate::workspace) fn normalize_newlines(s: &str) -> String {
-    s.replace("\r\n", "\n")
 }
 
 /// `a == b` with every CRLF read as LF, compared without allocating.
@@ -192,8 +166,6 @@ impl TaskEditValues {
             branch,
             prompt,
             notes,
-            auto_execute,
-            agent_surface,
             run_as,
             flow,
             base_value,
@@ -206,8 +178,6 @@ impl TaskEditValues {
             || *branch != other.branch
             || !eq_ignoring_crlf(prompt, &other.prompt)
             || !eq_ignoring_crlf(notes, &other.notes)
-            || *auto_execute != other.auto_execute
-            || *agent_surface != other.agent_surface
             || *run_as != other.run_as
             // The flow pickers only count while the task runs as a flow.
             || (*run_as == super::flow_choice::RunAs::Flow && *flow != other.flow)
@@ -237,8 +207,6 @@ impl TaskEditContent {
             branch: self.branch_input.read(cx).text().to_string(),
             prompt: self.prompt_state.read(cx).text().to_string(),
             notes: self.notes_state.read(cx).text().to_string(),
-            auto_execute: self.auto_execute,
-            agent_surface: self.agent_surface,
             run_as: self.run_as,
             flow: self.flow_choice.values(cx),
             base_value: self

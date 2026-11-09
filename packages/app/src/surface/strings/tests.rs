@@ -139,11 +139,7 @@ fn bottom_input_placeholders_cover_terminal_and_agent_contexts() {
 /// every locale can place it where its own word order wants it.
 #[test]
 fn title_prompts_interpolate_the_title() {
-    for heading in [
-        task::edit_save_prompt("notes.md"),
-        task::watcher_heading("notes.md"),
-    ] {
-        assert!(heading.contains("notes.md"), "{heading:?}");
-        assert!(!heading.contains("%{"), "{heading:?}");
-    }
+    let heading = task::edit_save_prompt("notes.md");
+    assert!(heading.contains("notes.md"), "{heading:?}");
+    assert!(!heading.contains("%{"), "{heading:?}");
 }

@@ -425,12 +425,6 @@ task:
   picker_empty_reopen: "No completed tasks to reopen."
   picker_empty_retry: "No errored tasks to retry."
   picker_empty_delete: "No tasks to delete."
-  # `[📄 Open file]` button shown next to the Prompt section header in
-  # the Task editor. Click opens
-  # the task's prompt file (`prompt_file_path`) in a fresh file viewer tab when
-  # the task has a lane (Backlog / draft tasks disable the button
-  # since no on-disk file exists yet).
-  edit_open_file_button: "📄 Open file"
   # Subtext rendered directly under the "Notes" label in the Task
   # editor. Notes are stored on the `Task` and surface in search, but
   # `render_task_prompt` deliberately excludes them — the hint makes
@@ -470,11 +464,8 @@ task:
   # first-option label so empty drafts read as "Active lane"
   # rather than blank.
   edit_base_active_label: "Active worktree"
-  edit_auto_execute_label: "Auto-execute"
   # Field label for the execution-surface selector on the Task editor.
   edit_surface_label: "Run on"
-  # Option label — run the task on a terminal CLI session.
-  edit_surface_terminal: "Terminal (CLI)"
   # Option label — run the task on an in-app Agent chat (ACP) session.
   edit_surface_agent_chat: "Agent Chat"
   # The task runs as a flow; its prompt becomes one of the flow's inputs.
@@ -502,14 +493,6 @@ task:
   edit_discard_draft_prompt: "Discard new task?"
   edit_save_draft: "Save Draft"
   edit_discard: "Discard"
-  watcher_detail: "Reload the file or keep your in-pane edits?"
-  watcher_use_disk: "Use disk version"
-  watcher_keep_mine: "Keep my version"
-  watcher_diff: "Diff"
-  prompt_disk_copy: "On disk"
-  prompt_disk_copy_close: "Close the disk version"
-  # Heading of the prompt-file watcher conflict prompt.
-  watcher_heading: "“%{title}” changed on disk"
   # Tab / window batch close prompt. Single 3-button modal
   # summarising every unsaved item in the closing scope.
   batch_close_heading: "Save changes to the following before closing?"
@@ -1556,9 +1539,7 @@ error:
   pane_spawn_failed: "Pane spawn failed: %{context}"
   pane_spawn_status: "%{context} failed — %{error}"
   pane_vt_init_failed: "VT initialization failed: %{error}"
-  prompt_file_not_found: "Prompt file not found"
   reveal_path_missing: "Cannot reveal: the folder no longer exists"
-  prompt_watcher_read_failed: "Prompt watcher read failed"
   project_config_create_dir_failed: "Failed to create project config directory"
   project_config_create_file_failed: "Failed to create project config file"
   project_config_open_failed: "Failed to open project config"

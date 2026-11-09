@@ -369,115 +369,6 @@ fn task_list_scope_preserves_worktree_and_seeds_new_task_project(cx: &mut TestAp
 }
 
 #[gpui::test]
-fn task_editor_watches_prompt_after_start_parks_its_lane(cx: &mut TestAppContext) {
-    let source = tempfile::tempdir().unwrap();
-    let (window, ws) = build_with(
-        cx,
-        &daruda_config::Config::default(),
-        Some(daruda_store::project::Project::from_path(source.path())),
-    );
-    let other = tempfile::tempdir().unwrap();
-    cx.update_window(window.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.open_task_editor(None, window, cx);
-            let editor = ws
-                .task_detail_id()
-                .expect("the Tasks page holds the editor");
-            let title = ws.task_editor(editor).unwrap().title_input.clone();
-            title.update(cx, |s, cx| s.set_value("Keep watching", window, cx));
-            let id = ws.commit_task_form(editor, cx).unwrap();
-            let project = ws.active.project;
-            let lane = ws.alloc_id();
-            ws.project_for_mut(project).unwrap().lanes.push(
-                crate::lane::Lane::default_for_project(lane, other.path().to_path_buf()),
-            );
-            ws.activate_lane(daruda_store::project::LaneRef { project, lane }, window, cx);
-            crate::runs::seed::commit_now(
-                crate::runs::seed::run(&id, &SeedRun::chat(other.path()), SeedEnd::Running),
-                cx,
-            );
-            let task = cx.global::<GlobalTasks>().get(&id).unwrap().clone();
-            let path = daruda_store::tasks::prompt_file::prompt_file_path(&task.spec, other.path());
-            daruda_store::tasks::prompt_file::write_prompt_file(&path, "External update").unwrap();
-            ws.attach_prompt_watcher_if_editor_open(&id, window, cx);
-            assert!(ws.task_editor(editor).unwrap()._prompt_watcher.is_some());
-            ws.handle_prompt_file_changed(editor, path, window, cx);
-            let te = ws.task_editor(editor).unwrap();
-            assert_eq!(te.prompt_state.read(cx).value().as_ref(), "External update");
-            assert!(
-                te.is_dirty(cx),
-                "the task keeps its saved prompt until the disk version is saved"
-            );
-        });
-    })
-    .unwrap();
-}
-
-/// The prompt file holds Start's framed prompt. Its echo must not replace the
-/// form's prompt with the frame, an edit made inside the frame reaches the form
-/// without it, and Start writing the saved prompt behind unsaved edits raises
-/// no conflict.
-#[gpui::test]
-fn task_editor_reads_the_prompt_file_without_its_frame(cx: &mut TestAppContext) {
-    let source = tempfile::tempdir().unwrap();
-    let (window, ws) = build_with(
-        cx,
-        &daruda_config::Config::default(),
-        Some(daruda_store::project::Project::from_path(source.path())),
-    );
-    let other = tempfile::tempdir().unwrap();
-    cx.update_window(window.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.open_task_editor(None, window, cx);
-            let editor = ws
-                .task_detail_id()
-                .expect("the Tasks page holds the editor");
-            let te = ws.task_editor(editor).unwrap();
-            let (title, prompt) = (te.title_input.clone(), te.prompt_state.clone());
-            title.update(cx, |s, cx| s.set_value("Framed", window, cx));
-            prompt.update(cx, |s, cx| s.set_value("Fix the bug", window, cx));
-            let id = ws.commit_task_form(editor, cx).unwrap();
-            let project = ws.active.project;
-            let lane = ws.alloc_id();
-            ws.project_for_mut(project).unwrap().lanes.push(
-                crate::lane::Lane::default_for_project(lane, other.path().to_path_buf()),
-            );
-            ws.activate_lane(daruda_store::project::LaneRef { project, lane }, window, cx);
-            crate::runs::seed::commit_now(
-                crate::runs::seed::run(&id, &SeedRun::chat(other.path()), SeedEnd::Running),
-                cx,
-            );
-            let task = cx.global::<GlobalTasks>().get(&id).unwrap().clone();
-            let path = daruda_store::tasks::prompt_file::prompt_file_path(&task.spec, other.path());
-            let framed = daruda_store::tasks::render_task_prompt(&task, "task-branch");
-            daruda_store::tasks::prompt_file::write_prompt_file(&path, &framed).unwrap();
-            ws.attach_prompt_watcher_if_editor_open(&id, window, cx);
-
-            ws.handle_prompt_file_changed(editor, path.clone(), window, cx);
-            assert_eq!(prompt.read(cx).value().as_ref(), "Fix the bug");
-            assert!(!ws.task_editor(editor).unwrap().is_dirty(cx));
-
-            let edited = framed
-                .replace("Fix the bug", "Fix both bugs")
-                .replace('\n', "\r\n");
-            daruda_store::tasks::prompt_file::write_prompt_file(&path, &edited).unwrap();
-            ws.handle_prompt_file_changed(editor, path.clone(), window, cx);
-            assert_eq!(prompt.read(cx).value().as_ref(), "Fix both bugs");
-
-            prompt.update(cx, |s, cx| s.set_value("Unsaved draft", window, cx));
-            daruda_store::tasks::prompt_file::write_prompt_file(&path, &framed).unwrap();
-            ws.handle_prompt_file_changed(editor, path, window, cx);
-            assert_eq!(prompt.read(cx).value().as_ref(), "Unsaved draft");
-        });
-    })
-    .unwrap();
-    assert!(
-        !cx.has_pending_prompt(),
-        "the saved prompt's echo is no conflict with unsaved edits"
-    );
-}
-
-#[gpui::test]
 fn task_editor_save_shortcut_and_tab_order(cx: &mut TestAppContext) {
     let (_project, window, ws) = build_workspace_with_project(cx);
     let mut vcx = VisualTestContext::from_window(window.into(), cx);
@@ -1557,41 +1448,6 @@ fn close_tab_leaves_the_editor_for_the_list(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-/// The conflict prompt's `[Diff]` shows the disk version beside the prompt,
-/// read-only; closing it leaves the prompt as it was.
-#[gpui::test]
-fn the_disk_version_shows_read_only_beside_the_prompt(cx: &mut TestAppContext) {
-    let (_project, window, ws) = build_workspace_with_project(cx);
-    cx.update_window(window.into(), |_, window, cx| {
-        ws.update(cx, |ws, cx| {
-            ws.open_task_editor(None, window, cx);
-            let editor = ws
-                .task_detail_id()
-                .expect("the Tasks page holds the editor");
-            let prompt = ws.task_editor(editor).unwrap().prompt_state.clone();
-            prompt.update(cx, |s, cx| s.set_value("mine", window, cx));
-            ws.show_prompt_disk_copy(editor, "on disk", window, cx);
-            let copy = ws
-                .task_editor(editor)
-                .unwrap()
-                .disk_copy
-                .clone()
-                .expect("shown");
-            assert_eq!(copy.read(cx).value().as_ref(), "on disk");
-            let presentation = copy.read(cx).presentation();
-            assert!(
-                presentation.is_readonly() && !presentation.is_disabled(),
-                "the disk version is read-only, not dimmed or unselectable"
-            );
-            ws.close_prompt_disk_copy(editor, cx);
-            let te = ws.task_editor(editor).unwrap();
-            assert!(te.disk_copy.is_none());
-            assert_eq!(te.prompt_state.read(cx).value().as_ref(), "mine");
-        });
-    })
-    .unwrap();
-}
-
 /// Restores `ws`'s snapshot into a fresh window and reports what the Tasks
 /// page's editor came back holding: `None` for the list, else its task id.
 fn restored_detail(
@@ -1724,7 +1580,7 @@ fn workspace_with_a_review_flow(
 /// from the flow's own declarations, and reopening shows it unchanged.
 #[gpui::test]
 fn task_editor_saves_a_task_that_runs_as_a_flow(cx: &mut TestAppContext) {
-    use super::flow_choice::{RunAs, Runner};
+    use super::flow_choice::RunAs;
     let (_root, window, ws) = workspace_with_a_review_flow(cx, "  pr: { required: true }\n");
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -1733,7 +1589,7 @@ fn task_editor_saves_a_task_that_runs_as_a_flow(cx: &mut TestAppContext) {
             let title = ws.task_editor(editor).unwrap().title_input.clone();
             title.update(cx, |s, cx| s.set_value("Review", window, cx));
             ws.set_task_run_in(editor, RunInChoice::ExistingLane, cx);
-            ws.set_task_runner(editor, Runner::Flow, cx);
+            ws.set_task_runner(editor, RunAs::Flow, cx);
             assert!(
                 !ws.task_editor(editor).unwrap().can_save(cx),
                 "a flow must be picked"
@@ -1779,7 +1635,7 @@ fn task_editor_saves_a_task_that_runs_as_a_flow(cx: &mut TestAppContext) {
 /// of — refuses the save rather than a later Start.
 #[gpui::test]
 fn task_editor_refuses_a_flow_the_prompt_cannot_run(cx: &mut TestAppContext) {
-    use super::flow_choice::Runner;
+    use super::flow_choice::RunAs;
     let (_root, window, ws) =
         workspace_with_a_review_flow(cx, "  pr: { required: true }\n  base: { required: true }\n");
     cx.update_window(window.into(), |_, window, cx| {
@@ -1789,7 +1645,7 @@ fn task_editor_refuses_a_flow_the_prompt_cannot_run(cx: &mut TestAppContext) {
             let title = ws.task_editor(editor).unwrap().title_input.clone();
             title.update(cx, |s, cx| s.set_value("Review", window, cx));
             ws.set_task_run_in(editor, RunInChoice::ExistingLane, cx);
-            ws.set_task_runner(editor, Runner::Flow, cx);
+            ws.set_task_runner(editor, RunAs::Flow, cx);
             let flow = ws.task_editor(editor).unwrap().flow_choice.flow.clone();
             flow.update(cx, |s, cx| {
                 s.set_selected_value(&"review.yaml".into(), window, cx)
@@ -1807,7 +1663,7 @@ fn task_editor_refuses_a_flow_the_prompt_cannot_run(cx: &mut TestAppContext) {
 /// under a flow's stem opens with it picked.
 #[gpui::test]
 fn task_editor_offers_the_flows_of_where_the_task_runs(cx: &mut TestAppContext) {
-    use super::flow_choice::{RunAs, Runner};
+    use super::flow_choice::RunAs;
     let (_root, window, ws) = workspace_with_a_review_flow(cx, "  pr: { required: true }\n");
     let other = tempfile::tempdir().unwrap();
     let flows = crate::workspace::flow_paths::flows_dir(other.path());
@@ -1854,16 +1710,12 @@ fn task_editor_offers_the_flows_of_where_the_task_runs(cx: &mut TestAppContext) 
             let title = ws.task_editor(editor).unwrap().title_input.clone();
             title.update(cx, |s, cx| s.set_value("t", window, cx));
             let id = ws.commit_task_form(editor, cx).unwrap();
-            ws.set_task_runner(editor, Runner::Flow, cx);
+            ws.set_task_runner(editor, RunAs::Flow, cx);
             let flow = ws.task_editor(editor).unwrap().flow_choice.flow.clone();
             flow.update(cx, |s, cx| {
                 s.set_selected_value(&"branch-only.yaml".into(), window, cx)
             });
-            ws.set_task_runner(
-                editor,
-                Runner::Agent(daruda_store::tasks::TaskAgentSurface::AgentChat),
-                cx,
-            );
+            ws.set_task_runner(editor, RunAs::Agent, cx);
             assert!(!ws.task_editor(editor).unwrap().is_dirty(cx));
             let _ = id;
         });

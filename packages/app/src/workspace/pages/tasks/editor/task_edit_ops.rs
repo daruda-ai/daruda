@@ -1,5 +1,5 @@
 //! The Task editor's lifecycle — builder, open, branch validation, and the
-//! accessors the sibling `save_ops` / `prompt_file_ops` reach the editor by.
+//! accessors the sibling `save_ops` / `flow_choice` reach the editor by.
 //!
 //! The editor itself is rendered by `editor::render_detail`; this
 //! module owns the *operations* (open, restore, validate)
@@ -11,11 +11,10 @@
 //! git accepts.
 
 use daruda_store::project::{ProjectUuid, TaskDetailTarget};
-use daruda_store::tasks::{TaskAgentSurface, TaskId, TaskRecord, random_branch_name};
+use daruda_store::tasks::{TaskId, TaskRecord, random_branch_name};
 use gpui::{AppContext as _, Context, Focusable as _, SharedString, Window};
 
 use super::TaskEditorId;
-use super::prompt_file_ops::install_prompt_watcher;
 use super::state::{BranchValidation, TaskEditContent, TaskEditValues};
 use crate::ui::select::{SelectOption, state_with_options};
 use crate::ui::{InputEvent, InputState, make_markdown_prose_state};
@@ -148,14 +147,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> TaskEditContent {
-        let (title, prompt, notes, branch_name, auto_execute, agent_surface) = match &initial {
+        let (title, prompt, notes, branch_name) = match &initial {
             Some(t) => (
                 t.spec.title.clone(),
                 t.spec.prompt.clone(),
                 t.spec.notes.clone(),
                 t.spec.branch_name.clone(),
-                t.spec.auto_execute,
-                t.spec.agent_surface,
             ),
             // A draft opens with a usable branch already filled in.
             None => (
@@ -163,8 +160,6 @@ impl Workspace {
                 String::new(),
                 String::new(),
                 random_branch_name(),
-                true,
-                TaskAgentSurface::default(),
             ),
         };
 
@@ -368,11 +363,6 @@ impl Workspace {
             },
         );
 
-        // Running tasks watch immediately; Start attaches the watcher once
-        // it has materialized the task's prompt file.
-        let (_prompt_watcher, _prompt_pump) =
-            install_prompt_watcher(initial.as_ref(), editor_id, window, cx);
-
         let mut content = TaskEditContent {
             task_id,
             pending_save: None,
@@ -385,8 +375,6 @@ impl Workspace {
             notes_open: !notes.is_empty(),
             prompt_state,
             notes_state,
-            auto_execute,
-            agent_surface,
             run_as,
             flow_choice,
             focus_handle,
@@ -408,12 +396,9 @@ impl Workspace {
                 prompt_sub,
                 notes_sub,
             ],
-            _prompt_watcher,
-            _prompt_pump,
             new_subtask_input,
             editing_subtask: None,
             editing_subtask_input,
-            disk_copy: None,
             body_scroll_handle: gpui::ScrollHandle::new(),
         };
         content._subscriptions.extend(flow_subs);

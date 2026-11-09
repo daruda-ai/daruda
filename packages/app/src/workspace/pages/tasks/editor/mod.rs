@@ -2,8 +2,6 @@
 
 mod editor_ops;
 pub(in crate::workspace) mod flow_choice;
-mod prompt_file_ops;
-mod prompt_watcher;
 pub(in crate::workspace) mod run_in_ops;
 mod save_ops;
 pub(in crate::workspace) mod state;
@@ -12,7 +10,7 @@ pub(super) mod task_edit_ops;
 #[cfg(test)]
 mod tests;
 
-use daruda_store::tasks::{Lifecycle, TaskAgentSurface, TaskExecution};
+use daruda_store::tasks::{Lifecycle, TaskExecution};
 use gpui::{Context, IntoElement, SharedString, div, prelude::*, px};
 
 use crate::workspace::Workspace;
@@ -20,11 +18,11 @@ use crate::workspace::Workspace;
 pub(in crate::workspace) use super::TaskEditorId;
 use crate::runs::GlobalTasks;
 use crate::surface::strings;
+use crate::ui::button;
 use crate::ui::{self, ButtonVariants as _, Disableable as _, theme};
-use crate::ui::{button, checkbox};
 #[cfg(feature = "screenshot")]
 pub(crate) use editor_ops::TaskEditorShot;
-use flow_choice::{RunAs, Runner};
+use flow_choice::RunAs;
 use run_in_ops::task_running_in;
 use state::{BranchValidation, RunInChoice, TaskEditContent};
 use subtasks::subtasks_section;
@@ -158,7 +156,7 @@ fn render(
             ui::input(&te.title_input, cx, 0).into_any_element(),
             cx,
         ))
-        .child(prompt(editor_id, te, te._prompt_watcher.is_some(), cx))
+        .child(prompt(editor_id, te, cx))
         .child(settings(editor_id, te, can_start, cx))
         .child(subtasks_section(editor_id, te, subtasks, cx))
         .child(notes(editor_id, te, cx));
@@ -337,7 +335,6 @@ fn field(label: String, body: gpui::AnyElement, cx: &gpui::App) -> impl IntoElem
 fn prompt(
     editor_id: TaskEditorId,
     te: &TaskEditContent,
-    has_file: bool,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let header = div()
@@ -353,20 +350,7 @@ fn prompt(
                 .on_click(cx.listener(move |this, index: &usize, _, cx| {
                     this.set_task_prompt_preview(editor_id, *index, cx)
                 })),
-        )
-        .when(has_file, |row| {
-            row.child(
-                ui::button_icon(
-                    ("task-edit-open-file", editor_id.0 as usize),
-                    ui::icons::FOLDER_OPEN,
-                    cx,
-                )
-                .tooltip(strings::task::edit_open_file_button())
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_editor_prompt_file(editor_id, window, cx)
-                })),
-            )
-        });
+        );
     let body = if te.preview_prompt {
         div()
             .min_h(px(theme::TASK_EDIT_PREVIEW_MIN_H))
@@ -386,15 +370,6 @@ fn prompt(
             .tab_index(1)
             .into_any_element()
     };
-    // With the disk version beside it, headers and bodies each share a row
-    // so the two texts start level.
-    let (header, body) = match &te.disk_copy {
-        Some(copy) => (
-            beside(header, disk_copy_header(editor_id, cx)),
-            beside(body, ui::markdown_editor(copy, cx)),
-        ),
-        None => (header.into_any_element(), body),
-    };
     div()
         .flex()
         .flex_col()
@@ -402,44 +377,6 @@ fn prompt(
         .gap(px(theme::GAP_LG))
         .child(header)
         .child(body)
-}
-
-/// Two equal columns, the prompt's part left of the disk version's. Both
-/// stretch to the row; a shorter part sits centred in its column.
-fn beside(prompt: impl IntoElement, disk: impl IntoElement) -> gpui::AnyElement {
-    let column = |part| {
-        div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .justify_center()
-            .child(part)
-    };
-    div()
-        .flex()
-        .gap(px(theme::GAP_LG))
-        .child(column(prompt.into_any_element()))
-        .child(column(disk.into_any_element()))
-        .into_any_element()
-}
-
-/// The label over the prompt file's read-only disk version, with its close.
-fn disk_copy_header(editor_id: TaskEditorId, cx: &mut Context<Workspace>) -> impl IntoElement {
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .text_size(px(theme::FONT_SIZE_SM))
-        .text_color(theme::current(cx).text_muted)
-        .child(strings::task::prompt_disk_copy())
-        .child(
-            ui::button_close(("task-edit-disk-copy-close", editor_id.0 as usize), cx)
-                .tooltip(strings::task::prompt_disk_copy_close())
-                .on_click(
-                    cx.listener(move |this, _, _, cx| this.close_prompt_disk_copy(editor_id, cx)),
-                ),
-        )
 }
 
 fn settings(
@@ -559,13 +496,13 @@ fn settings(
         RunInChoice::ExistingLane => section,
     };
     let as_agent = te.run_as == RunAs::Agent;
-    let surface_radio = |id: &'static str, label: String, tab: isize, surface| {
+    let runner_radio = |id: &'static str, label: String, tab: isize, runner| {
         ui::radio((id, editor_id.0 as usize), label, tab)
             .disabled(!editable)
-            .checked(as_agent && te.agent_surface == surface)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.set_task_runner(editor_id, Runner::Agent(surface), cx)
-            }))
+            .checked(te.run_as == runner)
+            .on_click(
+                cx.listener(move |this, _, _, cx| this.set_task_runner(editor_id, runner, cx)),
+            )
     };
     section = section.child(field(
         strings::task::edit_surface_label(),
@@ -573,51 +510,26 @@ fn settings(
             .flex()
             .flex_wrap()
             .gap(px(theme::GAP_LG))
-            .child(surface_radio(
-                "task-edit-surface-terminal",
-                strings::task::edit_surface_terminal(),
-                5,
-                TaskAgentSurface::Terminal,
-            ))
-            .child(surface_radio(
+            .child(runner_radio(
                 "task-edit-surface-chat",
                 strings::task::edit_surface_agent_chat(),
-                6,
-                TaskAgentSurface::AgentChat,
+                5,
+                RunAs::Agent,
             ))
-            .child(
-                ui::radio(
-                    ("task-edit-surface-flow", editor_id.0 as usize),
-                    strings::task::edit_surface_flow(),
-                    7,
-                )
-                .disabled(!editable)
-                .checked(!as_agent)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.set_task_runner(editor_id, Runner::Flow, cx)
-                })),
-            )
+            .child(runner_radio(
+                "task-edit-surface-flow",
+                strings::task::edit_surface_flow(),
+                6,
+                RunAs::Flow,
+            ))
             .into_any_element(),
         cx,
     ));
-    if !as_agent {
-        return flow_fields(section, te, editable, cx);
+    if as_agent {
+        section
+    } else {
+        flow_fields(section, te, editable, cx)
     }
-    if te.agent_surface == TaskAgentSurface::Terminal {
-        section = section.child(
-            checkbox(
-                ("task-edit-auto", editor_id.0 as usize),
-                strings::task::edit_auto_execute_label(),
-                8,
-            )
-            .checked(te.auto_execute)
-            .disabled(!editable)
-            .on_click(cx.listener(move |this, enabled: &bool, _, cx| {
-                this.set_task_auto_execute(editor_id, *enabled, cx)
-            })),
-        );
-    }
-    section
 }
 
 /// The flow the task runs as, and — when it declares them — its profile and

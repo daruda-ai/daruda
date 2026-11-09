@@ -16,8 +16,6 @@ pub(crate) enum TaskEditorShot {
     Preview,
     /// A started task, its location fixed.
     Running,
-    /// A conflict's disk version shown beside the prompt.
-    DiskCopy,
     Saving,
     /// Set to run as a flow that declares profiles and inputs.
     Flow,
@@ -108,10 +106,6 @@ impl Workspace {
             if !running {
                 te.draft_subtasks = subtasks;
             }
-        }
-        if shot == TaskEditorShot::DiskCopy {
-            let on_disk = format!("{}\n- Edited outside daruda", spec.prompt);
-            self.show_prompt_disk_copy(editor_id, &on_disk, window, cx);
         }
         if shot == TaskEditorShot::Saving {
             self.set_task_editor_pending_save(editor_id, Some("saving-preview".into()), cx);
@@ -394,18 +388,6 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(super) fn set_task_auto_execute(
-        &mut self,
-        editor_id: TaskEditorId,
-        enabled: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(te) = self.task_editor_mut(editor_id) {
-            te.auto_execute = enabled;
-        }
-        cx.notify();
-    }
-
     /// Replace the branch with a fresh `task-<random>` name.
     pub(super) fn regenerate_task_branch(
         &mut self,
@@ -509,20 +491,6 @@ impl Workspace {
             .and_then(|te| te.task_id.clone())
         {
             self.focus_task_lane(&id, window, cx);
-        }
-    }
-
-    pub(super) fn open_editor_prompt_file(
-        &mut self,
-        editor_id: TaskEditorId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(id) = self
-            .task_editor(editor_id)
-            .and_then(|te| te.task_id.clone())
-        {
-            self.open_task_prompt_file(&id, window, cx);
         }
     }
 }

@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use daruda_store::tasks::{TaskAgentSurface, TaskFlow, TaskRunIn};
+use daruda_store::tasks::{TaskFlow, TaskRunIn};
 use gpui::{AppContext as _, Context, Entity, SharedString, Subscription, Window};
 
 use super::TaskEditorId;
@@ -18,18 +18,12 @@ use crate::workspace::Workspace;
 use crate::workspace::flow_declared::declared_flow;
 use crate::workspace::flow_paths::{FoundFlow, flow_label, names_flow};
 
-/// What drives the task: one agent, on the editor's surface, or a flow.
+/// What drives the task, as the "Run on" radios pick it: one agent in a
+/// chat, or a flow.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::workspace) enum RunAs {
     #[default]
     Agent,
-    Flow,
-}
-
-/// One of the "Run on" choices, as a click names it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum Runner {
-    Agent(TaskAgentSurface),
     Flow,
 }
 
@@ -304,21 +298,15 @@ impl Workspace {
         cx.notify();
     }
 
-    /// One "Run on" click: an agent surface, or a flow.
+    /// One "Run on" click: an agent chat, or a flow.
     pub(super) fn set_task_runner(
         &mut self,
         editor_id: TaskEditorId,
-        runner: Runner,
+        run_as: RunAs,
         cx: &mut Context<Self>,
     ) {
         if let Some(te) = self.task_editor_mut(editor_id) {
-            match runner {
-                Runner::Agent(surface) => {
-                    te.run_as = RunAs::Agent;
-                    te.agent_surface = surface;
-                }
-                Runner::Flow => te.run_as = RunAs::Flow,
-            }
+            te.run_as = run_as;
         }
         cx.notify();
     }

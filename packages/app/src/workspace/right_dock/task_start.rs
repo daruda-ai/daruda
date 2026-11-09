@@ -748,14 +748,6 @@ impl Workspace {
             }
         };
 
-        // Dynamic install: for the Terminal surface, if the Task editor for
-        // this task is open (the user clicked Start from its footer), the
-        // prompt file just landed on disk for the first time —
-        // install the FS watcher now instead of waiting for the user to
-        // close-and-reopen the pane. The AgentChat surface writes no prompt
-        // file, so this is a harmless no-op there (no path to watch).
-        self.attach_prompt_watcher_if_editor_open(&exec.task_id, window, cx);
-
         cx.notify();
         Ok(dispatched)
     }
