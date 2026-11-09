@@ -6,8 +6,10 @@
 # bypass below spawned real git from tests: a storm of them hung macOS.
 #
 # Rule: outside packages/app/src/git_host.rs, no file under packages/app/src
-# may name `SystemGit` or build a `git` child (`process::command("git")`,
-# `command_on_path("git")`, `Command::new("git")`). Line comments are ignored.
+# may name `SystemGit` or build a `git` child (`command("git")`, bare or
+# path-qualified, `command_on_path("git")`, `Command::new("git")`). Line
+# comments are ignored. A call split across lines or a name built at runtime
+# is not caught; the `pub(crate)` git boundary is what enforces it.
 # A file that genuinely needs one goes in ALLOWED with its reason.
 #
 # Usage:
@@ -55,9 +57,8 @@ scan() {
                     s{(^|\s)//.*}{$1};
                     print "$ARGV:$.: real git outside GitHost: $_"
                         if /\bSystemGit\b
-                            | \bprocess::command\(\s*"git"\s*\)
-                            | \bcommand_on_path\(\s*"git"\s*\)
-                            | \bCommand::new\(\s*"git"\s*\)/x;
+                            | \b(?:command|command_on_path)\s*\(\s*"git"
+                            | \bCommand::new\s*\(\s*"git"/x;
                 }
                 close ARGV if eof;
             '
@@ -90,6 +91,27 @@ self_test() {
         return 1
     fi
 
+    local spawn
+    for spawn in \
+        'use daruda_core::process::command; let out = command("git").output();' \
+        'let out = command( "git" ).output();' \
+        'let out = command_on_path ("git").output();' \
+        'let out = std::process::Command::new( "git").output();'; do
+        printf '%s\n' "$spawn" >"$violation"
+        status=0
+        scan "$temp" >/dev/null || status=$?
+        if [ "$status" -ne 1 ]; then
+            echo "[lint-real-git-tests] self-test: \`$spawn\` exited $status, not 1" >&2
+            return 1
+        fi
+    done
+
+    printf '%s\n' 'let out = test_process::command("ls"); git_command(dir);' >"$violation"
+    if ! scan "$temp" >/dev/null; then
+        echo "[lint-real-git-tests] self-test: a non-git spawn failed" >&2
+        return 1
+    fi
+
     printf '%s\n' 'GitHost::set_global(Arc::new(SystemGit), cx);' >"$violation"
     status=0
     scan "$temp" >/dev/null || status=$?
@@ -98,7 +120,8 @@ self_test() {
         return 1
     fi
 
-    printf '%s\n' '// Comments may name SystemGit and Command::new("git").' >"$violation"
+    printf '%s\n' '// Comments may name SystemGit and Command::new("git").' \
+        'let x = 1; /// as may trailing ones: command("git")' >"$violation"
     printf '%s\n' 'Arc::new(crate::lane::git::SystemGit)' >"$temp/$HOST"
     if ! scan "$temp" >/dev/null; then
         echo "[lint-real-git-tests] self-test: git_host.rs or a comment failed" >&2
