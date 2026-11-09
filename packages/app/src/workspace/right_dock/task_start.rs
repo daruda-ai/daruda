@@ -61,10 +61,12 @@ pub(crate) enum TaskStartError {
     /// The agent a control start's card named was removed. Before the start
     /// was recorded, nothing was; after, no pane opened under another agent.
     AgentUnavailable,
-    /// [`Self::AgentUnavailable`] found after git made the task's new
-    /// worktree: `lane` is registered with nothing open in it.
-    AgentUnavailableWorktreeKept {
+    /// `cause`, after git made the task's new worktree and it was
+    /// registered as `lane`: the worktree stays, so the caller can use it
+    /// and the orchestrator's budget counts it. Built by [`Self::kept_in`].
+    WorktreeKept {
         lane: daruda_store::project::LaneRef,
+        cause: Box<TaskStartError>,
     },
     /// The task's flow is not one its lane can run by that name.
     FlowMissing,
@@ -110,6 +112,18 @@ pub(crate) type TaskStartOutcome = Result<TaskStarted, TaskStartError>;
 pub(super) type Answer = smol::channel::Sender<TaskStartOutcome>;
 
 impl TaskStartError {
+    /// This failure, found once the start's new worktree was registered as
+    /// `lane`.
+    pub(in crate::workspace) fn kept_in(self, lane: daruda_store::project::LaneRef) -> Self {
+        match self {
+            kept @ Self::WorktreeKept { .. } => kept,
+            cause => Self::WorktreeKept {
+                lane,
+                cause: Box::new(cause),
+            },
+        }
+    }
+
     /// The cause the task log records for a start that failed after it was
     /// requested; `None` where no run was recorded to fail. Only a recorded
     /// start asks: a refusal taken before recording reaches
@@ -118,9 +132,8 @@ impl TaskStartError {
         Some(match self {
             Self::NotFound => StartFailure::NotFound,
             Self::NotBacklog | Self::NotRecorded { .. } | Self::RemoteLane => return None,
-            Self::AgentUnavailable | Self::AgentUnavailableWorktreeKept { .. } => {
-                StartFailure::AgentMissing
-            }
+            Self::WorktreeKept { cause, .. } => return cause.failure(),
+            Self::AgentUnavailable => StartFailure::AgentMissing,
             Self::ProjectNotOpen => StartFailure::ProjectNotOpen,
             Self::NoGitRepo => StartFailure::NoGitRepo,
             Self::RepoBusy => StartFailure::RepoBusy,
@@ -146,10 +159,10 @@ impl TaskStartError {
                 ErrorSeverity::Info,
                 "tasks.remote_lane",
             ),
+            Self::WorktreeKept { cause, .. } => return cause.report(),
             Self::NotFound
             | Self::NotBacklog
             | Self::AgentUnavailable
-            | Self::AgentUnavailableWorktreeKept { .. }
             | Self::PaneUnavailable
             | Self::PromptUndelivered { .. }
             | Self::WindowClosed => return None,
@@ -556,19 +569,30 @@ impl Workspace {
                                         TaskStartError::FinalizeFailed { detail }
                                     }
                                     FinalizeError::AgentUnavailable { lane } => {
-                                        TaskStartError::AgentUnavailableWorktreeKept { lane }
+                                        TaskStartError::AgentUnavailable.kept_in(lane)
                                     }
                                 })
                             })
                             .and_then(|pane| {
-                                let dispatched = ws.dispatch_task_to_chat(
-                                    &exec,
-                                    &plan.new_path,
-                                    &plan.branch,
-                                    pane,
-                                    window,
-                                    cx,
-                                )?;
+                                // From here on a failure leaves the
+                                // worktree registered with the pane.
+                                let lane = ws.lane_ref_at(&plan.new_path);
+                                let kept = move |e: TaskStartError| match lane {
+                                    Some(lane) => e.kept_in(lane),
+                                    None => e,
+                                };
+                                let dispatched = ws
+                                    .dispatch_task_to_chat(
+                                        &exec,
+                                        &plan.new_path,
+                                        &plan.branch,
+                                        pane,
+                                        window,
+                                        cx,
+                                    )
+                                    .map_err(kept)?;
+                                let dispatched =
+                                    cx.spawn(async move |_, _| dispatched.await.map_err(kept));
                                 Ok((
                                     TaskStarted {
                                         exec: exec.clone(),

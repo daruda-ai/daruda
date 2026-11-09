@@ -174,7 +174,8 @@ impl Workspace {
                     self.activate_lane(lane.lane(), window, cx);
                 }
                 let root = lane.root().to_path_buf();
-                self.launch_task_flow(exec, lane.lane(), root, launch, answer, cx);
+                let lane = RunLane::Existing(lane.lane());
+                self.launch_task_flow(exec, lane, root, launch, answer, cx);
             }
             FlowPlace::New(start) => {
                 self.create_flow_task_worktree(start, exec, launch, answer, window, cx)
@@ -235,6 +236,7 @@ impl Workspace {
                 }
                 let worktree = plan.new_path.clone();
                 let lane = ws.register_created_lane(plan, project_id, None, reveal, window, cx);
+                let lane = RunLane::Created(lane);
                 let mut launch = launch;
                 launch.target.path = on_branch(&launch.target, &worktree);
                 ws.launch_task_flow(exec.clone(), lane, worktree, launch, answer.clone(), cx);
@@ -251,7 +253,7 @@ impl Workspace {
     fn launch_task_flow(
         &mut self,
         exec: ExecutionRef,
-        lane: LaneRef,
+        lane: RunLane,
         worktree: PathBuf,
         launch: FlowLaunch,
         answer: Answer,
@@ -261,7 +263,8 @@ impl Workspace {
         if !task_is(&exec, cx, |lifecycle| {
             matches!(lifecycle, Lifecycle::Preparing { .. })
         }) {
-            self.finish_task_start(Err(TaskStartError::NotBacklog), None, &answer, cx);
+            let refused = lane.failed(TaskStartError::NotBacklog);
+            self.finish_task_start(Err(refused), None, &answer, cx);
             return;
         }
         let prepared = RunsHost::propose(
@@ -280,11 +283,12 @@ impl Workspace {
             let recorded = prepared.await;
             let finished = ws.update(cx, |ws, cx| {
                 let outcome = match recorded {
-                    Ok(_) => ws.submit_task_flow(&exec, lane, worktree, launch, cx),
+                    Ok(_) => ws.submit_task_flow(&exec, lane.lane(), worktree, launch, cx),
                     Err(error) => Err(TaskStartError::NotRecorded {
                         detail: error.to_string(),
                     }),
-                };
+                }
+                .map_err(|e| lane.failed(e));
                 ws.finish_task_start(outcome, Some(&exec), &answer, cx);
             });
             if finished.is_err() {
@@ -336,6 +340,29 @@ impl Workspace {
             worktree,
             on: StartedOn::Flow,
         })
+    }
+}
+
+/// The lane a flow task runs in, by whether its start made it: a start
+/// that fails after making one leaves that worktree registered, and says so.
+#[derive(Clone, Copy)]
+enum RunLane {
+    Existing(LaneRef),
+    Created(LaneRef),
+}
+
+impl RunLane {
+    fn lane(self) -> LaneRef {
+        match self {
+            Self::Existing(lane) | Self::Created(lane) => lane,
+        }
+    }
+
+    fn failed(self, e: TaskStartError) -> TaskStartError {
+        match self {
+            Self::Existing(_) => e,
+            Self::Created(lane) => e.kept_in(lane),
+        }
     }
 }
 

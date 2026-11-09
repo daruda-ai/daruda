@@ -322,6 +322,14 @@ fn every_error_variant_round_trips_through_json() {
         ControlError::ApprovalUnavailable,
         ControlError::ApprovalsPending,
         ControlError::AgentUnavailable,
+        ControlError::TaskStartFailedWorktreeKept {
+            worktree: LaneHandle {
+                workspace: daruda_store::project::WorkspaceUuid::new(),
+                project: 1,
+                lane: 2,
+            },
+            detail: "the prompt never reached the pane".into(),
+        },
         ControlError::TaskNotRecorded {
             detail: "the task log is read-only".into(),
         },

@@ -254,6 +254,17 @@ fn every_new_refusal_travels_as_its_code() {
             },
             "agent_unavailable_worktree_kept",
         ),
+        (
+            ControlError::TaskStartFailedWorktreeKept {
+                worktree: crate::control::result::LaneHandle {
+                    workspace: daruda_store::project::WorkspaceUuid::new(),
+                    project: 1,
+                    lane: 2,
+                },
+                detail: "the prompt never reached the pane".into(),
+            },
+            "task_start_failed_worktree_kept",
+        ),
     ] {
         let v = to_tool_result(&Err(error));
         assert_eq!(v["isError"], true);

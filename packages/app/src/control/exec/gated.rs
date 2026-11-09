@@ -259,13 +259,14 @@ fn guard_gated(asked: &Asked, cx: &mut App) -> Result<(), ControlError> {
 }
 
 /// Whether a creation spent its slot: a success, or a refusal that names the
-/// worktree it kept. A task start failing after git (finalize, pane, prompt)
-/// also leaves one, but `TaskStartFailed` does not say whether git ran, so
-/// those are not counted rather than guessed at.
+/// worktree it kept. A task start's failure after git registered its new
+/// worktree is always one of those refusals; see `TaskStartError::kept_in`.
 fn left_a_worktree(outcome: &ControlOutcome) -> bool {
     matches!(
         outcome,
-        Ok(_) | Err(ControlError::AgentUnavailableWorktreeKept { .. })
+        Ok(_)
+            | Err(ControlError::AgentUnavailableWorktreeKept { .. }
+                | ControlError::TaskStartFailedWorktreeKept { .. })
     )
 }
 

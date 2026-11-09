@@ -252,31 +252,52 @@ async fn the_approved_work_takes_the_mode_its_card_named(cx: &mut TestAppContext
 
 /// A creation refused after git kept its worktree, so its slot is spent as
 /// a success's would be.
-#[gpui::test]
-async fn a_kept_worktree_spends_its_budget_slot(cx: &mut TestAppContext) {
+/// Approve a creation that refuses with the worktree it kept: it spends the
+/// last slot it reserved.
+async fn spends_the_slot(
+    kept: impl FnOnce(crate::control::result::LaneHandle) -> ControlError,
+    cx: &mut TestAppContext,
+) {
     let (_fixture, at) = window(cx);
     let _outbound = cx.update(setup);
-    let worktree = crate::control::result::LaneHandle {
+    let refusal = kept(crate::control::result::LaneHandle {
         workspace: at.0,
         project: at.1,
         lane: 9,
-    };
+    });
     let done = cx.update(|cx| {
+        let answer = refusal.clone();
         let dispatch = run_gated_with(
             command(at),
             CommandOrigin::Orchestrator,
-            move |_, _, _, _| {
-                async move { Err(ControlError::AgentUnavailableWorktreeKept { worktree }) }
-                    .boxed_local()
-            },
+            move |_, _, _, _| async move { Err(answer) }.boxed_local(),
             cx,
         );
         approve(dispatch, cx)
     });
     cx.run_until_parked();
-    assert_eq!(
-        done.recv().await.unwrap(),
-        Some(Err(ControlError::AgentUnavailableWorktreeKept { worktree }))
-    );
+    assert_eq!(done.recv().await.unwrap(), Some(Err(refusal)));
     cx.update(|cx| assert_eq!(guards::spent_budget_for_test(cx), 16));
+}
+
+#[gpui::test]
+async fn a_worktree_kept_without_its_agent_spends_its_budget_slot(cx: &mut TestAppContext) {
+    spends_the_slot(
+        |worktree| ControlError::AgentUnavailableWorktreeKept { worktree },
+        cx,
+    )
+    .await;
+}
+
+/// A task start that failed after git made its worktree spends the slot too.
+#[gpui::test]
+async fn a_task_start_failing_after_git_spends_its_budget_slot(cx: &mut TestAppContext) {
+    spends_the_slot(
+        |worktree| ControlError::TaskStartFailedWorktreeKept {
+            worktree,
+            detail: "the prompt never reached the pane".into(),
+        },
+        cx,
+    )
+    .await;
 }

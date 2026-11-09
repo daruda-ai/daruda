@@ -2538,6 +2538,8 @@ control:
   error_task_not_running: "That task is not running."
   error_task_project_not_open: "That task's project is not open in daruda."
   error_task_start_failed: "The task did not start. daruda has the reason."
+  # The same, after git made the task's worktree: it is kept in daruda.
+  error_task_start_failed_worktree_kept: "The task did not start. daruda has the reason. Its worktree was still created and stays in daruda."
   error_task_title_empty: "A task needs a title."
   error_task_not_recorded: "daruda could not save that task change. The desktop has the reason."
   error_task_no_session: "That task has no conversation to open yet."

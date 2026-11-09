@@ -353,6 +353,9 @@ pub(crate) fn render_error(error: &ControlError) -> String {
         ControlError::AgentUnavailableWorktreeKept { .. } => {
             s::control::error_agent_unavailable_worktree_kept()
         }
+        ControlError::TaskStartFailedWorktreeKept { .. } => {
+            s::control::error_task_start_failed_worktree_kept()
+        }
     }
 }
 

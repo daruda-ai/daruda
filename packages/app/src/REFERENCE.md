@@ -292,9 +292,14 @@ The agent is resolved when the card is built and pinned as
 kept as a lane with nothing open and the refusal is
 `agent_unavailable_worktree_kept`, carrying its handle, so the caller can
 open a chat there rather than retry a branch name git now refuses; it spends
-the agent's worktree budget like a success. A task start that fails later
-(finalize, pane, prompt delivery) also leaves its worktree, but answers
-`task_start_failed`, which does not say whether git ran, so it is not counted. A recorded task start fails as
+the agent's worktree budget like a success. A task start (chat or flow) that
+fails after its new worktree is registered (the pane, the prompt's delivery,
+the flow's submission, a cancel landing meanwhile) is
+`TaskStartError::WorktreeKept` around its cause, answering
+`task_start_failed_worktree_kept` with the handle and the cause's detail, and
+spends the budget the same way. A project or window closed while git ran
+leaves the checkout unregistered, with no handle to give: that start keeps
+its plain refusal and is not counted. A recorded task start fails as
 `AgentMissing` either way. A card discloses the agent, the requested mode,
 the task title and the prompt through `agent_text`: titles and prompts are
 flattened to one line, their quote marks neutralized, a long one shows its

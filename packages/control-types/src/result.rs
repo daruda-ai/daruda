@@ -772,6 +772,15 @@ pub enum ControlError {
     AgentUnavailableWorktreeKept {
         worktree: LaneHandle,
     },
+    /// [`Self::TaskStartFailed`] after git made the task's new worktree,
+    /// which stays registered as `worktree`: the start failed later (the
+    /// pane, the prompt's delivery, the flow's submission, a cancel landing
+    /// meanwhile). Its own code for the reason `AgentUnavailableWorktreeKept`
+    /// has one: the task's branch now exists, and `worktree` is where it is.
+    TaskStartFailedWorktreeKept {
+        worktree: LaneHandle,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for ControlError {
@@ -857,6 +866,10 @@ impl std::fmt::Display for ControlError {
             Self::AgentUnavailableWorktreeKept { .. } => write!(
                 f,
                 "the agent the approval named is no longer configured; the worktree was created and kept with no chat in it"
+            ),
+            Self::TaskStartFailedWorktreeKept { detail, .. } => write!(
+                f,
+                "task did not start: {detail}; its worktree was created and kept"
             ),
         }
     }

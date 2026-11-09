@@ -298,9 +298,20 @@ fn control_start_error(
         },
         TaskStartError::FlowRefused { detail, .. } => ControlError::TaskStartFailed { detail },
         TaskStartError::AgentUnavailable => ControlError::AgentUnavailable,
-        TaskStartError::AgentUnavailableWorktreeKept { lane } => {
-            ControlError::AgentUnavailableWorktreeKept {
-                worktree: crate::control::result::LaneHandle::new(workspace, lane),
+        TaskStartError::WorktreeKept { lane, cause } => {
+            let worktree = crate::control::result::LaneHandle::new(workspace, lane);
+            match control_start_error(*cause, workspace) {
+                ControlError::AgentUnavailable => {
+                    ControlError::AgentUnavailableWorktreeKept { worktree }
+                }
+                ControlError::TaskStartFailed { detail }
+                | ControlError::TaskNotRecorded { detail } => {
+                    ControlError::TaskStartFailedWorktreeKept { worktree, detail }
+                }
+                other => ControlError::TaskStartFailedWorktreeKept {
+                    worktree,
+                    detail: other.to_string(),
+                },
             }
         }
     }
@@ -333,5 +344,55 @@ fn flow_problem_answer(
         P::InputAmbiguous | P::OtherInputsRequired => ControlError::TaskStartFailed {
             detail: problem.to_string(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::control::result::LaneHandle;
+    use daruda_store::project::WorkspaceUuid;
+
+    /// Every failure after git registered the task's new worktree answers
+    /// with that worktree's handle, keeping its cause's detail; the removed
+    /// agent keeps its own code.
+    #[test]
+    fn a_failure_after_git_names_the_worktree_it_kept() {
+        let workspace = WorkspaceUuid::new();
+        let lane = LaneRef {
+            project: 3,
+            lane: 7,
+        };
+        let worktree = LaneHandle::new(workspace, lane);
+        let kept = |cause: TaskStartError| control_start_error(cause.kept_in(lane), workspace);
+        assert_eq!(
+            kept(TaskStartError::AgentUnavailable),
+            ControlError::AgentUnavailableWorktreeKept { worktree }
+        );
+        assert_eq!(
+            kept(TaskStartError::PromptUndelivered {
+                detail: "the pane closed".into()
+            }),
+            ControlError::TaskStartFailedWorktreeKept {
+                worktree,
+                detail: "the pane closed".into()
+            }
+        );
+        assert_eq!(
+            kept(TaskStartError::NotBacklog),
+            ControlError::TaskStartFailedWorktreeKept {
+                worktree,
+                detail: ControlError::TaskNotBacklog.to_string()
+            }
+        );
+        // Kept once: a failure already naming its worktree is not wrapped
+        // again.
+        assert_eq!(
+            TaskStartError::NotBacklog.kept_in(lane).kept_in(LaneRef {
+                project: 1,
+                lane: 1
+            }),
+            TaskStartError::NotBacklog.kept_in(lane)
+        );
     }
 }
