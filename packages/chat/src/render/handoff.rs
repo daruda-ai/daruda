@@ -60,6 +60,7 @@ pub(super) fn handoff_row(
                         ("agent-chat-md-handoff-record", ix),
                         record.clone(),
                         muted,
+                        markdown.states,
                         cx,
                     )
                     .link_click_handler(markdown.links.handler()),

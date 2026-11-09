@@ -5,16 +5,16 @@
 
 use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px, relative};
 
-use super::MermaidImages;
 use super::fold_header::{FoldHeader, FoldRow, SummaryLine};
 use super::links::AgentChatMarkdownLinks;
 use super::mermaid::mermaid_code_block_render;
+use super::{MermaidImages, RenderAssets};
 use crate::fold::FoldKey;
 use crate::strings as s;
 use crate::view::AgentChatView;
 use daruda_ui::ButtonVariants as _;
 use daruda_ui::theme;
-use daruda_ui::{Icon, Sizable as _};
+use daruda_ui::{Icon, MarkdownStates, Sizable as _};
 
 /// The answer's mark — the turn's work, settled. It gives the conclusion row
 /// something beside its chevron, which the row otherwise lacks: it carries no
@@ -26,18 +26,16 @@ const ICON_ANSWER: &str = "icons/ui/task-alt.svg";
 #[derive(Clone)]
 pub(super) struct MarkdownRender<'a> {
     pub(super) mermaid_images: &'a MermaidImages,
+    pub(super) states: &'a MarkdownStates,
     pub(super) dim: f32,
     pub(super) links: AgentChatMarkdownLinks,
 }
 
 impl<'a> MarkdownRender<'a> {
-    pub(super) fn new(
-        mermaid_images: &'a MermaidImages,
-        dim: f32,
-        links: AgentChatMarkdownLinks,
-    ) -> Self {
+    pub(super) fn new(assets: RenderAssets<'a>, dim: f32, links: AgentChatMarkdownLinks) -> Self {
         Self {
-            mermaid_images,
+            mermaid_images: assets.mermaid_images,
+            states: assets.markdown_states,
             dim,
             links,
         }
@@ -232,9 +230,11 @@ pub(super) fn pane_markdown(
     id: impl Into<gpui::ElementId>,
     text: impl Into<gpui::SharedString>,
     color: gpui::Hsla,
+    states: &MarkdownStates,
     cx: &App,
 ) -> daruda_ui::Markdown {
     crate::localized::markdown(id, text)
+        .retained_in(states)
         .color(color)
         .surface(theme::agent_chat_bg(cx))
         .font_family(theme::agent_chat_font_family(cx))
@@ -255,6 +255,7 @@ pub(super) fn assistant_markdown(
         ("agent-chat-md-assistant", ix),
         text.to_string(),
         theme::dim_toward_gray(theme::agent_chat_fg(cx), markdown.dim),
+        markdown.states,
         cx,
     )
     .code_block_render(mermaid_code_block_render(
@@ -401,6 +402,7 @@ fn thought_body(
         ("agent-chat-md-thinking", ix),
         text.to_string(),
         theme::dim_toward_gray(color, markdown.dim),
+        markdown.states,
         cx,
     )
     .code_block_render(mermaid_code_block_render(

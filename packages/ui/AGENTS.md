@@ -129,6 +129,10 @@ access, ask first whether the access belongs in `ui/` instead.
   (such as `Dock::snap`) must notify the child when their content changes.
   Self-notifying TerminalView and ToastLayer are safe; bare field assignment
   through `entity.update` without notify is incompatible with caching.
+- A body's GPUI keyed state is dropped the first frame it is not drawn. A
+  virtualized host retains Markdown parses in a host-owned `MarkdownStates`,
+  filled from render as keyed state would be; that is the keyed-state
+  exception, not a pattern for model state.
 - Accessing an off-screen entity during render re-arms its invalidation:
   GPUI tracks accessed entities as displayed by that window. Do not stage
   snapshots or read geometry for hidden docks. Apply the visibility condition

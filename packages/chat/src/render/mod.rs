@@ -79,9 +79,10 @@ pub(super) type ResourceImages = std::sync::Arc<
 >;
 
 /// The `AgentChatView::assets` caches the render pass reads, borrowed as one
-/// parameter instead of six threaded through `render_item` → `tool_card` →
+/// parameter instead of one each threaded through `render_item` → `tool_card` →
 /// `output_block_view` (and `tool_card`'s recursion into flattened subagent
-/// children). Read-only here: entries are built in the reconcile layer.
+/// children). Read-only here: entries are built in the reconcile layer,
+/// except `markdown_states`, which a drawn Markdown body fills itself.
 #[derive(Clone, Copy)]
 pub(super) struct RenderAssets<'a> {
     pub(super) diff_editors: &'a DiffEditors,
@@ -90,6 +91,7 @@ pub(super) struct RenderAssets<'a> {
     pub(super) tool_images: &'a ToolImages,
     pub(super) resource_images: &'a ResourceImages,
     pub(super) mermaid_images: &'a MermaidImages,
+    pub(super) markdown_states: &'a daruda_ui::MarkdownStates,
 }
 
 impl<'a> RenderAssets<'a> {
@@ -101,6 +103,7 @@ impl<'a> RenderAssets<'a> {
             tool_images: &assets.tool_images,
             resource_images: &assets.resource_images,
             mermaid_images: &assets.mermaid_images,
+            markdown_states: &assets.markdown_states,
         }
     }
 }

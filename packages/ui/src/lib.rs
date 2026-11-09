@@ -109,7 +109,7 @@ pub use input_panel::{
 };
 pub use label::Label;
 pub use macro_key::{KeyDisplay, MacroKey};
-pub use markdown::{CopyTooltips, Markdown, markdown};
+pub use markdown::{CopyTooltips, Markdown, MarkdownStates, markdown};
 pub use menu::{
     DropdownMenu, PopupMenu, PopupMenuItem, menu_builder, popup_menu_deferred, stacked_menu_builder,
 };

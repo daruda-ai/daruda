@@ -1,8 +1,9 @@
 //! Render-once wrapper over `gpui_base::TextView` Markdown.
 //!
 //! Builds the window-needing `TextView::markdown` inside render so callers can
-//! construct Markdown from cx-only snapshot paths. Selection is GPUI keyed
-//! state, a sanctioned MVU exception; callers must provide stable ids or live
+//! construct Markdown from cx-only snapshot paths. The parse and selection live
+//! in GPUI keyed state, a sanctioned MVU exception, unless the host retains them
+//! in a [`MarkdownStates`]; either way callers must provide stable ids or live
 //! selection resets.
 
 use std::collections::hash_map::DefaultHasher;
@@ -19,7 +20,10 @@ use gpui_component::ActiveTheme as _;
 use crate::{icons, theme};
 
 mod highlight;
+mod states;
 mod style;
+
+pub use states::MarkdownStates;
 
 /// Optional code-block override hook kept domain-free for this UI wrapper.
 type CodeBlockRender =
@@ -42,6 +46,7 @@ pub struct Markdown {
     surface: Option<Hsla>,
     code_block_render: Option<CodeBlockRender>,
     link_click_handler: Option<LinkClickHandler>,
+    retained_in: Option<MarkdownStates>,
     copy_tooltips: CopyTooltips,
     #[cfg(any(test, feature = "test-support"))]
     debug_inline_bounds: Option<DebugInlineBounds>,
@@ -127,6 +132,14 @@ impl Markdown {
         self.link_click_handler = Some(Arc::new(f));
         self
     }
+
+    /// Keep this body's parse in `states` rather than in keyed state, so it
+    /// survives frames in which the element is not drawn — a row a virtualized
+    /// list has scrolled out of its overdraw.
+    pub fn retained_in(mut self, states: &MarkdownStates) -> Self {
+        self.retained_in = Some(states.clone());
+        self
+    }
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -153,7 +166,11 @@ impl RenderOnce for Markdown {
         let surface = self.surface.unwrap_or_else(|| cx.theme().background);
         let style = self.text_view_style(color, surface, window.rem_size(), cx);
         let base_id = self.id.clone();
-        let mut view = TextView::markdown(self.id, self.text)
+        let view = match &self.retained_in {
+            Some(states) => TextView::new(&states.state_for(&self.id, &self.text, cx)),
+            None => TextView::markdown(self.id, self.text),
+        };
+        let mut view = view
             .selectable(self.selectable)
             .style(style)
             .text_color(color);
@@ -271,6 +288,7 @@ pub fn markdown(
         surface: None,
         code_block_render: None,
         link_click_handler: None,
+        retained_in: None,
         copy_tooltips,
         #[cfg(any(test, feature = "test-support"))]
         debug_inline_bounds: None,

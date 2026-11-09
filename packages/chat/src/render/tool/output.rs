@@ -118,6 +118,7 @@ pub(in crate::render) fn output_block_view(
                 SharedString::from(plain_id_prefix.clone()),
                 text.clone(),
                 plain_color,
+                context.assets.markdown_states,
                 cx,
             )
             .link_click_handler(context.links.handler())

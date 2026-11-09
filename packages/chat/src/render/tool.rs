@@ -354,6 +354,7 @@ pub(super) fn tool_card(
                     SharedString::from(format!("agent-chat-subagent-instructions-{}", tc.id)),
                     SharedString::from(prompt.to_string()),
                     theme::dim_toward_gray(theme::agent_chat_fg(cx), dim),
+                    assets.markdown_states,
                     cx,
                 )
                 .code_block_render(mermaid_code_block_render(assets.mermaid_images, dim))

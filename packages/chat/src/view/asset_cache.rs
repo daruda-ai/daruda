@@ -1,4 +1,5 @@
-//! Async-built rendering artifacts the reconcilers fill and `render/` reads.
+//! Rendering artifacts derived from the conversation: the async-built ones the
+//! reconcilers fill and `render/` reads, and the Markdown parses `render/` keeps.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -8,9 +9,10 @@ use crate::render::{
 
 /// Async-built rendering artifacts derived from the conversation: read-only
 /// diff editors, read-only verbatim tool-output editors, rasterized mermaid
-/// diagrams, and decoded tool-output images. Each cache is filled by its own
-/// reconciler in `reconcile/`; `render/` only ever reads them by reference.
-/// One field instead of nine, with one [`Self::clear`] wiping all of them on a
+/// diagrams, and decoded tool-output images. Each is filled by its own
+/// reconciler in `reconcile/` and only read by `render/`; the exception is
+/// `markdown_states`, which the render pass fills (see its field).
+/// One field instead of many, with one [`Self::clear`] wiping all of them on a
 /// session reset.
 #[derive(Default)]
 pub(crate) struct AssetCache {
@@ -60,6 +62,15 @@ pub(crate) struct AssetCache {
     /// value as well as the key prevents a late old task overwriting a newer
     /// source at the same block index.
     pub(crate) resource_image_inflight: HashMap<String, u64>,
+    /// Parsed Markdown bodies by element id. The one cache the render pass
+    /// fills rather than a reconciler: it takes the place of GPUI keyed state,
+    /// which drops a body's parse the first frame the virtualized list does not
+    /// draw its row, so a long body scrolled back into view would lay out empty
+    /// until a background reparse landed. Ids carry an item index or a tool-call
+    /// id, the same identity the other caches key on; a replayed tail that
+    /// reuses one hands its body the new text. Every body drawn stays parsed
+    /// until a discarded conversation clears it with the rest.
+    pub(crate) markdown_states: daruda_ui::MarkdownStates,
 }
 
 impl AssetCache {
@@ -73,6 +84,7 @@ impl AssetCache {
         self.output_editors.clear();
         self.output_editor_sources.clear();
         self.clear_mermaid();
+        self.markdown_states.clear();
         self.tool_image_inflight.clear();
         if let Ok(mut m) = self.tool_images.lock() {
             m.clear();

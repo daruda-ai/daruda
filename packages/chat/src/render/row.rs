@@ -54,7 +54,7 @@ pub(super) fn render_row(
                     fold_context_at(&key, *ix, &this.items, this.turn_boundary, &this.live_units),
                 );
                 let markdown = MarkdownRender::new(
-                    &this.assets.mermaid_images,
+                    RenderAssets::of(&this.assets),
                     this.dim_amount,
                     AgentChatMarkdownLinks::new(cx.weak_entity()),
                 );
@@ -87,7 +87,7 @@ pub(super) fn render_row(
                 text,
                 thought_icon(),
                 MarkdownRender::new(
-                    &this.assets.mermaid_images,
+                    RenderAssets::of(&this.assets),
                     this.dim_amount,
                     AgentChatMarkdownLinks::new(cx.weak_entity()),
                 ),
@@ -157,7 +157,7 @@ pub(super) fn render_row(
                         cx,
                     ),
                     MarkdownRender::new(
-                        &this.assets.mermaid_images,
+                        RenderAssets::of(&this.assets),
                         this.dim_amount,
                         AgentChatMarkdownLinks::new(cx.weak_entity()),
                     ),
@@ -293,12 +293,7 @@ fn render_item(
     window: &mut Window,
     cx: &mut Context<AgentChatView>,
 ) -> AnyElement {
-    let mermaid_images = assets.mermaid_images;
-    let markdown = MarkdownRender::new(
-        mermaid_images,
-        dim,
-        AgentChatMarkdownLinks::new(cx.weak_entity()),
-    );
+    let markdown = MarkdownRender::new(assets, dim, AgentChatMarkdownLinks::new(cx.weak_entity()));
     match item {
         ChatItem::UserText(text) => {
             let fold = prompt_fold(ix, text, fold, items, boundary, live_units);

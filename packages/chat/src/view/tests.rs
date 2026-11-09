@@ -8,6 +8,7 @@ mod card_folding;
 mod diff_layout;
 mod early_stop;
 mod host_cards;
+mod markdown_retention;
 mod message_copy;
 mod output_layout;
 mod overage;
