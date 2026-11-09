@@ -204,16 +204,16 @@ impl Workspace {
         Ok((started.exec, lane, chat))
     }
 
-    /// Bring up the chat `task`'s run belongs to; one it reopens runs in the
-    /// agent's delegated mode, as the control surface's caller is not at the
-    /// desktop to answer a prompt.
+    /// Bring up the chat `task`'s run belongs to; one it reopens in a new
+    /// pane runs with its mode from `mode`.
     pub(crate) fn control_task_open(
         &mut self,
         task: &str,
+        mode: daruda_config::ModeChoice,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneId, ControlError> {
-        self.begin_task_chat_open(task, daruda_config::ModeChoice::FollowDelegated, window, cx)
+        self.begin_task_chat_open(task, mode, window, cx)
             .map_err(|e| match e {
                 TaskChatError::NotFound => ControlError::TaskNotFound,
                 TaskChatError::NoSession => ControlError::TaskNoSession,

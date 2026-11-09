@@ -1,7 +1,12 @@
 use daruda_control_types::agent_text::{
-    PROMPT_EXCERPT_CHARS, bound_agent_text, elide_middle, excerpt_line, prompt_excerpt,
-    sanitize_title,
+    PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS, bound_agent_text, elide_middle,
+    excerpt_line, one_line, prompt_excerpt, sanitize_title, title_line,
 };
+
+/// The marker a test reads back: the hidden count, nothing localized.
+fn marker(hidden: usize) -> String {
+    format!(" [+{hidden}] ")
+}
 
 #[test]
 fn elide_middle_keeps_short_text_verbatim() {
@@ -92,27 +97,78 @@ fn a_short_title_is_untouched_and_a_blank_one_is_absent() {
 #[test]
 fn a_short_prompt_is_quoted_whole_on_one_line() {
     assert_eq!(
-        prompt_excerpt("fix\n\tthe  login\r\nbug"),
+        prompt_excerpt("fix\n\tthe  login\r\nbug", marker),
         "fix the login bug"
     );
 }
 
+/// A harmless opening cannot hide the instruction after it: past the bound
+/// the card quotes both ends and says how much it left out.
 #[test]
-fn a_long_prompt_is_cut_at_the_cap_with_an_ellipsis() {
-    let excerpt = prompt_excerpt(&"가".repeat(PROMPT_EXCERPT_CHARS + 5));
-    assert_eq!(excerpt.chars().count(), PROMPT_EXCERPT_CHARS + 1);
-    assert!(excerpt.ends_with('…'));
-    let exact = "a".repeat(PROMPT_EXCERPT_CHARS);
-    assert_eq!(prompt_excerpt(&exact), exact);
+fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
+    let budget = PROMPT_EXCERPT_HEAD_CHARS + PROMPT_EXCERPT_TAIL_CHARS;
+    let exact = "a".repeat(budget);
+    assert_eq!(prompt_excerpt(&exact, marker), exact);
+
+    let prompt = format!(
+        "{}{}{}",
+        "가".repeat(PROMPT_EXCERPT_HEAD_CHARS),
+        "x".repeat(7),
+        "😀".repeat(PROMPT_EXCERPT_TAIL_CHARS)
+    );
+    assert_eq!(
+        prompt_excerpt(&prompt, marker),
+        format!(
+            "{}{}{}",
+            "가".repeat(PROMPT_EXCERPT_HEAD_CHARS),
+            marker(7),
+            "😀".repeat(PROMPT_EXCERPT_TAIL_CHARS)
+        )
+    );
+    // The hidden count is of the flattened line, not the raw text.
+    let spaced = format!("{}\n\n\n{}", "a".repeat(budget), "b");
+    assert_eq!(
+        prompt_excerpt(&spaced, marker),
+        format!(
+            "{}{}{} b",
+            "a".repeat(PROMPT_EXCERPT_HEAD_CHARS),
+            marker(2),
+            "a".repeat(PROMPT_EXCERPT_TAIL_CHARS - 2)
+        )
+    );
+}
+
+#[test]
+fn an_excerpt_is_cut_with_an_ellipsis_and_a_title_at_its_bound() {
     assert_eq!(excerpt_line("abcdef", 3), "abc…");
+    assert_eq!(excerpt_line("abc", 3), "abc");
+    let title = title_line(&"t".repeat(200));
+    assert_eq!(title.chars().count(), 81);
+    assert!(title.ends_with('…'));
+    assert_eq!(title_line("Fix\nthe login"), "Fix the login");
 }
 
 /// A right-to-left override would show `txt.exe` as `exe.txt`; zero-width
-/// and bidi marks could hide or reorder the words a card asks about.
+/// and bidi marks could hide or reorder the words a card asks about; tag
+/// characters carry text nobody sees.
 #[test]
-fn invisible_format_characters_are_dropped_from_excerpts_and_titles() {
-    let hostile = "run \u{202E}exe.txt\u{202C} now\u{200B}\u{2066}!\u{2069}\u{FEFF}\u{061C}";
+fn reordering_and_hiding_characters_are_dropped_from_excerpts_and_titles() {
+    let hostile =
+        "run \u{202E}exe.txt\u{202C} now\u{200B}\u{2066}!\u{2069}\u{FEFF}\u{061C}\u{200E}\u{00AD}";
     assert_eq!(excerpt_line(hostile, 80), "run exe.txt now!");
     assert_eq!(sanitize_title(hostile).as_deref(), Some("run exe.txt now!"));
+    assert_eq!(title_line("a\u{202E}b"), "ab");
     assert_eq!(sanitize_title("\u{200B}\u{202E}"), None);
+    assert_eq!(one_line("ok\u{E0041}\u{E0042}"), "ok");
+}
+
+/// Joiners shape Persian, Indic scripts and emoji sequences, and cannot
+/// reorder or hide a word, so they survive.
+#[test]
+fn joiners_survive_so_scripts_and_emoji_keep_their_shape() {
+    let family = "👩\u{200D}👩\u{200D}👧";
+    assert_eq!(one_line(family), family);
+    let persian = "می\u{200C}خواهم";
+    assert_eq!(one_line(persian), persian);
+    assert_eq!(prompt_excerpt(family, marker), family);
 }

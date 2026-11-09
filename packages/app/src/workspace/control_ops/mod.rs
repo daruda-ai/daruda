@@ -104,7 +104,6 @@ impl Workspace {
     pub(crate) fn control_chat_label(&self, pane: PaneId, cx: &App) -> Option<ChatLabel> {
         let lane = self.lane_ref_for_pane(pane)?;
         let view = self.agent_chat_view(pane)?.read(cx);
-        let agent = self.mirrors.agents.iter().find(|a| a.id == view.agent_id());
         let preferences = view.session_preferences(&self.mirrors.agents);
         Some(ChatLabel {
             path: crate::surface::strings::control::lane_path(
@@ -113,7 +112,7 @@ impl Workspace {
             ),
             agent: view.agent_id().to_owned(),
             agent_name: view.agent_name().to_owned(),
-            mode: self.requested_mode_label(view.agent_id(), agent, &preferences),
+            mode: self.requested_mode_label(view.agent_id(), &preferences),
         })
     }
 
@@ -218,11 +217,11 @@ impl Workspace {
     pub(crate) fn control_chat_new(
         &mut self,
         target: LaneRef,
-        agent: Option<String>,
+        chat: crate::workspace::ChatOpen,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneRef, ControlError> {
-        let pane = self.control_insert_chat(target, agent, window, cx)?;
+        let pane = self.control_insert_chat(target, chat, window, cx)?;
         // Revealing focuses the pane, which starts the session — so it is the
         // last step, the same split `open_agent_chat_pane_with_agent` uses.
         self.reveal_new_agent_chat_pane(pane, window, cx);
@@ -240,7 +239,7 @@ impl Workspace {
     fn control_insert_chat(
         &mut self,
         target: LaneRef,
-        agent: Option<String>,
+        chat: crate::workspace::ChatOpen,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneId, ControlError> {
@@ -253,22 +252,13 @@ impl Workspace {
         if lane.availability != crate::lane::availability::LaneAvailability::Present {
             return Err(ControlError::TargetGone);
         }
-        if !self.pinned_agent_configured(agent.as_deref()) {
-            return Err(ControlError::AgentUnavailable);
-        }
+        let agent_id = self
+            .resolve_chat_agent(&chat.agent)
+            .map_err(|_| ControlError::AgentUnavailable)?;
         self.activate_lane(target, window, cx);
-        let agent_id = self.open_agent_id(agent.as_deref());
         let cwds = self.active_lane_cwds();
-        // Whoever called the control surface is not at the desktop to answer
-        // a permission prompt.
-        self.insert_agent_chat_pane(
-            agent_id,
-            cwds,
-            daruda_config::ModeChoice::FollowDelegated,
-            window,
-            cx,
-        )
-        .ok_or(ControlError::TargetGone)
+        self.insert_agent_chat_pane(agent_id, cwds, chat.mode, window, cx)
+            .ok_or(ControlError::TargetGone)
     }
 
     /// The insert half of [`Self::control_chat_new`], for a test that must not
@@ -280,7 +270,8 @@ impl Workspace {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneId, ControlError> {
-        self.control_insert_chat(target, None, window, cx)
+        let chat = crate::workspace::ChatOpen::orchestrator_for_test();
+        self.control_insert_chat(target, chat, window, cx)
     }
 
     /// The worktree-creation plan `git worktree add` needs, derived from a
@@ -326,27 +317,25 @@ impl Workspace {
         &mut self,
         plan: crate::workspace::lane_ops::CreateWorktreePlan,
         project: ProjectId,
-        agent: Option<String>,
+        chat: crate::workspace::ChatOpen,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Result<(LaneRef, PaneRef), ControlError> {
+        use crate::workspace::lane_ops::{FinalizeError, InitialPane};
         let pane = self
-            .finalize_create_lane(
-                plan,
-                project,
-                crate::workspace::lane_ops::InitialPane::AgentChat(
-                    daruda_config::ModeChoice::FollowDelegated,
-                ),
-                agent.as_deref(),
-                window,
-                cx,
-            )
-            // The checkout is on disk and only the bookkeeping failed, which
-            // is not something a caller can fix by asking differently — so
-            // the detail says that rather than forwarding the toast's
-            // localized wording onto a machine payload.
-            .map_err(|_| ControlError::LaneCreateFailed {
-                detail: "the worktree was created but daruda could not register it".to_owned(),
+            .finalize_create_lane(plan, project, InitialPane::AgentChat(chat), window, cx)
+            .map_err(|e| match e {
+                // The worktree is registered with no chat in it; the agent
+                // the card named is not replaced by another.
+                FinalizeError::AgentUnavailable => ControlError::AgentUnavailable,
+                // The checkout is on disk and only the bookkeeping failed,
+                // which is not something a caller can fix by asking
+                // differently — so the detail says that rather than
+                // forwarding the toast's localized wording onto a machine
+                // payload.
+                FinalizeError::Failed(_) => ControlError::LaneCreateFailed {
+                    detail: "the worktree was created but daruda could not register it".to_owned(),
+                },
             })?;
         Ok((
             self.active,

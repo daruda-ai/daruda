@@ -23,7 +23,7 @@ use crate::workspace::Workspace;
 pub(crate) type CreatedLane = Result<(LaneRef, PaneRef), ControlError>;
 
 impl Workspace {
-    /// Create a worktree in `project` and open a chat in it.
+    /// Create a worktree in `project` and open `chat` in it.
     ///
     /// Answers on the returned channel once the git work and the registration
     /// are both done. A caller that stops listening cannot stall it — the
@@ -33,12 +33,14 @@ impl Workspace {
         project: ProjectId,
         name: String,
         base_ref: Option<String>,
-        agent: Option<String>,
+        chat: crate::workspace::ChatOpen,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<CreatedLane> {
         let (tx, rx) = smol::channel::bounded(1);
-        if !self.pinned_agent_configured(agent.as_deref()) {
+        // Before git, so a card whose agent is already gone creates nothing;
+        // finalize checks again for one removed while git runs.
+        if self.resolve_chat_agent(&chat.agent).is_err() {
             let _ = tx.try_send(Err(ControlError::AgentUnavailable));
             return rx;
         }
@@ -110,7 +112,7 @@ impl Workspace {
                                 })
                             }
                             Ok(()) => {
-                                ws.control_lane_finalize(plan.clone(), project, agent, window, cx)
+                                ws.control_lane_finalize(plan.clone(), project, chat, window, cx)
                             }
                         }
                     })
@@ -141,7 +143,8 @@ mod tests {
         let rx = cx
             .update_window(fixture.window.into(), |_, window, cx| {
                 fixture.workspace.update(cx, |ws, cx| {
-                    ws.control_create_lane(9_999, "x".into(), None, None, window, cx)
+                    let chat = crate::workspace::ChatOpen::orchestrator_for_test();
+                    ws.control_create_lane(9_999, "x".into(), None, chat, window, cx)
                 })
             })
             .expect("window is live");

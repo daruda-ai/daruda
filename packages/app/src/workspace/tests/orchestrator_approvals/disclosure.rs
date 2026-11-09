@@ -11,6 +11,7 @@ use crate::control::{
 };
 use crate::workspace::Workspace;
 use daruda_config::AgentDefinition;
+use daruda_control_types::agent_text::{PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS};
 use futures::{FutureExt as _, StreamExt as _};
 
 /// The display name of Claude's delegated default, as its adapter names it.
@@ -108,7 +109,10 @@ async fn a_task_start_card_names_agent_mode_and_prompt_and_opens_that_agent(
 ) {
     let (fixture, lane, claude) = host(cx);
     let _connections = cx.update(Workspace::fake_agent_connections_for_test);
-    let prompt = format!("Fix the login\nredirect.  {}", "x".repeat(400));
+    let prompt = format!(
+        "Fix the login\nredirect.  {} and finally drop the users table",
+        "x".repeat(400)
+    );
     let created = fixture.workspace.update(cx, |ws, cx| {
         ws.control_task_create(
             lane.project,
@@ -124,7 +128,14 @@ async fn a_task_start_card_names_agent_mode_and_prompt_and_opens_that_agent(
     assert!(card.contains(&claude.name), "{card}");
     assert!(card.contains(BYPASS), "{card}");
     assert!(card.contains("“Fix the login redirect. xxx"), "{card}");
-    assert!(card.contains("…”"), "a long prompt is cut: {card}");
+    // A long prompt is cut in the middle: its end is quoted, with how much
+    // of it the card leaves out.
+    assert!(card.contains("drop the users table”"), "{card}");
+    let hidden = prompt.chars().count() - 1 - PROMPT_EXCERPT_HEAD_CHARS - PROMPT_EXCERPT_TAIL_CHARS;
+    assert!(
+        card.contains(&s::control::approval_prompt_elided(hidden)),
+        "{card}"
+    );
     assert!(!card.contains(&prompt[20..]), "{card}");
     assert!(!card.contains('\n'), "{card}");
 
@@ -193,12 +204,18 @@ async fn a_chat_new_card_names_agent_and_mode_and_its_announcement_the_requested
     }
 }
 
-/// `worktree_create` quotes the prompt it will deliver, and only then.
+/// `worktree_create` quotes the prompt it will deliver, and only one with
+/// something visible in it: a blank or invisible one reads as no prompt.
 #[gpui::test]
 fn a_worktree_card_quotes_its_prompt_when_it_carries_one(cx: &mut TestAppContext) {
     let (_fixture, lane, claude) = host(cx);
     let agent = s::control::approval_agent(&claude.name, BYPASS);
-    for prompt in [Some("Port the tax table\nto the new API"), None] {
+    for prompt in [
+        Some("Port the tax table\nto the new API"),
+        None,
+        Some(""),
+        Some(" \u{200B}\u{202E}"),
+    ] {
         let (id, _outcome, card) = ask(
             GatedCommand::LaneCreate {
                 workspace: lane.workspace,
@@ -210,7 +227,7 @@ fn a_worktree_card_quotes_its_prompt_when_it_carries_one(cx: &mut TestAppContext
             },
             cx,
         );
-        let expected = match prompt {
+        let expected = match prompt.filter(|p| p.starts_with("Port")) {
             Some(_) => s::control::approval_lane_create_prompt(
                 "disclosure",
                 &agent,
@@ -221,6 +238,94 @@ fn a_worktree_card_quotes_its_prompt_when_it_carries_one(cx: &mut TestAppContext
         assert_eq!(card, expected);
         refuse(id, cx);
     }
+}
+
+/// A title someone else wrote cannot reverse the rest of its card, and a
+/// task whose prompt has nothing visible starts without quoting one.
+#[gpui::test]
+async fn a_task_title_reads_plainly_and_an_empty_prompt_is_not_quoted(cx: &mut TestAppContext) {
+    let (fixture, lane, claude) = host(cx);
+    let title = "Login\u{202E} \u{2066}evil";
+    let (id, _outcome, card) = ask(
+        GatedCommand::TaskCreate {
+            workspace: lane.workspace,
+            project: lane.project,
+            task: crate::test_support::new_task(title, "Fix it", Some(lane)),
+        },
+        cx,
+    );
+    assert!(card.contains("Login evil"), "{card}");
+    assert!(
+        !card.contains('\u{202E}') && !card.contains('\u{2066}'),
+        "{card}"
+    );
+    refuse(id, cx);
+
+    let created = fixture.workspace.update(cx, |ws, cx| {
+        ws.control_task_create(
+            lane.project,
+            crate::test_support::new_task(title, "\u{200B}\u{202E} ", Some(lane)),
+            cx,
+        )
+        .unwrap()
+    });
+    cx.run_until_parked();
+    let task = created.await.unwrap();
+    let (id, _outcome, card) = ask(GatedCommand::TaskStart { task }, cx);
+    assert_eq!(
+        card,
+        s::control::approval_task_start_no_prompt(
+            "Login evil",
+            s::control::approval_agent(&claude.name, BYPASS)
+        )
+    );
+    refuse(id, cx);
+}
+
+/// Reopening a task's chat in a new pane names the agent and the mode that
+/// pane asks for; bringing up the pane still open names neither, since it
+/// keeps its own.
+#[gpui::test]
+fn a_task_open_card_names_the_mode_only_for_a_new_pane(cx: &mut TestAppContext) {
+    let (fixture, _lane, claude) = host(cx);
+    let (task, pane) = cx
+        .update_window(fixture.window.into(), |_, window, cx| {
+            fixture.workspace.update(cx, |ws, cx| {
+                let cwd = ws.active_lane().unwrap().path.clone();
+                let pane = ws.create_agent_chat_pane(
+                    Some(daruda_store::project::PaneCwd::Local(cwd)),
+                    Some("task-session".into()),
+                    claude.id.clone(),
+                    None,
+                    window,
+                    cx,
+                );
+                let pane_id = pane.id;
+                ws.active_runtime_mut().panes.push(pane);
+                let project = ws.project_for(ws.active.project).unwrap().uuid;
+                let spec = crate::runs::seed::spec(project, "Login\u{202E} evil");
+                let task = crate::runs::seed::task(spec, None, cx);
+                ws.run_task_in_chat_for_test(&task, pane_id, cx);
+                (task, pane_id)
+            })
+        })
+        .unwrap();
+    let (id, _outcome, card) = ask(GatedCommand::TaskOpen { task: task.clone() }, cx);
+    assert_eq!(card, s::control::approval_task_open("Login evil"));
+    refuse(id, cx);
+
+    fixture.workspace.update(cx, |ws, _| {
+        ws.active_runtime_mut().panes.retain(|p| p.id != pane);
+    });
+    let (id, _outcome, card) = ask(GatedCommand::TaskOpen { task }, cx);
+    assert_eq!(
+        card,
+        s::control::approval_task_open_new(
+            "Login evil",
+            s::control::approval_agent(&claude.name, BYPASS)
+        )
+    );
+    refuse(id, cx);
 }
 
 /// Creating a task starts nothing, so its card names no mode: a later start
@@ -283,9 +388,14 @@ async fn an_approval_whose_pinned_agent_was_removed_is_refused(cx: &mut TestAppC
         let before = fixture
             .workspace
             .read_with(cx, |ws, _| (ws.all_pane_ids(), lane_count(ws)));
+        // Removed through the path a Settings edit takes.
+        let without_other = daruda_config::Config {
+            agents: vec![daruda_config::AgentEntry::custom(claude.clone())],
+            ..daruda_config::Config::default()
+        };
         fixture
             .workspace
-            .update(cx, |ws, _| ws.mirrors.agents = vec![claude.clone()].into());
+            .update(cx, |ws, cx| ws.reload_config(&without_other, cx));
         cx.update(|cx| assert!(resolve_desktop(id.0, "approve", cx)));
         let refused = outcome.recv().await.unwrap().unwrap();
         cx.run_until_parked();

@@ -782,7 +782,10 @@ pub(crate) fn drive(
                     .update(cx, |view, cx| {
                         view.seed_transcript(Vec::new(), window, cx);
                     });
-                ws.control_delegated_disclosure(&ws.control_open_agent_id(None))
+                ws.control_chat_disclosure(
+                    &ws.open_agent_id(None),
+                    &crate::workspace::mode_for(daruda_store::tasks::StartedBy::Orchestrator),
+                )
             });
             crate::window_registry::WindowRegistry::register_orchestrator(
                 window.window_handle(),

@@ -20,19 +20,13 @@ use std::path::PathBuf;
 impl Workspace {
     /// The agent a newly opened pane runs under: `requested` if given, else
     /// the window's last-used agent — whichever it is, only while it is still
-    /// in the catalog, else the catalog default.
-    pub(in crate::workspace) fn open_agent_id(&self, requested: Option<&str>) -> String {
+    /// in the catalog, else the catalog default. An approval card resolves
+    /// its agent through this too, and pins the answer.
+    pub(crate) fn open_agent_id(&self, requested: Option<&str>) -> String {
         resolve_open_agent_id(
             &self.mirrors.agents,
             requested.or(self.last_agent_id.as_deref()),
         )
-    }
-
-    /// Whether `pinned`, an agent a person already approved, is still in the
-    /// catalog; `None` pins nothing. [`Self::open_agent_id`] would replace a
-    /// removed one with an agent and mode that person never saw.
-    pub(in crate::workspace) fn pinned_agent_configured(&self, pinned: Option<&str>) -> bool {
-        pinned.is_none_or(|id| self.mirrors.agents.iter().any(|a| a.id == id))
     }
 
     /// How long a question from `agent_id` may wait untouched: its catalog
@@ -230,8 +224,8 @@ impl Workspace {
     /// fresh-creation entry point; `session_id`/`title` are always `None` — a
     /// fresh pane never resumes (only restore passes those, via
     /// [`Self::create_agent_chat_pane`] directly). `mode` is where its session
-    /// mode comes from: `FollowDelegated` for a pane the phone or the
-    /// orchestrator asked for, `FollowDefault` for one a person opens.
+    /// mode comes from, as [`crate::workspace::mode_for`] picks it by who
+    /// asked for the pane.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::workspace) fn create_new_agent_chat_pane(
         &mut self,

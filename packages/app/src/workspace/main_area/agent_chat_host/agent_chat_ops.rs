@@ -12,6 +12,7 @@
 //!
 //! [`AgentChatView`]: daruda_chat::view::AgentChatView
 
+pub(crate) mod chat_open;
 mod links;
 mod mode_config;
 mod notify;

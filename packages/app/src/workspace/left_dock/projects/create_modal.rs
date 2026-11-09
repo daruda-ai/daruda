@@ -27,7 +27,7 @@ use crate::ui::select::{self, SelectOption, SelectState};
 use crate::ui::{InputEvent, InputState, button, button_primary, form_input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
-use crate::workspace::lane_ops::CreateWorktreePlan;
+use crate::workspace::lane_ops::{CreateWorktreePlan, FinalizeError};
 use daruda_config::SessionHostEntry;
 use daruda_core::git::sanitize_branch_name;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -323,15 +323,22 @@ impl CreateWorktreeModal {
                                         plan.clone(),
                                         project_id,
                                         crate::workspace::lane_ops::InitialPane::Terminal,
-                                        None,
                                         window,
                                         cx,
                                     )
                                 })
                                 // The left dock opener doesn't need the
                                 // newly-spawned pane id — only
-                                // start_task does. Discard it.
-                                .map(|_pane_id| ()),
+                                // start_task does. Discard it. A shell has
+                                // no agent to lose, so only `Failed` is
+                                // reachable here.
+                                .map(|_pane_id| ())
+                                .map_err(|e| match e {
+                                    FinalizeError::Failed(message) => message,
+                                    FinalizeError::AgentUnavailable => {
+                                        s::control::error_agent_unavailable()
+                                    }
+                                }),
                             None => Ok(()),
                         },
                     };

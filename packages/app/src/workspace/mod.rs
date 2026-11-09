@@ -34,6 +34,11 @@ mod notification_ops;
 /// and lives outside `crate::workspace`.
 pub(crate) use control_ops::{ChatDisclosure, ChatLabel, SlashClaim};
 pub(crate) use control_task_ops::ControlTaskStart;
+/// The chat a control command opens, built by the dispatcher outside
+/// `crate::workspace`.
+pub(crate) use main_area::agent_chat_host::agent_chat_ops::chat_open::{
+    ChatAgent, ChatOpen, mode_for,
+};
 mod close_guard_ops;
 pub(crate) mod delete_project_modal;
 pub(crate) mod dialog_helpers;

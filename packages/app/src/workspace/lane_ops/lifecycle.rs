@@ -5,7 +5,7 @@ use crate::runs::RunsHost;
 use daruda_store::project::{LaneId, LaneRef, ProjectId};
 use gpui::{Context, Window};
 
-use super::{CreateWorktreePlan, InitialPane, RemoveWorktreePlan, git_repo_root_of};
+use super::{CreateWorktreePlan, FinalizeError, InitialPane, RemoveWorktreePlan, git_repo_root_of};
 use crate::lane::availability::LaneAvailability;
 use crate::workspace::LaneRuntime;
 use crate::workspace::Workspace;
@@ -184,27 +184,21 @@ impl Workspace {
     /// Post-git UI-thread work: spawn a pane at the new checkout, wrap it
     /// in a Tab / LaneRuntime, register the Lane, and activate it. Errors
     /// leave the created worktree orphaned on disk (recover via `git
-    /// worktree prune`) and bubble the message back to the modal.
-    /// `requested_agent` names the agent the initial chat pane opens under.
-    /// `None` keeps the session-sticky default; an id the catalog does not
-    /// hold falls back to the catalog default, not to the sticky one — the
-    /// rule [`Workspace::open_agent_id`] already applies, not a second one.
-    /// Only the control surface passes a value — the create form and the task
-    /// workflow both leave the choice to the session.
+    /// worktree prune`) and bubble the message back to the modal — except a
+    /// chat whose pinned agent is gone, which registers the lane with
+    /// nothing open and opens no other agent in its place.
     pub(in crate::workspace) fn finalize_create_lane(
         &mut self,
         plan: CreateWorktreePlan,
         project_id: ProjectId,
         initial: InitialPane,
-        requested_agent: Option<&str>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<PaneId, String> {
+    ) -> Result<PaneId, FinalizeError> {
         self.finalize_create_lane_as(
             plan,
             project_id,
             initial,
-            requested_agent,
             super::LaneReveal::Foreground,
             window,
             cx,
@@ -213,19 +207,19 @@ impl Workspace {
 
     /// [`Self::finalize_create_lane`], registering the lane behind the one
     /// the window shows when `reveal` is `Background`.
-    #[allow(clippy::too_many_arguments)]
     pub(in crate::workspace) fn finalize_create_lane_as(
         &mut self,
         plan: CreateWorktreePlan,
         project_id: ProjectId,
         initial: InitialPane,
-        requested_agent: Option<&str>,
         reveal: super::LaneReveal,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<PaneId, String> {
+    ) -> Result<PaneId, FinalizeError> {
         if self.project_for(project_id).is_none() {
-            return Err(crate::surface::strings::create_lane::err_no_active_project());
+            return Err(FinalizeError::Failed(
+                crate::surface::strings::create_lane::err_no_active_project(),
+            ));
         }
         let new_path = &plan.new_path;
         let is_chat = matches!(initial, InitialPane::AgentChat(_));
@@ -241,22 +235,24 @@ impl Workspace {
                     window,
                     cx,
                 )
-                .map_err(|e| e.to_string())?
+                .map_err(|e| FinalizeError::Failed(e.to_string()))?
             }
-            InitialPane::AgentChat(mode) => {
-                // No source pane (new lane), so open under the
-                // session-sticky default. A brand-new lane has neither a
+            InitialPane::AgentChat(chat) => {
+                let Ok(agent_id) = self.resolve_chat_agent(&chat.agent) else {
+                    self.register_created_lane(plan, project_id, None, reveal, window, cx);
+                    return Err(FinalizeError::AgentUnavailable);
+                };
+                // No source pane (new lane). A brand-new lane has neither a
                 // legacy `remote_cwd` nor a `session_host` yet, so an agent
                 // whose command needs the legacy `{{cwd}}` token parks in
                 // the "no remote path set" error rather than connecting;
                 // every other launch shape resolves to `Local`.
-                let agent_id = self.open_agent_id(requested_agent);
                 self.create_new_agent_chat_pane(
                     agent_id,
                     Some(new_path.clone()),
                     None,
                     None,
-                    mode,
+                    chat.mode,
                     window,
                     cx,
                 )

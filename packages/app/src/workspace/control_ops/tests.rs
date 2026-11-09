@@ -183,9 +183,14 @@ async fn chat_new_on_a_missing_lane_is_target_gone(cx: &mut gpui::TestAppContext
     };
     let result = cx
         .update_window(fixture.window.into(), |_, window, cx| {
-            fixture
-                .workspace
-                .update(cx, |ws, cx| ws.control_chat_new(bogus, None, window, cx))
+            fixture.workspace.update(cx, |ws, cx| {
+                ws.control_chat_new(
+                    bogus,
+                    crate::workspace::ChatOpen::orchestrator_for_test(),
+                    window,
+                    cx,
+                )
+            })
         })
         .expect("window is live");
     assert_eq!(result, Err(ControlError::TargetGone));

@@ -14,9 +14,9 @@
 //! phone's lives at its call site in `remote_ops`, which owns the localized
 //! string.
 //!
-//! Text flattened to one line also loses Unicode format characters (bidi
-//! overrides, zero-width marks): rendered on a card, they could reorder or
-//! hide the words a person is asked to approve.
+//! Text flattened to one line also loses the invisible characters that can
+//! reorder or hide words (bidi controls, zero-width spacers, tag characters):
+//! rendered on a card, they could change what a person is asked to approve.
 //!
 //! GPUI-free.
 
@@ -31,10 +31,11 @@ const TITLE_MAX_CHARS: usize = 80;
 const ORCHESTRATOR_HEAD_CHARS: usize = 2000;
 const ORCHESTRATOR_TAIL_CHARS: usize = 2000;
 
-/// The most of a prompt an approval card quotes. Enough to recognize the
-/// request on a phone screen; the card is one line, and the full text is the
-/// agent's.
-pub const PROMPT_EXCERPT_CHARS: usize = 120;
+/// How much of a prompt's start and end an approval card quotes. Enough to
+/// recognize the request on a phone screen, and the end too, so an
+/// instruction cannot hide behind a harmless opening. The card is one line.
+pub const PROMPT_EXCERPT_HEAD_CHARS: usize = 80;
+pub const PROMPT_EXCERPT_TAIL_CHARS: usize = 40;
 
 /// Fixed English, like every other value in a tool result: the consumer is a
 /// model branching on content, not a person reading their own locale.
@@ -48,6 +49,12 @@ pub fn sanitize_title(raw: &str) -> Option<String> {
     (!clean.is_empty()).then_some(clean)
 }
 
+/// A title someone else wrote, as one line of a card: flattened as
+/// [`one_line`] does and cut to the title bound with a trailing `…`.
+pub fn title_line(raw: &str) -> String {
+    excerpt_line(raw, TITLE_MAX_CHARS)
+}
+
 /// `raw` flattened as [`one_line`] does, cut to `max_chars` characters with
 /// a trailing `…` when it is longer.
 pub fn excerpt_line(raw: &str, max_chars: usize) -> String {
@@ -58,16 +65,22 @@ pub fn excerpt_line(raw: &str, max_chars: usize) -> String {
     }
 }
 
-/// The start of a prompt as an approval card quotes it.
-pub fn prompt_excerpt(raw: &str) -> String {
-    excerpt_line(raw, PROMPT_EXCERPT_CHARS)
+/// A prompt as an approval card quotes it: flattened as [`one_line`] does,
+/// and past the bound its start and end around `elided(hidden_chars)`, the
+/// caller's (localized) marker saying how much was left out.
+pub fn prompt_excerpt(raw: &str, elided: impl FnOnce(usize) -> String) -> String {
+    let line = one_line(raw);
+    match split_ends(&line, PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS) {
+        Some((head, hidden, tail)) => format!("{head}{}{tail}", elided(hidden)),
+        None => line,
+    }
 }
 
-/// Format characters are dropped, control characters become spaces, and
+/// Invisible characters are dropped, control characters become spaces, and
 /// whitespace runs collapse to one space.
-fn one_line(raw: &str) -> String {
+pub fn one_line(raw: &str) -> String {
     raw.chars()
-        .filter(|c| !is_format_char(*c))
+        .filter(|c| !hides_or_reorders(*c))
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect::<String>()
         .split_whitespace()
@@ -75,33 +88,49 @@ fn one_line(raw: &str) -> String {
         .join(" ")
 }
 
-/// Unicode general category `Cf`. std has no category lookup, and the set is
-/// small and stable, so it is listed rather than pulled in as a dependency.
-fn is_format_char(c: char) -> bool {
+/// Bidi controls, which reorder the text after them; zero-width spaces,
+/// invisible operators and the soft hyphen, which hide where words break;
+/// and tag characters, which carry text no one sees but an agent still reads.
+///
+/// ZWNJ/ZWJ (U+200C/U+200D) pass: they cannot reorder or hide a word, and
+/// Persian, Indic scripts and emoji sequences need them. Other blank-looking
+/// characters pass too (Hangul fillers U+115F, U+1160, U+3164, U+FFA0, the
+/// blank Braille pattern U+2800): they are letters or symbols, render as a
+/// gap at most, cannot reorder their neighbours, and dropping them would
+/// corrupt legitimate Hangul and Braille.
+fn hides_or_reorders(c: char) -> bool {
     matches!(
         c,
-        '\u{00AD}'
-            | '\u{0600}'..='\u{0605}'
-            | '\u{061C}'
-            | '\u{06DD}'
-            | '\u{070F}'
-            | '\u{0890}'..='\u{0891}'
-            | '\u{08E2}'
-            | '\u{180E}'
-            | '\u{200B}'..='\u{200F}'
+        '\u{061C}'
+            | '\u{200E}'
+            | '\u{200F}'
             | '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{00AD}'
+            | '\u{180E}'
+            | '\u{200B}'
             | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{206F}'
             | '\u{FEFF}'
-            | '\u{FFF9}'..='\u{FFFB}'
-            | '\u{110BD}'
-            | '\u{110CD}'
-            | '\u{13430}'..='\u{1343F}'
-            | '\u{1BCA0}'..='\u{1BCA3}'
-            | '\u{1D173}'..='\u{1D17A}'
             | '\u{E0001}'
             | '\u{E0020}'..='\u{E007F}'
     )
+}
+
+/// `text`'s first `head` and last `tail` characters, and how many lie
+/// between them; `None` while it fits in `head + tail`, so nothing is cut.
+/// Counts `char`s, so neither end splits a character.
+fn split_ends(text: &str, head: usize, tail: usize) -> Option<(&str, usize, &str)> {
+    let (head_end, _) = text.char_indices().nth(head)?;
+    let tail_start = if tail == 0 {
+        text.len()
+    } else {
+        text.char_indices().rev().nth(tail - 1)?.0
+    };
+    if head_end >= tail_start {
+        return None;
+    }
+    let hidden = text[head_end..tail_start].chars().count();
+    Some((&text[..head_end], hidden, &text[tail_start..]))
 }
 
 /// Keep `text` verbatim while it fits in `head + tail` characters; past that,
@@ -116,23 +145,10 @@ fn is_format_char(c: char) -> bool {
 /// mid-character. Line breaks are preserved — a caller wanting one line wants
 /// [`sanitize_title`].
 pub fn elide_middle(text: &str, head: usize, tail: usize, marker: &str) -> String {
-    let Some((head_end, _)) = text.char_indices().nth(head) else {
-        return text.to_string();
-    };
-    let tail_start = if tail == 0 {
-        text.len()
-    } else {
-        let Some((start, _)) = text.char_indices().rev().nth(tail - 1) else {
-            return text.to_string();
-        };
-        start
-    };
-    if head_end >= tail_start {
-        return text.to_string();
+    match split_ends(text, head, tail) {
+        Some((head, _, tail)) => format!("{head}\n{marker}\n{tail}"),
+        None => text.to_string(),
     }
-    let head = &text[..head_end];
-    let tail = &text[tail_start..];
-    format!("{head}\n{marker}\n{tail}")
 }
 
 /// Bound an agent's answer for a tool result. `None` for text that carries

@@ -54,8 +54,19 @@ pub(in crate::workspace) enum InitialPane {
     /// A shell, as a lane the person makes by hand opens with.
     Terminal,
     /// An Agent chat rooted at the new checkout, as tasks and the control
-    /// surface ask for, with where its session mode comes from.
-    AgentChat(daruda_config::ModeChoice),
+    /// surface ask for.
+    AgentChat(crate::workspace::ChatOpen),
+}
+
+/// Why a created worktree did not open with its first pane.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum FinalizeError {
+    /// Nothing was registered; the message says why, as the create form
+    /// shows it.
+    Failed(String),
+    /// The chat's pinned agent is gone. The lane is registered with nothing
+    /// open, so the worktree on disk is not lost to the person.
+    AgentUnavailable,
 }
 
 /// Counterpart to `CreateWorktreePlan` for the remove path.

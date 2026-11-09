@@ -26,6 +26,14 @@ impl CommandOrigin {
             },
         }
     }
+
+    /// Who the task log and the chat-mode policy record as having asked.
+    pub(crate) fn started_by(self) -> daruda_store::tasks::StartedBy {
+        match self {
+            Self::Phone => daruda_store::tasks::StartedBy::Phone,
+            Self::Orchestrator => daruda_store::tasks::StartedBy::Orchestrator,
+        }
+    }
 }
 
 /// Who a control command answers to: the phone, which always asked, or the
@@ -93,5 +101,16 @@ mod tests {
             assert_eq!(orchestrator(solicited).solicited(), solicited);
         }
         assert!(Caller::Phone.solicited());
+    }
+
+    /// Each origin starts work as itself, matching what its submitter records.
+    #[test]
+    fn every_origin_starts_as_itself() {
+        for caller in [Caller::Phone, Caller::Orchestrator { solicited: false }] {
+            assert_eq!(
+                caller.origin().started_by(),
+                caller.flow_submitter().task_started_by()
+            );
+        }
     }
 }

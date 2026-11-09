@@ -17,11 +17,10 @@ use daruda_store::tasks::{
 use gpui::{App, Context, Window};
 
 use crate::runs::{GlobalTasks, RunsHost, TaskCommitError};
-use crate::workspace::Workspace;
-use crate::workspace::lane_ops::{CreateWorktreePlan, InitialPane, LaneReveal};
+use crate::workspace::lane_ops::{CreateWorktreePlan, FinalizeError, InitialPane, LaneReveal};
 use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::{ChatAgent, ChatOpen, Workspace, mode_for};
 use daruda_chat::view::AgentSessionStatus;
-use daruda_config::ModeChoice;
 
 /// Why a task did not start.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,8 +58,8 @@ pub(crate) enum TaskStartError {
     NotRecorded {
         detail: String,
     },
-    /// The agent a control start's card named was removed before the start
-    /// ran; nothing was recorded or spawned.
+    /// The agent a control start's card named was removed. Before the start
+    /// was recorded, nothing was; after, no pane opened under another agent.
     AgentUnavailable,
     /// The task's flow is not one its lane can run by that name.
     FlowMissing,
@@ -111,10 +110,10 @@ impl TaskStartError {
     fn failure(&self) -> Option<StartFailure> {
         Some(match self {
             Self::NotFound => StartFailure::NotFound,
-            Self::NotBacklog
-            | Self::NotRecorded { .. }
-            | Self::RemoteLane
-            | Self::AgentUnavailable => return None,
+            Self::NotBacklog | Self::NotRecorded { .. } | Self::RemoteLane => return None,
+            // Refused before recording, there is no run to fail; once it was
+            // recorded, the pinned agent went while its pane was opened.
+            Self::AgentUnavailable => StartFailure::AgentMissing,
             Self::ProjectNotOpen => StartFailure::ProjectNotOpen,
             Self::NoGitRepo => StartFailure::NoGitRepo,
             Self::RepoBusy => StartFailure::RepoBusy,
@@ -349,23 +348,28 @@ impl Workspace {
         if task.lifecycle != Lifecycle::Backlog {
             return Err(TaskStartError::NotBacklog);
         }
-        let Requester { reveal, mode } = requester(started_by);
+        let reveal = reveal_for(started_by);
         let route = match &task.spec.flow {
             Some(flow) => StartRoute::Flow(Box::new(
                 self.prepare_task_flow_start(&task, flow, reveal, submitter, cx)?,
             )),
             None => {
-                if !self.pinned_agent_configured(agent.as_deref()) {
-                    return Err(TaskStartError::AgentUnavailable);
-                }
-                let chat = TaskChat {
-                    agent: self.open_agent_id(agent.as_deref()),
-                    mode,
+                // Resolved now, so a desktop start keeps the agent it was
+                // asked under; a pinned one is checked again as its pane opens.
+                let resolved = self
+                    .resolve_chat_agent(&ChatAgent::pinned_or_preferred(agent.clone()))
+                    .map_err(|_| TaskStartError::AgentUnavailable)?;
+                let chat = ChatOpen {
+                    agent: match agent {
+                        Some(pinned) => ChatAgent::Pinned(pinned),
+                        None => ChatAgent::Preferred(Some(resolved.clone())),
+                    },
+                    mode: mode_for(started_by),
                 };
                 match &task.spec.run_in {
                     // An existing lane needs no git repo, lock or checkout.
                     TaskRunIn::ExistingLane { path } => StartRoute::Existing {
-                        start: self.prepare_existing_lane_start(path, &chat.agent, reveal)?,
+                        start: self.prepare_existing_lane_start(path, &resolved, reveal)?,
                         chat,
                     },
                     TaskRunIn::NewWorktree => StartRoute::New {
@@ -484,7 +488,7 @@ impl Workspace {
     fn create_task_worktree(
         &mut self,
         start: WorktreeStart,
-        chat: TaskChat,
+        chat: ChatOpen,
         exec: ExecutionRef,
         answer: Answer,
         window: &mut Window,
@@ -531,13 +535,19 @@ impl Workspace {
                                 ws.finalize_create_lane_as(
                                     plan.clone(),
                                     project_id,
-                                    InitialPane::AgentChat(chat.mode.clone()),
-                                    Some(&chat.agent),
+                                    InitialPane::AgentChat(chat.clone()),
                                     reveal,
                                     window,
                                     cx,
                                 )
-                                .map_err(|detail| TaskStartError::FinalizeFailed { detail })
+                                .map_err(|e| match e {
+                                    FinalizeError::Failed(detail) => {
+                                        TaskStartError::FinalizeFailed { detail }
+                                    }
+                                    FinalizeError::AgentUnavailable => {
+                                        TaskStartError::AgentUnavailable
+                                    }
+                                })
                             })
                             .and_then(|pane| {
                                 let dispatched = ws.dispatch_task_to_chat(
@@ -714,47 +724,25 @@ pub(super) struct WorktreeStart {
     pub(super) reveal: LaneReveal,
 }
 
-/// How a start's chat meets the person, by who asked for it.
-#[derive(Debug, PartialEq, Eq)]
-struct Requester {
-    reveal: LaneReveal,
-    /// Unused by a flow, whose nodes run in the flow file's own modes.
-    mode: ModeChoice,
-}
-
 /// Only a start made at this window brings its lane forward. One the phone
 /// or the orchestrator asked for runs behind the view the person is using —
-/// often the orchestrator's own tab, which a lane switch would take down —
-/// and in the agent's delegated mode, since nobody there answers a prompt.
-fn requester(started_by: StartedBy) -> Requester {
+/// often the orchestrator's own tab, which a lane switch would take down.
+fn reveal_for(started_by: StartedBy) -> LaneReveal {
     match started_by {
-        StartedBy::Desktop => Requester {
-            reveal: LaneReveal::Foreground,
-            mode: ModeChoice::FollowDefault,
-        },
-        StartedBy::Phone | StartedBy::Orchestrator => Requester {
-            reveal: LaneReveal::Background,
-            mode: ModeChoice::FollowDelegated,
-        },
+        StartedBy::Desktop => LaneReveal::Foreground,
+        StartedBy::Phone | StartedBy::Orchestrator => LaneReveal::Background,
     }
-}
-
-/// The chat a start opens: its agent, resolved once as the start is
-/// checked — a control start's card already named it — and its mode.
-pub(super) struct TaskChat {
-    pub(super) agent: String,
-    pub(super) mode: ModeChoice,
 }
 
 /// Where a recorded start continues.
 enum StartRoute {
     Existing {
         start: super::task_existing_lane_ops::ExistingLaneStart,
-        chat: TaskChat,
+        chat: ChatOpen,
     },
     New {
         start: WorktreeStart,
-        chat: TaskChat,
+        chat: ChatOpen,
     },
     /// Boxed because a flow start carries a whole worktree start plus its
     /// inputs, about twice the other routes once Windows paths widen it.

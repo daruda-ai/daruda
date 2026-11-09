@@ -3,6 +3,7 @@
 //! and restarts — and no chat a person opens.
 
 use super::*;
+use crate::workspace::ChatOpen;
 use crate::workspace::main_area::pane::TabEntry;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 use daruda_config::{AgentDefinition, ModeChoice, SessionPreferences};
@@ -79,7 +80,9 @@ fn a_control_chat_starts_delegated_and_a_menu_chat_does_not(cx: &mut TestAppCont
     let (control, menu) = cx
         .update_window(window.into(), |_, window, cx| {
             workspace.update(cx, |ws, cx| {
-                let control = ws.control_chat_new(ws.active, None, window, cx).unwrap();
+                let control = ws
+                    .control_chat_new(ws.active, ChatOpen::orchestrator_for_test(), window, cx)
+                    .unwrap();
                 let agent = ws.mirrors.agents[0].id.clone();
                 ws.open_agent_chat_pane_with_agent(agent, window, cx);
                 (control.pane, ws.active_runtime().focused_pane_id)
@@ -123,7 +126,13 @@ fn a_control_worktree_opens_its_chat_delegated(cx: &mut TestAppContext) {
                 )
                 .unwrap();
                 let (_, pane) = ws
-                    .control_lane_finalize(plan, project, None, window, cx)
+                    .control_lane_finalize(
+                        plan,
+                        project,
+                        ChatOpen::orchestrator_for_test(),
+                        window,
+                        cx,
+                    )
                     .unwrap();
                 pane.pane
             })
@@ -159,7 +168,8 @@ fn a_reopened_task_chat_follows_who_reopened_it(cx: &mut TestAppContext) {
                     ws.run_task_in_chat_for_test(&id, pane_id, cx);
                     ws.active_runtime_mut().panes.retain(|p| p.id != pane_id);
                     let reopened = if control {
-                        ws.control_task_open(&id, window, cx).unwrap()
+                        ws.control_task_open(&id, ModeChoice::FollowDelegated, window, cx)
+                            .unwrap()
                     } else {
                         ws.open_task_chat(&id, window, cx);
                         ws.active_runtime().focused_pane_id

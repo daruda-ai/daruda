@@ -11,11 +11,13 @@ use crate::surface::strings as s;
 
 use super::announce_chat;
 
-/// A task's title, for the sentence that asks about it.
+/// A task's title, for the sentence that asks or tells about it: written by
+/// whoever created the task, so flattened to a line that cannot reorder or
+/// hide the rest of the sentence.
 pub(super) fn task_title(task: &str, cx: &App) -> String {
     cx.global::<GlobalTasks>()
         .get(task)
-        .map(|t| t.spec.title.clone())
+        .map(|t| daruda_control_types::agent_text::title_line(&t.spec.title))
         .unwrap_or_default()
 }
 
@@ -122,10 +124,12 @@ impl PendingTaskStart {
     }
 }
 
-/// Bring up the chat `task` ran in and announce it to remote channels.
+/// Bring up the chat `task` ran in and announce it to remote channels. A
+/// new pane takes the mode the caller's chats take.
 pub(crate) fn open_task(task: String, caller: Caller, cx: &mut App) -> ControlOutcome {
+    let mode = crate::workspace::mode_for(caller.origin().started_by());
     let chat = in_task_window(&task, cx, |ws, window, cx| {
-        let pane = ws.control_task_open(&task, window, cx)?;
+        let pane = ws.control_task_open(&task, mode.clone(), window, cx)?;
         Ok(PaneRef {
             workspace: ws.uuid(),
             pane,

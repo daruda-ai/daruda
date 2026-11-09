@@ -39,6 +39,7 @@ mod palette_agent;
 mod pane_menu;
 mod pane_on_screen;
 mod pane_scrollbar_press;
+mod pinned_agent;
 mod ports;
 // Disabled: drives save_state/restore_state against removed legacy
 // WorkspaceState/ProjectState types; needs a rewrite for the UUID-keyed schema.

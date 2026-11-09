@@ -2404,7 +2404,10 @@ control:
   approval_chat_new: "daruda wants to open another chat in %{path} with %{agent}. Allow?"
   # The agent a delegated chat opens with, and the permission mode it asks
   # for; `mode` is the vocabulary's name or approval_mode_agent_default.
-  approval_agent: "%{agent} (permission mode: %{mode})"
+  approval_agent: "%{agent} (requested permission mode: %{mode})"
+  # Stands between the start and the end of a long quoted prompt; `n` is how
+  # many characters of it the card leaves out.
+  approval_prompt_elided: " … (+%{n} characters) … "
   approval_mode_agent_default: "the agent's default"
   approval_allow: "Allow"
   approval_approved_desktop: "Approved on desktop"
@@ -2453,7 +2456,7 @@ control:
   error_lane_name_invalid: "That is not a usable branch name."
   error_task_branch_taken: "Another worktree already has that branch checked out."
   error_approvals_pending: "Too many approvals are already waiting. Answer one first."
-  error_agent_unavailable: "The agent that approval named is no longer set up, so nothing was opened."
+  error_agent_unavailable: "The agent that approval named is no longer set up, so no chat was opened."
   error_approval_unavailable: "daruda could not ask for approval — no desktop or remote channel is available."
   error_lane_create_busy: "A worktree is already being created in that repository. Try again in a moment."
   error_self_target_refused: "That would have the agent prompt itself."
@@ -2474,9 +2477,14 @@ control:
   approval_flow_no_agents: "commands only, no agents"
   # `agent` is approval_agent; `prompt` a one-line excerpt of the task's.
   approval_task_start: "daruda wants to start the task %{title} with %{agent}, prompting “%{prompt}”. Allow?"
+  # A task whose prompt is empty.
+  approval_task_start_no_prompt: "daruda wants to start the task %{title} with %{agent}. Allow?"
   # `flow` is one of the approval_task_as_flow phrases.
   approval_task_start_flow: "daruda wants to start the task %{title} %{flow}. Allow?"
+  # The task's chat is already open, and keeps its own mode.
   approval_task_open: "daruda wants to open the chat of the task %{title}. Allow?"
+  # The task's chat reopens in a new pane; `agent` is approval_agent.
+  approval_task_open_new: "daruda wants to reopen the chat of the task %{title} with %{agent}. Allow?"
   # A flow run the app quit or a crash cut off: `passed` of its `total`
   # steps had passed, and the step it was on runs again from the start.
   approval_flow_resume: "daruda wants to resume the flow %{name} from where it stopped (%{passed} of %{total} steps done; any step that was running starts over). Allow?"

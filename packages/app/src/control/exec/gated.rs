@@ -75,15 +75,13 @@ impl Asked {
                 name,
                 base_ref,
                 agent: in_project_window(workspace, project, cx, |ws, _, _| {
-                    Ok(ws.control_open_agent_id(agent.as_deref()))
+                    Ok(ws.open_agent_id(agent.as_deref()))
                 })?,
                 prompt,
             },
             GatedCommand::ChatNew { lane, agent } => Self::ChatNew {
                 lane,
-                agent: in_lane_window(lane, cx, |ws, _, _| {
-                    Ok(ws.control_open_agent_id(agent.as_deref()))
-                })?,
+                agent: in_lane_window(lane, cx, |ws, _, _| Ok(ws.open_agent_id(agent.as_deref())))?,
             },
             GatedCommand::TaskCreate {
                 workspace,
@@ -95,7 +93,7 @@ impl Asked {
                 task,
             },
             GatedCommand::TaskStart { task } => Self::TaskStart {
-                agent: in_task_window(&task, cx, |ws, _, _| Ok(ws.control_open_agent_id(None)))?,
+                agent: in_task_window(&task, cx, |ws, _, _| Ok(ws.open_agent_id(None)))?,
                 task,
             },
             GatedCommand::TaskOpen { task } => Self::TaskOpen { task },
@@ -137,7 +135,9 @@ fn run_gated_with(
     if let Err(refusal) = guard_gated(&asked, cx) {
         return Dispatch::Ready(Err(refusal));
     }
-    let summary = match approval_summary(&asked, cx) {
+    // The mode every chat this command opens takes, named on its card.
+    let mode = crate::workspace::mode_for(origin.started_by());
+    let summary = match approval_summary(&asked, &mode, cx) {
         Ok(summary) => summary,
         Err(refusal) => return Dispatch::Ready(Err(refusal)),
     };
@@ -268,10 +268,15 @@ fn task_creates_lane(task: &daruda_store::tasks::TaskRecord) -> bool {
 ///
 /// A target that cannot be named is refused rather than asked about: a card
 /// with the place left blank asks the person to approve without saying where.
-fn approval_summary(asked: &Asked, cx: &mut App) -> Result<String, ControlError> {
-    use daruda_control_types::agent_text::prompt_excerpt;
-    use disclosure::agent_phrase;
-    // A chat's card names its pinned agent and that agent's delegated mode.
+/// A chat's card names its pinned agent and the mode `mode` resolves to.
+/// Titles and prompts someone else wrote pass through `agent_text` first.
+fn approval_summary(
+    asked: &Asked,
+    mode: &daruda_config::ModeChoice,
+    cx: &mut App,
+) -> Result<String, ControlError> {
+    use daruda_control_types::agent_text::title_line;
+    use disclosure::{agent_phrase, prompt_phrase};
     Ok(match asked {
         Asked::LaneCreate {
             workspace,
@@ -282,12 +287,10 @@ fn approval_summary(asked: &Asked, cx: &mut App) -> Result<String, ControlError>
             ..
         } => {
             let agent = in_project_window(*workspace, *project, cx, |ws, _, _| {
-                Ok(agent_phrase(&ws.control_delegated_disclosure(agent)))
+                Ok(agent_phrase(&ws.control_chat_disclosure(agent, mode)))
             })?;
-            match prompt {
-                Some(prompt) => {
-                    s::control::approval_lane_create_prompt(name, agent, prompt_excerpt(prompt))
-                }
+            match prompt.as_deref().and_then(prompt_phrase) {
+                Some(prompt) => s::control::approval_lane_create_prompt(name, agent, prompt),
                 None => s::control::approval_lane_create(name, agent),
             }
         }
@@ -297,7 +300,7 @@ fn approval_summary(asked: &Asked, cx: &mut App) -> Result<String, ControlError>
                     ws.control_project_name(lane.project),
                     ws.control_lane_name(lane.lane_ref()),
                 );
-                Ok((path, agent_phrase(&ws.control_delegated_disclosure(agent))))
+                Ok((path, agent_phrase(&ws.control_chat_disclosure(agent, mode))))
             })?;
             s::control::approval_chat_new(&path, agent)
         }
@@ -334,7 +337,7 @@ fn approval_summary(asked: &Asked, cx: &mut App) -> Result<String, ControlError>
                     Ok((ws.control_project_name(*project), location, flow))
                 })?;
             let surface = flow.unwrap_or_else(s::control::approval_task_as_chat);
-            s::control::approval_task_create(task.title.trim(), &name, &location, &surface)
+            s::control::approval_task_create(title_line(&task.title), &name, &location, &surface)
         }
         Asked::TaskStart { task, agent } => match task_flow_summary(task, cx) {
             Some(flow) => s::control::approval_task_start_flow(task_title(task, cx), &flow),
@@ -342,15 +345,30 @@ fn approval_summary(asked: &Asked, cx: &mut App) -> Result<String, ControlError>
                 let prompt = cx
                     .global::<GlobalTasks>()
                     .get(task)
-                    .map(|t| prompt_excerpt(&t.spec.prompt))
-                    .unwrap_or_default();
+                    .and_then(|t| prompt_phrase(&t.spec.prompt));
                 let agent = in_task_window(task, cx, |ws, _, _| {
-                    Ok(agent_phrase(&ws.control_delegated_disclosure(agent)))
+                    Ok(agent_phrase(&ws.control_chat_disclosure(agent, mode)))
                 })?;
-                s::control::approval_task_start(task_title(task, cx), agent, prompt)
+                match prompt {
+                    Some(prompt) => {
+                        s::control::approval_task_start(task_title(task, cx), agent, prompt)
+                    }
+                    None => s::control::approval_task_start_no_prompt(task_title(task, cx), agent),
+                }
             }
         },
-        Asked::TaskOpen { task } => s::control::approval_task_open(task_title(task, cx)),
+        // A chat already open keeps its own mode; only a new pane takes `mode`.
+        Asked::TaskOpen { task } => {
+            let agent = in_task_window(task, cx, |ws, _, cx| {
+                Ok(ws
+                    .task_chat_reopen_agent(task, cx)
+                    .map(|agent| agent_phrase(&ws.control_chat_disclosure(&agent, mode))))
+            })?;
+            match agent {
+                Some(agent) => s::control::approval_task_open_new(task_title(task, cx), agent),
+                None => s::control::approval_task_open(task_title(task, cx)),
+            }
+        }
         Asked::FlowResume(target) => flow_resume::summary(target, cx)?,
     })
 }
@@ -386,7 +404,12 @@ async fn perform_gated(
         Asked::ChatNew { lane, agent } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {
-                    ws.control_chat_new(lane.lane_ref(), Some(agent.clone()), window, cx)
+                    ws.control_chat_new(
+                        lane.lane_ref(),
+                        pinned_chat(agent.clone(), caller),
+                        window,
+                        cx,
+                    )
                 })
             })
             .map(|target| (target, None)),
@@ -401,7 +424,7 @@ async fn perform_gated(
             (workspace, project),
             name,
             base_ref,
-            Some(agent),
+            pinned_chat(agent, caller),
             prompt,
             caller.origin(),
             cx,
@@ -425,6 +448,15 @@ async fn perform_gated(
             agent,
         },
     })
+}
+
+/// The chat a card approved: the agent it named, in the mode its caller's
+/// chats take.
+fn pinned_chat(agent: String, caller: super::Caller) -> crate::workspace::ChatOpen {
+    crate::workspace::ChatOpen {
+        agent: crate::workspace::ChatAgent::Pinned(agent),
+        mode: crate::workspace::mode_for(caller.origin().started_by()),
+    }
 }
 
 /// Name the new chat for remote channels, handing the label back for the
@@ -465,7 +497,7 @@ async fn create_lane(
     ),
     name: String,
     base_ref: Option<String>,
-    agent: Option<String>,
+    chat: crate::workspace::ChatOpen,
     prompt: Option<String>,
     origin: super::CommandOrigin,
     cx: &mut gpui::AsyncApp,
@@ -477,7 +509,7 @@ async fn create_lane(
                 project,
                 name.clone(),
                 base_ref.clone(),
-                agent.clone(),
+                chat.clone(),
                 window,
                 cx,
             ))

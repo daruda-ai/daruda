@@ -281,16 +281,7 @@ impl Workspace {
             .ok_or(TaskChatError::NotFound)?;
         let execution = task.execution.ok_or(TaskChatError::NoSession)?;
         let title = task.spec.title;
-        let existing = self.main_area.runtimes.iter().find_map(|(lane, rt)| {
-            rt.panes.iter().find_map(|pane| {
-                let chat = pane.agent_chat_content()?;
-                let owned = self
-                    .task_chat_execution(pane.id, cx)
-                    .is_some_and(|exec| exec.task_id == task_id);
-                (owned || matches_session(chat, &execution, cx)).then_some((*lane, pane.id))
-            })
-        });
-        if let Some((lane, pane)) = existing {
+        if let Some((lane, pane)) = self.open_task_chat_pane(task_id, &execution, cx) {
             self.reveal_task_chat(lane, pane, window, cx);
             return Ok(pane);
         }
@@ -341,6 +332,40 @@ impl Workspace {
         self.reveal_task_chat(lane, pane_id, window, cx);
         self.mutate_durable(cx, |_, _| {});
         Ok(pane_id)
+    }
+
+    /// The pane already showing `task_id`'s run, which a reopen brings up
+    /// as it is rather than opening another.
+    fn open_task_chat_pane(
+        &self,
+        task_id: &str,
+        execution: &TaskExecution,
+        cx: &gpui::App,
+    ) -> Option<(LaneRef, PaneId)> {
+        self.main_area.runtimes.iter().find_map(|(lane, rt)| {
+            rt.panes.iter().find_map(|pane| {
+                let chat = pane.agent_chat_content()?;
+                let owned = self
+                    .task_chat_execution(pane.id, cx)
+                    .is_some_and(|exec| exec.task_id == task_id);
+                (owned || matches_session(chat, execution, cx)).then_some((*lane, pane.id))
+            })
+        })
+    }
+
+    /// The agent a reopen of `task_id`'s chat would open a new pane under,
+    /// or `None` when it would bring up a pane already open (which keeps
+    /// its own mode) or open nothing at all.
+    pub(crate) fn task_chat_reopen_agent(&self, task_id: &str, cx: &gpui::App) -> Option<String> {
+        let execution = cx
+            .global::<GlobalTasks>()
+            .get(task_id)?
+            .execution
+            .as_ref()?;
+        execution.session_id.as_ref()?;
+        self.open_task_chat_pane(task_id, execution, cx)
+            .is_none()
+            .then(|| execution.agent_id.clone())
     }
 
     fn reveal_task_chat(
