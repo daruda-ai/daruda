@@ -160,9 +160,8 @@ impl Workspace {
         // outcome and the completion signals fire exactly once.
         // A still-running subagent leaves the pane busy, so the
         // firing defers to the pulse tick that catches the
-        // quiescence settle. AgentChat-surfaced tasks reconcile
-        // off this edge (they never write the status-file hooks
-        // the Terminal surface uses).
+        // quiescence settle. Task runs in chats settle off this
+        // edge; chats write no status-file hooks.
         let edge = view.update(cx, |v, cx| v.tick_activity(std::time::Instant::now(), cx));
         if let Some(outcome) = edge {
             self.fire_activity_completion(pane_id, outcome, cx);

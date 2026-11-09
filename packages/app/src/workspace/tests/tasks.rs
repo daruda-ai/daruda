@@ -69,7 +69,7 @@ fn seed_cli_task(
 }
 
 /// Insert a running task with one attached session and return the task
-/// id. Shared fixture for the escalation-counter tests.
+/// id. Fixture for the task-deletion test.
 fn seed_running_task(
     workspace: &gpui::Entity<crate::workspace::Workspace>,
     cx: &mut TestAppContext,

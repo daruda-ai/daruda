@@ -509,9 +509,11 @@ pub struct SerializedAgentChatContent {
     pub picked_mode_id: Option<String>,
     /// Without a pick, whether this pane's mode follows its agent's
     /// delegated mode rather than its `default_mode`: a chat the phone or the
-    /// orchestrator asked for. A pick wins over it. A separate key rather than
-    /// a reshaped `picked_mode_id`, so a build that predates it reads such a
-    /// pane as following `default_mode` — the prompting side — not as a pick.
+    /// orchestrator asked for. The writer never sets it beside a pick; a
+    /// reader given both lets the pick win. A separate key rather than a
+    /// reshaped `picked_mode_id`, so a build that predates it still reads
+    /// picks and reads such a pane as following `default_mode` — the
+    /// prompting side — not as a pick.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub follows_delegated_mode: bool,
     /// Model id this pane's user explicitly picked. Persisted so the next

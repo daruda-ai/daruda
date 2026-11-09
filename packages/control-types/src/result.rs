@@ -529,7 +529,7 @@ pub enum ControlResult {
         title: String,
     },
     /// The task is running: in `lane`, and in `chat` when it runs as an
-    /// agent chat. A terminal task has no chat to address.
+    /// agent chat. A task run as a flow has no chat to address.
     TaskStarted {
         handle: RunHandle,
         task: String,

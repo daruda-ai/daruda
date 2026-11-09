@@ -22,9 +22,8 @@ impl Workspace {
     /// reactivates the existing tab. Delegates to `open_pane_file_view`,
     /// which derives the pane's git status itself.
     ///
-    /// `intent` is passed through rather than fixed here: the Files panel's
-    /// own rows preview or commit, while opening a task's prompt file is
-    /// navigation into that file.
+    /// `intent` is passed through rather than fixed here: selecting or clicking
+    /// a Files row previews, while Enter on a row commits the tab.
     pub(in crate::workspace) fn open_files_entry(
         &mut self,
         wt_ref: LaneRef,

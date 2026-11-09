@@ -16,11 +16,9 @@ use crate::project::ProjectUuid;
 /// one from, so the loader drops its tasks rather than migrating them.
 pub const SCHEMA_VERSION: u32 = 2;
 
-/// Number of `PostToolUseFailure` hook events on the same Claude
-/// session before daruda escalates the owning task to `Error`. The
-/// threshold is intentionally a small integer — the goal is to catch
-/// runaway tool failures (rate-limited Bash, repeated permission
-/// denials) without overreacting to a single slip.
+/// The `PostToolUseFailure` count named in the label of a task the log
+/// records as ended by `ErrorCause::ToolFailures`. Daruda does not count
+/// failures; this value only words those recorded errors.
 pub const TASK_TOOL_USE_FAILURE_THRESHOLD: u32 = 5;
 
 /// ULID encoded as string — sortable by creation time, globally unique
