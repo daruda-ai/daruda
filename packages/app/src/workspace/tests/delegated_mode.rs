@@ -103,12 +103,10 @@ fn a_control_chat_starts_delegated_and_a_menu_chat_does_not(cx: &mut TestAppCont
 /// `worktree_create` opens its chat delegated even without a named agent.
 #[gpui::test]
 fn a_control_worktree_opens_its_chat_delegated(cx: &mut TestAppContext) {
-    if !crate::lane::git::has_git() {
-        return;
-    }
     let temp = tempfile::tempdir().unwrap();
-    super::tasks::git_repo(temp.path());
-    let project = daruda_store::project::Project::from_path(temp.path());
+    let fake = crate::test_support::fake_git(cx);
+    let root = super::tasks::fake_repo(&fake, &temp.path().join("repo"));
+    let project = daruda_store::project::Project::from_path(&root);
     let (window, workspace) = build_workspace_with(cx, &config_with(claude(None)), Some(project));
     workspace.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
     cx.run_until_parked();
@@ -118,13 +116,8 @@ fn a_control_worktree_opens_its_chat_delegated(cx: &mut TestAppContext) {
             workspace.update(cx, |ws, cx| {
                 let project = ws.projects[0].id;
                 let plan = ws.control_lane_plan(project, "delegated", None).unwrap();
-                crate::lane::git::add_lane(
-                    &plan.repo_root,
-                    &plan.new_path,
-                    Some(&plan.branch),
-                    plan.base_ref.as_deref(),
-                )
-                .unwrap();
+                // `control_lane_finalize` registers a worktree already on disk.
+                super::tasks::fake_lane(&fake, &plan.new_path, &plan.branch);
                 let (_, pane) = ws
                     .control_lane_finalize(
                         plan,

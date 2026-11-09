@@ -58,7 +58,7 @@ fn push_project_in_memory(ws: &mut Workspace, root: &str) -> ProjectId {
     let mut p = crate::project::Project::bootstrap(
         id,
         std::path::PathBuf::from(root),
-        &crate::lane::git::SystemGit,
+        &crate::lane::git::FakeGit::new(),
     );
     p.tab_order = ws.projects.len() as u32;
     ws.projects.push(p);

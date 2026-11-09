@@ -10,6 +10,7 @@ use daruda_store::tasks::machine::ErrorCause;
 use daruda_store::tasks::{CliProcessState, Lifecycle, SessionEndReason};
 use gpui::{AppContext as _, TestAppContext};
 
+use crate::lane::git::{FakeGit, FakeRepo, GitCall};
 use crate::runs::GlobalTasks;
 use crate::runs::seed::{SeedEnd, SeedRun};
 
@@ -230,35 +231,41 @@ fn subtask_ops_add_toggle_rename_and_delete(cx: &mut TestAppContext) {
     assert_eq!(t[0].title, "new title");
 }
 
-pub(in crate::workspace::tests) fn git_repo(dir: &std::path::Path) {
-    for args in [
-        &["init", "-q", "-b", "main"][..],
-        &["config", "user.email", "daruda@test"],
-        &["config", "user.name", "daruda"],
-        &["commit", "-q", "--allow-empty", "-m", "initial"],
-    ] {
-        let status = daruda_core::process::command("git")
-            .current_dir(dir)
-            .args(args)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed in {dir:?}");
-    }
+/// Register a repository on `main` at `dir`; answers its canonical root,
+/// the form real git reports lane paths in.
+pub(in crate::workspace::tests) fn fake_repo(
+    fake: &FakeGit,
+    dir: &std::path::Path,
+) -> std::path::PathBuf {
+    std::fs::create_dir_all(dir).unwrap();
+    let root = daruda_core::path::canonicalize(dir).unwrap();
+    fake.add_repo(FakeRepo::at(&root).branch("main"));
+    root
+}
+
+/// What `git worktree add` would leave for a lane the app is about to make:
+/// its directory, answering as a repository on `branch`.
+pub(in crate::workspace::tests) fn fake_lane(fake: &FakeGit, path: &std::path::Path, branch: &str) {
+    std::fs::create_dir_all(path).unwrap();
+    fake.add_repo(FakeRepo::at(path).branch(branch));
+}
+
+/// The `git worktree add` calls the code under test asked for.
+pub(in crate::workspace::tests) fn added_lanes(fake: &FakeGit) -> Vec<GitCall> {
+    fake.calls()
+        .into_iter()
+        .filter(|call| matches!(call, GitCall::AddLane { .. }))
+        .collect()
 }
 
 /// A task's worktree is made in the repository of the project it belongs
 /// to, not in whichever project the window happens to be showing.
 #[gpui::test]
 fn a_task_starts_in_its_own_project_while_another_is_active(cx: &mut TestAppContext) {
-    if !crate::lane::git::has_git() {
-        return;
-    }
     let temp = tempfile::tempdir().unwrap();
-    let (a_root, b_root) = (temp.path().join("a"), temp.path().join("b"));
-    for root in [&a_root, &b_root] {
-        std::fs::create_dir_all(root).unwrap();
-        git_repo(root);
-    }
+    let fake = crate::test_support::fake_git(cx);
+    let a_root = fake_repo(&fake, &temp.path().join("a"));
+    let b_root = fake_repo(&fake, &temp.path().join("b"));
     let (window, ws) = super::build_workspace_with(
         cx,
         &daruda_config::Config::default(),
@@ -280,6 +287,7 @@ fn a_task_starts_in_its_own_project_while_another_is_active(cx: &mut TestAppCont
                         .expect("A is a git project"),
                     &task.branch_name,
                 );
+                fake_lane(&fake, &expected, &task.branch_name);
                 let id = crate::runs::seed::task(task, None, cx);
                 let rx =
                     ws.begin_task_start(&id, daruda_store::tasks::StartedBy::Desktop, window, cx);
@@ -294,6 +302,14 @@ fn a_task_starts_in_its_own_project_while_another_is_active(cx: &mut TestAppCont
         .expect("answered once git ran")
         .expect("started");
     assert_eq!(started.worktree, expected);
+    assert!(
+        matches!(
+            added_lanes(&fake).as_slice(),
+            [GitCall::AddLane { repo, new_path, .. }] if *repo == a_root && *new_path == expected
+        ),
+        "the worktree is added in A's repository: {:?}",
+        fake.calls()
+    );
     ws.read_with(cx, |_, cx| {
         let task = cx.global::<GlobalTasks>().get(&task_id).unwrap();
         assert_eq!(
@@ -336,16 +352,14 @@ fn focusing_a_task_lane_crosses_projects(cx: &mut TestAppContext) {
 fn start_new_worktree_task(
     started_by: daruda_store::tasks::StartedBy,
     cx: &mut TestAppContext,
-) -> Option<NewWorktreeStart> {
-    if !crate::lane::git::has_git() {
-        return None;
-    }
+) -> NewWorktreeStart {
     let temp = tempfile::tempdir().unwrap();
-    git_repo(temp.path());
+    let fake = crate::test_support::fake_git(cx);
+    let root = fake_repo(&fake, &temp.path().join("repo"));
     let (window, ws) = super::build_workspace_with(
         cx,
         &daruda_config::Config::default(),
-        Some(daruda_store::project::Project::from_path(temp.path())),
+        Some(daruda_store::project::Project::from_path(&root)),
     );
     ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
     cx.run_until_parked();
@@ -365,6 +379,9 @@ fn start_new_worktree_task(
                     .unwrap();
                 assert!(ws.show_orchestrator_tab(window, cx));
                 let task = crate::runs::seed::spec(ws.projects[0].uuid, "Elsewhere");
+                let checkout =
+                    crate::workspace::lane_ops::lane_checkout_path(&root, &task.branch_name);
+                fake_lane(&fake, &checkout, &task.branch_name);
                 let id = crate::runs::seed::task(task, None, cx);
                 let rx = ws.begin_task_start(&id, started_by, window, cx);
                 (id, ws.active, orchestrator, rx)
@@ -373,6 +390,14 @@ fn start_new_worktree_task(
         .unwrap();
     cx.run_until_parked();
     let started = rx.try_recv().expect("answered").expect("started");
+    assert!(
+        matches!(
+            added_lanes(&fake).as_slice(),
+            [GitCall::AddLane { new_path, .. }] if *new_path == started.worktree
+        ),
+        "{:?}",
+        fake.calls()
+    );
     let lifecycle = ws.read_with(cx, |_, cx| {
         cx.global::<GlobalTasks>()
             .get(&task_id)
@@ -390,7 +415,7 @@ fn start_new_worktree_task(
     assert_eq!(requested.len(), 1);
     assert_eq!(requested[0].0, pane);
     let modes = requested[0].1.modes.clone();
-    Some(ws.read_with(cx, |ws, cx| {
+    ws.read_with(cx, |ws, cx| {
         let lane = ws.lane_ref_at(&started.worktree).expect("lane registered");
         let rt = ws.main_area.runtimes.get(&lane).expect("lane runtime");
         assert!(rt.panes.iter().any(|p| p.id == pane));
@@ -410,7 +435,7 @@ fn start_new_worktree_task(
                 && active.focused_pane_id == orchestrator,
             modes,
         }
-    }))
+    })
 }
 
 struct NewWorktreeStart {
@@ -426,10 +451,7 @@ struct NewWorktreeStart {
 /// but the window stays on the orchestrator's tab the person is using.
 #[gpui::test]
 fn an_orchestrator_started_worktree_does_not_take_the_window(cx: &mut TestAppContext) {
-    let Some(start) = start_new_worktree_task(daruda_store::tasks::StartedBy::Orchestrator, cx)
-    else {
-        return;
-    };
+    let start = start_new_worktree_task(daruda_store::tasks::StartedBy::Orchestrator, cx);
     assert_ne!(start.lane, start.before);
     assert_eq!(start.after, start.before, "the active lane stays");
     assert!(start.orchestrator_in_front);
@@ -443,9 +465,7 @@ fn an_orchestrator_started_worktree_does_not_take_the_window(cx: &mut TestAppCon
 /// Started from this window's Tasks page, the new worktree is brought up.
 #[gpui::test]
 fn a_desktop_started_worktree_becomes_the_active_lane(cx: &mut TestAppContext) {
-    let Some(start) = start_new_worktree_task(daruda_store::tasks::StartedBy::Desktop, cx) else {
-        return;
-    };
+    let start = start_new_worktree_task(daruda_store::tasks::StartedBy::Desktop, cx);
     assert_eq!(start.after, start.lane);
     assert!(!start.orchestrator_in_front);
     assert!(

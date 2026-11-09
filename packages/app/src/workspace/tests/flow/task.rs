@@ -1,6 +1,7 @@
 //! A task that runs as a flow, from its start to the task's end.
 
 use super::*;
+use crate::lane::git::GitCall;
 use crate::runs::GlobalTasks;
 use daruda_store::tasks::{LifecycleKind, StartedBy, TaskFlow, TaskRunIn};
 
@@ -173,19 +174,18 @@ async fn stopping_a_flow_tasks_run_stops_the_task(cx: &mut TestAppContext) {
 /// run is what works there. The flow is read from the lane it branches from.
 #[gpui::test]
 async fn a_flow_task_runs_in_a_new_worktree_of_its_own(cx: &mut TestAppContext) {
-    if !crate::lane::git::has_git() {
-        return;
-    }
+    use super::super::tasks::{added_lanes, fake_lane, fake_repo};
     cx.executor().allow_parking();
-    let repo = tempfile::tempdir().unwrap();
-    super::super::tasks::git_repo(repo.path());
-    let flows = crate::workspace::flow_paths::flows_dir(repo.path());
+    let temp = tempfile::tempdir().unwrap();
+    let fake = crate::test_support::fake_git(cx);
+    let repo = fake_repo(&fake, &temp.path().join("repo"));
+    let flows = crate::workspace::flow_paths::flows_dir(&repo);
     std::fs::create_dir_all(&flows).unwrap();
     std::fs::write(flows.join("ship.yaml"), FLOW).unwrap();
     let built = build_workspace_with(
         cx,
         &daruda_config::Config::default(),
-        Some(daruda_store::project::Project::from_path(repo.path())),
+        Some(daruda_store::project::Project::from_path(&repo)),
     );
     let (wh, ws) = registered(cx, built);
     ws.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
@@ -198,6 +198,8 @@ async fn a_flow_task_runs_in_a_new_worktree_of_its_own(cx: &mut TestAppContext) 
             profile: None,
             input: Some("pr".into()),
         });
+        let checkout = crate::workspace::lane_ops::lane_checkout_path(&repo, &spec.branch_name);
+        fake_lane(&fake, &checkout, &spec.branch_name);
         crate::runs::seed::task(spec, None, cx)
     });
     let answer = start(&ws, wh, &id, cx);
@@ -207,7 +209,15 @@ async fn a_flow_task_runs_in_a_new_worktree_of_its_own(cx: &mut TestAppContext) 
         kind(&id, cx)
     );
     let started = answer.try_recv().expect("answered").expect("started");
-    assert_ne!(started.worktree, repo.path());
+    assert_ne!(started.worktree, repo);
+    assert!(
+        matches!(
+            added_lanes(&fake).as_slice(),
+            [GitCall::AddLane { new_path, .. }] if *new_path == started.worktree
+        ),
+        "{:?}",
+        fake.calls()
+    );
     assert_eq!(
         std::fs::read_to_string(started.worktree.join("seen.txt")).unwrap(),
         "77\n"

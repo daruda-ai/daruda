@@ -183,28 +183,24 @@ async fn task_start_runs_the_task_the_listing_numbered(cx: &mut gpui::TestAppCon
 }
 
 /// A start that fails after the reply — here git refuses a branch that
-/// is already checked out — reaches the phone as a notice of its own.
+/// is already checked out — reaches the phone as a notice of its own. That
+/// real git refuses it is `daruda_project`'s `tests/it/git.rs`.
 #[gpui::test]
 async fn a_task_start_that_fails_later_is_told_as_a_notice(cx: &mut gpui::TestAppContext) {
     use crate::control::spec::{ControlCommand, Ordinal, TaskCommand};
+    use crate::lane::git::{FakeFailure, FakeRepo, GitCall, GitOp};
     use gpui::BorrowAppContext as _;
-    if !crate::lane::git::has_git() {
-        return;
-    }
+    let fake = crate::test_support::fake_git(cx);
     let fixture = crate::test_support::workspace_for_control(cx);
-    for args in [
-        &["init", "-q", "-b", "main"][..],
-        &["config", "user.email", "daruda@test"],
-        &["config", "user.name", "daruda"],
-        &["commit", "-q", "--allow-empty", "-m", "initial"],
-    ] {
-        let status = daruda_core::process::command("git")
-            .current_dir(fixture.root())
-            .args(args)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?}");
-    }
+    fake.add_repo(FakeRepo::at(fixture.root()).branch("main"));
+    fake.fail(
+        fixture.root(),
+        GitOp::AddLane,
+        FakeFailure::Exit {
+            code: Some(128),
+            stderr: "fatal: a branch named 'main' already exists".into(),
+        },
+    );
     fixture
         .workspace
         .update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes_for_test(cx));
@@ -289,6 +285,14 @@ async fn a_task_start_that_fails_later_is_told_as_a_notice(cx: &mut gpui::TestAp
         }
     }
     assert_eq!(notices, vec![expected]);
+    assert!(
+        matches!(
+            fake.calls().as_slice(),
+            [GitCall::AddLane { new_branch: Some(branch), .. }] if branch == "main"
+        ),
+        "the start asked git for the checked-out branch: {:?}",
+        fake.calls()
+    );
 }
 
 /// An approval tap is settled under the surface it came from, so the card

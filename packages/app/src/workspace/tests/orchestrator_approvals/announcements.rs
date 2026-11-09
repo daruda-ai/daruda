@@ -40,6 +40,7 @@ async fn delayed_announcement(kind: Announcement, cx: &mut TestAppContext) {
     for (initially_solicited, away_when_announcing) in
         [(true, false), (false, false), (false, true)]
     {
+        let fake = crate::test_support::fake_git(cx);
         let (fixture, orchestrator) = desktop_host(cx);
         let _connections = cx.update(crate::workspace::Workspace::fake_agent_connections_for_test);
         let lane = fixture.workspace.read_with(cx, |ws, _| {
@@ -79,29 +80,7 @@ async fn delayed_announcement(kind: Announcement, cx: &mut TestAppContext) {
                 }
             }
             Announcement::Lane => {
-                for args in [
-                    vec!["init", "--quiet"],
-                    vec![
-                        "-c",
-                        "user.name=Fixture",
-                        "-c",
-                        "user.email=fixture@example.invalid",
-                        "-c",
-                        "commit.gpgsign=false",
-                        "commit",
-                        "--quiet",
-                        "--allow-empty",
-                        "-m",
-                        "fixture",
-                    ],
-                ] {
-                    let output = daruda_core::process::command("git")
-                        .args(args)
-                        .current_dir(fixture.root())
-                        .output()
-                        .unwrap();
-                    assert!(output.status.success(), "{output:?}");
-                }
+                fake.add_repo(crate::lane::git::FakeRepo::at(fixture.root()));
                 checkout = Some(fixture.workspace.read_with(cx, |ws, _| {
                     ws.control_lane_plan(lane.project, "announcement", None)
                         .unwrap()
@@ -222,7 +201,14 @@ async fn delayed_announcement(kind: Announcement, cx: &mut TestAppContext) {
             fixture.workspace.read_with(cx, |ws, cx| {
                 assert!(!ws.phone_turn_open(chat.pane, cx));
             });
-            std::fs::remove_dir_all(checkout).unwrap();
+            assert!(
+                matches!(
+                    fake.calls().as_slice(),
+                    [crate::lane::git::GitCall::AddLane { new_path, .. }] if *new_path == checkout
+                ),
+                "{:?}",
+                fake.calls()
+            );
         }
     }
 }
