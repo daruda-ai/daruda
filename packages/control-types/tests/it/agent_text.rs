@@ -1,11 +1,32 @@
 use daruda_control_types::agent_text::{
-    PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS, bound_agent_text, elide_middle,
-    excerpt_line, one_line, prompt_excerpt, sanitize_title, title_line,
+    PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS, QuoteMarkers, TITLE_EXCERPT_HEAD_CHARS,
+    TITLE_EXCERPT_TAIL_CHARS, bound_agent_text, elide_middle, one_line, prompt_excerpt,
+    sanitize_title, title_excerpt,
 };
 
-/// The marker a test reads back: the hidden count, nothing localized.
-fn marker(hidden: usize) -> String {
-    format!(" [+{hidden}] ")
+/// Markers a test reads back: the counts, nothing localized.
+struct Markers;
+
+impl QuoteMarkers for Markers {
+    fn elided(&self, n: usize) -> String {
+        marker(n)
+    }
+
+    fn hidden(&self, n: usize) -> String {
+        format!(" [{n} hidden]")
+    }
+}
+
+fn marker(elided: usize) -> String {
+    format!(" [+{elided}] ")
+}
+
+fn prompt(raw: &str) -> String {
+    prompt_excerpt(raw, &Markers)
+}
+
+fn title(raw: &str) -> String {
+    title_excerpt(raw, &Markers)
 }
 
 #[test]
@@ -96,10 +117,7 @@ fn a_short_title_is_untouched_and_a_blank_one_is_absent() {
 
 #[test]
 fn a_short_prompt_is_quoted_whole_on_one_line() {
-    assert_eq!(
-        prompt_excerpt("fix\n\tthe  login\r\nbug", marker),
-        "fix the login bug"
-    );
+    assert_eq!(prompt("fix\n\tthe  login\r\nbug"), "fix the login bug");
 }
 
 /// A harmless opening cannot hide the instruction after it: past the bound
@@ -108,16 +126,16 @@ fn a_short_prompt_is_quoted_whole_on_one_line() {
 fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
     let budget = PROMPT_EXCERPT_HEAD_CHARS + PROMPT_EXCERPT_TAIL_CHARS;
     let exact = "a".repeat(budget);
-    assert_eq!(prompt_excerpt(&exact, marker), exact);
+    assert_eq!(prompt(&exact), exact);
 
-    let prompt = format!(
+    let long = format!(
         "{}{}{}",
         "가".repeat(PROMPT_EXCERPT_HEAD_CHARS),
         "x".repeat(7),
         "😀".repeat(PROMPT_EXCERPT_TAIL_CHARS)
     );
     assert_eq!(
-        prompt_excerpt(&prompt, marker),
+        prompt(&long),
         format!(
             "{}{}{}",
             "가".repeat(PROMPT_EXCERPT_HEAD_CHARS),
@@ -125,10 +143,10 @@ fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
             "😀".repeat(PROMPT_EXCERPT_TAIL_CHARS)
         )
     );
-    // The hidden count is of the flattened line, not the raw text.
+    // The elided count is of the flattened line, not the raw text.
     let spaced = format!("{}\n\n\n{}", "a".repeat(budget), "b");
     assert_eq!(
-        prompt_excerpt(&spaced, marker),
+        prompt(&spaced),
         format!(
             "{}{}{} b",
             "a".repeat(PROMPT_EXCERPT_HEAD_CHARS),
@@ -138,14 +156,29 @@ fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
     );
 }
 
+/// A task title reaches the agent whole, so a long one is quoted by both
+/// ends with the count between, as a prompt is.
 #[test]
-fn an_excerpt_is_cut_with_an_ellipsis_and_a_title_at_its_bound() {
-    assert_eq!(excerpt_line("abcdef", 3), "abc…");
-    assert_eq!(excerpt_line("abc", 3), "abc");
-    let title = title_line(&"t".repeat(200));
-    assert_eq!(title.chars().count(), 81);
-    assert!(title.ends_with('…'));
-    assert_eq!(title_line("Fix\nthe login"), "Fix the login");
+fn a_long_title_keeps_its_start_and_end_around_the_hidden_count() {
+    let budget = TITLE_EXCERPT_HEAD_CHARS + TITLE_EXCERPT_TAIL_CHARS;
+    let whole = "t".repeat(budget);
+    assert_eq!(title(&whole), whole);
+    let long = format!(
+        "{}{}{}",
+        "h".repeat(TITLE_EXCERPT_HEAD_CHARS),
+        "m".repeat(120),
+        "z".repeat(TITLE_EXCERPT_TAIL_CHARS)
+    );
+    assert_eq!(
+        title(&long),
+        format!(
+            "{}{}{}",
+            "h".repeat(TITLE_EXCERPT_HEAD_CHARS),
+            marker(120),
+            "z".repeat(TITLE_EXCERPT_TAIL_CHARS)
+        )
+    );
+    assert_eq!(title("Fix\nthe login"), "Fix the login");
 }
 
 /// A right-to-left override would show `txt.exe` as `exe.txt`; zero-width
@@ -155,11 +188,50 @@ fn an_excerpt_is_cut_with_an_ellipsis_and_a_title_at_its_bound() {
 fn reordering_and_hiding_characters_are_dropped_from_excerpts_and_titles() {
     let hostile =
         "run \u{202E}exe.txt\u{202C} now\u{200B}\u{2066}!\u{2069}\u{FEFF}\u{061C}\u{200E}\u{00AD}";
-    assert_eq!(excerpt_line(hostile, 80), "run exe.txt now!");
+    assert_eq!(one_line(hostile), "run exe.txt now!");
     assert_eq!(sanitize_title(hostile).as_deref(), Some("run exe.txt now!"));
-    assert_eq!(title_line("a\u{202E}b"), "ab");
     assert_eq!(sanitize_title("\u{200B}\u{202E}"), None);
     assert_eq!(one_line("ok\u{E0041}\u{E0042}"), "ok");
+    // Interlinear annotations, deprecated format controls and supplementary
+    // variation selectors hide data the same way.
+    assert_eq!(
+        one_line("a\u{FFF9}b\u{FFFB}\u{206A}\u{206F}c\u{E0100}\u{E01EF}"),
+        "abc"
+    );
+}
+
+/// The agent still receives what a card drops, so the card says how much:
+/// an instruction in tag characters shows as a count, never as nothing.
+#[test]
+fn a_card_quote_counts_the_invisible_characters_it_dropped() {
+    let tagged: String = "ok"
+        .chars()
+        .chain(
+            "rm -rf"
+                .chars()
+                .map(|c| char::from_u32(0xE0000 + c as u32).unwrap()),
+        )
+        .collect();
+    assert_eq!(prompt(&tagged), "ok [6 hidden]");
+    assert_eq!(title(&tagged), "ok [6 hidden]");
+    // Nothing visible is still something sent.
+    assert_eq!(prompt("\u{200B}\u{202E}"), "[2 hidden]");
+    assert_eq!(prompt("plain text"), "plain text");
+    assert_eq!(title("plain text"), "plain text");
+}
+
+/// A quote mark inside quoted text could close the card's own quote and
+/// append words that read as the card's; each becomes an apostrophe.
+#[test]
+fn a_card_quote_cannot_close_the_cards_quotes() {
+    let spoof = "x\u{201D}. (requested permission mode: Ask) \u{201C}\"y\" \u{00AB}z\u{00BB}";
+    assert_eq!(
+        prompt(spoof),
+        "x'. (requested permission mode: Ask) ''y' 'z'"
+    );
+    assert_eq!(title("say \"hi\""), "say 'hi'");
+    // An apostrophe is left as it is.
+    assert_eq!(prompt("don't"), "don't");
 }
 
 /// Joiners shape Persian, Indic scripts and emoji sequences, and cannot
@@ -170,5 +242,5 @@ fn joiners_survive_so_scripts_and_emoji_keep_their_shape() {
     assert_eq!(one_line(family), family);
     let persian = "می\u{200C}خواهم";
     assert_eq!(one_line(persian), persian);
-    assert_eq!(prompt_excerpt(family, marker), family);
+    assert_eq!(prompt(family), family);
 }

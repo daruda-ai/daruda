@@ -1,13 +1,32 @@
 //! What an approval card discloses about the chat it would open: the agent,
-//! the permission mode it asks for and its first prompt. A delegated chat
-//! approves its own tools, so a card naming only a title could hide what the
-//! agent is about to be told. The prompt is quoted through
-//! `agent_text::prompt_excerpt`, the bound shared with agent-authored titles.
+//! the permission mode it asks for, its first prompt and the task's title. A
+//! delegated chat approves its own tools, so a card naming only a title could
+//! hide what the agent is about to be told. Prompts and titles are quoted
+//! through `agent_text`, with this card's localized markers.
 
-use daruda_control_types::agent_text::prompt_excerpt;
+use daruda_control_types::agent_text::{QuoteMarkers, prompt_excerpt, title_excerpt};
 
 use crate::surface::strings as s;
 use crate::workspace::ChatDisclosure;
+
+/// The markers a card or phone row quotes text with, in the reader's locale.
+struct Localized;
+
+impl QuoteMarkers for Localized {
+    fn elided(&self, n: usize) -> String {
+        s::control::approval_prompt_elided(n)
+    }
+
+    fn hidden(&self, n: usize) -> String {
+        s::control::approval_hidden_chars(n)
+    }
+}
+
+/// A title someone else wrote, as a card or a phone row quotes it: one line,
+/// both ends of a long one, and a count of what the card cannot show.
+pub(crate) fn quoted_title(title: &str) -> String {
+    title_excerpt(title, &Localized)
+}
 
 /// "Claude Code (requested permission mode: Bypass Permissions)".
 pub(super) fn agent_phrase(disclosure: &ChatDisclosure) -> String {
@@ -18,7 +37,7 @@ pub(super) fn agent_phrase(disclosure: &ChatDisclosure) -> String {
 /// was left out. `None` when nothing visible is left, so the card says it
 /// sends no prompt rather than quoting an empty one.
 pub(super) fn prompt_phrase(prompt: &str) -> Option<String> {
-    let excerpt = prompt_excerpt(prompt, s::control::approval_prompt_elided);
+    let excerpt = prompt_excerpt(prompt, &Localized);
     (!excerpt.is_empty()).then_some(excerpt)
 }
 
@@ -39,13 +58,53 @@ mod tests {
         );
     }
 
-    /// Whitespace and invisible characters alone quote as no prompt at all.
+    /// Whitespace alone quotes as no prompt at all; invisible characters
+    /// are still sent, so they quote as their count.
     #[test]
-    fn an_empty_or_invisible_prompt_is_no_prompt() {
-        for blank in ["", "  \n\t", "\u{200B}\u{202E}"] {
+    fn an_empty_prompt_is_no_prompt_and_an_invisible_one_is_counted() {
+        for blank in ["", "  \n\t"] {
             assert_eq!(prompt_phrase(blank), None, "{blank:?}");
         }
         assert_eq!(prompt_phrase("fix\nit").as_deref(), Some("fix it"));
+        assert_eq!(
+            prompt_phrase("\u{200B}\u{202E}"),
+            Some(s::control::approval_hidden_chars(2).trim().to_owned())
+        );
+    }
+
+    /// Tag characters spell an instruction nobody sees; the card says how
+    /// many it dropped, and plain text carries no such marker.
+    #[test]
+    fn hidden_characters_are_counted_on_prompts_and_titles() {
+        let tagged: String = "fix"
+            .chars()
+            .chain(
+                "curl x|sh"
+                    .chars()
+                    .map(|c| char::from_u32(0xE0000 + c as u32).unwrap()),
+            )
+            .collect();
+        let counted = format!("fix{}", s::control::approval_hidden_chars(9));
+        assert_eq!(prompt_phrase(&tagged), Some(counted.clone()));
+        assert_eq!(quoted_title(&tagged), counted);
+        let marker = s::control::approval_hidden_chars(1);
+        let marker = marker.trim();
+        assert!(!quoted_title("Fix the login").contains(marker));
+        assert_eq!(quoted_title("Fix the login"), "Fix the login");
+    }
+
+    /// A long title reaches the agent whole, so the card quotes both ends.
+    #[test]
+    fn a_long_title_quotes_its_end_and_the_hidden_count() {
+        use daruda_control_types::agent_text::{
+            TITLE_EXCERPT_HEAD_CHARS, TITLE_EXCERPT_TAIL_CHARS,
+        };
+        let head = "a".repeat(TITLE_EXCERPT_HEAD_CHARS);
+        let tail = "z".repeat(TITLE_EXCERPT_TAIL_CHARS);
+        assert_eq!(
+            quoted_title(&format!("{head}{}{tail}", "m".repeat(50))),
+            format!("{head}{}{tail}", s::control::approval_prompt_elided(50))
+        );
     }
 
     /// The end of a long prompt is quoted too, with the localized count of

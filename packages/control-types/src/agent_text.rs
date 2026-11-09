@@ -17,6 +17,7 @@
 //! Text flattened to one line also loses the invisible characters that can
 //! reorder or hide words (bidi controls, zero-width spacers, tag characters):
 //! rendered on a card, they could change what a person is asked to approve.
+//! The agent still receives them, so a card says how many it dropped.
 //!
 //! GPUI-free.
 
@@ -37,9 +38,32 @@ const ORCHESTRATOR_TAIL_CHARS: usize = 2000;
 pub const PROMPT_EXCERPT_HEAD_CHARS: usize = 80;
 pub const PROMPT_EXCERPT_TAIL_CHARS: usize = 40;
 
+/// The same for a task title, which the agent receives whole: a title up to
+/// [`TITLE_MAX_CHARS`] is quoted whole, a longer one by both ends.
+pub const TITLE_EXCERPT_HEAD_CHARS: usize = 60;
+pub const TITLE_EXCERPT_TAIL_CHARS: usize = 20;
+
 /// Fixed English, like every other value in a tool result: the consumer is a
 /// model branching on content, not a person reading their own locale.
 const TRUNCATION_MARKER: &str = "[...truncated by daruda...]";
+
+/// Quote characters a card's own framing uses; inside quoted text each
+/// becomes an apostrophe, so the text cannot close the quote and append
+/// words that read as the card's.
+const FRAMING_QUOTES: &[char] = &[
+    '"', '\u{201C}', '\u{201D}', '\u{201E}', '\u{201F}', '\u{2033}', '\u{2036}', '\u{00AB}',
+    '\u{00BB}', '\u{301D}', '\u{301E}', '\u{301F}', '\u{FF02}',
+];
+const NEUTRAL_QUOTE: char = '\'';
+
+/// What a card adds to text it quotes, in its reader's language.
+pub trait QuoteMarkers {
+    /// Stands between the start and the end: `n` characters left out.
+    fn elided(&self, n: usize) -> String;
+    /// Follows the quote: `n` invisible characters the agent receives but
+    /// the card cannot show.
+    fn hidden(&self, n: usize) -> String;
+}
 
 /// Flatten an agent-authored title to one bounded line, as [`one_line`]
 /// does, so a multi-line title cannot break the row it is rendered on, and no
@@ -49,48 +73,81 @@ pub fn sanitize_title(raw: &str) -> Option<String> {
     (!clean.is_empty()).then_some(clean)
 }
 
-/// A title someone else wrote, as one line of a card: flattened as
-/// [`one_line`] does and cut to the title bound with a trailing `…`.
-pub fn title_line(raw: &str) -> String {
-    excerpt_line(raw, TITLE_MAX_CHARS)
+/// A prompt as an approval card quotes it, so nothing the agent receives is
+/// out of sight: flattened as [`one_line`] does, framing quotes neutralized,
+/// past the bound its two ends around `markers.elided`, then
+/// `markers.hidden` for the invisible characters dropped. Empty only when
+/// `raw` carries nothing at all.
+pub fn prompt_excerpt(raw: &str, markers: &impl QuoteMarkers) -> String {
+    card_quote(
+        raw,
+        PROMPT_EXCERPT_HEAD_CHARS,
+        PROMPT_EXCERPT_TAIL_CHARS,
+        markers,
+    )
 }
 
-/// `raw` flattened as [`one_line`] does, cut to `max_chars` characters with
-/// a trailing `…` when it is longer.
-pub fn excerpt_line(raw: &str, max_chars: usize) -> String {
-    let line = one_line(raw);
-    match line.char_indices().nth(max_chars) {
-        Some((end, _)) => format!("{}…", &line[..end]),
-        None => line,
-    }
+/// A title someone else wrote, as a card or a phone row quotes it: the same
+/// as [`prompt_excerpt`], within the title's bound.
+pub fn title_excerpt(raw: &str, markers: &impl QuoteMarkers) -> String {
+    card_quote(
+        raw,
+        TITLE_EXCERPT_HEAD_CHARS,
+        TITLE_EXCERPT_TAIL_CHARS,
+        markers,
+    )
 }
 
-/// A prompt as an approval card quotes it: flattened as [`one_line`] does,
-/// and past the bound its start and end around `elided(hidden_chars)`, the
-/// caller's (localized) marker saying how much was left out.
-pub fn prompt_excerpt(raw: &str, elided: impl FnOnce(usize) -> String) -> String {
-    let line = one_line(raw);
-    match split_ends(&line, PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS) {
-        Some((head, hidden, tail)) => format!("{head}{}{tail}", elided(hidden)),
+/// [`prompt_excerpt`] within `head + tail` characters.
+fn card_quote(raw: &str, head: usize, tail: usize, markers: &impl QuoteMarkers) -> String {
+    let (line, hidden) = flatten(raw);
+    let line: String = line
+        .chars()
+        .map(|c| {
+            if FRAMING_QUOTES.contains(&c) {
+                NEUTRAL_QUOTE
+            } else {
+                c
+            }
+        })
+        .collect();
+    let mut quoted = match split_ends(&line, head, tail) {
+        Some((head, elided, tail)) => format!("{head}{}{tail}", markers.elided(elided)),
         None => line,
+    };
+    if hidden > 0 {
+        quoted.push_str(&markers.hidden(hidden));
     }
+    quoted.trim().to_owned()
 }
 
 /// Invisible characters are dropped, control characters become spaces, and
 /// whitespace runs collapse to one space.
 pub fn one_line(raw: &str) -> String {
-    raw.chars()
-        .filter(|c| !hides_or_reorders(*c))
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    flatten(raw).0
 }
 
-/// Bidi controls reorder the text after them; zero-width spaces, invisible
-/// operators and the soft hyphen hide word breaks; tag characters carry text
-/// no one sees but an agent reads. ZWNJ/ZWJ pass: they hide nothing, and
+/// [`one_line`], and how many invisible characters it dropped.
+fn flatten(raw: &str) -> (String, usize) {
+    let mut hidden = 0;
+    let spaced: String = raw
+        .chars()
+        .filter(|c| {
+            let drop = hides_or_reorders(*c);
+            hidden += usize::from(drop);
+            !drop
+        })
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let line = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
+    (line, hidden)
+}
+
+/// Bidi controls (and the deprecated U+206A-206F format controls) reorder
+/// or reshape the text after them; zero-width spaces, invisible operators,
+/// interlinear annotation marks and the soft hyphen hide word breaks; tag
+/// characters and supplementary variation selectors carry data no one sees
+/// but an agent reads. ZWNJ/ZWJ pass: they hide nothing, and
 /// Persian, Indic and emoji sequences need them. Hangul fillers (U+115F,
 /// U+1160, U+3164, U+FFA0) and blank Braille (U+2800) pass as letters that
 /// show a gap at most and reorder nothing; dropping them corrupts real text.
@@ -106,9 +163,12 @@ fn hides_or_reorders(c: char) -> bool {
             | '\u{180E}'
             | '\u{200B}'
             | '\u{2060}'..='\u{2064}'
+            | '\u{206A}'..='\u{206F}'
+            | '\u{FFF9}'..='\u{FFFB}'
             | '\u{FEFF}'
             | '\u{E0001}'
             | '\u{E0020}'..='\u{E007F}'
+            | '\u{E0100}'..='\u{E01EF}'
     )
 }
 

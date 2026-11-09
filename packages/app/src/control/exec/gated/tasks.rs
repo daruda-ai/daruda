@@ -12,12 +12,13 @@ use crate::surface::strings as s;
 use super::announce_chat;
 
 /// A task's title, for the sentence that asks or tells about it: written by
-/// whoever created the task, so flattened to a line that cannot reorder or
-/// hide the rest of the sentence.
+/// whoever created the task and sent to its agent whole, so quoted as a card
+/// quotes it — one line that cannot reorder or hide the rest of the
+/// sentence, with nothing the agent receives out of sight.
 pub(super) fn task_title(task: &str, cx: &App) -> String {
     cx.global::<GlobalTasks>()
         .get(task)
-        .map(|t| daruda_control_types::agent_text::title_line(&t.spec.title))
+        .map(|t| super::quoted_title(&t.spec.title))
         .unwrap_or_default()
 }
 

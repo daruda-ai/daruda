@@ -18,6 +18,7 @@ mod disclosure;
 mod flow_resume;
 mod tasks;
 
+pub(crate) use disclosure::quoted_title;
 pub(crate) use tasks::{begin_task_start, open_task, task_flow_summary};
 use tasks::{start_task, task_title};
 
@@ -272,7 +273,6 @@ fn approval_summary(
     mode: &daruda_config::ModeChoice,
     cx: &mut App,
 ) -> Result<String, ControlError> {
-    use daruda_control_types::agent_text::title_line;
     use disclosure::{agent_phrase, prompt_phrase};
     Ok(match asked {
         Asked::LaneCreate {
@@ -334,7 +334,7 @@ fn approval_summary(
                     Ok((ws.control_project_name(*project), location, flow))
                 })?;
             let surface = flow.unwrap_or_else(s::control::approval_task_as_chat);
-            s::control::approval_task_create(title_line(&task.title), &name, &location, &surface)
+            s::control::approval_task_create(quoted_title(&task.title), &name, &location, &surface)
         }
         Asked::TaskStart { task, agent } => match task_flow_summary(task, cx) {
             Some(flow) => s::control::approval_task_start_flow(task_title(task, cx), &flow),

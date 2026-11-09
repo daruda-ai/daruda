@@ -204,8 +204,8 @@ async fn a_chat_new_card_names_agent_and_mode_and_its_announcement_the_requested
     }
 }
 
-/// `worktree_create` quotes the prompt it will deliver, and only one with
-/// something visible in it: a blank or invisible one reads as no prompt.
+/// `worktree_create` quotes the prompt it will deliver: a blank one reads as
+/// no prompt, and an invisible one as the count of what it carries.
 #[gpui::test]
 fn a_worktree_card_quotes_its_prompt_when_it_carries_one(cx: &mut TestAppContext) {
     let (_fixture, lane, claude) = host(cx);
@@ -227,21 +227,24 @@ fn a_worktree_card_quotes_its_prompt_when_it_carries_one(cx: &mut TestAppContext
             },
             cx,
         );
-        let expected = match prompt.filter(|p| p.starts_with("Port")) {
-            Some(_) => s::control::approval_lane_create_prompt(
+        let hidden = s::control::approval_hidden_chars(2);
+        let expected = match prompt.map(str::trim) {
+            Some("") | None => s::control::approval_lane_create("disclosure", &agent),
+            Some(p) if p.starts_with("Port") => s::control::approval_lane_create_prompt(
                 "disclosure",
                 &agent,
                 "Port the tax table to the new API",
             ),
-            None => s::control::approval_lane_create("disclosure", &agent),
+            Some(_) => s::control::approval_lane_create_prompt("disclosure", &agent, hidden.trim()),
         };
         assert_eq!(card, expected);
         refuse(id, cx);
     }
 }
 
-/// A title someone else wrote cannot reverse the rest of its card, and a
-/// task whose prompt has nothing visible starts without quoting one.
+/// A title someone else wrote cannot reverse the rest of its card, which
+/// counts what it dropped, and a task with a blank prompt starts without
+/// quoting one.
 #[gpui::test]
 async fn a_task_title_reads_plainly_and_an_empty_prompt_is_not_quoted(cx: &mut TestAppContext) {
     let (fixture, lane, claude) = host(cx);
@@ -254,7 +257,8 @@ async fn a_task_title_reads_plainly_and_an_empty_prompt_is_not_quoted(cx: &mut T
         },
         cx,
     );
-    assert!(card.contains("Login evil"), "{card}");
+    let shown = format!("Login evil{}", s::control::approval_hidden_chars(2));
+    assert!(card.contains(&shown), "{card}");
     assert!(
         !card.contains('\u{202E}') && !card.contains('\u{2066}'),
         "{card}"
@@ -264,7 +268,7 @@ async fn a_task_title_reads_plainly_and_an_empty_prompt_is_not_quoted(cx: &mut T
     let created = fixture.workspace.update(cx, |ws, cx| {
         ws.control_task_create(
             lane.project,
-            crate::test_support::new_task(title, "\u{200B}\u{202E} ", Some(lane)),
+            crate::test_support::new_task(title, " \n ", Some(lane)),
             cx,
         )
         .unwrap()
@@ -275,7 +279,7 @@ async fn a_task_title_reads_plainly_and_an_empty_prompt_is_not_quoted(cx: &mut T
     assert_eq!(
         card,
         s::control::approval_task_start_no_prompt(
-            "Login evil",
+            &shown,
             s::control::approval_agent(&claude.name, BYPASS)
         )
     );
@@ -310,8 +314,9 @@ fn a_task_open_card_names_the_mode_only_for_a_new_pane(cx: &mut TestAppContext) 
             })
         })
         .unwrap();
+    let shown = format!("Login evil{}", s::control::approval_hidden_chars(1));
     let (id, _outcome, card) = ask(GatedCommand::TaskOpen { task: task.clone() }, cx);
-    assert_eq!(card, s::control::approval_task_open("Login evil"));
+    assert_eq!(card, s::control::approval_task_open(&shown));
     refuse(id, cx);
 
     fixture.workspace.update(cx, |ws, _| {
@@ -321,7 +326,7 @@ fn a_task_open_card_names_the_mode_only_for_a_new_pane(cx: &mut TestAppContext) 
     assert_eq!(
         card,
         s::control::approval_task_open_new(
-            "Login evil",
+            &shown,
             s::control::approval_agent(&claude.name, BYPASS)
         )
     );
