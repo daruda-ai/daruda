@@ -338,7 +338,7 @@ settings:
   agent_field_default_mode: "세션 모드"
   agent_field_default_model: "모델"
   agent_field_delegated_mode: "자동 실행 모드"
-  agent_delegated_mode_description: "휴대폰에서 요청하거나 오케스트레이터가 연 채팅·작업은 이 모드로 시작합니다. 기본값은 권한을 묻지 않는 모드입니다. 데스크톱에서 직접 연 채팅은 세션 모드를 따릅니다."
+  agent_delegated_mode_description: "휴대폰에서 요청하거나 오케스트레이터가 연 채팅·작업은 이 모드로 시작합니다. Claude와 Codex는 기본값이 권한을 묻지 않는 모드이고, 다른 에이전트는 세션 모드를 따릅니다. 데스크톱에서 직접 연 채팅은 세션 모드를 따릅니다."
   agent_delegated_mode_default_named: "기본값 — %{name}"
   agent_delegated_mode_follows_session_mode: "세션 모드와 같음"
   agent_field_question_timeout: "질문 제한 시간(초)"

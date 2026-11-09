@@ -361,7 +361,7 @@ settings:
   # Label for an agent catalog row's mode for sessions the phone or the
   # orchestrator opens (config key `delegated_mode`).
   agent_field_delegated_mode: "Autonomous run mode"
-  agent_delegated_mode_description: "Chats and tasks requested from your phone or opened by the orchestrator start in this mode. By default it skips permission prompts. Chats you open on the desktop use Session mode."
+  agent_delegated_mode_description: "Chats and tasks requested from your phone or opened by the orchestrator start in this mode. For Claude and Codex the default skips permission prompts; other agents use Session mode. Chats you open on the desktop use Session mode."
   # The "no override" entry of that picker, naming the mode it then uses.
   agent_delegated_mode_default_named: "Default — %{name}"
   # Same entry for an adapter daruda knows no no-prompt mode for.

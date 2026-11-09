@@ -134,8 +134,9 @@ create worktrees, start tasks and flows, or message other agents. Before it
 creates a worktree, chat, or task, or starts a task, it waits for your
 approval as a card in its chat. It starts on your first request, not at
 launch. Chats and tasks the phone or orchestrator opens run in each
-agent's **Autonomous run mode** — by default without permission prompts —
-which you can change per agent in **Settings › Agents & Chat**.
+agent's **Autonomous run mode**, which you can change per agent in
+**Settings › Agents & Chat**. For Claude and Codex it skips permission
+prompts by default; other agents use their Session mode.
 
 <img src=".github/readme/en/orchestrator.png" alt="The orchestrator chat with one approved task start and one pending request to add a task in a new worktree, with Allow and Refuse buttons" width="100%" />
 
