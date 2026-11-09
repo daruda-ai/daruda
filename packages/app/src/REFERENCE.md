@@ -105,8 +105,9 @@ Conversation queries return all observations, or one only when unambiguous.
 Turn-completion and notification deduplication use the same typed identity.
 The workspace hook receiver owns file ingestion and pane observation. Task-specific hook
 consumption lives in `right_dock/task_hook_ops.rs`, with execution facts owned
-by `RunsHost::record_task_cli_hook`. Shared `HookEnd` semantics are interpreted
-by the GPUI-free `runs/cli/hook_policy.rs` for both live and PID-exit recovery.
+by `RunsHost::record_task_cli_hook`. The GPUI-free `runs/cli/hook_policy.rs`
+maps a live hook's `HookEnd` to its end reason; a confirmed PID exit carries no
+hook event and settles through `RunsHost::reconcile_lost_cli` instead.
 Task-independent terminal history lives in `daruda_store::terminal_sessions`
 (schema 1), separate from the task log. Each terminal has a runlog below the
 profile-routed `status/history/` directory. Terminal journals compact after

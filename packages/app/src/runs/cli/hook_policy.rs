@@ -17,7 +17,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn live_hooks_and_exit_recovery_share_completion_semantics() {
+    fn hook_events_map_to_their_end_reasons() {
         assert_eq!(hook_end_reason("Stop"), Some(SessionEndReason::Stop));
         assert_eq!(
             hook_end_reason("StopFailure"),
