@@ -101,7 +101,8 @@ impl Workspace {
         }
         let place = match &spec.run_in {
             TaskRunIn::ExistingLane { path } => {
-                let lane = self.prepare_existing_lane_start(path, reveal)?;
+                let agent = self.open_agent_id(None);
+                let lane = self.prepare_existing_lane_start(path, &agent, reveal)?;
                 self.check_task_flow(lane.lane(), &target, cx)?;
                 if self.lane_busy(lane.lane(), lane.root(), cx).is_some() {
                     return Err(lane_busy_refusal());

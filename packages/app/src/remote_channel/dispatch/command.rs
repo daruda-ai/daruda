@@ -127,8 +127,12 @@ fn start_task(task: String, cx: &mut App) -> ControlOutcome {
     // A phone start asks no approval, so the notice says what a desktop
     // approval would have: the flow, and how freely its agents act.
     let flow = crate::control::exec::task_flow_summary(&task, cx);
-    let pending =
-        crate::control::exec::begin_task_start(task, crate::control::exec::Caller::Phone, cx)?;
+    let pending = crate::control::exec::begin_task_start(
+        task,
+        crate::control::exec::Caller::Phone,
+        None,
+        cx,
+    )?;
     if let Some(outcome) = pending.try_finish(cx) {
         return outcome;
     }

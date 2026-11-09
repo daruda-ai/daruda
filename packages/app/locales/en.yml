@@ -2397,8 +2397,16 @@ control:
   task_started_flow: "%{title} is running %{flow} in daruda."
   # The follow-up when a start failed after it was accepted.
   task_start_failed: "%{title} did not start: %{reason}"
-  approval_lane_create: "daruda wants to create the worktree %{name}. Allow?"
-  approval_chat_new: "daruda wants to open another chat in %{path}. Allow?"
+  # `agent` is approval_agent: a delegated chat runs in its agent's
+  # delegated mode, approving tools by itself, so the card says which.
+  approval_lane_create: "daruda wants to create the worktree %{name} and open %{agent} there. Allow?"
+  # `prompt` is a one-line excerpt of what the new chat is sent first.
+  approval_lane_create_prompt: "daruda wants to create the worktree %{name} and open %{agent} there, prompting “%{prompt}”. Allow?"
+  approval_chat_new: "daruda wants to open another chat in %{path} with %{agent}. Allow?"
+  # The agent a delegated chat opens with, and the permission mode it asks
+  # for; `mode` is the vocabulary's name or approval_mode_agent_default.
+  approval_agent: "%{agent} (permission mode: %{mode})"
+  approval_mode_agent_default: "the agent's default"
   approval_allow: "Allow"
   approval_approved_desktop: "Approved on desktop"
   approval_approved_telegram: "Approved in Telegram"
@@ -2420,8 +2428,10 @@ control:
   chat_created: "Chat opened."
   # The ping that introduces a chat the phone approved opening; `agent` is
   # the display name of the agent running it.
-  chat_announced: "A new %{agent} tab is open. Messages you send now go to it. /use - to go back to the orchestrator."
-  chat_announced_only: "A new %{agent} tab is open."
+  # `mode` is the permission mode the chat asked for: it is announced
+  # before its session connects, so whether the agent took it is unknown.
+  chat_announced: "A new %{agent} tab is open (requested permission mode: %{mode}). Messages you send now go to it. /use - to go back to the orchestrator."
+  chat_announced_only: "A new %{agent} tab is open (requested permission mode: %{mode})."
   # Told to a sender whose message named no chat and whose bridge remembered
   # none, so the app's own focused lane took it: which chat that was, and how
   # to pick another. `name` is the lane's path, `agent` the display name of
@@ -2462,7 +2472,8 @@ control:
   approval_task_as_flow_unresolved: "as the flow %{flow}, which daruda cannot find there"
   approval_flow_modes: "permission mode: %{modes}"
   approval_flow_no_agents: "commands only, no agents"
-  approval_task_start: "daruda wants to start the task %{title}. Allow?"
+  # `agent` is approval_agent; `prompt` a one-line excerpt of the task's.
+  approval_task_start: "daruda wants to start the task %{title} with %{agent}, prompting “%{prompt}”. Allow?"
   # `flow` is one of the approval_task_as_flow phrases.
   approval_task_start_flow: "daruda wants to start the task %{title} %{flow}. Allow?"
   approval_task_open: "daruda wants to open the chat of the task %{title}. Allow?"

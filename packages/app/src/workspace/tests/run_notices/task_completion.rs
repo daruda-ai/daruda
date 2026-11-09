@@ -148,7 +148,7 @@ async fn task_completion(
     } else {
         exec::Caller::Orchestrator { solicited: true }
     };
-    let pending = cx.update(|cx| exec::begin_task_start(task.clone(), caller, cx).unwrap());
+    let pending = cx.update(|cx| exec::begin_task_start(task.clone(), caller, None, cx).unwrap());
     cx.run_until_parked();
     let (execution, child) = fixture.workspace.read_with(cx, |ws, cx| {
         let task = cx.global::<crate::runs::GlobalTasks>().get(&task).unwrap();

@@ -19,10 +19,12 @@ use daruda_chat::view::{ActivityState, AgentChatView, AgentSessionStatus, Prompt
 use daruda_control_types::agent_text::{bound_agent_text, sanitize_title};
 use daruda_store::project::{LaneRef, ProjectId};
 
+mod disclosure;
 mod slash;
 #[cfg(test)]
 mod test_hooks;
 
+pub(crate) use disclosure::ChatDisclosure;
 pub(crate) use slash::SlashClaim;
 
 /// What a newly opened chat is called, for the two surfaces that have to name
@@ -34,6 +36,9 @@ pub(crate) struct ChatLabel {
     /// default agent, and reporting the request back would hide that.
     pub(crate) agent: String,
     pub(crate) agent_name: String,
+    /// The display name of the permission mode the pane asks for. Requested,
+    /// not applied: a chat is announced before its session connects.
+    pub(crate) mode: String,
 }
 
 impl Workspace {
@@ -99,6 +104,8 @@ impl Workspace {
     pub(crate) fn control_chat_label(&self, pane: PaneId, cx: &App) -> Option<ChatLabel> {
         let lane = self.lane_ref_for_pane(pane)?;
         let view = self.agent_chat_view(pane)?.read(cx);
+        let agent = self.mirrors.agents.iter().find(|a| a.id == view.agent_id());
+        let preferences = view.session_preferences(&self.mirrors.agents);
         Some(ChatLabel {
             path: crate::surface::strings::control::lane_path(
                 self.control_project_name(lane.project),
@@ -106,6 +113,7 @@ impl Workspace {
             ),
             agent: view.agent_id().to_owned(),
             agent_name: view.agent_name().to_owned(),
+            mode: self.requested_mode_label(view.agent_id(), agent, &preferences),
         })
     }
 

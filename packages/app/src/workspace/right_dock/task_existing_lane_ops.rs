@@ -7,12 +7,11 @@
 
 use std::path::Path;
 
-use daruda_config::ModeChoice;
 use daruda_store::project::{LaneKind, LaneRef};
 use daruda_store::tasks::{ExecutionRef, TaskRecord};
 use gpui::{Context, Window};
 
-use super::task_start::{StartedOn, TaskStartError, TaskStarted};
+use super::task_start::{StartedOn, TaskChat, TaskStartError, TaskStarted};
 use crate::lane::availability::LaneAvailability;
 use crate::runs::GlobalTasks;
 use crate::workspace::Workspace;
@@ -75,10 +74,12 @@ impl Workspace {
     /// Check the lane at `path` can host the task, before the start is
     /// recorded: a lane that is gone or cannot host a pane leaves the task
     /// in Backlog, so the user can pick another one and start again.
-    /// Checked in place — a refused start does not switch lanes.
+    /// Checked in place — a refused start does not switch lanes. `agent`
+    /// is the one the chat will run, whose launch can make it remote.
     pub(super) fn prepare_existing_lane_start(
         &mut self,
         path: &Path,
+        agent: &str,
         reveal: LaneReveal,
     ) -> Result<ExistingLaneStart, TaskStartError> {
         let missing = || TaskStartError::LaneMissing {
@@ -98,8 +99,7 @@ impl Workspace {
         {
             return Err(missing());
         }
-        let agent = self.open_agent_id(None);
-        let launch = self.agent_launch_for(&agent);
+        let launch = self.agent_launch_for(agent);
         if self.lane_for(lane).is_some_and(|lane| {
             lane.remote_cwd.is_some()
                 || lane
@@ -130,7 +130,7 @@ impl Workspace {
         &mut self,
         exec: &ExecutionRef,
         start: ExistingLaneStart,
-        mode: ModeChoice,
+        chat: TaskChat,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(TaskStarted, gpui::Task<Result<u64, TaskStartError>>), TaskStartError> {
@@ -160,9 +160,9 @@ impl Workspace {
         let pane = match reveal {
             LaneReveal::Foreground => {
                 self.activate_lane(lane, window, cx);
-                self.open_task_chat_in_active_lane(mode, window, cx)
+                self.open_task_chat_in_active_lane(chat, window, cx)
             }
-            LaneReveal::Background => self.open_task_chat_behind(lane, mode, window, cx),
+            LaneReveal::Background => self.open_task_chat_behind(lane, chat, window, cx),
         }
         .ok_or(TaskStartError::PaneUnavailable)?;
         let dispatched = self.dispatch_claude_for_task(exec, &root, &branch, pane, window, cx)?;
@@ -178,13 +178,12 @@ impl Workspace {
 
     fn open_task_chat_in_active_lane(
         &mut self,
-        mode: ModeChoice,
+        chat: TaskChat,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneId> {
-        let agent_id = self.open_agent_id(None);
         let cwds = self.active_lane_cwds();
-        let pane_id = self.insert_agent_chat_pane(agent_id, cwds, mode, window, cx)?;
+        let pane_id = self.insert_agent_chat_pane(chat.agent, cwds, chat.mode, window, cx)?;
         self.reveal_new_agent_chat_pane(pane_id, window, cx);
         Some(pane_id)
     }
@@ -196,13 +195,13 @@ impl Workspace {
     fn open_task_chat_behind(
         &mut self,
         lane: LaneRef,
-        mode: ModeChoice,
+        chat: TaskChat,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneId> {
-        let agent_id = self.open_agent_id(None);
         let (local, remote, host) = self.lane_cwds(lane);
-        let pane = self.create_new_agent_chat_pane(agent_id, local, remote, host, mode, window, cx);
+        let TaskChat { agent, mode } = chat;
+        let pane = self.create_new_agent_chat_pane(agent, local, remote, host, mode, window, cx);
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         let rt = self.main_area.runtimes.entry(lane).or_default();

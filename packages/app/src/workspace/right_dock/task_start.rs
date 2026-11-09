@@ -247,16 +247,19 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<TaskStartOutcome> {
         let submitter = crate::runs::FlowSubmitter::of_task(started_by, false);
-        self.begin_task_start_for(task_id, submitter, window, cx)
+        self.begin_task_start_for(task_id, submitter, None, window, cx)
     }
 
     /// [`Self::begin_task_start`] for `submitter`, whose solicitation a
     /// flow-backed task's run carries: a control start captured it before
     /// its card, and the run's questions follow it as the task's end does.
+    /// `agent` is the agent a control start's card named; `None` resolves it
+    /// as a new pane would. A flow's nodes name their own agents.
     pub(crate) fn begin_task_start_for(
         &mut self,
         task_id: &str,
         submitter: crate::runs::FlowSubmitter,
+        agent: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<TaskStartOutcome> {
@@ -270,7 +273,9 @@ impl Workspace {
             return rx;
         }
         if RunsHost::settled(cx) {
-            if let Err(e) = self.start_task_into(task_id, submitter, answer.clone(), window, cx) {
+            let started =
+                self.start_task_into(task_id, submitter, agent, answer.clone(), window, cx);
+            if let Err(e) = started {
                 self.finish_task_start(Err(e), None, &answer, cx);
             }
             return rx;
@@ -280,7 +285,8 @@ impl Workspace {
         cx.spawn_in(window, async move |ws, cx| {
             barrier.await;
             let entered = ws.update_in(cx, |ws, window, cx| {
-                if let Err(e) = ws.start_task_into(&id, submitter, answer.clone(), window, cx) {
+                let started = ws.start_task_into(&id, submitter, agent, answer.clone(), window, cx);
+                if let Err(e) = started {
                     ws.finish_task_start(Err(e), None, &answer, cx);
                 }
             });
@@ -322,6 +328,7 @@ impl Workspace {
         &mut self,
         task_id: &str,
         submitter: crate::runs::FlowSubmitter,
+        agent: Option<String>,
         answer: Answer,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -340,17 +347,23 @@ impl Workspace {
             Some(flow) => StartRoute::Flow(Box::new(
                 self.prepare_task_flow_start(&task, flow, reveal, submitter, cx)?,
             )),
-            // An existing lane needs no git repo, lock or checkout.
-            None => match &task.spec.run_in {
-                TaskRunIn::ExistingLane { path } => StartRoute::Existing {
-                    start: self.prepare_existing_lane_start(path, reveal)?,
+            None => {
+                let chat = TaskChat {
+                    agent: self.open_agent_id(agent.as_deref()),
                     mode,
-                },
-                TaskRunIn::NewWorktree => StartRoute::New {
-                    start: self.prepare_worktree_start(&task, reveal)?,
-                    mode,
-                },
-            },
+                };
+                match &task.spec.run_in {
+                    // An existing lane needs no git repo, lock or checkout.
+                    TaskRunIn::ExistingLane { path } => StartRoute::Existing {
+                        start: self.prepare_existing_lane_start(path, &chat.agent, reveal)?,
+                        chat,
+                    },
+                    TaskRunIn::NewWorktree => StartRoute::New {
+                        start: self.prepare_worktree_start(&task, reveal)?,
+                        chat,
+                    },
+                }
+            }
         };
         let exec = ExecutionRef {
             task_id: task.id().to_owned(),
@@ -445,12 +458,12 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         match route {
-            StartRoute::Existing { start, mode } => {
-                let started = self.start_task_in_existing_lane(&exec, start, mode, window, cx);
+            StartRoute::Existing { start, chat } => {
+                let started = self.start_task_in_existing_lane(&exec, start, chat, window, cx);
                 self.answer_when_dispatched(started, exec, answer, cx);
             }
-            StartRoute::New { start, mode } => {
-                self.create_task_worktree(start, mode, exec, answer, window, cx)
+            StartRoute::New { start, chat } => {
+                self.create_task_worktree(start, chat, exec, answer, window, cx)
             }
             StartRoute::Flow(start) => {
                 self.continue_task_flow_start(*start, exec, answer, window, cx)
@@ -461,7 +474,7 @@ impl Workspace {
     fn create_task_worktree(
         &mut self,
         start: WorktreeStart,
-        mode: ModeChoice,
+        chat: TaskChat,
         exec: ExecutionRef,
         answer: Answer,
         window: &mut Window,
@@ -508,8 +521,8 @@ impl Workspace {
                                 ws.finalize_create_lane_as(
                                     plan.clone(),
                                     project_id,
-                                    InitialPane::AgentChat(mode),
-                                    None,
+                                    InitialPane::AgentChat(chat.mode.clone()),
+                                    Some(&chat.agent),
                                     reveal,
                                     window,
                                     cx,
@@ -723,15 +736,22 @@ fn requester(started_by: StartedBy) -> Requester {
     }
 }
 
+/// The chat a start opens: its agent, resolved once as the start is
+/// checked — a control start's card already named it — and its mode.
+pub(super) struct TaskChat {
+    pub(super) agent: String,
+    pub(super) mode: ModeChoice,
+}
+
 /// Where a recorded start continues.
 enum StartRoute {
     Existing {
         start: super::task_existing_lane_ops::ExistingLaneStart,
-        mode: ModeChoice,
+        chat: TaskChat,
     },
     New {
         start: WorktreeStart,
-        mode: ModeChoice,
+        chat: TaskChat,
     },
     /// Boxed because a flow start carries a whole worktree start plus its
     /// inputs, about twice the other routes once Windows paths widen it.

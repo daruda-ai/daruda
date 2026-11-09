@@ -8,6 +8,8 @@ use std::time::Duration;
 
 #[path = "orchestrator_approvals/announcements.rs"]
 mod announcements;
+#[path = "orchestrator_approvals/disclosure.rs"]
+mod disclosure;
 
 fn setup(cx: &mut TestAppContext) -> Receiver<crate::remote_channel::bridge::Outbound> {
     setup_bridge(cx, true, Some(42))

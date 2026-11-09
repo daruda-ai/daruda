@@ -14,6 +14,7 @@ use crate::surface::strings as s;
 
 use super::{Dispatch, Pending, in_lane_window, in_pane_window, in_project_window, in_task_window};
 
+mod disclosure;
 mod flow_resume;
 mod tasks;
 
@@ -23,26 +24,30 @@ use tasks::{start_task, task_title};
 /// A command as its card asked about it. A resume's run is resolved once,
 /// before the card, so a handle such as `TaskLatest` cannot name another
 /// execution by the time the user answers; no variant carries the handle.
+/// The same holds for the agent a chat opens with: the card may wait for
+/// minutes while the window's last agent changes, so it is a concrete id.
 enum Asked {
     LaneCreate {
         workspace: daruda_store::project::WorkspaceUuid,
         project: daruda_store::project::ProjectId,
         name: String,
         base_ref: Option<String>,
-        agent: Option<String>,
+        agent: String,
         prompt: Option<String>,
     },
     ChatNew {
         lane: LaneHandle,
-        agent: Option<String>,
+        agent: String,
     },
     TaskCreate {
         workspace: daruda_store::project::WorkspaceUuid,
         project: daruda_store::project::ProjectId,
         task: NewTask,
     },
+    /// `agent` is unused by a flow-backed task, whose nodes name their own.
     TaskStart {
         task: String,
+        agent: String,
     },
     TaskOpen {
         task: String,
@@ -51,10 +56,11 @@ enum Asked {
 }
 
 impl Asked {
-    /// Resolve a resume's run; every other command is asked about as sent.
-    /// Not resumable, gone or held by another run: no answer changes that,
-    /// so the card is not shown.
-    fn resolve(cmd: GatedCommand, cx: &App) -> Result<Self, ControlError> {
+    /// Resolve a resume's run and the agent a chat opens with, in the window
+    /// that will open it; every other command is asked about as sent. Not
+    /// resumable, gone or held by another run: no answer changes that, so
+    /// the card is not shown.
+    fn resolve(cmd: GatedCommand, cx: &mut App) -> Result<Self, ControlError> {
         Ok(match cmd {
             GatedCommand::LaneCreate {
                 workspace,
@@ -68,10 +74,17 @@ impl Asked {
                 project,
                 name,
                 base_ref,
-                agent,
+                agent: in_project_window(workspace, project, cx, |ws, _, _| {
+                    Ok(ws.control_open_agent_id(agent.as_deref()))
+                })?,
                 prompt,
             },
-            GatedCommand::ChatNew { lane, agent } => Self::ChatNew { lane, agent },
+            GatedCommand::ChatNew { lane, agent } => Self::ChatNew {
+                lane,
+                agent: in_lane_window(lane, cx, |ws, _, _| {
+                    Ok(ws.control_open_agent_id(agent.as_deref()))
+                })?,
+            },
             GatedCommand::TaskCreate {
                 workspace,
                 project,
@@ -81,7 +94,10 @@ impl Asked {
                 project,
                 task,
             },
-            GatedCommand::TaskStart { task } => Self::TaskStart { task },
+            GatedCommand::TaskStart { task } => Self::TaskStart {
+                agent: in_task_window(&task, cx, |ws, _, _| Ok(ws.control_open_agent_id(None)))?,
+                task,
+            },
             GatedCommand::TaskOpen { task } => Self::TaskOpen { task },
             GatedCommand::FlowResume { run } => Self::FlowResume(flow_resume::target(&run, cx)?),
         })
@@ -178,7 +194,7 @@ fn reserve_gated(
     guard_gated(asked, cx)?;
     let creates_lane = match asked {
         Asked::LaneCreate { .. } => true,
-        Asked::TaskStart { task } => cx
+        Asked::TaskStart { task, .. } => cx
             .global::<GlobalTasks>()
             .get(task)
             .is_some_and(task_creates_lane),
@@ -219,7 +235,7 @@ fn guard_gated(asked: &Asked, cx: &mut App) -> Result<(), ControlError> {
         }),
         // Only a start that creates a worktree spends the budget, as
         // `daruda_worktree_create` does; an existing one is already there.
-        Asked::TaskStart { task } => {
+        Asked::TaskStart { task, .. } => {
             let tasks = cx.global::<GlobalTasks>();
             let found = tasks.get(task).ok_or(ControlError::TaskNotFound)?;
             if found.lifecycle != daruda_store::tasks::Lifecycle::Backlog {
@@ -253,16 +269,36 @@ fn task_creates_lane(task: &daruda_store::tasks::TaskRecord) -> bool {
 /// A target that cannot be named is refused rather than asked about: a card
 /// with the place left blank asks the person to approve without saying where.
 fn approval_summary(asked: &Asked, cx: &mut App) -> Result<String, ControlError> {
+    use disclosure::{agent_phrase, prompt_excerpt};
+    // A chat's card names its pinned agent and that agent's delegated mode.
     Ok(match asked {
-        Asked::LaneCreate { name, .. } => s::control::approval_lane_create(name),
-        Asked::ChatNew { lane, .. } => {
-            let path = in_lane_window(*lane, cx, |ws, _window, _cx| {
-                Ok(s::control::lane_path(
+        Asked::LaneCreate {
+            workspace,
+            project,
+            name,
+            agent,
+            prompt,
+            ..
+        } => {
+            let agent = in_project_window(*workspace, *project, cx, |ws, _, _| {
+                Ok(agent_phrase(&ws.control_delegated_disclosure(agent)))
+            })?;
+            match prompt {
+                Some(prompt) => {
+                    s::control::approval_lane_create_prompt(name, agent, prompt_excerpt(prompt))
+                }
+                None => s::control::approval_lane_create(name, agent),
+            }
+        }
+        Asked::ChatNew { lane, agent } => {
+            let (path, agent) = in_lane_window(*lane, cx, |ws, _window, _cx| {
+                let path = s::control::lane_path(
                     ws.control_project_name(lane.project),
                     ws.control_lane_name(lane.lane_ref()),
-                ))
+                );
+                Ok((path, agent_phrase(&ws.control_delegated_disclosure(agent))))
             })?;
-            s::control::approval_chat_new(&path)
+            s::control::approval_chat_new(&path, agent)
         }
         Asked::TaskCreate {
             workspace,
@@ -299,9 +335,19 @@ fn approval_summary(asked: &Asked, cx: &mut App) -> Result<String, ControlError>
             let surface = flow.unwrap_or_else(s::control::approval_task_as_chat);
             s::control::approval_task_create(task.title.trim(), &name, &location, &surface)
         }
-        Asked::TaskStart { task } => match task_flow_summary(task, cx) {
+        Asked::TaskStart { task, agent } => match task_flow_summary(task, cx) {
             Some(flow) => s::control::approval_task_start_flow(task_title(task, cx), &flow),
-            None => s::control::approval_task_start(task_title(task, cx)),
+            None => {
+                let prompt = cx
+                    .global::<GlobalTasks>()
+                    .get(task)
+                    .map(|t| prompt_excerpt(&t.spec.prompt))
+                    .unwrap_or_default();
+                let agent = in_task_window(task, cx, |ws, _, _| {
+                    Ok(agent_phrase(&ws.control_delegated_disclosure(agent)))
+                })?;
+                s::control::approval_task_start(task_title(task, cx), agent, prompt)
+            }
         },
         Asked::TaskOpen { task } => s::control::approval_task_open(task_title(task, cx)),
         Asked::FlowResume(target) => flow_resume::summary(target, cx)?,
@@ -334,12 +380,12 @@ async fn perform_gated(
                 .await
                 .map(|task| ControlResult::TaskCreated { task });
         }
-        Asked::TaskStart { task } => return start_task(task, caller, cx).await,
+        Asked::TaskStart { task, agent } => return start_task(task, agent, caller, cx).await,
         Asked::TaskOpen { task } => return cx.update(|cx| open_task(task, caller, cx)),
         Asked::ChatNew { lane, agent } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {
-                    ws.control_chat_new(lane.lane_ref(), agent.clone(), window, cx)
+                    ws.control_chat_new(lane.lane_ref(), Some(agent.clone()), window, cx)
                 })
             })
             .map(|target| (target, None)),
@@ -354,7 +400,7 @@ async fn perform_gated(
             (workspace, project),
             name,
             base_ref,
-            agent,
+            Some(agent),
             prompt,
             caller.origin(),
             cx,
@@ -400,6 +446,7 @@ fn announce_chat(
         pane,
         label.path.clone(),
         &label.agent_name,
+        &label.mode,
         delivery,
         cx,
     );

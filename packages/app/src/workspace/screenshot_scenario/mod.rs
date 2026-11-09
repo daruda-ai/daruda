@@ -773,7 +773,8 @@ pub(crate) fn drive(
         ScreenshotScenario::OrchestratorApproval => {
             use crate::control::approval;
             use crate::remote_channel::global::Delivery;
-            workspace.update(cx, |ws, cx| {
+            use crate::surface::strings::control as s;
+            let agent = workspace.update(cx, |ws, cx| {
                 ws.seed_orchestrator_for_shot(true, window, cx);
                 let pane = ws.orchestrator_chat_pane().unwrap();
                 ws.agent_chat_view(pane.pane)
@@ -781,6 +782,7 @@ pub(crate) fn drive(
                     .update(cx, |view, cx| {
                         view.seed_transcript(Vec::new(), window, cx);
                     });
+                ws.control_delegated_disclosure(&ws.control_open_agent_id(None))
             });
             crate::window_registry::WindowRegistry::register_orchestrator(
                 window.window_handle(),
@@ -788,16 +790,20 @@ pub(crate) fn drive(
                 cx,
             );
             let (settled, _) = approval::request(
-                crate::surface::strings::control::approval_task_start("Review changes"),
+                s::approval_task_start(
+                    "Review changes",
+                    s::approval_agent(&agent.agent_name, &agent.mode),
+                    "Review the open changes on feat/approvals and list anything risky",
+                ),
                 Delivery::Presence { away: false },
                 cx,
             );
             let _ = approval::request(
-                crate::surface::strings::control::approval_task_create(
+                s::approval_task_create(
                     "Add desktop approvals",
                     "Daruda",
-                    crate::surface::strings::control::approval_task_in_new_branch("feat/approvals"),
-                    crate::surface::strings::control::approval_task_as_chat(),
+                    s::approval_task_in_new_branch("feat/approvals"),
+                    s::approval_task_as_chat(),
                 ),
                 Delivery::Presence { away: false },
                 cx,

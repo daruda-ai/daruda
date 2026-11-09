@@ -19,10 +19,33 @@ fn setup(cx: &mut App) -> crate::telegram::global::TestOutbox {
     crate::telegram::global::install_for_test(true, Some(42), cx)
 }
 
-fn command() -> GatedCommand {
+/// A window holding a project, whose worktree creations these ask about:
+/// the card names the agent the window would open.
+fn window(
+    cx: &mut TestAppContext,
+) -> (
+    crate::test_support::ControlFixture,
+    (
+        daruda_store::project::WorkspaceUuid,
+        daruda_store::project::ProjectId,
+    ),
+) {
+    let fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let at = fixture
+        .workspace
+        .read_with(cx, |ws, _| (ws.uuid(), ws.control_active_lane().project));
+    (fixture, at)
+}
+
+fn command(
+    (workspace, project): (
+        daruda_store::project::WorkspaceUuid,
+        daruda_store::project::ProjectId,
+    ),
+) -> GatedCommand {
     GatedCommand::LaneCreate {
-        workspace: Default::default(),
-        project: 0,
+        workspace,
+        project,
         name: "new-work".into(),
         base_ref: None,
         agent: None,
@@ -51,11 +74,12 @@ fn approve(dispatch: Dispatch, cx: &mut App) -> smol::channel::Receiver<Option<C
 /// the dispatch future run normally while two different creations overlap.
 #[gpui::test]
 async fn an_approved_creation_holds_the_last_budget_slot_until_completion(cx: &mut TestAppContext) {
+    let (_fixture, at) = window(cx);
     let _outbound = cx.update(setup);
     let (release, resume) = smol::channel::bounded(1);
     let first = cx.update(|cx| {
         let dispatch = run_gated_with(
-            command(),
+            command(at),
             CommandOrigin::Orchestrator,
             move |_, _, _| {
                 async move {
@@ -74,7 +98,7 @@ async fn an_approved_creation_holds_the_last_budget_slot_until_completion(cx: &m
     cx.run_until_parked();
     let second = cx.update(|cx| {
         run_gated_with(
-            command(),
+            command(at),
             CommandOrigin::Orchestrator,
             |_, _, _| {
                 async { panic!("a second creation cannot begin in the reserved slot") }
@@ -99,11 +123,12 @@ async fn an_approved_creation_holds_the_last_budget_slot_until_completion(cx: &m
 
 #[gpui::test]
 async fn a_failed_approved_creation_returns_its_reserved_budget_slot(cx: &mut TestAppContext) {
+    let (_fixture, at) = window(cx);
     let _outbound = cx.update(setup);
     let (release, resume) = smol::channel::bounded(1);
     let first = cx.update(|cx| {
         let dispatch = run_gated_with(
-            command(),
+            command(at),
             CommandOrigin::Orchestrator,
             move |_, _, _| {
                 async move {
@@ -137,11 +162,12 @@ async fn a_failed_approved_creation_returns_its_reserved_budget_slot(cx: &mut Te
 
 #[gpui::test]
 async fn already_open_approvals_cannot_share_the_last_creation_slot(cx: &mut TestAppContext) {
+    let (_fixture, at) = window(cx);
     let _outbound = cx.update(setup);
     let (release, resume) = smol::channel::bounded(1);
     let (first, second) = cx.update(|cx| {
         let first = run_gated_with(
-            command(),
+            command(at),
             CommandOrigin::Orchestrator,
             move |_, _, _| {
                 async move {
@@ -156,7 +182,7 @@ async fn already_open_approvals_cannot_share_the_last_creation_slot(cx: &mut Tes
             cx,
         );
         let second = run_gated_with(
-            command(),
+            command(at),
             CommandOrigin::Orchestrator,
             |_, _, _| {
                 async {

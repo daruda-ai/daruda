@@ -98,6 +98,7 @@ pub(crate) fn announce_chat_created(
     pane: bridge::PaneRef,
     header: String,
     agent: &str,
+    mode: &str,
     delivery: global::Delivery,
     cx: &mut gpui::App,
 ) {
@@ -106,9 +107,9 @@ pub(crate) fn announce_chat_created(
         log_writer::LogWriter,
     };
     let tail = match delivery {
-        global::Delivery::Explicit => crate::surface::strings::control::chat_announced(agent),
+        global::Delivery::Explicit => crate::surface::strings::control::chat_announced(agent, mode),
         global::Delivery::Presence { .. } => {
-            crate::surface::strings::control::chat_announced_only(agent)
+            crate::surface::strings::control::chat_announced_only(agent, mode)
         }
     };
     let telegram = crate::telegram::global::TelegramBridge::announce_chat(
