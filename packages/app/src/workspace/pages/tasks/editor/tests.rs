@@ -1743,3 +1743,70 @@ fn task_editor_offers_the_flows_of_where_the_task_runs(cx: &mut TestAppContext) 
     })
     .unwrap();
 }
+
+/// A previewed prompt over the 4 KiB synchronous-parse limit lays out empty
+/// until its background parse lands. If the parse lives in keyed state, leaving
+/// the page drops it, the first frame back is nearly empty, and the body's
+/// persistent scroll handle clamps the reader's place away.
+#[gpui::test]
+fn returning_to_a_previewed_long_prompt_keeps_the_body_scroll(cx: &mut TestAppContext) {
+    let fixture = crate::test_support::workspace_for_control(cx);
+    // Hangul is three bytes a character, so a Korean prompt crosses the limit
+    // at ~1.4k characters.
+    let prompt: String = (0..200)
+        .map(|n| format!("문단 {n}: 미리보기에서 높이를 차지하는 긴 프롬프트 본문입니다."))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    assert!(
+        prompt.len() > 4 * 1024,
+        "the prompt must take the async parse path"
+    );
+    let editor = cx
+        .update_window(fixture.window.into(), |_, window, cx| {
+            fixture.workspace.update(cx, |ws, cx| {
+                ws.open_task_editor(None, window, cx);
+                let editor = ws
+                    .task_detail_id()
+                    .expect("the Tasks page holds the editor");
+                let state = ws.task_editor(editor).unwrap().prompt_state.clone();
+                state.update(cx, |s, cx| s.set_value(prompt.clone(), window, cx));
+                ws.set_task_prompt_preview(editor, 1, cx);
+                editor
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let scroll = fixture.workspace.read_with(cx, |ws, _| {
+        ws.task_editor(editor).unwrap().body_scroll_handle.clone()
+    });
+    let reading_at = gpui::px(-600.);
+    assert!(
+        scroll.max_offset().y > -reading_at,
+        "the preview must scroll past the reader's place (max {:?})",
+        scroll.max_offset().y
+    );
+    scroll.set_offset(gpui::point(gpui::px(0.), reading_at));
+    fixture.workspace.update(cx, |_, cx| cx.notify());
+    cx.run_until_parked();
+    assert_eq!(scroll.offset().y, reading_at);
+
+    // Leave the page for a frame, then come back to the same editor.
+    fixture.workspace.update(cx, |ws, cx| ws.close_page(cx));
+    cx.run_until_parked();
+    fixture.workspace.update(cx, |ws, cx| {
+        ws.show_page(crate::workspace::pages::Page::Tasks, cx)
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        fixture.workspace.read_with(cx, |ws, _| ws.task_detail_id()),
+        Some(editor),
+        "the editor must still be the page's detail"
+    );
+    assert_eq!(
+        scroll.offset().y,
+        reading_at,
+        "coming back to the page must leave the reader where they were"
+    );
+}

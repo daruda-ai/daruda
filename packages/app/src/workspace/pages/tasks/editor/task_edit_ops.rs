@@ -400,6 +400,7 @@ impl Workspace {
             editing_subtask: None,
             editing_subtask_input,
             body_scroll_handle: gpui::ScrollHandle::new(),
+            prompt_preview: crate::ui::MarkdownStates::default(),
         };
         content._subscriptions.extend(flow_subs);
         // The baseline is what the form shows: a base or lane no longer

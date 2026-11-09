@@ -360,6 +360,7 @@ fn prompt(
                     ("task-edit-preview", editor_id.0 as usize),
                     te.prompt_state.read(cx).value(),
                 )
+                .retained_in(&te.prompt_preview)
                 .text_size(px(theme::editor_font_size(cx)))
                 .selectable(true)
                 .full_width(true),

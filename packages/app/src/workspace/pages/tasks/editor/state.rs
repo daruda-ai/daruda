@@ -61,6 +61,11 @@ pub(in crate::workspace) struct TaskEditContent {
     /// the visible thumb; `track_scroll(&handle)` on the scroll
     /// container hooks up cursor + wheel + scrollbar drag together.
     pub(in crate::workspace::pages::tasks) body_scroll_handle: ScrollHandle,
+    /// The prompt preview's parse, kept while the preview is not drawn (page
+    /// hidden or editing tab). Keyed state would drop it, and a prompt past the
+    /// 4 KiB synchronous-parse limit would lay out empty for a frame and clamp
+    /// `body_scroll_handle`'s offset to that short body.
+    pub(in crate::workspace::pages::tasks) prompt_preview: crate::ui::MarkdownStates,
 }
 
 /// Result of running `validate_branch` over the current branch-input
