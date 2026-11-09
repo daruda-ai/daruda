@@ -4,6 +4,8 @@ use crate::control::{
 };
 use crate::remote_channel::trace;
 use crate::remote_channel::{bridge::PaneRef, command};
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
 use gpui::App;
 
 /// Resolve, run, and render one command.
@@ -146,15 +148,22 @@ fn start_task(task: String, cx: &mut App) -> ControlOutcome {
         cx.update(|cx| match outcome {
             // A chat was announced as the phone's new target on the way.
             Ok(ControlResult::TaskStarted { chat: Some(_), .. }) => {}
-            // Every other start runs as a flow, which `flow` names.
-            Ok(_) => {
-                if let Some(flow) = &flow {
-                    crate::remote_channel::send_notice_everywhere(
-                        crate::surface::strings::control::task_started_flow(&title, flow),
-                        cx,
-                    );
-                }
+            // A start without a chat runs as the flow `flow` names.
+            Ok(ControlResult::TaskStarted { chat: None, .. }) if let Some(flow) = &flow => {
+                crate::remote_channel::send_notice_everywhere(
+                    crate::surface::strings::control::task_started_flow(&title, flow),
+                    cx,
+                );
             }
+            // Only a chat or a flow can carry a start; the phone heard
+            // nothing more, so the log keeps what happened.
+            Ok(other) => LogWriter::log(
+                ErrorReport::new("A phone task start reported neither a chat nor a flow")
+                    .severity(ErrorSeverity::Warning)
+                    .message(format!("{other:?}"))
+                    .at(file!(), line!())
+                    .build(),
+            ),
             Err(e) => crate::remote_channel::send_notice_everywhere(
                 crate::surface::strings::control::task_start_failed(
                     &title,

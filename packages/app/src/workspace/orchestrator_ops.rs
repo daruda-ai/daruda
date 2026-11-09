@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use daruda_config::ModeChoice;
 use daruda_store::accounts::AccountSelection;
 use daruda_store::project::PaneCwd;
 use gpui::{Context, Entity, Focusable as _, Window};
@@ -147,11 +148,13 @@ impl Workspace {
         if let Some(chat) = &self.orchestrator.chat {
             return chat.pane_id;
         }
-        let pane = self.create_agent_chat_pane(
+        // It holds the MCP control tools, so it never takes the delegated mode.
+        let pane = self.create_agent_chat_pane_in(
             Some(PaneCwd::Local(cwd)),
             None,
             agent_id,
             None,
+            ModeChoice::FollowDefault,
             window,
             cx,
         );
