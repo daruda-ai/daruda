@@ -1,5 +1,6 @@
 pub mod assemble;
 mod chat_config;
+mod delegated;
 pub mod entry;
 pub mod icon;
 pub mod preset;
@@ -21,6 +22,7 @@ pub use chat_config::{
     READING_WIDTH_MIN, SessionPreferences, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
     TAIL_WINDOW_DEFAULT, USE_READING_WIDTH_DEFAULT,
 };
+pub use delegated::{delegated_default, effective_delegated_mode};
 pub use entry::{AgentEntry, AgentSource, PresetOverrides};
 pub use preset::{
     ACP_REGISTRY_URL, ACP_REGISTRY_VERSION, AgentPreset, CODEX_CONFIG_ENV, PresetLaunchability,
@@ -46,6 +48,10 @@ pub struct AgentDefinition {
     /// per model. An id the agent doesn't advertise is skipped at connect,
     /// falling through to the adapter's own default.
     pub default_mode: Option<String>,
+    /// Session mode for a session daruda opens because the phone or the
+    /// orchestrator asked, in place of `default_mode`. `None` follows
+    /// [`delegated_default`]; read through [`effective_delegated_mode`].
+    pub delegated_mode: Option<String>,
     /// Model a pane under this agent runs on unless its user picked one —
     /// requested on every connect and on a live config edit.
     ///
@@ -312,6 +318,20 @@ impl AgentLaunch {
         account_recipe_for_local_command(command)
     }
 
+    /// The bare adapter command whichever launch shape carries, without its
+    /// host — what identifies the adapter, wherever it runs.
+    pub(crate) fn adapter_command(&self) -> &str {
+        match self {
+            AgentLaunch::Raw(command) => command,
+            AgentLaunch::Ssh {
+                adapter_command, ..
+            }
+            | AgentLaunch::Docker {
+                adapter_command, ..
+            } => adapter_command,
+        }
+    }
+
     /// The adapter command this agent runs on this machine, or `None` for
     /// remote launches (SSH/Docker), whose CLI a local desktop browser
     /// cannot sign in.
@@ -359,6 +379,8 @@ struct AgentDefinitionRepr {
     command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    delegated_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -500,6 +522,7 @@ impl From<AgentDefinition> for AgentDefinitionRepr {
             name: v.name,
             command,
             default_mode: v.default_mode,
+            delegated_mode: v.delegated_mode,
             default_model: v.default_model,
             fold_mode: v.fold_mode,
             tail_window: v.tail_window,
@@ -538,6 +561,7 @@ impl From<AgentDefinitionRepr> for AgentDefinition {
             name: v.name,
             launch,
             default_mode: v.default_mode,
+            delegated_mode: v.delegated_mode,
             default_model: v.default_model,
             fold_mode: v.fold_mode,
             tail_window: v.tail_window,
@@ -558,6 +582,7 @@ impl AgentDefinition {
             name: name.into(),
             launch,
             default_mode: None,
+            delegated_mode: None,
             default_model: None,
             fold_mode: None,
             tail_window: None,
@@ -581,6 +606,7 @@ impl AgentDefinition {
                 "npx -y @agentclientprotocol/claude-agent-acp@latest".to_string(),
             ),
             default_mode: None,
+            delegated_mode: None,
             default_model: None,
             fold_mode: None,
             tail_window: None,

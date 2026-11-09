@@ -499,6 +499,37 @@ fn a_mode_or_model_pick_persists_for_a_constructor_seeded_row(cx: &mut TestAppCo
     }
 }
 
+/// The delegated-mode picker persists on pick into its own key, leaving the
+/// session mode the desktop uses untouched.
+#[gpui::test]
+fn a_delegated_mode_pick_persists_apart_from_the_session_mode(cx: &mut TestAppContext) {
+    let (wh, win) = build_window(cx);
+    set_agent_vocabulary(
+        &wh,
+        &win,
+        cx,
+        daruda_store::agent_vocabulary::AgentVocabularyCache::default(),
+    );
+    let delegated = |r: &AgentCatalogRow| r.delegated_mode_select.clone();
+    confirm_agent_row_select(&wh, &win, cx, 0, delegated, "acceptEdits");
+    win.read_with(cx, |_w, cx| {
+        let agents = &crate::store::SettingsStore::global(cx).user().agents;
+        let definition = agents[0].resolve().expect("the built-in default resolves");
+        assert_eq!(definition.delegated_mode.as_deref(), Some("acceptEdits"));
+        assert_eq!(definition.default_mode, None);
+    });
+
+    confirm_agent_row_select(&wh, &win, cx, 0, delegated, "");
+    win.read_with(cx, |_w, cx| {
+        let agents = &crate::store::SettingsStore::global(cx).user().agents;
+        let definition = agents[0].resolve().expect("the built-in default resolves");
+        assert_eq!(
+            definition.delegated_mode, None,
+            "the empty entry follows the policy default"
+        );
+    });
+}
+
 /// The cached vocabulary is keyed on the row's **id**, which stays editable
 /// after the row was built — retyping it has to re-source both pickers. The
 /// two axes are sourced independently: a cache that only knows this agent's

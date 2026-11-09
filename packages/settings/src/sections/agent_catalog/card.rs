@@ -219,6 +219,16 @@ impl SettingsView {
                 daruda_ui::select::select(&row.default_model_select, cx, 0),
             ))
             .child(field_row(
+                s::settings::agent_field_delegated_mode(),
+                daruda_ui::select::select(&row.delegated_mode_select, cx, 0),
+            ))
+            .child(
+                div()
+                    .text_size(px(theme::MODAL_BODY_FONT_SIZE))
+                    .text_color(t.text_muted)
+                    .child(s::settings::agent_delegated_mode_description()),
+            )
+            .child(field_row(
                 s::settings::agent_field_question_timeout(),
                 daruda_ui::input(&row.question_timeout_input, cx, 0),
             ))

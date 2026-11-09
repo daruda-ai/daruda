@@ -167,6 +167,9 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
             if let Some(default_mode) = &overrides.default_mode {
                 table["default_mode"] = toml_edit::value(default_mode.clone());
             }
+            if let Some(delegated_mode) = &overrides.delegated_mode {
+                table["delegated_mode"] = toml_edit::value(delegated_mode.clone());
+            }
             if let Some(default_model) = &overrides.default_model {
                 table["default_model"] = toml_edit::value(default_model.clone());
             }
@@ -218,6 +221,9 @@ fn agent_entry_table(entry: &AgentEntry) -> toml_edit::Table {
             };
             if let Some(default_mode) = &agent.default_mode {
                 table["default_mode"] = toml_edit::value(default_mode.clone());
+            }
+            if let Some(delegated_mode) = &agent.delegated_mode {
+                table["delegated_mode"] = toml_edit::value(delegated_mode.clone());
             }
             if let Some(default_model) = &agent.default_model {
                 table["default_model"] = toml_edit::value(default_model.clone());

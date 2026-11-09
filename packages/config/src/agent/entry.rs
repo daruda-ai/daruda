@@ -54,6 +54,7 @@ pub struct PresetOverrides {
     /// override of this one — that is a [`AgentSource::Custom`] entry.
     pub command: Option<String>,
     pub default_mode: Option<String>,
+    pub delegated_mode: Option<String>,
     pub default_model: Option<String>,
     pub fold_mode: Option<Vec<String>>,
     pub tail_window: Option<u8>,
@@ -139,6 +140,9 @@ impl AgentSource {
                 }
                 if let Some(default_mode) = &overrides.default_mode {
                     definition.default_mode = Some(default_mode.clone());
+                }
+                if let Some(delegated_mode) = &overrides.delegated_mode {
+                    definition.delegated_mode = Some(delegated_mode.clone());
                 }
                 if let Some(default_model) = &overrides.default_model {
                     definition.default_model = Some(default_model.clone());
@@ -236,6 +240,7 @@ impl AgentSource {
                 // and `command`: every registry preset leaves these `None`, so
                 // the value *is* the override.
                 default_mode: definition.default_mode.clone(),
+                delegated_mode: definition.delegated_mode.clone(),
                 default_model: definition.default_model.clone(),
                 fold_mode: definition.fold_mode.clone(),
                 tail_window: definition.tail_window,
@@ -290,6 +295,8 @@ struct AgentEntryRepr {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     default_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    delegated_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     default_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fold_mode: Option<Vec<String>>,
@@ -331,6 +338,7 @@ impl TryFrom<AgentEntryRepr> for AgentSource {
                     name: v.name,
                     command: v.command,
                     default_mode: v.default_mode,
+                    delegated_mode: v.delegated_mode,
                     default_model: v.default_model,
                     fold_mode: v.fold_mode,
                     tail_window: v.tail_window,
@@ -359,6 +367,7 @@ impl TryFrom<AgentEntryRepr> for AgentSource {
             ssh: v.ssh,
             docker: v.docker,
             default_mode: v.default_mode,
+            delegated_mode: v.delegated_mode,
             default_model: v.default_model,
             fold_mode: v.fold_mode,
             tail_window: v.tail_window,
@@ -390,6 +399,7 @@ impl From<AgentSource> for AgentEntryRepr {
                 name: overrides.name,
                 command: overrides.command,
                 default_mode: overrides.default_mode,
+                delegated_mode: overrides.delegated_mode,
                 default_model: overrides.default_model,
                 fold_mode: overrides.fold_mode,
                 tail_window: overrides.tail_window,
@@ -409,6 +419,7 @@ impl From<AgentSource> for AgentEntryRepr {
                     name: Some(repr.name),
                     command: repr.command,
                     default_mode: repr.default_mode,
+                    delegated_mode: repr.delegated_mode,
                     default_model: repr.default_model,
                     fold_mode: repr.fold_mode,
                     tail_window: repr.tail_window,

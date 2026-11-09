@@ -1349,3 +1349,77 @@ fn timeout_defaults_off_and_agent_overrides_global() {
         "an agent may turn the timeout on alone"
     );
 }
+
+const CLAUDE_ADAPTER: &str = "npx -y @agentclientprotocol/claude-agent-acp@latest";
+
+/// The policy default follows the adapter the launch runs, wherever it runs.
+#[test]
+fn delegated_default_is_the_adapters_no_prompt_mode() {
+    for launch in [
+        AgentLaunch::Raw(CLAUDE_ADAPTER.to_string()),
+        AgentLaunch::Ssh {
+            adapter_command: CLAUDE_ADAPTER.to_string(),
+            host: "vm-work".to_string(),
+        },
+        AgentLaunch::Docker {
+            adapter_command: CLAUDE_ADAPTER.to_string(),
+            container: "dev".to_string(),
+        },
+    ] {
+        assert_eq!(
+            delegated_default(&launch),
+            Some("bypassPermissions"),
+            "{launch:?}"
+        );
+    }
+    assert_eq!(
+        delegated_default(&AgentLaunch::Raw("npx -y codex-acp@1.1.0".to_string())),
+        Some("agent-full-access")
+    );
+    assert_eq!(
+        delegated_default(&AgentLaunch::Raw("run-other".to_string())),
+        None,
+        "an adapter daruda knows nothing of leaves the session mode standing"
+    );
+}
+
+#[test]
+fn effective_delegated_mode_prefers_a_stated_mode_over_the_policy_default() {
+    let claude = |delegated_mode: Option<&str>| AgentDefinition {
+        delegated_mode: delegated_mode.map(str::to_string),
+        ..AgentDefinition::claude_default()
+    };
+    assert_eq!(
+        effective_delegated_mode(&claude(Some(" acceptEdits "))).as_deref(),
+        Some("acceptEdits")
+    );
+    // Blank is no statement at all.
+    for unset in [None, Some(""), Some("  ")] {
+        assert_eq!(
+            effective_delegated_mode(&claude(unset)).as_deref(),
+            Some("bypassPermissions"),
+            "{unset:?}"
+        );
+    }
+    assert_eq!(effective_delegated_mode(&agent_with(None, None)), None);
+    let stated_unknown = AgentDefinition {
+        delegated_mode: Some("yolo".to_string()),
+        ..agent_with(None, None)
+    };
+    assert_eq!(
+        effective_delegated_mode(&stated_unknown).as_deref(),
+        Some("yolo")
+    );
+}
+
+#[test]
+fn a_definition_without_a_delegated_mode_round_trips_and_stays_absent() {
+    // Pre-`delegated_mode` configs must keep loading, and daruda must not
+    // start writing an empty key back into them.
+    let d: AgentDefinition =
+        toml::from_str("id = \"codex\"\nname = \"Codex\"\ncommand = \"codex acp\"\n")
+            .expect("deserialize");
+    assert_eq!(d.delegated_mode, None);
+    let toml_str = toml::to_string(&d).expect("serialize");
+    assert!(!toml_str.contains("delegated_mode"), "{toml_str}");
+}

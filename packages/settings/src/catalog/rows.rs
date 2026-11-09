@@ -59,6 +59,14 @@ impl SettingsView {
         let default_mode = SharedString::from(definition.default_mode.clone().unwrap_or_default());
         let default_model =
             SharedString::from(definition.default_model.clone().unwrap_or_default());
+        let delegated_mode =
+            SharedString::from(definition.delegated_mode.clone().unwrap_or_default());
+        let delegated_options = sections::agent_vocabulary::agent_row_delegated_options(
+            vocabulary,
+            &id,
+            &command,
+            &delegated_mode,
+        );
         let (mode_options, model_options) =
             sections::agent_vocabulary::agent_row_vocabulary_options(
                 vocabulary,
@@ -133,6 +141,9 @@ impl SettingsView {
             }),
             default_mode_select: cx.new(|cx| {
                 select::state_with_options(mode_options, Some(&default_mode), window, cx)
+            }),
+            delegated_mode_select: cx.new(|cx| {
+                select::state_with_options(delegated_options, Some(&delegated_mode), window, cx)
             }),
             default_model_select: cx.new(|cx| {
                 select::state_with_options(model_options, Some(&default_model), window, cx)

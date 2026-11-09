@@ -58,7 +58,7 @@ pub use agent::{
     READING_WIDTH_MAX, READING_WIDTH_MIN, SessionPreferences, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
     TAIL_WINDOW_DEFAULT, TranscriptDefault, account_recipe_for_local_command, agent_preset,
     agent_presets, agent_vocabulary_seed, assemble_launch_command, canonical_env,
-    is_valid_env_name, with_transcript_default,
+    delegated_default, effective_delegated_mode, is_valid_env_name, with_transcript_default,
 };
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
@@ -380,16 +380,7 @@ fn migrate_legacy_default_permission_mode(agents: &mut [AgentEntry], mode: &str)
 }
 
 fn legacy_mode_can_apply_to(launch: &AgentLaunch, mode: &str) -> bool {
-    let command = match launch {
-        AgentLaunch::Raw(command) => command,
-        AgentLaunch::Ssh {
-            adapter_command, ..
-        }
-        | AgentLaunch::Docker {
-            adapter_command, ..
-        } => adapter_command,
-    };
-    match agent_vocabulary_seed(command) {
+    match agent_vocabulary_seed(launch.adapter_command()) {
         Some(seed) => seed.modes.iter().any(|entry| entry.id == mode),
         // Unknown adapters previously received the global candidate too; keep
         // that safe behavior because `daruda_acp` skips unadvertised modes.

@@ -140,6 +140,7 @@ impl SettingsView {
             let entry = daruda_config::AgentEntry::for_definition(
                 daruda_config::AgentDefinition {
                     default_mode: row.default_mode(cx),
+                    delegated_mode: row.delegated_mode(cx),
                     default_model: row.default_model(cx),
                     fold_mode: row.fold_mode(),
                     tail_window: row.tail_window(cx),

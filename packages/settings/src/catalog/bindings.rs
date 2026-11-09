@@ -96,7 +96,11 @@ impl SettingsView {
         // mode/model option lists are rebuilt in place by the id/command
         // handlers further down, which reuse these same entities so this
         // wiring stays valid.
-        for state in [&row.default_mode_select, &row.default_model_select] {
+        for state in [
+            &row.default_mode_select,
+            &row.delegated_mode_select,
+            &row.default_model_select,
+        ] {
             subs.push(cx.subscribe_in(
                 state,
                 window,

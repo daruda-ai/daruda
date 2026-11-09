@@ -51,6 +51,10 @@ pub(crate) struct AgentCatalogRow {
     /// means no override. Rebuilt whenever the row's id or command changes —
     /// see [`SettingsView::refresh_agent_row_vocabulary`].
     pub(crate) default_mode_select: Entity<SelectState>,
+    /// Optional session mode for a session the phone or the orchestrator
+    /// opens. Same vocabulary as `default_mode_select`; its empty sentinel
+    /// follows [`daruda_config::delegated_default`] rather than the adapter.
+    pub(crate) delegated_mode_select: Entity<SelectState>,
     /// Optional model to request when this agent connects. Same option
     /// sourcing and same empty sentinel as `default_mode_select`.
     pub(crate) default_model_select: Entity<SelectState>,

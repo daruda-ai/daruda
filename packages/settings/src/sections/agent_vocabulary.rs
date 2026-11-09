@@ -38,6 +38,7 @@ impl SettingsView {
         let agent_id = row.id_input.read(cx).value().trim().to_string();
         let command = row.command_input.read(cx).value().trim().to_string();
         let mode = selected_value(&row.default_mode_select, cx);
+        let delegated = selected_value(&row.delegated_mode_select, cx);
         let model = selected_value(&row.default_model_select, cx);
         let (mode_options, model_options) = agent_row_vocabulary_options(
             &self.agent_vocabulary,
@@ -48,6 +49,15 @@ impl SettingsView {
         );
         set_options(&row.default_mode_select, mode_options, &mode, window, cx);
         set_options(&row.default_model_select, model_options, &model, window, cx);
+        let delegated_options =
+            agent_row_delegated_options(&self.agent_vocabulary, &agent_id, &command, &delegated);
+        set_options(
+            &row.delegated_mode_select,
+            delegated_options,
+            &delegated,
+            window,
+            cx,
+        );
         cx.notify();
     }
 }
@@ -58,6 +68,12 @@ impl AgentCatalogRow {
     /// disagree about what "no override" looks like.
     pub(crate) fn default_mode(&self, cx: &gpui::App) -> Option<String> {
         selected_override(&self.default_mode_select, cx)
+    }
+
+    /// The mode for phone- and orchestrator-opened sessions, same sentinel as
+    /// [`Self::default_mode`]; `None` follows the policy default.
+    pub(crate) fn delegated_mode(&self, cx: &gpui::App) -> Option<String> {
+        selected_override(&self.delegated_mode_select, cx)
     }
 
     /// The pinned model, same sentinel as [`Self::default_mode`].
@@ -124,6 +140,30 @@ pub(crate) fn agent_row_vocabulary_options(
             MODEL_LABELS,
         ),
     )
+}
+
+/// The delegated-mode picker's options: the row's mode vocabulary, led by a
+/// "no override" entry naming what [`daruda_config::delegated_default`] picks.
+///
+/// The row's command is the adapter command whatever its transport, which is
+/// all `delegated_default` reads, so a `Raw` launch stands in for any of them.
+pub(crate) fn agent_row_delegated_options(
+    vocabulary: &AgentVocabularyCache,
+    agent_id: &str,
+    command: &str,
+    saved: &str,
+) -> Vec<SelectOption> {
+    let seed = daruda_config::agent_vocabulary_seed(command);
+    let seed_modes = seed.as_ref().map_or(&[][..], |seed| seed.modes.as_slice());
+    let entries = known_axis(vocabulary.known_modes_for(agent_id, command), seed_modes);
+    let launch = daruda_config::AgentLaunch::Raw(command.to_string());
+    let sentinel = match daruda_config::delegated_default(&launch) {
+        Some(id) => {
+            s::settings::agent_delegated_mode_default_named(entry_label(entries, id, mode_label))
+        }
+        None => s::settings::agent_delegated_mode_follows_session_mode(),
+    };
+    options_with_sentinel(entries, sentinel, saved, mode_label)
 }
 
 /// `(model, mode)` as a collapsed catalog card names them: the picked value,
@@ -233,14 +273,27 @@ fn vocabulary_options(
     saved: &str,
     labels: AxisLabels,
 ) -> Vec<SelectOption> {
-    let mut options = vec![SelectOption::new(
-        "",
+    options_with_sentinel(
+        entries,
         agent_default_label(entries, adapter_default, labels.adapter_default),
-    )];
+        saved,
+        labels.choice,
+    )
+}
+
+/// The empty "no override" entry labelled `sentinel`, then `entries`, then
+/// `saved` when the entries do not list it.
+fn options_with_sentinel(
+    entries: &[VocabEntry],
+    sentinel: String,
+    saved: &str,
+    choice: fn(&VocabEntry) -> String,
+) -> Vec<SelectOption> {
+    let mut options = vec![SelectOption::new("", sentinel)];
     options.extend(
         entries
             .iter()
-            .map(|entry| SelectOption::new(entry.id.clone(), (labels.choice)(entry))),
+            .map(|entry| SelectOption::new(entry.id.clone(), choice(entry))),
     );
     if !saved.is_empty() && !entries.iter().any(|entry| entry.id == saved) {
         options.push(SelectOption::new(saved.to_string(), saved.to_string()));
@@ -281,7 +334,10 @@ impl SettingsView {
 
 #[cfg(test)]
 mod tests {
-    use super::{VocabEntry, agent_row_summary, agent_row_vocabulary_options, vocabulary_options};
+    use super::{
+        VocabEntry, agent_row_delegated_options, agent_row_summary, agent_row_vocabulary_options,
+        vocabulary_options,
+    };
     use daruda_store::agent_vocabulary::AgentVocabularyCache;
 
     fn entries(pairs: &[(&str, &str)]) -> Vec<VocabEntry> {
@@ -327,6 +383,31 @@ mod tests {
         );
         assert_ne!(unlisted[0].label, named[0].label);
         assert_eq!(values(&unlisted), vec!["", "plan"]);
+    }
+
+    /// The delegated picker's "no override" entry names the policy default it
+    /// stands for, not the adapter's own default, and falls back to the
+    /// session mode for an adapter with no such policy.
+    #[test]
+    fn the_delegated_default_entry_names_the_policy_mode() {
+        let vocabulary = AgentVocabularyCache::default();
+        let claude = agent_row_delegated_options(&vocabulary, "claude", CLAUDE, "");
+        assert_eq!(
+            claude[0].label.as_ref(),
+            crate::strings::settings::agent_delegated_mode_default_named("Bypass Permissions")
+        );
+        assert!(values(&claude).contains(&"plan".to_string()));
+        let codex = agent_row_delegated_options(&vocabulary, "codex", "npx codex-acp", "");
+        assert_eq!(
+            codex[0].label.as_ref(),
+            crate::strings::settings::agent_delegated_mode_default_named("Agent (full access)")
+        );
+        let other = agent_row_delegated_options(&vocabulary, "other", "other --acp", "legacy");
+        assert_eq!(
+            other[0].label.as_ref(),
+            crate::strings::settings::agent_delegated_mode_follows_session_mode()
+        );
+        assert_eq!(values(&other), vec!["", "legacy"]);
     }
 
     /// A value pinned before the agent ever advertised anything has to stay

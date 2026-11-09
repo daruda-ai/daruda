@@ -358,6 +358,14 @@ settings:
   agent_field_default_mode: "Session mode"
   # Label for an agent catalog row's optional model override.
   agent_field_default_model: "Model"
+  # Label for an agent catalog row's mode for sessions the phone or the
+  # orchestrator opens.
+  agent_field_delegated_mode: "Mode for phone and orchestrator sessions"
+  agent_delegated_mode_description: "Chats and tasks opened from your phone or by the orchestrator run in this mode, since no one is at the desktop to answer a permission prompt."
+  # The "no override" entry of that picker, naming the mode it then uses.
+  agent_delegated_mode_default_named: "Default — %{name}"
+  # Same entry for an adapter daruda knows no no-prompt mode for.
+  agent_delegated_mode_follows_session_mode: "Same as session mode"
   agent_field_question_timeout: "Question timeout (s)"
   agent_question_timeout_placeholder: "Follows the Chat setting"
   agent_question_timeout_description: "Seconds this agent's untouched questions wait before they are skipped. Empty follows the Chat setting; 0 turns it off for this agent."

@@ -572,3 +572,72 @@ fn out_of_range_question_timeouts_load_clamped() {
         );
     }
 }
+
+/// `delegated_mode` survives the `toml_edit` writer on both entry shapes, and
+/// a file written before the key existed loads with it unset.
+#[test]
+fn delegated_mode_round_trips_on_preset_and_custom_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+
+    let cfg = Config {
+        agents: vec![
+            AgentEntry::preset_with(
+                "codex-acp".to_string(),
+                PresetOverrides {
+                    delegated_mode: Some("agent".to_string()),
+                    ..PresetOverrides::default()
+                },
+            ),
+            AgentEntry::custom(AgentDefinition {
+                delegated_mode: Some("acceptEdits".to_string()),
+                ..AgentDefinition::new(
+                    "remote".to_string(),
+                    "Remote".to_string(),
+                    AgentLaunch::Ssh {
+                        adapter_command: "npx -y @agentclientprotocol/claude-agent-acp".to_string(),
+                        host: "vm-work".to_string(),
+                    },
+                )
+            }),
+        ],
+        ..Config::default()
+    };
+    patch_config_file_to(&cfg, &path).unwrap();
+
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    assert!(on_disk.contains("delegated_mode = \"agent\""), "{on_disk}");
+    assert!(
+        on_disk.contains("delegated_mode = \"acceptEdits\""),
+        "{on_disk}"
+    );
+    let reloaded = Config::load_from(&path);
+    assert_eq!(reloaded.agents, cfg.agents);
+    let resolved = reloaded.resolved_agents();
+    assert_eq!(resolved[0].delegated_mode.as_deref(), Some("agent"));
+    assert_eq!(resolved[1].delegated_mode.as_deref(), Some("acceptEdits"));
+}
+
+#[test]
+fn a_catalog_written_before_delegated_mode_loads_with_it_unset() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[[agents]]\npreset = \"codex-acp\"\ndefault_mode = \"agent\"\n",
+    )
+    .unwrap();
+
+    let cfg = Config::load_from(&path);
+    let codex = &cfg.resolved_agents()[0];
+    assert_eq!(codex.default_mode.as_deref(), Some("agent"));
+    assert_eq!(codex.delegated_mode, None);
+    assert_eq!(
+        effective_delegated_mode(codex).as_deref(),
+        Some("agent-full-access")
+    );
+
+    patch_config_file_to(&cfg, &path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("delegated_mode"), "{text}");
+}
