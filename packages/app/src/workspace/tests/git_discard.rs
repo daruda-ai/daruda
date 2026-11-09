@@ -130,8 +130,8 @@ fn discard_all_asks_before_touching_anything(cx: &mut TestAppContext) {
     .unwrap();
     cx.run_until_parked();
     assert_eq!(
-        discards(&f),
+        f.fake.calls(),
         Vec::new(),
-        "nothing happens before the confirm"
+        "nothing is written before the confirm"
     );
 }
