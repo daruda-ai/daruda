@@ -154,13 +154,30 @@ pub(crate) fn base_tips(
     base_name: Option<&str>,
     current_branch: Option<&str>,
 ) -> Result<BaseTips, BaseProblem> {
-    let name = base_name.ok_or(BaseProblem::NoBaseConfigured)?;
+    let name = require_base(base_name)?;
     let base = resolve_base_ref(wt, name)?;
+    check_not_on_base(name, current_branch, &base)?;
+    let head = verify(wt, "HEAD")?.ok_or(BaseProblem::UnbornHead)?;
+    Ok(BaseTips { base, head })
+}
+
+/// The first rule of [`base_tips`], decided before any git read: a lane
+/// without a base has nothing to compare.
+pub(crate) fn require_base(base_name: Option<&str>) -> Result<&str, BaseProblem> {
+    base_name.ok_or(BaseProblem::NoBaseConfigured)
+}
+
+/// The rule [`base_tips`] applies once the base resolved and before HEAD is
+/// read: a lane checked out on its base, by name or resolved label, has none.
+pub(crate) fn check_not_on_base(
+    name: &str,
+    current_branch: Option<&str>,
+    base: &ResolvedBase,
+) -> Result<(), BaseProblem> {
     if current_branch.is_some_and(|b| b == name || b == base.label) {
         return Err(BaseProblem::OnBaseBranch);
     }
-    let head = verify(wt, "HEAD")?.ok_or(BaseProblem::UnbornHead)?;
-    Ok(BaseTips { base, head })
+    Ok(())
 }
 
 /// What the lane committed between the merge-base of `tips` and its HEAD.

@@ -23,8 +23,9 @@
 //! | other writes | logged, then exit 128 | logged, `Ok` |
 //! | `merge` | logged, then exit 128 | logged, `Success` |
 //!
-//! `base_tips` with no base name is always `NoBaseConfigured`, and a scripted
-//! base the current branch names is `OnBaseBranch`, as in the real one.
+//! `base_tips` applies the real one's rules in its order: no base name is
+//! always `NoBaseConfigured`, then a scripted base the current branch names is
+//! `OnBaseBranch`, even when the script is `UnbornHead` (HEAD is read last).
 //! Git-level failures of a base read come from [`FakeGit::fail`]; other
 //! [`BaseProblem`](super::base::BaseProblem)s are scripted through [`FakeRepo::base_tips`].
 //!

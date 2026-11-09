@@ -6,7 +6,9 @@
 //!
 //! - `--no-optional-locks` keeps a read-only `git status` from rewriting
 //!   `.git/index` to refresh its stat cache. That write is what a `.git`
-//!   watcher would see, re-triggering the status it came from.
+//!   watcher would see, re-triggering the status it came from. It does not
+//!   cover `diff HEAD --numstat`, which still refreshes a stat-stale index
+//!   (a known defect, tracked separately).
 //! - `core.fsmonitor=false` stops a repo-supplied hook from running as a
 //!   side effect of a status read.
 //! - `log.showSignature=false` keeps a signature block out of

@@ -183,3 +183,22 @@ fn unrelated_histories_have_no_merge_base() {
     assert_eq!(changes_since(&dir, tips), Err(BaseProblem::NoMergeBase));
     teardown(&dir);
 }
+
+#[test]
+fn the_base_rules_refuse_no_base_and_the_base_branch_by_name_or_label() {
+    assert_eq!(require_base(None), Err(BaseProblem::NoBaseConfigured));
+    assert_eq!(require_base(Some("main")), Ok("main"));
+    let base = ResolvedBase {
+        label: "origin/main".into(),
+        sha: "b".into(),
+    };
+    for current in ["main", "origin/main"] {
+        assert_eq!(
+            check_not_on_base("main", Some(current), &base),
+            Err(BaseProblem::OnBaseBranch),
+            "{current}"
+        );
+    }
+    assert_eq!(check_not_on_base("main", Some("feature"), &base), Ok(()));
+    assert_eq!(check_not_on_base("main", None, &base), Ok(()));
+}

@@ -252,6 +252,18 @@ fn a_lane_on_its_scripted_base_branch_has_no_comparison() {
         );
     }
     assert_eq!(repo.base_tips(Some("main"), Some("feature")), Ok(tips));
+    // HEAD is read after the branch check, so an unborn lane on its base is
+    // still on its base.
+    let git = FakeGit::new().with(FakeRepo::at(ROOT).base_tips(Err(BaseProblem::UnbornHead)));
+    let repo = git.open(Path::new(ROOT));
+    assert_eq!(
+        repo.base_tips(Some("main"), Some("main")),
+        Err(BaseProblem::OnBaseBranch)
+    );
+    assert_eq!(
+        repo.base_tips(Some("main"), Some("feature")),
+        Err(BaseProblem::UnbornHead)
+    );
     // A base that resolves to nothing is reported before the branch check.
     let git = FakeGit::new().with(FakeRepo::at(ROOT));
     assert_eq!(

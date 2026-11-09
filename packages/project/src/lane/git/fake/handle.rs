@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use super::super::base::{AgainstBase, BaseProblem, BaseTips};
+use super::super::base::{self, AgainstBase, BaseProblem, BaseTips, ResolvedBase};
 use super::super::{GitDirs, GitError, GitRepo, GitTracking, GitWorktreeStatus, MergeOutcome};
 use super::{FakeRepo, FakeState, GitCall, GitOp, lock, not_a_repo};
 
@@ -220,19 +220,29 @@ impl GitRepo for FakeHandle {
         base_name: Option<&str>,
         current_branch: Option<&str>,
     ) -> Result<BaseTips, BaseProblem> {
-        // The real check precedes any git process, so it holds even
-        // without a repository or a git install.
-        let Some(name) = base_name else {
-            lock(&self.state).count(GitOp::BaseTips, &self.path);
-            return Err(BaseProblem::NoBaseConfigured);
+        // The real rules, in the real order. The first precedes any git
+        // process, so it holds even without a repository or a git install.
+        let name = match base::require_base(base_name) {
+            Ok(name) => name,
+            Err(problem) => {
+                lock(&self.state).count(GitOp::BaseTips, &self.path);
+                return Err(problem);
+            }
         };
         self.base_read(GitOp::BaseTips, |repo| {
-            let tips = repo.base_tips_answer(name)?;
-            // As in the real one: a resolved base the lane is checked out on.
-            if current_branch.is_some_and(|b| b == name || b == tips.base.label) {
-                return Err(BaseProblem::OnBaseBranch);
-            }
-            Ok(tips)
+            let answer = repo.base_tips_answer(name);
+            // One script stands in for both reads: an unborn HEAD fails after
+            // the base resolved, so it resolves here under the base's name.
+            let resolved = match &answer {
+                Ok(tips) => tips.base.clone(),
+                Err(BaseProblem::UnbornHead) => ResolvedBase {
+                    label: name.to_owned(),
+                    sha: String::new(),
+                },
+                Err(problem) => return Err(problem.clone()),
+            };
+            base::check_not_on_base(name, current_branch, &resolved)?;
+            answer
         })
     }
     fn changes_since(&self, tips: BaseTips) -> Result<AgainstBase, BaseProblem> {
