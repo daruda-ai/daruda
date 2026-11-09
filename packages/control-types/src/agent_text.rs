@@ -17,7 +17,10 @@
 //! Text flattened to one line also loses the invisible characters that can
 //! reorder or hide words (bidi controls, zero-width spacers, tag characters):
 //! rendered on a card, they could change what a person is asked to approve.
-//! The agent still receives them, so a card says how many it dropped.
+//! The agent still receives them, so a card says how many it dropped. Which
+//! characters those are, and which invisible ones pass uncounted because they
+//! only modify the glyph beside them, is `daruda_core::text::hides_or_reorders`
+//! — the same predicate a branch name is checked against.
 //!
 //! GPUI-free.
 
@@ -133,7 +136,7 @@ fn flatten(raw: &str) -> (String, usize) {
     let spaced: String = raw
         .chars()
         .filter(|c| {
-            let drop = hides_or_reorders(*c);
+            let drop = daruda_core::text::hides_or_reorders(*c);
             hidden += usize::from(drop);
             !drop
         })
@@ -141,32 +144,6 @@ fn flatten(raw: &str) -> (String, usize) {
         .collect();
     let line = spaced.split_whitespace().collect::<Vec<_>>().join(" ");
     (line, hidden)
-}
-
-/// Bidi and deprecated format controls reorder text; zero-width, annotation
-/// and soft-hyphen marks hide breaks; tag characters and supplementary
-/// variation selectors carry data only an agent reads. ZWNJ/ZWJ (Persian,
-/// Indic, emoji), Hangul fillers and blank Braille pass: they show a gap at
-/// most, reorder nothing, and dropping them corrupts real text.
-fn hides_or_reorders(c: char) -> bool {
-    matches!(
-        c,
-        '\u{061C}'
-            | '\u{200E}'
-            | '\u{200F}'
-            | '\u{202A}'..='\u{202E}'
-            | '\u{2066}'..='\u{2069}'
-            | '\u{00AD}'
-            | '\u{180E}'
-            | '\u{200B}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{206A}'..='\u{206F}'
-            | '\u{FFF9}'..='\u{FFFB}'
-            | '\u{FEFF}'
-            | '\u{E0001}'
-            | '\u{E0020}'..='\u{E007F}'
-            | '\u{E0100}'..='\u{E01EF}'
-    )
 }
 
 /// `text`'s first `head` and last `tail` characters, and how many lie

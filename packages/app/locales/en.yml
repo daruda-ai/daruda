@@ -1702,6 +1702,7 @@ branch_rule:
   edge_slash: "cannot start or end with '/'"
   edge_dot: "cannot start or end with '.'"
   control_char: "contains a control character"
+  invisible_char: "contains an invisible character"
   space: "cannot contain spaces"
   reserved: "cannot contain '%{ch}'"
 

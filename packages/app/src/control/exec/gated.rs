@@ -304,9 +304,12 @@ fn approval_summary(
             let agent = in_project_window(*workspace, *project, cx, |ws, _, _| {
                 Ok(agent_phrase(&ws.control_chat_disclosure(agent, mode)))
             })?;
+            // The guard already refused a name that hides or reorders text;
+            // quoting it as well keeps the card safe if that rule changes.
+            let name = quoted_title(name);
             match prompt.as_deref().and_then(prompt_phrase) {
-                Some(prompt) => s::control::approval_lane_create_prompt(name, agent, prompt),
-                None => s::control::approval_lane_create(name, agent),
+                Some(prompt) => s::control::approval_lane_create_prompt(&name, agent, prompt),
+                None => s::control::approval_lane_create(&name, agent),
             }
         }
         Asked::ChatNew { lane, agent } => {
@@ -345,7 +348,9 @@ fn approval_summary(
                             .map(str::trim)
                             .filter(|b| !b.is_empty())
                         {
-                            Some(branch) => s::control::approval_task_in_new_branch(branch),
+                            Some(branch) => {
+                                s::control::approval_task_in_new_branch(quoted_title(branch))
+                            }
                             None => s::control::approval_task_in_new_worktree(),
                         },
                     };

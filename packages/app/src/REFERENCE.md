@@ -294,7 +294,10 @@ the task title and the prompt through `agent_text`: titles and prompts are
 flattened to one line, their quote marks neutralized, a long one shows its
 start and end around the count it leaves out, and the invisible characters
 dropped (bidi, zero-width, tag) are counted, since the agent still receives
-them. A mode name the adapter advertised that daruda's seed does not match
+them. A branch name may not contain those characters
+(`BranchNameRule::InvisibleChar`), since it reaches the agent's first prompt
+uncounted; worktree and branch names are still quoted on a card the same way.
+A mode name the adapter advertised that daruda's seed does not match
 is shown beside the mode id. Phone `/task` rows quote titles the same way.
 A flow task's start card quotes the prompt too unless the flow was found to
 declare no input for it (`TaskFlowApproval::takes_prompt`); like a chat
@@ -795,7 +798,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_flow_edit  →  daruda_flow   # YAML edits that keep comments and order
              →  daruda_project    →  daruda_config, daruda_store, daruda_core  # GPUI-free Project/Lane
              →  daruda_content    →  merman, resvg, image   # GPUI-free image + mermaid pipeline
-             →  daruda_control_types  →  daruda_store   # GPUI-free control contract, PaneRef
+             →  daruda_control_types  →  daruda_store, daruda_core   # GPUI-free control contract, PaneRef
              →  daruda_ui         →  daruda_terminal, daruda_config, gpui_component, ferrum_flow  # widgets
              →  daruda_transcript →  daruda_acp, daruda_config, daruda_ui   # transcript presentation, shared by chat + Settings
              →  daruda_chat       →  daruda_transcript, daruda_acp, daruda_content, daruda_ui, daruda_config, daruda_store, daruda_core  # the chat pane view

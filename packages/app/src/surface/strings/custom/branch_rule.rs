@@ -13,6 +13,7 @@ pub(crate) fn reason(rule: daruda_core::git::BranchNameRule) -> String {
         R::EdgeSlash => s::branch_rule::edge_slash(),
         R::EdgeDot => s::branch_rule::edge_dot(),
         R::ControlChar => s::branch_rule::control_char(),
+        R::InvisibleChar => s::branch_rule::invisible_char(),
         R::Space => s::branch_rule::space(),
         R::Reserved(ch) => s::branch_rule::reserved(ch),
     }

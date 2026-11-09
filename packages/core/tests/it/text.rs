@@ -147,3 +147,24 @@ fn char_cell_hit_x_uses_center_for_drag_and_containment_for_click() {
     assert!(char_cell_hit_x(10.0, 8.0, 17.9, 17.9));
     assert!(!char_cell_hit_x(10.0, 8.0, 18.0, 18.0)); // exclusive right edge
 }
+
+#[test]
+fn reordering_and_hiding_characters_are_named_and_text_marks_pass() {
+    for c in [
+        '\u{202E}',
+        '\u{2066}',
+        '\u{200B}',
+        '\u{FEFF}',
+        '\u{00AD}',
+        '\u{E0001}',
+        '\u{E0041}',
+        '\u{E0100}',
+    ] {
+        assert!(hides_or_reorders(c), "{c:?}");
+    }
+    for c in [
+        'a', ' ', '\u{200C}', '\u{200D}', '\u{FE0F}', '\u{034F}', '\u{3164}', '\u{2800}',
+    ] {
+        assert!(!hides_or_reorders(c), "{c:?}");
+    }
+}

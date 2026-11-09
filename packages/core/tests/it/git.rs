@@ -30,6 +30,9 @@ fn reports_which_rule_failed() {
     assert_eq!(err("trailing."), BranchNameRule::EdgeDot);
     assert_eq!(err("has space"), BranchNameRule::Space);
     assert_eq!(err("bell\u{7}"), BranchNameRule::ControlChar);
+    for hidden in ["fix\u{202E}gnp", "a\u{200B}b", "a\u{E0041}", "a\u{2066}b"] {
+        assert_eq!(err(hidden), BranchNameRule::InvisibleChar, "{hidden:?}");
+    }
     assert_eq!(err("has:colon"), BranchNameRule::Reserved(':'));
     assert_eq!(err("has~tilde"), BranchNameRule::Reserved('~'));
     assert_eq!(err("has\\slash"), BranchNameRule::Reserved('\\'));
@@ -39,9 +42,13 @@ fn reports_which_rule_failed() {
 fn sanitize_agrees_with_validate() {
     // The two entry points must never disagree on acceptance — that
     // divergence is what splitting them into separate copies caused.
+    let non_ascii = ["a\u{202E}b", "한글-브랜치"];
     for s in [
         "main", "feat/x", "", "  ", "a..b", "/x", "x/", ".x", "x.", "a b", "a:b", "v1.2.3",
-    ] {
+    ]
+    .into_iter()
+    .chain(non_ascii)
+    {
         assert_eq!(
             sanitize_branch_name(s).is_some(),
             validate_branch_name(s).is_ok(),

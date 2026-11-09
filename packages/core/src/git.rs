@@ -28,6 +28,11 @@ pub enum BranchNameRule {
     EdgeDot,
     /// Contains an ASCII control character.
     ControlChar,
+    /// Contains a character that hides or reorders text
+    /// ([`crate::text::hides_or_reorders`]). Git accepts it, but the name is
+    /// shown on approval cards, in an agent's prompt and in git views, where
+    /// it could make the name read as another.
+    InvisibleChar,
     /// Contains a space — legal for git in some contexts, hostile to shells.
     Space,
     /// Contains a character git reserves or a shell would expand.
@@ -57,6 +62,9 @@ pub fn validate_branch_name(raw: &str) -> Result<&str, BranchNameRule> {
     for c in trimmed.chars() {
         if c.is_control() {
             return Err(BranchNameRule::ControlChar);
+        }
+        if crate::text::hides_or_reorders(c) {
+            return Err(BranchNameRule::InvisibleChar);
         }
         if c == ' ' {
             return Err(BranchNameRule::Space);

@@ -23,7 +23,8 @@ impl QuoteMarkers for Localized {
 }
 
 /// A title someone else wrote, as a card or a phone row quotes it: one line,
-/// both ends of a long one, and a count of what the card cannot show.
+/// both ends of a long one, and a count of what the card cannot show. Branch
+/// and worktree names on a card are quoted the same way.
 pub(crate) fn quoted_title(title: &str) -> String {
     title_excerpt(title, &Localized)
 }

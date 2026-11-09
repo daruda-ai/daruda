@@ -1177,6 +1177,7 @@ branch_rule:
   edge_slash: "'/'로 시작하거나 끝날 수 없습니다"
   edge_dot: "'.'로 시작하거나 끝날 수 없습니다"
   control_char: "제어 문자가 포함되어 있습니다"
+  invisible_char: "보이지 않는 문자가 포함되어 있습니다"
   space: "공백을 포함할 수 없습니다"
   reserved: "'%{ch}'를 포함할 수 없습니다"
 

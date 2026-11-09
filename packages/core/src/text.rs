@@ -3,7 +3,8 @@
 //! Byte-offset word and line expansion, plus the selection hit-test that
 //! turns a pixel span into "is this cell selected". Navigation takes a
 //! `char_at` closure so rope-backed editors and plain strings can share it.
-//! Plain string prefixes use [`char_prefix`].
+//! Plain string prefixes use [`char_prefix`]; characters that make shown text
+//! differ from what a reader of the raw string receives, [`hides_or_reorders`].
 //!
 //! Deliberately *not* here: what counts as a word. The editor treats
 //! `foo/bar.txt` as three tokens while the terminal treats it as one path,
@@ -208,4 +209,31 @@ pub fn char_cell_hit_x(cell_left: f32, cell_width: f32, sel_left: f32, sel_right
         let center = cell_left + cell_width / 2.0;
         center >= sel_left && center <= sel_right
     }
+}
+
+/// Whether `c` makes shown text differ from the string: bidi and format
+/// controls reorder it, zero-width and soft-hyphen marks hide breaks, tag
+/// characters and supplementary variation selectors carry hidden data.
+/// Glyph modifiers pass (ZWNJ/ZWJ, U+FE00-FE0F, U+034F, U+180B-180F,
+/// U+17B4/17B5, U+1D173-1D17A, Hangul fillers, blank Braille): they reorder
+/// and spell nothing, and dropping them corrupts emoji and CJK text.
+pub fn hides_or_reorders(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061C}'
+            | '\u{200E}'
+            | '\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{00AD}'
+            | '\u{180E}'
+            | '\u{200B}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{206A}'..='\u{206F}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{FEFF}'
+            | '\u{E0001}'
+            | '\u{E0020}'..='\u{E007F}'
+            | '\u{E0100}'..='\u{E01EF}'
+    )
 }
