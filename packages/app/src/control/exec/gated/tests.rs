@@ -81,7 +81,7 @@ async fn an_approved_creation_holds_the_last_budget_slot_until_completion(cx: &m
         let dispatch = run_gated_with(
             command(at),
             CommandOrigin::Orchestrator,
-            move |_, _, _| {
+            move |_, _, _, _| {
                 async move {
                     resume.recv().await.unwrap();
                     Ok(ControlResult::TaskStarting {
@@ -100,7 +100,7 @@ async fn an_approved_creation_holds_the_last_budget_slot_until_completion(cx: &m
         run_gated_with(
             command(at),
             CommandOrigin::Orchestrator,
-            |_, _, _| {
+            |_, _, _, _| {
                 async { panic!("a second creation cannot begin in the reserved slot") }
                     .boxed_local()
             },
@@ -130,7 +130,7 @@ async fn a_failed_approved_creation_returns_its_reserved_budget_slot(cx: &mut Te
         let dispatch = run_gated_with(
             command(at),
             CommandOrigin::Orchestrator,
-            move |_, _, _| {
+            move |_, _, _, _| {
                 async move {
                     resume.recv().await.unwrap();
                     Err(ControlError::TargetGone)
@@ -169,7 +169,7 @@ async fn already_open_approvals_cannot_share_the_last_creation_slot(cx: &mut Tes
         let first = run_gated_with(
             command(at),
             CommandOrigin::Orchestrator,
-            move |_, _, _| {
+            move |_, _, _, _| {
                 async move {
                     resume.recv().await.unwrap();
                     Ok(ControlResult::TaskStarting {
@@ -184,7 +184,7 @@ async fn already_open_approvals_cannot_share_the_last_creation_slot(cx: &mut Tes
         let second = run_gated_with(
             command(at),
             CommandOrigin::Orchestrator,
-            |_, _, _| {
+            |_, _, _, _| {
                 async {
                     Ok(ControlResult::TaskStarting {
                         task: "second".into(),
@@ -209,4 +209,34 @@ async fn already_open_approvals_cannot_share_the_last_creation_slot(cx: &mut Tes
     cx.run_until_parked();
     assert!(first.recv().await.unwrap().unwrap().is_ok());
     cx.update(|cx| assert_eq!(guards::spent_budget_for_test(cx), 16));
+}
+
+/// The approved work receives the mode its card named rather than reading
+/// one again: an orchestrator's chat is asked for its delegated mode.
+#[gpui::test]
+async fn the_approved_work_takes_the_mode_its_card_named(cx: &mut TestAppContext) {
+    let (_fixture, at) = window(cx);
+    let _outbound = cx.update(setup);
+    let (seen, mode) = smol::channel::bounded(1);
+    let done = cx.update(|cx| {
+        let dispatch = run_gated_with(
+            command(at),
+            CommandOrigin::Orchestrator,
+            move |_, mode, _, _| {
+                async move {
+                    seen.send(mode).await.unwrap();
+                    Err(ControlError::TargetGone)
+                }
+                .boxed_local()
+            },
+            cx,
+        );
+        approve(dispatch, cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        mode.recv().await.unwrap(),
+        daruda_config::ModeChoice::FollowDelegated
+    );
+    assert!(done.recv().await.unwrap().is_some());
 }

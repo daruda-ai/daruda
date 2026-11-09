@@ -113,7 +113,7 @@ pub(crate) fn run_gated(cmd: GatedCommand, origin: super::CommandOrigin, cx: &mu
     run_gated_with(
         cmd,
         origin,
-        |cmd, caller, cx| perform_gated(cmd, caller, cx).boxed_local(),
+        |cmd, mode, caller, cx| perform_gated(cmd, mode, caller, cx).boxed_local(),
         cx,
     )
 }
@@ -123,6 +123,7 @@ fn run_gated_with(
     origin: super::CommandOrigin,
     perform: impl for<'a> FnOnce(
         Asked,
+        daruda_config::ModeChoice,
         super::Caller,
         &'a mut gpui::AsyncApp,
     ) -> LocalBoxFuture<'a, ControlOutcome>
@@ -136,7 +137,8 @@ fn run_gated_with(
     if let Err(refusal) = guard_gated(&asked, cx) {
         return Dispatch::Ready(Err(refusal));
     }
-    // The mode every chat this command opens takes, named on its card.
+    // The mode every chat this command opens takes, named on its card and
+    // handed to the work as it is, so the two cannot disagree.
     let mode = crate::workspace::mode_for(origin.started_by());
     let summary = match approval_summary(&asked, &mode, cx) {
         Ok(summary) => summary,
@@ -154,7 +156,7 @@ fn run_gated_with(
             Ok(ApprovalOutcome::Approved) => {
                 Some(match cx.update(|cx| reserve_gated(&asked, cx)) {
                     Ok(permit) => {
-                        let outcome = perform(asked, caller, cx).await;
+                        let outcome = perform(asked, mode, caller, cx).await;
                         if let Some(permit) = permit {
                             cx.update(|cx| permit.finish(left_a_worktree(&outcome), cx));
                         }
@@ -364,6 +366,9 @@ fn approval_summary(
             }
         },
         // A chat already open keeps its own mode; only a new pane takes `mode`.
+        // Which one this is is read now: a pane opened or closed before the
+        // answer can make the card's mode claim stale. The open then follows
+        // the pane as it finds it, with the card's `mode` for a new one.
         Asked::TaskOpen { task } => {
             let agent = in_task_window(task, cx, |ws, _, cx| {
                 Ok(ws
@@ -379,9 +384,11 @@ fn approval_summary(
     })
 }
 
-/// Do the thing, now that the user has said yes.
+/// Do the thing, now that the user has said yes. A chat it opens takes
+/// `mode`, the one its card named.
 async fn perform_gated(
     asked: Asked,
+    mode: daruda_config::ModeChoice,
     caller: super::Caller,
     cx: &mut gpui::AsyncApp,
 ) -> ControlOutcome {
@@ -405,14 +412,18 @@ async fn perform_gated(
                 .await
                 .map(|task| ControlResult::TaskCreated { task });
         }
+        // The start derives the same mode from `caller`, the origin the card
+        // read it from.
         Asked::TaskStart { task, agent } => return start_task(task, agent, caller, cx).await,
-        Asked::TaskOpen { task } => return cx.update(|cx| open_task(task, caller, cx)),
+        Asked::TaskOpen { task } => {
+            return cx.update(|cx| tasks::open_task_in(task, mode, caller, cx));
+        }
         Asked::ChatNew { lane, agent } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {
                     ws.control_chat_new(
                         lane.lane_ref(),
-                        pinned_chat(agent.clone(), caller),
+                        pinned_chat(agent.clone(), mode.clone()),
                         window,
                         cx,
                     )
@@ -430,7 +441,7 @@ async fn perform_gated(
             (workspace, project),
             name,
             base_ref,
-            pinned_chat(agent, caller),
+            pinned_chat(agent, mode),
             prompt,
             caller.origin(),
             cx,
@@ -456,12 +467,11 @@ async fn perform_gated(
     })
 }
 
-/// The chat a card approved: the agent it named, in the mode its caller's
-/// chats take.
-fn pinned_chat(agent: String, caller: super::Caller) -> crate::workspace::ChatOpen {
+/// The chat a card approved: the agent and the mode it named.
+fn pinned_chat(agent: String, mode: daruda_config::ModeChoice) -> crate::workspace::ChatOpen {
     crate::workspace::ChatOpen {
         agent: crate::workspace::ChatAgent::Pinned(agent),
-        mode: crate::workspace::mode_for(caller.origin().started_by()),
+        mode,
     }
 }
 

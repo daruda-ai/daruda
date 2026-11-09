@@ -129,6 +129,16 @@ impl PendingTaskStart {
 /// new pane takes the mode the caller's chats take.
 pub(crate) fn open_task(task: String, caller: Caller, cx: &mut App) -> ControlOutcome {
     let mode = crate::workspace::mode_for(caller.origin().started_by());
+    open_task_in(task, mode, caller, cx)
+}
+
+/// [`open_task`] with a new pane in `mode`, as an approval card named it.
+pub(super) fn open_task_in(
+    task: String,
+    mode: daruda_config::ModeChoice,
+    caller: Caller,
+    cx: &mut App,
+) -> ControlOutcome {
     let chat = in_task_window(&task, cx, |ws, window, cx| {
         let pane = ws.control_task_open(&task, mode.clone(), window, cx)?;
         Ok(PaneRef {
