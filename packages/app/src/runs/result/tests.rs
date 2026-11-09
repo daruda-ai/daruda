@@ -150,8 +150,6 @@ fn review_regression_execution_description_is_frozen_at_dispatch() {
             title: title.into(),
             prompt: format!("{title} prompt"),
             notes: String::new(),
-            auto_execute: true,
-            agent_surface: Default::default(),
             base_worktree_path: None,
             branch: None,
             run_in: None,

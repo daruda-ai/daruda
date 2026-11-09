@@ -7,7 +7,7 @@
 use super::build_workspace;
 
 use daruda_store::tasks::machine::ErrorCause;
-use daruda_store::tasks::{CliProcessState, Lifecycle, SessionEndReason, TaskAgentSurface};
+use daruda_store::tasks::{CliProcessState, Lifecycle, SessionEndReason};
 use gpui::{AppContext as _, TestAppContext};
 
 use crate::runs::GlobalTasks;
@@ -55,9 +55,8 @@ fn seed_cli_task(
     sessions: &[&str],
 ) -> String {
     workspace.update(cx, |_ws, cx| {
-        let mut spec =
+        let spec =
             crate::runs::seed::spec(daruda_store::project::ProjectUuid::default(), "fix-bug");
-        spec.agent_surface = TaskAgentSurface::Terminal;
         let mut run = SeedRun::cli("/tmp/wt", CliProcessState::Running { pid: 1 });
         if let Some(session) = session_id {
             run = run.session(session);
@@ -364,8 +363,7 @@ fn start_new_worktree_task(
                     )
                     .unwrap();
                 assert!(ws.show_orchestrator_tab(window, cx));
-                let mut task = crate::runs::seed::spec(ws.projects[0].uuid, "Elsewhere");
-                task.agent_surface = TaskAgentSurface::AgentChat;
+                let task = crate::runs::seed::spec(ws.projects[0].uuid, "Elsewhere");
                 let id = crate::runs::seed::task(task, None, cx);
                 let rx = ws.begin_task_start(&id, started_by, window, cx);
                 (id, ws.active, orchestrator, rx)

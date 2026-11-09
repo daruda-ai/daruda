@@ -6,7 +6,7 @@ use crate::runs::GlobalTasks;
 use crate::runs::seed::{SeedEnd, SeedRun};
 use crate::workspace::Workspace;
 use crate::workspace::tests::build_workspace_with;
-use daruda_store::tasks::{Lifecycle, TaskAgentSurface, TaskRunIn};
+use daruda_store::tasks::{Lifecycle, TaskRunIn};
 use gpui::{AppContext as _, Context, TestAppContext};
 
 fn existing_lane_task(path: &Path, cx: &mut Context<Workspace>) -> String {
@@ -173,8 +173,7 @@ fn existing_lane_start_keeps_the_task_in_backlog_when_the_lane_is_gone(cx: &mut 
 
 /// A task whose run in `lane` failed.
 fn finished_task(lane: &Path, cx: &mut Context<Workspace>) -> String {
-    let mut task = crate::runs::seed::spec(daruda_store::project::ProjectUuid::default(), "Again");
-    task.agent_surface = TaskAgentSurface::AgentChat;
+    let task = crate::runs::seed::spec(daruda_store::project::ProjectUuid::default(), "Again");
     let run = SeedRun::chat(lane);
     crate::runs::seed::task(task, Some((&run, SeedEnd::Errored)), cx)
 }

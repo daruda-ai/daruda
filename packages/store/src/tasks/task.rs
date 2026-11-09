@@ -57,24 +57,6 @@ pub enum AgentType {
     Claude,
 }
 
-/// Execution surface a started task's lane runs on.
-///
-/// - `Terminal` — drive the Claude CLI over the lane's PTY (the
-///   historical behaviour): a `claude "$(cat prompt-file)"` command is
-///   dispatched into a terminal pane.
-/// - `AgentChat` — attach an in-app ACP agent-chat session to the lane
-///   and deliver the task prompt as an ACP turn.
-///
-/// New tasks default to Agent Chat; legacy saved tasks without an
-/// execution surface retain Terminal through the field's serde default.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskAgentSurface {
-    Terminal,
-    #[default]
-    AgentChat,
-}
-
 /// One row in the per-task subtask checklist. `source_session_id`
 /// distinguishes hook-injected items (TodoWrite merge) from
 /// manually-added ones; the two never coalesce — duplicates with the
@@ -155,10 +137,6 @@ impl TaskState {
     }
 }
 
-fn default_auto_execute() -> bool {
-    true
-}
-
 /// Where a task runs when started. Saved tasks without this field create a
 /// fresh worktree, which is the only behaviour older builds know.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,10 +164,6 @@ pub struct TaskFlow {
     /// required input, or none at all when the flow declares no inputs.
     #[serde(default)]
     pub input: Option<String>,
-}
-
-fn legacy_agent_surface() -> TaskAgentSurface {
-    TaskAgentSurface::Terminal
 }
 
 /// Durable identity of a task execution; pane ids do not survive restarts.
@@ -284,18 +258,8 @@ pub struct Task {
     #[serde(default)]
     pub agent_type: AgentType,
 
-    /// New tasks use Agent Chat (ACP). Saved tasks without this field
-    /// retain Terminal CLI execution.
-    #[serde(default = "legacy_agent_surface")]
-    pub agent_surface: TaskAgentSurface,
-
     #[serde(default)]
     pub execution: Option<TaskExecution>,
-
-    /// `false` skips the trailing newline so the user must press Enter
-    /// in the terminal to dispatch the command (UX opt-out).
-    #[serde(default = "default_auto_execute")]
-    pub auto_execute: bool,
 
     /// Checklist of finer-grained steps under the task. Empty
     /// vec is the default for both fresh tasks and rows saved before
@@ -332,9 +296,7 @@ impl Task {
             branch_name,
             run_in: TaskRunIn::default(),
             agent_type: AgentType::default(),
-            agent_surface: TaskAgentSurface::default(),
             execution: None,
-            auto_execute: true,
             subtasks: Vec::new(),
         }
     }

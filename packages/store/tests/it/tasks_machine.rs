@@ -13,8 +13,8 @@ use daruda_store::tasks::machine::{
     TodoItem, UndeliveredReason,
 };
 use daruda_store::tasks::{
-    AgentType, CliProcessState, ExecutionRef, SessionEndReason, SubTask, TaskAgentSurface,
-    TaskExecution, TaskExecutionSource, TaskRunIn,
+    AgentType, CliProcessState, ExecutionRef, SessionEndReason, SubTask, TaskExecution,
+    TaskExecutionSource, TaskRunIn,
 };
 
 const ID: &str = "01TASK";
@@ -52,9 +52,7 @@ fn spec() -> TaskSpec {
         branch_name: "task-auth".into(),
         run_in: TaskRunIn::NewWorktree,
         agent_type: AgentType::Claude,
-        agent_surface: TaskAgentSurface::Terminal,
         flow: None,
-        auto_execute: true,
         created_at: at(0),
     }
 }
@@ -166,8 +164,6 @@ fn edit() -> TaskEdit {
         title: "Renamed".into(),
         prompt: "New prompt".into(),
         notes: "notes".into(),
-        auto_execute: false,
-        agent_surface: TaskAgentSurface::AgentChat,
         base_worktree_path: Some(PathBuf::from("/repo/main")),
         branch: Some("task-other".into()),
         run_in: Some(TaskRunIn::ExistingLane {
@@ -664,7 +660,7 @@ fn dispatch_facts_are_frozen_once_the_lane_is_prepared() {
             at: at(9),
         },
     );
-    assert_eq!(task(&book).spec.agent_surface, TaskAgentSurface::AgentChat);
+    assert_eq!(task(&book).spec.title, "Renamed");
     assert_eq!(task(&book).execution, frozen);
     assert!(matches!(
         frozen.unwrap().source,
@@ -1321,7 +1317,7 @@ fn an_undelivered_reason_round_trips_through_the_task_log() {
 
 #[test]
 fn flow_task_records_require_schema_eight() {
-    assert_eq!(TaskMachine::SCHEMA, 8);
+    const { assert!(TaskMachine::SCHEMA >= 8) };
 }
 
 /// A flow run records no pane, account or agent: `LanePrepared` carries

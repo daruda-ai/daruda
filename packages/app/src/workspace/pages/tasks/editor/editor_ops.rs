@@ -50,14 +50,13 @@ impl Workspace {
         let Some(project) = self.active_project().map(|p| p.uuid) else {
             return;
         };
-        let mut spec = daruda_store::tasks::TaskSpec::new(
+        let spec = daruda_store::tasks::TaskSpec::new(
             project,
             "Improve task creation and editing".into(),
             "## Goal\nMake task authoring feel clear and predictable.\n\n- Keep the prompt in focus\n- Preserve drafts when navigating\n- Verify save and start independently\n\n**Acceptance:** keyboard navigation and both themes work.".into(),
             None,
             chrono::Utc::now(),
         );
-        spec.agent_surface = daruda_store::tasks::TaskAgentSurface::AgentChat;
         let mut subtasks = vec![
             SubTask::new("Compare Orca and Superset task flows".into()),
             SubTask::new("Verify narrow panes and keyboard navigation".into()),

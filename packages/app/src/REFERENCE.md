@@ -79,6 +79,10 @@ Every Task starts as an Agent chat or a flow; no start creates a Claude CLI
 run. CLI runs already in the log keep their `LanePrepared` terminal ID (schema
 7; older preparation records without it still replay), and hooks, PID exits
 and startup reconciliation still settle them. Their chats open read-only.
+No pane is ever bound to a CLI run, so a hook reaches one only through the
+session it already recorded. The task log uses schema 9: task specs and edits
+carry no execution surface or auto-execute flag, and the copies older logs,
+snapshots and `tasks.json` hold are ignored on read.
 Only observed PIDs advance CLI process state. The tracker polls those PIDs;
 it has no pane discovery, process-tree walk or session-directory watcher.
 On restart, an already recorded Claude PID is verified against its account's

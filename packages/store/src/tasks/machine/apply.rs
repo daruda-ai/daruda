@@ -318,8 +318,6 @@ fn edit_spec(record: &mut TaskRecord, edit: &TaskEdit) {
     spec.title.clone_from(&edit.title);
     spec.prompt.clone_from(&edit.prompt);
     spec.notes.clone_from(&edit.notes);
-    spec.auto_execute = edit.auto_execute;
-    spec.agent_surface = edit.agent_surface;
     spec.base_worktree_path.clone_from(&edit.base_worktree_path);
     if record.lifecycle == Lifecycle::Backlog {
         if let Some(branch) = &edit.branch {

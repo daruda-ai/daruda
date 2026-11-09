@@ -30,33 +30,6 @@ fn report_hook(pane: RunPane, session: &str, pid: Option<u32>, cx: &mut gpui::Ap
 }
 
 #[gpui::test]
-fn a_hook_binds_a_run_without_claiming_an_unobserved_process(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        RunsHost::inline_commits_for_test(cx);
-        let (run, pane) = terminal_run(cx);
-        let id = seed::task(
-            seed::spec(Default::default(), "CLI"),
-            Some((&run, SeedEnd::Running)),
-            cx,
-        );
-        RunsHost::bind_execution(pane, run.exec(&id), cx);
-        report_hook(pane, "hook-session", None, cx);
-        let task = cx.global::<GlobalTasks>().get(&id).unwrap();
-        let execution = task.execution.as_ref().unwrap();
-        assert_eq!(execution.session_id.as_deref(), Some("hook-session"));
-        assert_eq!(
-            execution.source.cli_process(),
-            Some(&CliProcessState::Discovering)
-        );
-        assert!(
-            task.session_ids
-                .iter()
-                .any(|session| session == "hook-session")
-        );
-    });
-}
-
-#[gpui::test]
 fn cli_result_read_protects_the_execution_from_exit_reconciliation(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("result.jsonl");
@@ -167,7 +140,7 @@ fn a_cli_result_read_cannot_settle_a_restarted_execution(cx: &mut TestAppContext
 }
 
 #[gpui::test]
-fn an_exit_after_a_pending_binding_is_recorded_durably(cx: &mut TestAppContext) {
+fn an_observed_exit_is_recorded_durably(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().unwrap();
     let store = daruda_store::tasks::TaskStore::in_directory(
         directory.path(),
@@ -179,12 +152,12 @@ fn an_exit_after_a_pending_binding_is_recorded_durably(cx: &mut TestAppContext) 
     let id = cx.update(|cx| {
         RunsHost::install(RunsHost::open(Ok(store.clone())), cx);
         let (run, pane) = terminal_run(cx);
+        let run = run.session("session");
         let id = seed::task(
             seed::spec(Default::default(), "CLI"),
             Some((&run, SeedEnd::Running)),
             cx,
         );
-        RunsHost::bind_execution(pane, run.exec(&id), cx);
         report_hook(pane, "session", Some(42), cx);
         RunsHost::record_cli_exit("session", 42, cx);
         id
@@ -275,79 +248,19 @@ fn releasing_a_replaced_view_keeps_its_successor_registered(cx: &mut TestAppCont
 }
 
 #[gpui::test]
-fn a_stale_pane_binding_cannot_override_the_recorded_terminal(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        RunsHost::inline_commits_for_test(cx);
-        let (run, pane) = terminal_run(cx);
-        let id = seed::task(
-            seed::spec(Default::default(), "CLI"),
-            Some((&run, SeedEnd::Running)),
-            cx,
-        );
-        let fresh = crate::hooks::agent_hooks::mint_terminal_id();
-        RunsHost::register_terminal(pane, fresh, cx);
-        RunsHost::bind_execution(pane, run.exec(&id), cx);
-        report_hook(pane, "other-terminal-session", None, cx);
-        assert!(
-            cx.global::<GlobalTasks>()
-                .get(&id)
-                .unwrap()
-                .execution
-                .as_ref()
-                .unwrap()
-                .session_id
-                .is_none()
-        );
-    });
-}
-
-#[gpui::test]
-fn a_hook_older_than_the_run_cannot_attach_its_session(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        RunsHost::inline_commits_for_test(cx);
-        let (run, pane) = terminal_run(cx);
-        let id = seed::task(
-            seed::spec(Default::default(), "CLI"),
-            Some((&run, SeedEnd::Running)),
-            cx,
-        );
-        RunsHost::bind_execution(pane, run.exec(&id), cx);
-        let mut file = StatusFile::new_hook(
-            "previous-session",
-            "/cli",
-            daruda_agent::SessionStatus::Idle,
-            "SessionStart",
-        );
-        file.terminal_id = RunsHost::terminal_id(pane, cx).cloned();
-        file.timestamp = chrono::DateTime::UNIX_EPOCH;
-        RunsHost::record_task_cli_hook(&file, cx);
-        assert!(
-            cx.global::<GlobalTasks>()
-                .get(&id)
-                .unwrap()
-                .execution
-                .as_ref()
-                .unwrap()
-                .session_id
-                .is_none()
-        );
-    });
-}
-
-#[gpui::test]
-fn a_killed_cli_settles_even_when_its_terminal_remains_open(cx: &mut TestAppContext) {
+fn a_killed_cli_does_not_stay_running_while_its_terminal_remains_open(cx: &mut TestAppContext) {
     let child = test_process::sleeping();
     let pid = child.id();
     let (tracker, exits) = PtyTracker::spawn();
     let (id, pane) = cx.update(|cx| {
         RunsHost::inline_commits_for_test(cx);
         let (run, pane) = terminal_run(cx);
+        let run = run.session("killed-session");
         let id = seed::task(
             seed::spec(Default::default(), "CLI"),
             Some((&run, SeedEnd::Running)),
             cx,
         );
-        RunsHost::bind_execution(pane, run.exec(&id), cx);
         report_hook(pane, "killed-session", Some(pid), cx);
         tracker.track_agent("killed-session".into(), pid);
         (id, pane)
@@ -360,8 +273,8 @@ fn a_killed_cli_settles_even_when_its_terminal_remains_open(cx: &mut TestAppCont
         let task = cx.global::<GlobalTasks>().get(&id).unwrap();
         assert!(matches!(
             task.lifecycle,
-            Lifecycle::Error {
-                cause: daruda_store::tasks::machine::ErrorCause::SessionFailed,
+            Lifecycle::Interrupted {
+                cause: daruda_store::tasks::machine::InterruptCause::AppRestart,
                 ..
             }
         ));
@@ -378,7 +291,7 @@ fn a_killed_cli_settles_even_when_its_terminal_remains_open(cx: &mut TestAppCont
                 .as_ref()
                 .unwrap()
                 .reason,
-            daruda_store::tasks::CliSessionEndReason::ProcessExited
+            daruda_store::tasks::CliSessionEndReason::AppRestart
         );
         assert!(RunsHost::terminal_id(pane, cx).is_some());
     });
@@ -395,12 +308,12 @@ fn a_normal_exit_preserves_the_hook_completed_run(cx: &mut TestAppContext) {
     let id = cx.update(|cx| {
         RunsHost::inline_commits_for_test(cx);
         let (run, pane) = terminal_run(cx);
+        let run = run.session("normal-session");
         let id = seed::task(
             seed::spec(Default::default(), "CLI"),
             Some((&run, SeedEnd::Running)),
             cx,
         );
-        RunsHost::bind_execution(pane, run.exec(&id), cx);
         report_hook(pane, "normal-session", Some(pid), cx);
         tracker.track_agent("normal-session".into(), pid);
         RunsHost::settle_cli_session("normal-session", SessionEndReason::Stop, cx);
@@ -428,12 +341,12 @@ fn a_persisted_stop_wins_when_the_exit_arrives_before_the_watcher(cx: &mut TestA
         cx.update(|cx| {
             RunsHost::inline_commits_for_test(cx);
             let (run, pane) = terminal_run(cx);
+            let run = run.session("unread-final-hook");
             let id = seed::task(
                 seed::spec(Default::default(), "CLI"),
                 Some((&run, SeedEnd::Running)),
                 cx,
             );
-            RunsHost::bind_execution(pane, run.exec(&id), cx);
             report_hook(pane, "unread-final-hook", Some(42), cx);
             let mut file = StatusFile::new_hook(
                 "unread-final-hook",
@@ -471,12 +384,12 @@ fn ending_one_resumed_terminal_does_not_settle_another(cx: &mut TestAppContext) 
         let mut ids = Vec::new();
         for pid in [41, 42] {
             let (run, pane) = terminal_run(cx);
+            let run = run.session("shared-session");
             let id = seed::task(
                 seed::spec(Default::default(), "CLI"),
                 Some((&run, SeedEnd::Running)),
                 cx,
             );
-            RunsHost::bind_execution(pane, run.exec(&id), cx);
             report_hook(pane, "shared-session", Some(pid), cx);
             ids.push((id, run.terminal_id));
         }
@@ -495,38 +408,6 @@ fn ending_one_resumed_terminal_does_not_settle_another(cx: &mut TestAppContext) 
         assert_eq!(
             second.execution.as_ref().unwrap().source.cli_process(),
             Some(&CliProcessState::Running { pid: 42 })
-        );
-    });
-}
-
-#[gpui::test]
-fn closing_the_original_cli_pane_preserves_the_deliberate_end_reason(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        RunsHost::inline_commits_for_test(cx);
-        let (run, pane) = terminal_run(cx);
-        let id = seed::task(
-            seed::spec(Default::default(), "CLI"),
-            Some((&run, SeedEnd::Running)),
-            cx,
-        );
-        RunsHost::bind_execution(pane, run.exec(&id), cx);
-        report_hook(pane, "closed-session", Some(42), cx);
-        RunsHost::release_execution(
-            pane,
-            daruda_store::tasks::machine::UndeliveredReason::PaneClosed,
-            cx,
-        );
-        RunsHost::record_cli_exit("closed-session", 42, cx);
-        let task = cx.global::<GlobalTasks>().get(&id).unwrap();
-        assert_eq!(
-            task.execution
-                .as_ref()
-                .unwrap()
-                .cli_session_end
-                .as_ref()
-                .unwrap()
-                .reason,
-            daruda_store::tasks::CliSessionEndReason::PaneClosed
         );
     });
 }

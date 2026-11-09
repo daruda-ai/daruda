@@ -3,7 +3,7 @@
 
 use crate::runs::TaskIntent;
 use daruda_store::tasks::machine::TaskEdit;
-use daruda_store::tasks::{TaskAgentSurface, TaskId, TaskRunIn};
+use daruda_store::tasks::{TaskId, TaskRunIn};
 use futures::FutureExt as _;
 use gpui::{Context, Window};
 
@@ -12,11 +12,6 @@ use super::state::{RunInChoice, TaskEditValues};
 use crate::workspace::Workspace;
 use crate::workspace::task_draft::{DraftError, DraftLocation, TaskDraft};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-
-/// Every task the editor saves runs as an agent chat; the auto-execute flag
-/// only steered the terminal command, so it is always off.
-const EDITOR_SURFACE: TaskAgentSurface = TaskAgentSurface::AgentChat;
-const EDITOR_AUTO_EXECUTE: bool = false;
 
 impl Workspace {
     /// Commit the form as shown, including a typed-but-unsubmitted subtask
@@ -146,8 +141,6 @@ impl Workspace {
                     title: values.title.clone(),
                     prompt: values.prompt.clone(),
                     notes: values.notes.clone(),
-                    auto_execute: EDITOR_AUTO_EXECUTE,
-                    agent_surface: EDITOR_SURFACE,
                     base_worktree_path,
                     branch,
                     run_in,
@@ -171,9 +164,7 @@ impl Workspace {
                     notes: values.notes.clone(),
                     branch: values.branch.clone(),
                     location,
-                    agent_surface: EDITOR_SURFACE,
                     flow,
-                    auto_execute: EDITOR_AUTO_EXECUTE,
                 };
                 let spec = match self.task_spec_from(project, draft) {
                     Ok(spec) => spec,

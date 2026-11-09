@@ -301,9 +301,7 @@ mod tests {
             branch_name: "b".into(),
             run_in: Default::default(),
             agent_type: Default::default(),
-            agent_surface: Default::default(),
             flow: None,
-            auto_execute: true,
             created_at: chrono::Utc::now(),
         };
         let committed = smol::block_on(store.propose(TaskEvent::Created { spec })).unwrap();
@@ -332,9 +330,7 @@ mod tests {
             branch_name: "b".into(),
             run_in: Default::default(),
             agent_type: Default::default(),
-            agent_surface: Default::default(),
             flow: None,
-            auto_execute: true,
             created_at: chrono::Utc::now(),
         };
         assert!(smol::block_on(store.propose(TaskEvent::Created { spec })).is_err());

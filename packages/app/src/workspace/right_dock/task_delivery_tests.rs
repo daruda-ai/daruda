@@ -277,8 +277,6 @@ fn running_chat_uses_its_frozen_surface_after_the_task_is_edited(cx: &mut TestAp
                     title: spec.title.clone(),
                     prompt: spec.prompt.clone(),
                     notes: spec.notes.clone(),
-                    auto_execute: spec.auto_execute,
-                    agent_surface: daruda_store::tasks::TaskAgentSurface::Terminal,
                     base_worktree_path: None,
                     branch: None,
                     run_in: None,

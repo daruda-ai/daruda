@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 use daruda_store::project::{LaneKind, ProjectUuid};
-use daruda_store::tasks::{TaskAgentSurface, TaskFlow, TaskRunIn, TaskSpec};
+use daruda_store::tasks::{TaskFlow, TaskRunIn, TaskSpec};
 
 use crate::workspace::Workspace;
 
@@ -21,10 +21,8 @@ pub(in crate::workspace) struct TaskDraft {
     /// As typed. Empty keeps the task's default `task-<id>` branch.
     pub branch: String,
     pub location: DraftLocation,
-    pub agent_surface: TaskAgentSurface,
-    /// Runs as this flow instead of on `agent_surface`.
+    /// Runs as this flow instead of as one agent.
     pub flow: Option<TaskFlow>,
-    pub auto_execute: bool,
 }
 
 /// Where a drafted task runs.
@@ -96,9 +94,7 @@ impl Workspace {
         }
         spec.run_in = placement.run_in;
         spec.notes = draft.notes;
-        spec.agent_surface = draft.agent_surface;
         spec.flow = draft.flow;
-        spec.auto_execute = draft.auto_execute;
         Ok(spec)
     }
 
@@ -180,9 +176,7 @@ mod tests {
             notes: "n".into(),
             branch: branch.into(),
             location,
-            agent_surface: TaskAgentSurface::Terminal,
             flow: None,
-            auto_execute: false,
         }
     }
 
@@ -237,8 +231,6 @@ mod tests {
             assert_eq!(spec.run_in, TaskRunIn::NewWorktree);
             assert_eq!(spec.base_worktree_path, Some(PathBuf::from("/base")));
             assert_eq!(spec.notes, "n");
-            assert_eq!(spec.agent_surface, TaskAgentSurface::Terminal);
-            assert!(!spec.auto_execute);
             let default = ws
                 .task_spec_from(project, draft("", new_worktree()))
                 .expect("an empty branch is the default");

@@ -43,23 +43,16 @@ cd "$ROOT"
 # Files allowed to spell out the data-directory name literally — either
 # they are the canonical layout (storage.rs), or the path is deliberately
 # NOT app-instance state:
-#   - pages/tasks/editor/{mod,task_edit_ops}.rs: `<worktree>/.daruda/task-*.md`
-#     is a per-repo artifact tied to the branch, not app installation
-#     state — every profile touching the same repo should share it.
 #   - hooks/installer.rs: `~/.daruda/hooks/notify.sh` is a single global
 #     hook script by design (Claude Code's settings.json only supports
 #     one registration; the script self-resolves whichever daruda binary
 #     is on PATH at hook-fire time regardless of profile).
-#   - tasks/prompt_file.rs, runs/flow_tasks.rs: the per-repo `.daruda/`
-#     directory that holds task prompts, flow definitions and flow runs.
-#     Committed with the repo and shared by every profile that opens it,
-#     for the same reason as the `task-*.md` files above.
+#   - runs/flow_tasks.rs: the per-repo `.daruda/` directory that holds
+#     flow definitions and flow runs. It is a per-repo artifact, not app
+#     installation state: every profile that opens the repo shares it.
 WHITELIST=(
     "packages/store/src/storage.rs"
-    "packages/app/src/workspace/pages/tasks/editor/mod.rs"
-    "packages/app/src/workspace/pages/tasks/editor/task_edit_ops.rs"
     "packages/agent/src/hooks/installer.rs"
-    "packages/store/src/tasks/prompt_file.rs"
     "packages/app/src/runs/flow_tasks.rs"
 )
 

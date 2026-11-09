@@ -308,7 +308,6 @@ task:
   column_updated: "Updated"
   agent_on_start: "On start"
   agent_unknown: "Not recorded"
-  agent_terminal: "Claude CLI"
   updated_now: "Just now"
   updated_minutes: "%{count}m ago"
   updated_hours: "%{count}h ago"

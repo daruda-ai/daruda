@@ -1,0 +1,74 @@
+{
+  "schema_version": 2,
+  "tasks": [
+    {
+      "id": "01LEGACYRUN",
+      "project": "00000000-0000-0000-0000-00005c4e0008",
+      "title": "legacy running",
+      "prompt": "p",
+      "state": {
+        "state": "running",
+        "worktree_path": "/repo/wt-legacy"
+      },
+      "session_ids": [
+        "s-legacy"
+      ],
+      "created_at": "2023-11-14T22:13:20Z",
+      "updated_at": "2023-11-14T22:13:21Z",
+      "finished_at": null,
+      "notes": "",
+      "base_worktree_path": null,
+      "branch_name": "task-h0sn63nw",
+      "run_in": {
+        "kind": "new_worktree"
+      },
+      "agent_type": "claude",
+      "agent_surface": "terminal",
+      "execution": {
+        "source": {
+          "claude_cli": {
+            "transcript_path": "/home/u/.claude/projects/repo/s-legacy.jsonl",
+            "process": {
+              "running": {
+                "pid": 77
+              }
+            }
+          }
+        },
+        "id": "run-legacy",
+        "agent_id": "claude",
+        "account_id": null,
+        "cwd": "/repo/wt-legacy",
+        "session_id": "s-legacy",
+        "terminal_id": "term-legacy",
+        "cli_session_end": null
+      },
+      "auto_execute": false,
+      "subtasks": []
+    },
+    {
+      "id": "01LEGACYBACKLOG",
+      "project": "00000000-0000-0000-0000-00005c4e0008",
+      "title": "legacy backlog",
+      "prompt": "p",
+      "state": {
+        "state": "backlog"
+      },
+      "session_ids": [],
+      "created_at": "2023-11-14T22:13:20Z",
+      "updated_at": "2023-11-14T22:13:20Z",
+      "finished_at": null,
+      "notes": "",
+      "base_worktree_path": null,
+      "branch_name": "task-0de61bjs",
+      "run_in": {
+        "kind": "new_worktree"
+      },
+      "agent_type": "claude",
+      "agent_surface": "terminal",
+      "execution": null,
+      "auto_execute": true,
+      "subtasks": []
+    }
+  ]
+}

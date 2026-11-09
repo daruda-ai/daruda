@@ -10,8 +10,6 @@ fn edit(id: &str, title: &str) -> TaskEvent {
             title: title.into(),
             prompt: format!("{title} prompt"),
             notes: String::new(),
-            auto_execute: true,
-            agent_surface: Default::default(),
             base_worktree_path: None,
             branch: None,
             run_in: None,
@@ -96,7 +94,7 @@ fn review_regression_delivery_and_durable_history_use_the_dispatch_description()
         serde_json::json!({"title":"original", "prompt":"original prompt"})
     );
     assert_eq!(record.spec.title, "next");
-    assert_eq!(<TaskMachine as daruda_store::tasks::Machine>::SCHEMA, 8);
+    const { assert!(<TaskMachine as daruda_store::tasks::Machine>::SCHEMA >= 8) };
 }
 
 #[test]

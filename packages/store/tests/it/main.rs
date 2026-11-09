@@ -23,5 +23,6 @@ mod tasks_cli;
 mod tasks_description;
 mod tasks_machine;
 mod tasks_migrate;
+mod tasks_schema8;
 mod telegram;
 mod workspace_store;

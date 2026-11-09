@@ -1,4 +1,4 @@
-//! Task model, persistence, branch naming and prompt files.
+//! Task model, persistence, branch naming and the task prompt.
 
 use std::path::PathBuf;
 
@@ -7,14 +7,11 @@ use chrono::Utc;
 use daruda_store::project::ProjectUuid;
 use daruda_store::tasks::branch::{branch_name_for, random_branch_name};
 use daruda_store::tasks::persistence::{load_tasks_in, tasks_path_in};
-use daruda_store::tasks::prompt_file::{
-    PROMPT_DIR_NAME, build_claude_command, existing_prompt_file_path, prompt_file_path,
-    render_task_prompt, task_prompt_body, write_prompt_file,
-};
+use daruda_store::tasks::render_task_prompt;
 
 use daruda_store::tasks::task::{
-    AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, Task, TaskAgentSurface, TaskFilter,
-    TaskRunIn, TaskScope, TaskState, TasksState,
+    AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, Task, TaskFilter, TaskRunIn, TaskScope,
+    TaskState, TasksState,
 };
 
 /// `task` as the task log holds it.
@@ -100,7 +97,6 @@ fn task_new_assigns_ulid_and_backlog_state() {
     assert!(t.session_ids.is_empty());
     assert!(t.finished_at.is_none());
     assert!(t.notes.is_empty());
-    assert!(t.auto_execute);
     assert_eq!(t.agent_type, AgentType::Claude);
     assert_eq!(t.created_at, t.updated_at);
 }
@@ -253,8 +249,6 @@ fn task_serde_round_trip_preserves_all_fields() {
     t.notes = "some notes".into();
     t.session_ids = vec!["abc12345".into(), "def67890".into()];
     t.finished_at = Some(Utc::now());
-    t.auto_execute = false;
-    t.agent_surface = TaskAgentSurface::AgentChat;
     t.state = TaskState::Done {
         worktree_path: PathBuf::from("/repo/main-fix-auth"),
         end_reason: SessionEndReason::Stop,
@@ -266,32 +260,9 @@ fn task_serde_round_trip_preserves_all_fields() {
 }
 
 #[test]
-fn task_new_defaults_agent_surface_to_agent_chat() {
-    assert_eq!(TaskAgentSurface::default(), TaskAgentSurface::AgentChat);
-    assert_eq!(sample_task().agent_surface, TaskAgentSurface::AgentChat);
-}
-
-#[test]
-fn task_serde_preserves_explicit_terminal_surface() {
-    let mut task = sample_task();
-    task.agent_surface = TaskAgentSurface::Terminal;
-    let json = serde_json::to_string(&task).expect("serialize");
-    let restored: Task = serde_json::from_str(&json).expect("deserialize");
-    assert_eq!(restored.agent_surface, TaskAgentSurface::Terminal);
-}
-
-#[test]
-fn agent_surface_serializes_as_snake_case() {
-    let json = serde_json::to_string(&TaskAgentSurface::AgentChat).expect("serialize");
-    assert_eq!(json, "\"agent_chat\"");
-    let back: TaskAgentSurface = serde_json::from_str(&json).expect("deserialize");
-    assert_eq!(back, TaskAgentSurface::AgentChat);
-}
-
-#[test]
 fn task_loads_with_default_for_new_optional_fields() {
-    // JSON missing session_ids / notes / finished_at / agent_type / agent_surface /
-    // base_worktree_path / auto_execute / subtasks — must default cleanly.
+    // JSON missing session_ids / notes / finished_at / agent_type /
+    // base_worktree_path / subtasks — must default cleanly.
     let json = r#"{
         "id": "01HX",
         "project": "6f1c2b8e-0d4a-4f7e-9a51-3b2c1d0e9f8a",
@@ -308,12 +279,6 @@ fn task_loads_with_default_for_new_optional_fields() {
     assert!(t.notes.is_empty());
     assert!(t.base_worktree_path.is_none());
     assert_eq!(t.agent_type, AgentType::Claude);
-    assert_eq!(
-        t.agent_surface,
-        TaskAgentSurface::Terminal,
-        "legacy tasks without agent_surface retain Terminal"
-    );
-    assert!(t.auto_execute, "auto_execute default is true");
     assert!(t.subtasks.is_empty(), "subtasks defaults to empty vec");
 }
 
@@ -574,90 +539,8 @@ fn random_branch_names_are_valid_and_fresh() {
 }
 
 // ---------------------------------------------------------------------------
-// Prompt file + claude command
+// Task prompt
 // ---------------------------------------------------------------------------
-
-/// Named by id alone, so neither a branch shaped `task-…` nor a Retry that
-/// moves the task into its own lane changes the name.
-#[test]
-fn prompt_file_is_named_by_task_id_wherever_the_task_runs() {
-    let mut t = sample_task();
-    let wt = PathBuf::from("/repo/wt");
-    let expected = wt.join(PROMPT_DIR_NAME).join(format!("task-{}.md", t.id));
-    assert_eq!(prompt_file_path(&record_of(&t).spec, &wt), expected);
-    t.run_in = TaskRunIn::ExistingLane { path: wt.clone() };
-    assert_eq!(prompt_file_path(&record_of(&t).spec, &wt), expected);
-}
-
-#[test]
-fn reading_falls_back_to_a_branch_named_file_only_when_it_is_the_one_on_disk() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let t = sample_task();
-    let by_id = prompt_file_path(&record_of(&t).spec, tmp.path());
-    let by_branch = tmp
-        .path()
-        .join(PROMPT_DIR_NAME)
-        .join(format!("task-{}.md", t.branch_name));
-    assert_eq!(
-        existing_prompt_file_path(&record_of(&t).spec, tmp.path()),
-        by_id
-    );
-    write_prompt_file(&by_branch, "older build").expect("write");
-    assert_eq!(
-        existing_prompt_file_path(&record_of(&t).spec, tmp.path()),
-        by_branch
-    );
-    write_prompt_file(&by_id, "current").expect("write");
-    assert_eq!(
-        existing_prompt_file_path(&record_of(&t).spec, tmp.path()),
-        by_id
-    );
-}
-
-#[test]
-fn write_prompt_file_creates_dir_and_writes_contents() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let path = prompt_file_path(&record_of(&sample_task()).spec, tmp.path());
-    write_prompt_file(&path, "hello world").expect("write succeeds");
-    let contents = std::fs::read_to_string(&path).expect("read");
-    assert_eq!(contents, "hello world");
-}
-
-#[test]
-fn write_prompt_file_overwrites_existing_file() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let path = prompt_file_path(&record_of(&sample_task()).spec, tmp.path());
-    write_prompt_file(&path, "first").expect("write 1");
-    write_prompt_file(&path, "second").expect("write 2");
-    let contents = std::fs::read_to_string(&path).expect("read");
-    assert_eq!(contents, "second");
-}
-
-#[test]
-fn build_claude_command_appends_newline_when_auto_execute() {
-    let cmd = build_claude_command(&PathBuf::from("/tmp/p.md"), true);
-    assert!(cmd.starts_with("claude --dangerously-skip-permissions \"$(cat '/tmp/p.md')\""));
-    assert!(cmd.ends_with('\n'));
-}
-
-#[test]
-fn build_claude_command_skips_newline_when_manual() {
-    let cmd = build_claude_command(&PathBuf::from("/tmp/p.md"), false);
-    assert_eq!(
-        cmd,
-        "claude --dangerously-skip-permissions \"$(cat '/tmp/p.md')\""
-    );
-}
-
-#[test]
-fn build_claude_command_escapes_single_quotes_in_path() {
-    let cmd = build_claude_command(&PathBuf::from("/Users/al'fred/p.md"), false);
-    // POSIX-safe escape of `'` inside a single-quoted string.
-    assert!(
-        cmd.contains("'/Users/al'\\''fred/p.md'"),
-        "single-quote escape missing in {cmd}",
-    );
-}
 
 #[test]
 fn render_task_prompt_wraps_user_prompt_with_metadata() {
@@ -677,53 +560,6 @@ fn render_task_prompt_does_not_ask_the_agent_to_update_the_task() {
     let out = render_task_prompt(&record_of(&t), "feature-x");
     assert!(!out.contains("update task"), "{out}");
     assert!(!out.contains(&format!("\"{}\"", t.id)), "{out}");
-}
-
-/// The prompt file holds the framed prompt; reading it back must yield the
-/// user's text alone, or a reload frames it a second time on the next run.
-#[test]
-fn task_prompt_body_inverts_render_task_prompt() {
-    for prompt in [
-        "Fix the bug.",
-        "line one\n\nline two\n",
-        "\nleading blank",
-        "",
-    ] {
-        let mut t = sample_task();
-        t.prompt = prompt.to_string();
-        let out = render_task_prompt(&record_of(&t), "feature-x");
-        assert_eq!(task_prompt_body(&out), prompt, "{out}");
-        assert_eq!(task_prompt_body(out.trim_end_matches('\n')), prompt);
-    }
-}
-
-#[test]
-fn task_prompt_body_keeps_text_without_a_frame() {
-    assert_eq!(task_prompt_body("External update"), "External update");
-    assert_eq!(
-        task_prompt_body("Task: \"T\" (b)\nStatus: Running\n\nEdited body"),
-        "Edited body",
-        "a removed closing instruction keeps the body after the header"
-    );
-}
-
-/// A hand edit that trims the header or the gap before the closing
-/// instruction must still leave the frame out of the prompt.
-#[test]
-fn task_prompt_body_drops_a_hand_trimmed_frame() {
-    let mut t = sample_task();
-    t.prompt = "Body".to_string();
-    let out = render_task_prompt(&record_of(&t), "feature-x");
-    let (header, rest) = out.split_once("\n\n").unwrap();
-    let (task_line, status_line) = header.split_once('\n').unwrap();
-    let without_status = format!("{task_line}\n\n{rest}");
-    let without_gap = format!("{header}\n{rest}");
-    let closing = rest.strip_prefix("Body\n\n").unwrap();
-    let without_closing_gap = format!("{header}\n\nBody\n{closing}");
-    for edited in [without_status, without_gap, without_closing_gap] {
-        assert_eq!(task_prompt_body(&edited), "Body", "{edited:?}");
-    }
-    assert!(status_line.starts_with("Status: "));
 }
 
 // ---------------------------------------------------------------------------

@@ -68,8 +68,6 @@ fn edit(title: &str) -> TaskEdit {
         title: title.into(),
         prompt: String::new(),
         notes: String::new(),
-        auto_execute: true,
-        agent_surface: Default::default(),
         base_worktree_path: None,
         branch: None,
         run_in: None,
@@ -400,15 +398,7 @@ fn startup_reconciles_only_the_runs_the_process_lost(cx: &mut TestAppContext) {
     ];
     let mut ids = Vec::new();
     for (end, run) in scenarios {
-        let mut spec = seed::spec(project, "restart");
-        spec.agent_surface = if matches!(
-            run.source,
-            daruda_store::tasks::TaskExecutionSource::AgentChat
-        ) {
-            daruda_store::tasks::TaskAgentSurface::Terminal
-        } else {
-            daruda_store::tasks::TaskAgentSurface::AgentChat
-        };
+        let spec = seed::spec(project, "restart");
         ids.push(spec.id.clone());
         let mut events = seed::created(spec);
         events.extend(seed::run(ids.last().unwrap(), &run, end));

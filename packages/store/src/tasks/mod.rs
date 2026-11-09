@@ -19,11 +19,11 @@ pub use cli::{
     TaskExecutionSource,
 };
 pub mod persistence;
-pub mod prompt_file;
 /// Branch-name rules live in `daruda_core::git` — shared with the app so a
 /// form's diagnostics and this crate's silent filter cannot drift apart.
 pub use daruda_core::git::sanitize_branch_name;
 pub mod task;
+mod task_prompt;
 
 pub use branch::{branch_name_for, random_branch_name};
 pub use daruda_runlog::{AfterCommit, CommitError, Committed, Machine};
@@ -33,13 +33,10 @@ pub use machine::{
 };
 pub use migrate::migrate_legacy;
 pub use persistence::{load_tasks, load_tasks_in, tasks_path_in};
-pub use prompt_file::{
-    build_claude_command, existing_prompt_file_path, prompt_file_path, render_task_prompt,
-    task_prompt_body, write_prompt_file,
-};
 pub use store::{ReconcileBlocked, Reconciling, TaskStore, TaskStoreError};
 pub use task::{
     AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, TASK_TOOL_USE_FAILURE_THRESHOLD, Task,
-    TaskAgentSurface, TaskExecution, TaskFilter, TaskFlow, TaskId, TaskRunIn, TaskScope, TaskState,
-    TasksState, new_task_id,
+    TaskExecution, TaskFilter, TaskFlow, TaskId, TaskRunIn, TaskScope, TaskState, TasksState,
+    new_task_id,
 };
+pub use task_prompt::render_task_prompt;

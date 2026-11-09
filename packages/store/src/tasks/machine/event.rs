@@ -10,8 +10,8 @@ use super::{InterruptCause, StartFailure, TaskRecord, TaskSpec, UndeliveredReaso
 use crate::accounts::AccountId;
 use crate::project::ProjectUuid;
 use crate::tasks::{
-    CliProcessState, ExecutionRef, SessionEndReason, SubTask, TaskAgentSurface,
-    TaskExecutionSource, TaskFlow, TaskId, TaskRunIn,
+    CliProcessState, ExecutionRef, SessionEndReason, SubTask, TaskExecutionSource, TaskFlow,
+    TaskId, TaskRunIn,
 };
 
 /// The surface that requested an execution, independent of its agent transport.
@@ -187,14 +187,12 @@ pub struct TaskEdit {
     pub title: String,
     pub prompt: String,
     pub notes: String,
-    pub auto_execute: bool,
-    pub agent_surface: TaskAgentSurface,
     pub base_worktree_path: Option<PathBuf>,
     pub branch: Option<String>,
     pub run_in: Option<TaskRunIn>,
     pub project: Option<ProjectUuid>,
     /// Applies only in Backlog, like the other launch fields; `None` runs
-    /// the task on `agent_surface`.
+    /// the task as one agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow: Option<TaskFlow>,
 }

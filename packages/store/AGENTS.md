@@ -75,8 +75,8 @@ requires updating `clippy.toml`'s allow reasoning too.
   `daruda_core::path::directories`.
 - [Path-literal lint](../../scripts/lint-daruda-path-literals.sh) forbids
   hand-rolled `.join("daruda")` / `.join(".daruda")` outside `storage.rs`
-  and its explicit exceptions: per-repo `.daruda/task-*.md` files and the
-  global `~/.daruda/hooks/notify.sh`.
+  and its explicit exceptions: the per-repo `.daruda/` directory that holds
+  flow definitions and runs, and the global `~/.daruda/hooks/notify.sh`.
 - Review credential service names manually against
   `packages/app/src/telegram/keychain.rs::service_name()`; neither guard
   catches a hardcoded OS-credential identifier.

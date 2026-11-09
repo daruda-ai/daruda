@@ -53,52 +53,21 @@ impl RunsHost {
         let Some(terminal) = file.terminal_id.as_ref() else {
             return;
         };
-        let Some(pane) = Self::terminal_pane(terminal, cx) else {
+        if Self::terminal_pane(terminal, cx).is_none() {
             return;
-        };
-        let owner = Self::pane_execution(pane, cx).cloned();
+        }
+        // CLI runs only survive in older logs, and no pane is bound to one:
+        // a hook reaches a run through the session it already recorded.
         let session = &file.session_id;
         let tasks = cx.global::<GlobalTasks>();
-        let bound = owner.as_ref().and_then(|owner| {
-            cli_runs(tasks, |run| {
-                run.id == owner.execution_id
-                    && run.session_id.is_none()
-                    && run.terminal_id.as_deref() == Some(terminal.as_str())
-            })
-            .find(|(task, _, _)| {
-                task.id() == owner.task_id
-                    && task
-                        .started_at
-                        .is_none_or(|started| file.timestamp >= started)
-            })
-        });
         let mut events = Vec::new();
-        if let Some((task, _, exec)) = &bound {
-            events.push(TaskEvent::ExecutionSessionBound {
-                exec: exec.clone(),
-                session_id: session.clone(),
-                at: Utc::now(),
-            });
-            if matches!(task.lifecycle, Lifecycle::Running { .. })
-                && !task.session_ids.contains(session)
-            {
-                events.push(TaskEvent::SessionAttached {
-                    exec: exec.clone(),
-                    session_id: session.clone(),
-                    at: Utc::now(),
-                });
-            }
-        }
-        let bound_exec = bound.map(|(_, _, exec)| exec);
-        for (_, run, exec) in cli_runs(tasks, |_| true).filter(|(task, run, exec)| {
-            (run.session_id.as_ref() == Some(session)
+        for (_, run, exec) in cli_runs(tasks, |_| true).filter(|(task, run, _)| {
+            run.session_id.as_ref() == Some(session)
                 && (run.terminal_id.as_deref() == Some(terminal.as_str())
-                    || !matches!(task.lifecycle, Lifecycle::Running { .. })))
-                || bound_exec.as_ref() == Some(exec)
+                    || !matches!(task.lifecycle, Lifecycle::Running { .. }))
         }) {
             if file.last_event == "SessionEnd"
-                && (run.terminal_id.as_deref() == Some(terminal.as_str())
-                    || bound_exec.as_ref() == Some(&exec))
+                && run.terminal_id.as_deref() == Some(terminal.as_str())
             {
                 let end = daruda_store::tasks::CliSessionEnd {
                     reason: daruda_store::tasks::CliSessionEndReason::SessionEnded,
@@ -195,16 +164,12 @@ impl RunsHost {
         .collect();
         for (exec, event) in events {
             Self::propose_fact(event, cx);
+            // No pane drives a CLI run, so one still running outlived the
+            // process that started it.
             let restored = cx
                 .global::<GlobalTasks>()
                 .get(&exec.task_id)
-                .is_some_and(|task| matches!(task.lifecycle, Lifecycle::Running { .. }))
-                && !cx
-                    .global::<Self>()
-                    .executions
-                    .bindings
-                    .values()
-                    .any(|owner| owner == &exec);
+                .is_some_and(|task| matches!(task.lifecycle, Lifecycle::Running { .. }));
             let reason = if restored {
                 daruda_store::tasks::CliSessionEndReason::AppRestart
             } else {
@@ -255,39 +220,7 @@ impl RunsHost {
                 return;
             }
         }
-        let unfinished = cx
-            .global::<GlobalTasks>()
-            .get(&exec.task_id)
-            .is_some_and(|task| {
-                task.current_exec() == Some(&exec)
-                    && matches!(task.lifecycle, Lifecycle::Running { .. })
-                    && task
-                        .execution
-                        .as_ref()
-                        .and_then(|run| run.source.cli_process())
-                        .is_some_and(|process| {
-                            matches!(process, CliProcessState::ExitConfirmed { .. })
-                        })
-            });
-        let attached = cx
-            .global::<Self>()
-            .executions
-            .bindings
-            .values()
-            .any(|bound| bound == &exec);
-        if unfinished && attached {
-            Self::propose_fact(
-                TaskEvent::Settled {
-                    exec,
-                    outcome: daruda_store::tasks::machine::SettleOutcome::Errored,
-                    result: None,
-                    at: Utc::now(),
-                },
-                cx,
-            );
-        } else {
-            Self::reconcile_lost_cli(exec, cx);
-        }
+        Self::reconcile_lost_cli(exec, cx);
     }
 
     pub(crate) fn attach_cli_session(session: &str, cx: &mut App) {
@@ -437,15 +370,6 @@ impl RunsHost {
         Self::after_projection(
             move |cx| {
                 if cx.global::<Self>().executions.settling.contains(&exec) {
-                    return;
-                }
-                if cx
-                    .global::<Self>()
-                    .executions
-                    .bindings
-                    .values()
-                    .any(|bound| bound == &exec)
-                {
                     return;
                 }
                 let lost = cx

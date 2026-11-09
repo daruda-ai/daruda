@@ -657,7 +657,7 @@ impl Workspace {
         }) {
             return Err(TaskStartError::NotBacklog);
         }
-        let rendered = daruda_store::tasks::prompt_file::render_task_prompt(task, branch);
+        let rendered = daruda_store::tasks::render_task_prompt(task, branch);
         let failed = self
             .agent_chat_view(pane_id)
             .is_some_and(|view| matches!(view.read(cx).status(), AgentSessionStatus::Error { .. }));

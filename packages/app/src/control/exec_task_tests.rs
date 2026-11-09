@@ -144,10 +144,6 @@ async fn an_approved_create_adds_a_backlog_task_to_that_project(cx: &mut gpui::T
         assert_eq!(created.spec.run_in, TaskRunIn::NewWorktree);
         assert_eq!(created.spec.branch_name, "feat/login");
         assert_eq!(created.spec.notes, "for later");
-        assert_eq!(
-            created.spec.agent_surface,
-            daruda_store::tasks::TaskAgentSurface::AgentChat
-        );
     });
 }
 

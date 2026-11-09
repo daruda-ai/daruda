@@ -240,14 +240,13 @@ impl Workspace {
             .map(|lane| lane.path.clone())
             .unwrap_or_else(std::env::temp_dir);
         let project = self.active_project().map(|p| p.uuid).unwrap_or_default();
-        let mut spec = daruda_store::tasks::TaskSpec::new(
+        let spec = daruda_store::tasks::TaskSpec::new(
             project,
             "CLI task".into(),
             "Fix the parser".into(),
             None,
             Utc::now(),
         );
-        spec.agent_surface = daruda_store::tasks::TaskAgentSurface::Terminal;
         let process = if exited {
             CliProcessState::ExitConfirmed {
                 ended_at: Utc::now(),

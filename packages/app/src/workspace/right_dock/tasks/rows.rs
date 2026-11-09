@@ -1,7 +1,7 @@
 //! Aligned task columns; long metadata stays in the title or a tooltip.
 
 use daruda_core::age::{self, AgeBucket};
-use daruda_store::tasks::{Lifecycle, TaskAgentSurface, TaskRecord, TaskScope};
+use daruda_store::tasks::{Lifecycle, TaskRecord, TaskScope};
 use gpui::{AnyElement, App, Div, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
 use super::{TaskGrouping, list::TaskList};
@@ -269,12 +269,10 @@ fn agent_label(task: &TaskRecord, agents: &[daruda_config::AgentDefinition]) -> 
             .unwrap_or(&run.agent_id)
             .to_owned();
     }
-    match task.spec.agent_surface {
-        TaskAgentSurface::Terminal => strings::task::agent_terminal(),
-        TaskAgentSurface::AgentChat if task.lifecycle == Lifecycle::Backlog => {
-            strings::task::agent_on_start()
-        }
-        TaskAgentSurface::AgentChat => strings::task::agent_unknown(),
+    if task.lifecycle == Lifecycle::Backlog {
+        strings::task::agent_on_start()
+    } else {
+        strings::task::agent_unknown()
     }
 }
 
@@ -299,7 +297,6 @@ mod tests {
     #[test]
     fn agent_identity_comes_from_execution_not_legacy_agent_type() {
         let mut task = blank();
-        task.spec.agent_surface = TaskAgentSurface::AgentChat;
         assert_eq!(agent_label(&task, &[]), strings::task::agent_on_start());
         task.execution = Some(TaskExecution::begin(
             Default::default(),

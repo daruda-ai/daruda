@@ -12,8 +12,7 @@ use daruda_agent::pty_tracker::{ProcessExited, PtyBinding};
 use daruda_chat::view::{AgentSessionStatus, LoadIntent, PromptDispatch};
 use daruda_store::project::PaneCwd;
 use daruda_store::tasks::{
-    AgentChatAccess, SessionEndReason, TaskAgentSurface, TaskEvent, TaskExecution,
-    TaskExecutionSource,
+    AgentChatAccess, SessionEndReason, TaskEvent, TaskExecution, TaskExecutionSource,
 };
 use gpui::{AppContext as _, TestAppContext, Window};
 
@@ -61,8 +60,7 @@ fn cli_run(
     cx: &mut Context<Workspace>,
 ) -> String {
     let session = "cli-session";
-    let mut spec = crate::runs::seed::spec(daruda_store::project::ProjectUuid::default(), "CLI");
-    spec.agent_surface = TaskAgentSurface::Terminal;
+    let spec = crate::runs::seed::spec(daruda_store::project::ProjectUuid::default(), "CLI");
     let mut run = SeedRun::cli(cwd, CliProcessState::Running { pid })
         .session(session)
         .attach(session);
@@ -342,8 +340,7 @@ fn restart_rearms_tracking_for_running_pids_only(cx: &mut TestAppContext) {
             let cwd = std::env::temp_dir();
             // What a previous launch left: runs in each process state.
             let set = |session: &str, process: CliProcessState, cx: &mut Context<Workspace>| {
-                let mut spec = crate::runs::seed::spec(Default::default(), "CLI");
-                spec.agent_surface = TaskAgentSurface::Terminal;
+                let spec = crate::runs::seed::spec(Default::default(), "CLI");
                 let run = SeedRun::cli(&cwd, process).session(session);
                 crate::runs::seed::task(spec, Some((&run, SeedEnd::Dispatching)), cx)
             };

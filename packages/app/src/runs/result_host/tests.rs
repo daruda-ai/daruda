@@ -36,8 +36,6 @@ fn exact_results_survive_history_eviction_and_latest_resolves_after_reopen(
                         title: format!("edited {index}"),
                         prompt: format!("prompt {index}"),
                         notes: String::new(),
-                        auto_execute: true,
-                        agent_surface: Default::default(),
                         base_worktree_path: None,
                         branch: None,
                         run_in: None,

@@ -228,8 +228,6 @@ async fn a_task_start_that_fails_later_is_told_as_a_notice(cx: &mut gpui::TestAp
                     title: spec.title,
                     prompt: spec.prompt,
                     notes: spec.notes,
-                    auto_execute: spec.auto_execute,
-                    agent_surface: spec.agent_surface,
                     base_worktree_path: spec.base_worktree_path,
                     branch: Some("main".into()),
                     run_in: None,

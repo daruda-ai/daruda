@@ -291,7 +291,6 @@ task:
   column_updated: "업데이트"
   agent_on_start: "실행 시 선택"
   agent_unknown: "기록 없음"
-  agent_terminal: "Claude CLI"
   updated_now: "방금"
   updated_minutes: "%{count}분 전"
   updated_hours: "%{count}시간 전"
