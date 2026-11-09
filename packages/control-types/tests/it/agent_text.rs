@@ -1,4 +1,7 @@
-use daruda_control_types::agent_text::{bound_agent_text, elide_middle, sanitize_title};
+use daruda_control_types::agent_text::{
+    PROMPT_EXCERPT_CHARS, bound_agent_text, elide_middle, excerpt_line, prompt_excerpt,
+    sanitize_title,
+};
 
 #[test]
 fn elide_middle_keeps_short_text_verbatim() {
@@ -84,4 +87,32 @@ fn a_short_title_is_untouched_and_a_blank_one_is_absent() {
     );
     assert_eq!(sanitize_title("   \n\t  "), None);
     assert_eq!(sanitize_title(""), None);
+}
+
+#[test]
+fn a_short_prompt_is_quoted_whole_on_one_line() {
+    assert_eq!(
+        prompt_excerpt("fix\n\tthe  login\r\nbug"),
+        "fix the login bug"
+    );
+}
+
+#[test]
+fn a_long_prompt_is_cut_at_the_cap_with_an_ellipsis() {
+    let excerpt = prompt_excerpt(&"가".repeat(PROMPT_EXCERPT_CHARS + 5));
+    assert_eq!(excerpt.chars().count(), PROMPT_EXCERPT_CHARS + 1);
+    assert!(excerpt.ends_with('…'));
+    let exact = "a".repeat(PROMPT_EXCERPT_CHARS);
+    assert_eq!(prompt_excerpt(&exact), exact);
+    assert_eq!(excerpt_line("abcdef", 3), "abc…");
+}
+
+/// A right-to-left override would show `txt.exe` as `exe.txt`; zero-width
+/// and bidi marks could hide or reorder the words a card asks about.
+#[test]
+fn invisible_format_characters_are_dropped_from_excerpts_and_titles() {
+    let hostile = "run \u{202E}exe.txt\u{202C} now\u{200B}\u{2066}!\u{2069}\u{FEFF}\u{061C}";
+    assert_eq!(excerpt_line(hostile, 80), "run exe.txt now!");
+    assert_eq!(sanitize_title(hostile).as_deref(), Some("run exe.txt now!"));
+    assert_eq!(sanitize_title("\u{200B}\u{202E}"), None);
 }

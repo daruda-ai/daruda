@@ -269,7 +269,8 @@ fn task_creates_lane(task: &daruda_store::tasks::TaskRecord) -> bool {
 /// A target that cannot be named is refused rather than asked about: a card
 /// with the place left blank asks the person to approve without saying where.
 fn approval_summary(asked: &Asked, cx: &mut App) -> Result<String, ControlError> {
-    use disclosure::{agent_phrase, prompt_excerpt};
+    use daruda_control_types::agent_text::prompt_excerpt;
+    use disclosure::agent_phrase;
     // A chat's card names its pinned agent and that agent's delegated mode.
     Ok(match asked {
         Asked::LaneCreate {
