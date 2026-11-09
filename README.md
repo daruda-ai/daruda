@@ -133,7 +133,9 @@ The orchestrator is a resident agent you reach with `/daruda`. Ask it to
 create worktrees, start tasks and flows, or message other agents. Before it
 creates a worktree, chat, or task, or starts a task, it waits for your
 approval as a card in its chat. It starts on your first request, not at
-launch.
+launch. Chats and tasks the phone or orchestrator opens run in each
+agent's **Autonomous run mode** — by default without permission prompts —
+which you can change per agent in **Settings › Agents & Chat**.
 
 <img src=".github/readme/en/orchestrator.png" alt="The orchestrator chat with one approved task start and one pending request to add a task in a new worktree, with Allow and Refuse buttons" width="100%" />
 
@@ -199,7 +201,7 @@ agent runs in a terminal pane.
 | Windows | Native x86_64 and ARM64 ZIP and installer; experimental GUI support; CI builds, tests, and smoke-checks x86_64 and builds and smoke-checks ARM64 |
 | Linux | x86_64 `.deb` and tar.gz; CI builds, tests, and opens the window under Xvfb and sway; a real desktop (input, IME, menus) is still unverified |
 | ACP chat sessions | Shipped for configured ACP agents |
-| Claude Code integration | Status, usage, skills, tools, and task launching shipped |
+| Claude Code integration | Status, usage, skills, and tools shipped |
 | Other agent integrations | Ongoing as each CLI exposes stable metadata |
 
 ## Roadmap
