@@ -288,7 +288,9 @@ The agent is resolved when the card is built and pinned as
 kept as a lane with nothing open and the refusal is
 `agent_unavailable_worktree_kept`, carrying its handle, so the caller can
 open a chat there rather than retry a branch name git now refuses; it spends
-the agent's worktree budget like a success. A recorded task start fails as
+the agent's worktree budget like a success. A task start that fails later
+(finalize, pane, prompt delivery) also leaves its worktree, but answers
+`task_start_failed`, which does not say whether git ran, so it is not counted. A recorded task start fails as
 `AgentMissing` either way. A card discloses the agent, the requested mode,
 the task title and the prompt through `agent_text`: titles and prompts are
 flattened to one line, their quote marks neutralized, a long one shows its

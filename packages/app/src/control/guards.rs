@@ -123,8 +123,8 @@ pub(crate) fn guard_agent_budget(cx: &mut App) -> Result<(), ControlError> {
     Ok(())
 }
 
-/// Spend one worktree of the budget. Called after a creation actually
-/// succeeded — a refused or failed one costs nothing.
+/// Spend one worktree of the budget, for a creation that left one: a success
+/// or a refusal naming the worktree it kept (see `exec::gated`).
 pub(crate) fn note_agent_created_lane(cx: &mut App) {
     let budget = cx.default_global::<AgentBudget>();
     budget.created_lanes = budget.created_lanes.saturating_add(1);
