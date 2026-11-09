@@ -49,6 +49,9 @@ impl RunsHost {
         );
     }
 
+    /// A live terminal resumed the session of an ended CLI run: the run learns
+    /// its new process and transcript. Terminal ids are minted per spawn and no
+    /// run starts as a CLI, so a running run never owns a live terminal.
     pub(crate) fn record_task_cli_hook(file: &StatusFile, cx: &mut App) {
         let Some(terminal) = file.terminal_id.as_ref() else {
             return;
@@ -56,35 +59,12 @@ impl RunsHost {
         if Self::terminal_pane(terminal, cx).is_none() {
             return;
         }
-        // CLI runs only survive in older logs, and no pane is bound to one:
-        // a hook reaches a run through the session it already recorded.
         let session = &file.session_id;
         let tasks = cx.global::<GlobalTasks>();
         let mut events = Vec::new();
-        for (_, run, exec) in cli_runs(tasks, |_| true).filter(|(task, run, _)| {
-            run.session_id.as_ref() == Some(session)
-                && (run.terminal_id.as_deref() == Some(terminal.as_str())
-                    || !matches!(task.lifecycle, Lifecycle::Running { .. }))
-        }) {
-            if file.last_event == "SessionEnd"
-                && run.terminal_id.as_deref() == Some(terminal.as_str())
-            {
-                let end = daruda_store::tasks::CliSessionEnd {
-                    reason: daruda_store::tasks::CliSessionEndReason::SessionEnded,
-                    at: file.timestamp,
-                };
-                if run
-                    .cli_session_end
-                    .as_ref()
-                    .is_none_or(|previous| end.refines(previous))
-                {
-                    events.push(TaskEvent::CliSessionEnded {
-                        exec: exec.clone(),
-                        end,
-                        at: Utc::now(),
-                    });
-                }
-            }
+        for (_, run, exec) in cli_runs(tasks, |run| run.session_id.as_ref() == Some(session))
+            .filter(|(task, _, _)| !matches!(task.lifecycle, Lifecycle::Running { .. }))
+        {
             let mut process = run.source.cli_process().cloned().unwrap_or_default();
             if let Some(pid) = file.agent_pid
                 && !matches!(&process, CliProcessState::ExitConfirmed { ended_at } if file.timestamp <= *ended_at)
@@ -195,8 +175,8 @@ impl RunsHost {
             .and_then(|task| {
                 let run = task.execution.as_ref()?;
                 let terminal = run.terminal_id.as_ref()?;
-                let dir = daruda_agent::hooks::status_file::default_dir().ok()?;
-                let path = daruda_agent::hooks::status_file::path_for(&dir, terminal);
+                let dir = Self::status_dir(cx)?;
+                let path = daruda_agent::hooks::status_file::path_for(dir, terminal);
                 let file = daruda_agent::hooks::status_file::read(&path).ok()??;
                 (task.current_exec() == Some(&exec)
                     && file.storage_key() == terminal
@@ -210,7 +190,6 @@ impl RunsHost {
         if let Some(file) = final_hook {
             let reason = hook_end_reason(&file.last_event);
             if let Some(reason) = reason {
-                Self::record_task_cli_hook(&file, cx);
                 Self::settle_cli_terminal(
                     &file.session_id,
                     file.terminal_id.map(|id| id.as_str().to_owned()),

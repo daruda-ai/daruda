@@ -15,19 +15,17 @@ impl Workspace {
         file: &StatusFile,
         cx: &mut Context<Self>,
     ) {
-        if file.terminal_id.is_some() {
+        let routed = file.terminal_id.is_some();
+        if routed {
             RunsHost::record_task_cli_hook(file, cx);
         } else {
             self.record_task_cli_transcript(&file.session_id, file.transcript_path.as_deref(), cx);
         }
         self.apply_task_session_changed(&file.session_id, cx);
-        if let Some(reason) = crate::runs::cli_hook_end_reason(&file.last_event) {
-            let session = file.session_id.clone();
-            let terminal = file.terminal_id.as_ref().map(|id| id.as_str().to_owned());
-            self.after_task_projection(
-                move |_, cx| RunsHost::settle_cli_terminal(&session, terminal, reason, cx),
-                cx,
-            );
+        // A routed hook reaches here only from a terminal of this launch,
+        // which no CLI run recorded; only an unrouted one can end a run.
+        if !routed && let Some(reason) = crate::runs::cli_hook_end_reason(&file.last_event) {
+            self.apply_task_session_ended(&file.session_id, reason, cx);
         }
     }
 }

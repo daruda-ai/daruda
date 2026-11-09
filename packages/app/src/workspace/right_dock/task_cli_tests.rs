@@ -49,16 +49,9 @@ fn report_hook(
 }
 
 /// A Claude CLI run the log holds, in `cwd`, running as `pid` on `session`
-/// in terminal `pane`; no pane is bound to it, as none is once the app has
-/// restarted.
-fn cli_run(
-    ws: &Workspace,
-    pane: PaneId,
-    pid: u32,
-    cwd: &Path,
-    agent: Option<String>,
-    cx: &mut Context<Workspace>,
-) -> String {
+/// in a terminal of an earlier launch: no pane of this one is bound to it or
+/// owns that terminal.
+fn cli_run(pid: u32, cwd: &Path, agent: Option<String>, cx: &mut Context<Workspace>) -> String {
     let session = "cli-session";
     let spec = crate::runs::seed::spec(daruda_store::project::ProjectUuid::default(), "CLI");
     let mut run = SeedRun::cli(cwd, CliProcessState::Running { pid })
@@ -67,7 +60,11 @@ fn cli_run(
     if let Some(agent) = agent {
         run = run.agent(agent);
     }
-    run.terminal_id = RunsHost::terminal_id(ws.run_pane(pane), cx).map(|id| id.as_str().to_owned());
+    run.terminal_id = Some(
+        crate::hooks::agent_hooks::mint_terminal_id()
+            .as_str()
+            .to_owned(),
+    );
     crate::runs::seed::task(spec, Some((&run, SeedEnd::Running)), cx)
 }
 
@@ -101,8 +98,7 @@ fn rerun(id: &str, cx: &mut gpui::App) -> ExecutionRef {
 fn a_session_end_settles_a_cli_run_with_its_transcript(cx: &mut TestAppContext) {
     let (_, workspace) = build_workspace(cx);
     let id = workspace.update(cx, |ws, cx| {
-        let pane = terminal_panes(ws)[0];
-        let id = cli_run(ws, pane, 42, &std::env::temp_dir(), None, cx);
+        let id = cli_run(42, &std::env::temp_dir(), None, cx);
         ws.record_task_cli_transcript("cli-session", Some(Path::new("/transcript.jsonl")), cx);
         ws.apply_task_session_ended("cli-session", SessionEndReason::Stop, cx);
         id
@@ -234,7 +230,7 @@ fn attach_handle(
 /// A CLI run whose session the first terminal pane still shows.
 fn bound_task(ws: &mut Workspace, pid: u32, cx: &mut Context<Workspace>) -> (String, PaneId) {
     let pane = terminal_panes(ws)[0];
-    let id = cli_run(ws, pane, pid, &std::env::temp_dir(), None, cx);
+    let id = cli_run(pid, &std::env::temp_dir(), None, cx);
     bind(ws, pane, pid, "cli-session", cx);
     (id, pane)
 }
@@ -630,7 +626,7 @@ fn open_chat_marks_a_cli_run_read_only_and_restore_keeps_it(cx: &mut TestAppCont
             let cwd = ws.active_lane().unwrap().path.clone();
             let pane = terminal_panes(ws)[0];
             let agent = ws.mirrors.agents[0].id.clone();
-            let task = cli_run(ws, pane, 10, &cwd, Some(agent), cx);
+            let task = cli_run(10, &cwd, Some(agent), cx);
             bind(ws, pane, 10, "cli-session", cx);
             let execution_id = run(&task, cx).id;
 
