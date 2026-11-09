@@ -104,14 +104,68 @@ fn group_is_gone(errno: i32, darwin: bool) -> bool {
 }
 
 pub(super) fn command(program: &std::ffi::OsStr) -> std::process::Command {
-    std::process::Command::new(program)
+    use std::os::unix::process::CommandExt as _;
+    let resolved = resolve_program(program, None);
+    let mut command = std::process::Command::new(&resolved);
+    if resolved.as_os_str() != program {
+        // The child still sees the name it was asked for, as a shell would
+        // give it; some tools dispatch on `argv[0]`.
+        command.arg0(program);
+    }
+    command
 }
 
+/// A bare name, found on `path` (`None`: this process's own) by `stat`.
+///
+/// Leaving the search to `posix_spawnp` costs a process per PATH entry ahead
+/// of the match: Darwin creates the child before the exec fails with
+/// `ENOENT`, and each one is assessed by syspolicyd like a real launch.
 pub(super) fn resolve_program(
     program: &std::ffi::OsStr,
-    _path: Option<&std::ffi::OsStr>,
+    path: Option<&std::ffi::OsStr>,
 ) -> std::path::PathBuf {
-    program.into()
+    let own_path;
+    let path = match path {
+        Some(path) => Some(path),
+        None => {
+            own_path = std::env::var_os("PATH");
+            own_path.as_deref()
+        }
+    };
+    path.and_then(|path| first_executable_on(program, path, is_executable_file))
+        .unwrap_or_else(|| program.into())
+}
+
+/// The first `<dir>/<program>` on `path` that `is_executable` accepts.
+///
+/// `None` hands the search back to the OS: for a name with a separator, and
+/// before a relative or empty entry, which the OS resolves against the
+/// child's working directory rather than this process's.
+fn first_executable_on(
+    program: &std::ffi::OsStr,
+    path: &std::ffi::OsStr,
+    is_executable: impl Fn(&std::path::Path) -> bool,
+) -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt as _;
+    if program.is_empty() || program.as_bytes().contains(&b'/') {
+        return None;
+    }
+    for dir in std::env::split_paths(path) {
+        if !dir.is_absolute() {
+            return None;
+        }
+        let candidate = dir.join(program);
+        if is_executable(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn is_executable_file(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::metadata(path)
+        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
 }
 
 #[cfg(test)]
@@ -122,6 +176,57 @@ mod tests {
     fn a_vanished_group_is_gone_on_every_unix() {
         assert!(group_is_gone(libc::ESRCH, false));
         assert!(group_is_gone(libc::ESRCH, true));
+    }
+
+    fn search(program: &str, path: &str, present: &[&str]) -> Option<std::path::PathBuf> {
+        first_executable_on(program.as_ref(), path.as_ref(), |candidate| {
+            present.iter().any(|p| candidate == std::path::Path::new(p))
+        })
+    }
+
+    /// The point of resolving here: the match comes from `stat`, so the
+    /// entries ahead of it cost no spawn attempt.
+    #[test]
+    fn a_bare_name_resolves_to_the_first_entry_that_holds_it() {
+        let path = "/missing/a:/opt/x/bin:/usr/bin";
+        let present = ["/opt/x/bin/git", "/usr/bin/git"];
+        assert_eq!(
+            search("git", path, &present),
+            Some(std::path::PathBuf::from("/opt/x/bin/git"))
+        );
+    }
+
+    #[test]
+    fn what_the_os_must_decide_is_handed_back() {
+        let present = ["/usr/bin/git", "/usr/bin/./git"];
+        assert_eq!(search("git", "/nowhere", &present), None, "not found");
+        assert_eq!(
+            search("./git", "/usr/bin", &present),
+            None,
+            "already a path"
+        );
+        assert_eq!(search("", "/usr/bin", &present), None, "no name");
+        // A relative or empty entry means the child's cwd, which a
+        // `current_dir` on the command can change after this returns.
+        assert_eq!(search("git", "bin:/usr/bin", &present), None);
+        assert_eq!(search("git", ":/usr/bin", &present), None);
+    }
+
+    #[test]
+    fn a_resolved_command_keeps_the_name_as_its_argv0() {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let Some(sh) = first_executable_on("sh".as_ref(), &path, is_executable_file) else {
+            return;
+        };
+        let built = command("sh".as_ref());
+        assert_eq!(built.get_program(), sh.as_os_str());
+        let output = built_output(built, "printf %s \"$0\"");
+        assert_eq!(output, "sh");
+    }
+
+    fn built_output(mut command: std::process::Command, script: &str) -> String {
+        let output = command.args(["-c", script]).output().unwrap();
+        String::from_utf8(output.stdout).unwrap()
     }
 
     /// A command name may hold spaces and parentheses; only the last `)`

@@ -229,7 +229,7 @@ mod tests {
             vec!["commit", "-qm", "initial", "--allow-empty"],
         ] {
             assert!(
-                std::process::Command::new("git")
+                daruda_core::process::command("git")
                     .current_dir(&root)
                     .args(&args)
                     .status()

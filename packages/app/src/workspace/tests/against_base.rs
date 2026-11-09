@@ -6,7 +6,7 @@ use crate::lane::git::base::BaseProblem;
 use crate::workspace::main_area::file_view_pane::DiffSource;
 
 fn run_git(dir: &std::path::Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
+    let status = daruda_core::process::command("git")
         .current_dir(dir)
         .args(args)
         .status()

@@ -5,7 +5,7 @@ use super::*;
 use crate::workspace::{CommitChanges, PushChanges};
 
 fn run_git(dir: &std::path::Path, args: &[&str]) -> String {
-    let out = std::process::Command::new("git")
+    let out = daruda_core::process::command("git")
         .current_dir(dir)
         .args(args)
         .output()

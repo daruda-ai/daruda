@@ -237,7 +237,7 @@ pub(in crate::workspace::tests) fn git_repo(dir: &std::path::Path) {
         &["config", "user.name", "daruda"],
         &["commit", "-q", "--allow-empty", "-m", "initial"],
     ] {
-        let status = std::process::Command::new("git")
+        let status = daruda_core::process::command("git")
             .current_dir(dir)
             .args(args)
             .status()

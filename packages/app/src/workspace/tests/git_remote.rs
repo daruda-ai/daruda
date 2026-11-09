@@ -6,7 +6,7 @@ use super::*;
 const WATCH_REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
 fn run_git(dir: &std::path::Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
+    let status = daruda_core::process::command("git")
         .current_dir(dir)
         .args(args)
         .status()

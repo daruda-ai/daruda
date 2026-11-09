@@ -2,10 +2,9 @@
 
 use daruda_project::lane::git::git_command;
 use std::path::Path;
-use std::process::Command;
 
 fn run(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
+    let status = daruda_core::process::command("git")
         .current_dir(dir)
         .args(args)
         .status()
@@ -51,7 +50,7 @@ fn a_status_read_does_not_rewrite_the_index() {
         "a status read through the builder must not touch the index"
     );
 
-    Command::new("git")
+    daruda_core::process::command("git")
         .current_dir(root)
         .args(["status", "--porcelain=v1"])
         .output()

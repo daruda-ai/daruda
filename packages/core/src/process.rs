@@ -37,6 +37,8 @@ pub fn archive_command() -> std::process::Command {
 ///
 /// Windows console subprocesses stay hidden when launched by the GUI.
 /// The caller still supplies an executable, not a shell command line.
+/// On Unix a bare name is resolved against this process's `PATH` now; a
+/// child given another `PATH` is built with [`command_on_path`].
 pub fn command(program: impl AsRef<OsStr>) -> std::process::Command {
     backend::command(program.as_ref())
 }
@@ -46,8 +48,9 @@ pub fn command(program: impl AsRef<OsStr>) -> std::process::Command {
 ///
 /// Windows runs a bare name only as `<name>.exe`, so a `.cmd` shim — `npx`,
 /// an npm-installed `claude`, an editor's CLI — is resolved here through
-/// PATHEXT, the way a shell would. Anything already a path, anything not
-/// found, and every other platform get `program` back as given.
+/// PATHEXT, the way a shell would. Unix resolves a bare name too, because
+/// Darwin's own PATH search creates a dying process per entry it misses.
+/// Anything already a path, and anything not found, come back as given.
 pub fn resolve_program(program: &OsStr, path: Option<&OsStr>) -> std::path::PathBuf {
     backend::resolve_program(program, path)
 }

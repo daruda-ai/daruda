@@ -73,7 +73,7 @@ fn a_path_listed_staged_and_unstaged_is_planned_once() {
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = std::process::Command::new("git")
+    let out = daruda_core::process::command("git")
         .current_dir(dir)
         .args(args)
         .output()
@@ -205,7 +205,7 @@ fn discarding_an_add_add_conflict_keeps_heads_copy() {
     std::fs::write(root.join("both"), "main\n").unwrap();
     git(root, &["add", "both"]);
     git(root, &["commit", "-qm", "main"]);
-    let _ = std::process::Command::new("git")
+    let _ = daruda_core::process::command("git")
         .current_dir(root)
         .args(["merge", "-q", "side"])
         .output();

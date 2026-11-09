@@ -60,17 +60,17 @@ fn bootstrap_git_repo_single_worktree() {
     std::fs::create_dir_all(&dir).unwrap();
     let dir = daruda_core::path::canonicalize(&dir).unwrap();
     git::init(&dir).unwrap();
-    std::process::Command::new("git")
+    daruda_core::process::command("git")
         .current_dir(&dir)
         .args(["config", "user.email", "daruda@test"])
         .output()
         .unwrap();
-    std::process::Command::new("git")
+    daruda_core::process::command("git")
         .current_dir(&dir)
         .args(["config", "user.name", "daruda"])
         .output()
         .unwrap();
-    std::process::Command::new("git")
+    daruda_core::process::command("git")
         .current_dir(&dir)
         .args(["commit", "--allow-empty", "-m", "initial"])
         .output()
@@ -92,15 +92,15 @@ fn bootstrap_git_repo_multi_worktree_sorts_main_first() {
     std::fs::create_dir_all(&dir).unwrap();
     let dir = daruda_core::path::canonicalize(&dir).unwrap();
     git::init(&dir).unwrap();
-    let _ = std::process::Command::new("git")
+    let _ = daruda_core::process::command("git")
         .current_dir(&dir)
         .args(["config", "user.email", "daruda@test"])
         .output();
-    let _ = std::process::Command::new("git")
+    let _ = daruda_core::process::command("git")
         .current_dir(&dir)
         .args(["config", "user.name", "daruda"])
         .output();
-    let _ = std::process::Command::new("git")
+    let _ = daruda_core::process::command("git")
         .current_dir(&dir)
         .args(["commit", "--allow-empty", "-m", "initial"])
         .output();

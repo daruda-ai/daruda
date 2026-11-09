@@ -50,7 +50,7 @@ async fn raw_file_load_feeds_editor_text(cx: &mut TestAppContext) {
 }
 
 fn run_git(dir: &std::path::Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
+    let status = daruda_core::process::command("git")
         .current_dir(dir)
         .args(args)
         .status()
