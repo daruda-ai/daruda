@@ -59,9 +59,13 @@ const FRAMING_QUOTES: &[char] = &[
 ];
 const NEUTRAL_QUOTE: char = '\'';
 
-/// What a card adds to text it quotes, in its reader's language.
+/// What a card adds to text it quotes, in its reader's language. Each marker
+/// stands outside the quotation marks, where quoted text cannot forge one:
+/// the text's own quote marks are neutralized.
 pub trait QuoteMarkers {
-    /// Stands between the start and the end: `n` characters left out.
+    /// Wraps `text` in the card's quotation marks.
+    fn quote(&self, text: &str) -> String;
+    /// Stands between the quoted start and end: `n` characters left out.
     fn elided(&self, n: usize) -> String;
     /// Follows the quote: `n` invisible characters the agent receives but
     /// the card cannot show.
@@ -78,9 +82,9 @@ pub fn sanitize_title(raw: &str) -> Option<String> {
 
 /// A prompt as an approval card quotes it, so nothing the agent receives is
 /// out of sight: flattened as [`one_line`] does, framing quotes neutralized,
-/// past the bound its two ends around `markers.elided`, then
-/// `markers.hidden` for the invisible characters dropped. Empty only when
-/// `raw` carries nothing at all.
+/// quoted whole or, past the bound, its two quoted ends around
+/// `markers.elided`, then `markers.hidden` for the invisible characters
+/// dropped. Empty only when `raw` carries nothing at all.
 pub fn prompt_excerpt(raw: &str, markers: &impl QuoteMarkers) -> String {
     card_quote(
         raw,
@@ -115,8 +119,14 @@ fn card_quote(raw: &str, head: usize, tail: usize, markers: &impl QuoteMarkers) 
         })
         .collect();
     let mut quoted = match split_ends(&line, head, tail) {
-        Some((head, elided, tail)) => format!("{head}{}{tail}", markers.elided(elided)),
-        None => line,
+        Some((head, elided, tail)) => format!(
+            "{}{}{}",
+            markers.quote(head),
+            markers.elided(elided),
+            markers.quote(tail)
+        ),
+        None if line.is_empty() => String::new(),
+        None => markers.quote(&line),
     };
     if hidden > 0 {
         quoted.push_str(&markers.hidden(hidden));

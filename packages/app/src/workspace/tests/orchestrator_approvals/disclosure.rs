@@ -227,15 +227,16 @@ fn a_worktree_card_quotes_its_prompt_when_it_carries_one(cx: &mut TestAppContext
             },
             cx,
         );
+        let name = s::control::approval_quoted("disclosure");
         let hidden = s::control::approval_hidden_chars(2);
         let expected = match prompt.map(str::trim) {
-            Some("") | None => s::control::approval_lane_create("disclosure", &agent),
+            Some("") | None => s::control::approval_lane_create(&name, &agent),
             Some(p) if p.starts_with("Port") => s::control::approval_lane_create_prompt(
-                "disclosure",
+                &name,
                 &agent,
-                "Port the tax table to the new API",
+                s::control::approval_quoted("Port the tax table to the new API"),
             ),
-            Some(_) => s::control::approval_lane_create_prompt("disclosure", &agent, hidden.trim()),
+            Some(_) => s::control::approval_lane_create_prompt(&name, &agent, hidden.trim()),
         };
         assert_eq!(card, expected);
         refuse(id, cx);
@@ -257,7 +258,11 @@ async fn a_task_title_reads_plainly_and_an_empty_prompt_is_not_quoted(cx: &mut T
         },
         cx,
     );
-    let shown = format!("Login evil{}", s::control::approval_hidden_chars(2));
+    let shown = format!(
+        "{}{}",
+        s::control::approval_quoted("Login evil"),
+        s::control::approval_hidden_chars(2)
+    );
     assert!(card.contains(&shown), "{card}");
     assert!(
         !card.contains('\u{202E}') && !card.contains('\u{2066}'),
@@ -314,7 +319,11 @@ fn a_task_open_card_names_the_mode_only_for_a_new_pane(cx: &mut TestAppContext) 
             })
         })
         .unwrap();
-    let shown = format!("Login evil{}", s::control::approval_hidden_chars(1));
+    let shown = format!(
+        "{}{}",
+        s::control::approval_quoted("Login evil"),
+        s::control::approval_hidden_chars(1)
+    );
     let (id, _outcome, card) = ask(GatedCommand::TaskOpen { task: task.clone() }, cx);
     assert_eq!(card, s::control::approval_task_open(&shown));
     refuse(id, cx);

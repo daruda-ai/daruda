@@ -13,6 +13,10 @@ use crate::workspace::ChatDisclosure;
 struct Localized;
 
 impl QuoteMarkers for Localized {
+    fn quote(&self, text: &str) -> String {
+        s::control::approval_quoted(text)
+    }
+
     fn elided(&self, n: usize) -> String {
         s::control::approval_prompt_elided(n)
     }
@@ -22,9 +26,9 @@ impl QuoteMarkers for Localized {
     }
 }
 
-/// A title someone else wrote, as a card or a phone row quotes it: one line,
-/// both ends of a long one, and a count of what the card cannot show. Branch
-/// and worktree names on a card are quoted the same way.
+/// A title someone else wrote, as a card or a phone row quotes it: one quoted
+/// line, both ends of a long one, and a count of what the card cannot show.
+/// Branch and worktree names on a card are quoted the same way.
 pub(crate) fn quoted_title(title: &str) -> String {
     title_excerpt(title, &Localized)
 }
@@ -34,9 +38,9 @@ pub(super) fn agent_phrase(disclosure: &ChatDisclosure) -> String {
     s::control::approval_agent(&disclosure.agent_name, &disclosure.mode)
 }
 
-/// A prompt as a card quotes it: one line, its start and end around how much
-/// was left out. `None` when nothing visible is left, so the card says it
-/// sends no prompt rather than quoting an empty one.
+/// A prompt as a card quotes it: one quoted line, its start and end around
+/// how much was left out. `None` when the prompt carries nothing, so the card
+/// says it sends no prompt rather than quoting an empty one.
 pub(super) fn prompt_phrase(prompt: &str) -> Option<String> {
     let excerpt = prompt_excerpt(prompt, &Localized);
     (!excerpt.is_empty()).then_some(excerpt)
@@ -66,7 +70,10 @@ mod tests {
         for blank in ["", "  \n\t"] {
             assert_eq!(prompt_phrase(blank), None, "{blank:?}");
         }
-        assert_eq!(prompt_phrase("fix\nit").as_deref(), Some("fix it"));
+        assert_eq!(
+            prompt_phrase("fix\nit"),
+            Some(s::control::approval_quoted("fix it"))
+        );
         assert_eq!(
             prompt_phrase("\u{200B}\u{202E}"),
             Some(s::control::approval_hidden_chars(2).trim().to_owned())
@@ -85,13 +92,20 @@ mod tests {
                     .map(|c| char::from_u32(0xE0000 + c as u32).unwrap()),
             )
             .collect();
-        let counted = format!("fix{}", s::control::approval_hidden_chars(9));
+        let counted = format!(
+            "{}{}",
+            s::control::approval_quoted("fix"),
+            s::control::approval_hidden_chars(9)
+        );
         assert_eq!(prompt_phrase(&tagged), Some(counted.clone()));
         assert_eq!(quoted_title(&tagged), counted);
         let marker = s::control::approval_hidden_chars(1);
         let marker = marker.trim();
         assert!(!quoted_title("Fix the login").contains(marker));
-        assert_eq!(quoted_title("Fix the login"), "Fix the login");
+        assert_eq!(
+            quoted_title("Fix the login"),
+            s::control::approval_quoted("Fix the login")
+        );
     }
 
     /// A long title reaches the agent whole, so the card quotes both ends.
@@ -104,7 +118,12 @@ mod tests {
         let tail = "z".repeat(TITLE_EXCERPT_TAIL_CHARS);
         assert_eq!(
             quoted_title(&format!("{head}{}{tail}", "m".repeat(50))),
-            format!("{head}{}{tail}", s::control::approval_prompt_elided(50))
+            format!(
+                "{}{}{}",
+                s::control::approval_quoted(&head),
+                s::control::approval_prompt_elided(50),
+                s::control::approval_quoted(&tail)
+            )
         );
     }
 
@@ -118,8 +137,10 @@ mod tests {
         assert_eq!(
             prompt_phrase(&prompt),
             Some(format!(
-                "{head}{}{tail}",
-                s::control::approval_prompt_elided(9)
+                "{}{}{}",
+                s::control::approval_quoted(&head),
+                s::control::approval_prompt_elided(9),
+                s::control::approval_quoted(&tail)
             ))
         );
     }

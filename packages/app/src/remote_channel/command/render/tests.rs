@@ -384,10 +384,14 @@ fn task_list_rows_quote_titles_as_cards_do() {
         s::control::task_list_project_not_open(),
         s::control::task_list_row(
             1,
-            format!("Fix 2. fake row{}", s::control::approval_hidden_chars(3)),
+            format!(
+                "{}{}",
+                s::control::approval_quoted("Fix 2. fake row"),
+                s::control::approval_hidden_chars(3)
+            ),
             &backlog,
         ),
-        s::control::task_list_row(2, "Plain", &backlog),
+        s::control::task_list_row(2, s::control::approval_quoted("Plain"), &backlog),
     ]
     .join("\n");
     assert_eq!(text, expected);

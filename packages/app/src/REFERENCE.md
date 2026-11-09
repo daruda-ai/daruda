@@ -294,9 +294,11 @@ the agent's worktree budget like a success. A task start that fails later
 `AgentMissing` either way. A card discloses the agent, the requested mode,
 the task title and the prompt through `agent_text`: titles and prompts are
 flattened to one line, their quote marks neutralized, a long one shows its
-start and end around the count it leaves out, and the invisible characters
-dropped (bidi, zero-width, tag) are counted, since the agent still receives
-them. A branch name may not contain those characters
+quoted start and end around the count it leaves out (the middle is disclosed
+only as that count, never shown), and the invisible characters dropped (bidi,
+zero-width, tag) are counted, since the agent still receives them. Both
+counts stand outside the card's quotation marks, where quoted text cannot
+forge them. A branch name may not contain those characters
 (`BranchNameRule::InvisibleChar`), since it reaches the agent's first prompt
 uncounted; worktree and branch names are still quoted on a card the same way.
 A mode name the adapter advertised that daruda's seed does not match

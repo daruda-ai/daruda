@@ -2401,11 +2401,14 @@ control:
   # delegated mode, approving tools by itself, so the card says which.
   approval_lane_create: "daruda wants to create the worktree %{name} and open %{agent} there. Allow?"
   # `prompt` is a one-line excerpt of what the new chat is sent first.
-  approval_lane_create_prompt: "daruda wants to create the worktree %{name} and open %{agent} there, prompting “%{prompt}”. Allow?"
+  approval_lane_create_prompt: "daruda wants to create the worktree %{name} and open %{agent} there, prompting %{prompt}. Allow?"
   approval_chat_new: "daruda wants to open another chat in %{path} with %{agent}. Allow?"
   # The agent a delegated chat opens with, and the permission mode it asks
   # for; `mode` is the vocabulary's name or approval_mode_agent_default.
   approval_agent: "%{agent} (requested permission mode: %{mode})"
+  # Quotes text a card shows as it was written: a prompt, a title, a name.
+  # Markers the card adds (elided, hidden) stand outside it.
+  approval_quoted: "“%{text}”"
   # Stands between the start and the end of a long quoted prompt; `n` is how
   # many characters of it the card leaves out.
   approval_prompt_elided: " … (+%{n} characters) … "
@@ -2471,7 +2474,7 @@ control:
   error_self_target_refused: "That would have the agent prompt itself."
   # `location` is one of the approval_task_in_* phrases, `surface` one of
   # the approval_task_as_* ones.
-  approval_task_create: "daruda wants to add the task “%{title}” to %{project}, to run %{location} %{surface}. Allow?"
+  approval_task_create: "daruda wants to add the task %{title} to %{project}, to run %{location} %{surface}. Allow?"
   approval_task_in_new_worktree: "in a new worktree"
   approval_task_in_new_branch: "in a new worktree on the branch %{branch}"
   approval_task_in_worktree: "in the worktree %{lane}"
@@ -2485,18 +2488,18 @@ control:
   approval_flow_modes: "permission mode: %{modes}"
   approval_flow_no_agents: "commands only, no agents"
   # `agent` is approval_agent; `prompt` a one-line excerpt of the task's.
-  approval_task_start: "daruda wants to start the task “%{title}” with %{agent}, prompting “%{prompt}”. Allow?"
+  approval_task_start: "daruda wants to start the task %{title} with %{agent}, prompting %{prompt}. Allow?"
   # A task whose prompt is empty.
-  approval_task_start_no_prompt: "daruda wants to start the task “%{title}” with %{agent}. Allow?"
+  approval_task_start_no_prompt: "daruda wants to start the task %{title} with %{agent}. Allow?"
   # `flow` is one of the approval_task_as_flow phrases.
-  approval_task_start_flow: "daruda wants to start the task “%{title}” %{flow}. Allow?"
+  approval_task_start_flow: "daruda wants to start the task %{title} %{flow}. Allow?"
   # A flow given the task's prompt as an input; `prompt` is a one-line
   # excerpt of it, as its agents receive it.
-  approval_task_start_flow_prompt: "daruda wants to start the task “%{title}” %{flow}, giving it the prompt “%{prompt}”. Allow?"
+  approval_task_start_flow_prompt: "daruda wants to start the task %{title} %{flow}, giving it the prompt %{prompt}. Allow?"
   # The task's chat is already open, and keeps its own mode.
-  approval_task_open: "daruda wants to open the chat of the task “%{title}”. Allow?"
+  approval_task_open: "daruda wants to open the chat of the task %{title}. Allow?"
   # The task's chat reopens in a new pane; `agent` is approval_agent.
-  approval_task_open_new: "daruda wants to reopen the chat of the task “%{title}” with %{agent}. Allow?"
+  approval_task_open_new: "daruda wants to reopen the chat of the task %{title} with %{agent}. Allow?"
   # A flow run the app quit or a crash cut off: `passed` of its `total`
   # steps had passed, and the step it was on runs again from the start.
   approval_flow_resume: "daruda wants to resume the flow %{name} from where it stopped (%{passed} of %{total} steps done; any step that was running starts over). Allow?"

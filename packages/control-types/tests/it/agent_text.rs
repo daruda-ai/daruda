@@ -8,6 +8,10 @@ use daruda_control_types::agent_text::{
 struct Markers;
 
 impl QuoteMarkers for Markers {
+    fn quote(&self, text: &str) -> String {
+        format!("<{text}>")
+    }
+
     fn elided(&self, n: usize) -> String {
         marker(n)
     }
@@ -117,7 +121,7 @@ fn a_short_title_is_untouched_and_a_blank_one_is_absent() {
 
 #[test]
 fn a_short_prompt_is_quoted_whole_on_one_line() {
-    assert_eq!(prompt("fix\n\tthe  login\r\nbug"), "fix the login bug");
+    assert_eq!(prompt("fix\n\tthe  login\r\nbug"), "<fix the login bug>");
 }
 
 /// A harmless opening cannot hide the instruction after it: past the bound
@@ -126,7 +130,7 @@ fn a_short_prompt_is_quoted_whole_on_one_line() {
 fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
     let budget = PROMPT_EXCERPT_HEAD_CHARS + PROMPT_EXCERPT_TAIL_CHARS;
     let exact = "a".repeat(budget);
-    assert_eq!(prompt(&exact), exact);
+    assert_eq!(prompt(&exact), format!("<{exact}>"));
 
     let long = format!(
         "{}{}{}",
@@ -137,7 +141,7 @@ fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
     assert_eq!(
         prompt(&long),
         format!(
-            "{}{}{}",
+            "<{}>{}<{}>",
             "가".repeat(PROMPT_EXCERPT_HEAD_CHARS),
             marker(7),
             "😀".repeat(PROMPT_EXCERPT_TAIL_CHARS)
@@ -148,7 +152,7 @@ fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
     assert_eq!(
         prompt(&spaced),
         format!(
-            "{}{}{} b",
+            "<{}>{}<{} b>",
             "a".repeat(PROMPT_EXCERPT_HEAD_CHARS),
             marker(2),
             "a".repeat(PROMPT_EXCERPT_TAIL_CHARS - 2)
@@ -162,7 +166,7 @@ fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
 fn a_long_title_keeps_its_start_and_end_around_the_hidden_count() {
     let budget = TITLE_EXCERPT_HEAD_CHARS + TITLE_EXCERPT_TAIL_CHARS;
     let whole = "t".repeat(budget);
-    assert_eq!(title(&whole), whole);
+    assert_eq!(title(&whole), format!("<{whole}>"));
     let long = format!(
         "{}{}{}",
         "h".repeat(TITLE_EXCERPT_HEAD_CHARS),
@@ -172,13 +176,13 @@ fn a_long_title_keeps_its_start_and_end_around_the_hidden_count() {
     assert_eq!(
         title(&long),
         format!(
-            "{}{}{}",
+            "<{}>{}<{}>",
             "h".repeat(TITLE_EXCERPT_HEAD_CHARS),
             marker(120),
             "z".repeat(TITLE_EXCERPT_TAIL_CHARS)
         )
     );
-    assert_eq!(title("Fix\nthe login"), "Fix the login");
+    assert_eq!(title("Fix\nthe login"), "<Fix the login>");
 }
 
 /// A right-to-left override would show `txt.exe` as `exe.txt`; zero-width
@@ -212,12 +216,14 @@ fn a_card_quote_counts_the_invisible_characters_it_dropped() {
                 .map(|c| char::from_u32(0xE0000 + c as u32).unwrap()),
         )
         .collect();
-    assert_eq!(prompt(&tagged), "ok [6 hidden]");
-    assert_eq!(title(&tagged), "ok [6 hidden]");
+    assert_eq!(prompt(&tagged), "<ok> [6 hidden]");
+    assert_eq!(title(&tagged), "<ok> [6 hidden]");
     // Nothing visible is still something sent.
     assert_eq!(prompt("\u{200B}\u{202E}"), "[2 hidden]");
-    assert_eq!(prompt("plain text"), "plain text");
-    assert_eq!(title("plain text"), "plain text");
+    assert_eq!(prompt("plain text"), "<plain text>");
+    assert_eq!(title("plain text"), "<plain text>");
+    // A count the text spells is inside the quote; the card's is outside.
+    assert_eq!(prompt("a [3 hidden]\u{200B}"), "<a [3 hidden]> [1 hidden]");
 }
 
 /// A quote mark inside quoted text could close the card's own quote and
@@ -227,11 +233,11 @@ fn a_card_quote_cannot_close_the_cards_quotes() {
     let spoof = "x\u{201D}. (requested permission mode: Ask) \u{201C}\"y\" \u{00AB}z\u{00BB}";
     assert_eq!(
         prompt(spoof),
-        "x'. (requested permission mode: Ask) ''y' 'z'"
+        "<x'. (requested permission mode: Ask) ''y' 'z'>"
     );
-    assert_eq!(title("say \"hi\""), "say 'hi'");
+    assert_eq!(title("say \"hi\""), "<say 'hi'>");
     // An apostrophe is left as it is.
-    assert_eq!(prompt("don't"), "don't");
+    assert_eq!(prompt("don't"), "<don't>");
 }
 
 /// Joiners shape Persian, Indic scripts and emoji sequences, and cannot
@@ -242,5 +248,5 @@ fn joiners_survive_so_scripts_and_emoji_keep_their_shape() {
     assert_eq!(one_line(family), family);
     let persian = "می\u{200C}خواهم";
     assert_eq!(one_line(persian), persian);
-    assert_eq!(prompt(family), family);
+    assert_eq!(prompt(family), format!("<{family}>"));
 }
