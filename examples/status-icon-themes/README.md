@@ -7,6 +7,13 @@ override individual states.
 Selections apply immediately and survive restart; activity, permission, elapsed
 time and completion decisions remain owned by the sessions.
 
+## Examples
+
+- [Soft Ice](soft-ice/theme.json) inherits Icons and overrides tool execution
+  with two animated frames.
+- [Cats](cats/README.md) replaces all nine states with kitten artwork, including
+  an empty house for Disconnected and a raised front paw for Needs attention.
+
 ## Create a user theme
 
 1. Choose **Open theme folder** beside the selector. This opens the active

@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "id": "cats",
+  "name": "Cats",
+  "extends": "icons",
+  "states": {
+    "disconnected": {
+      "frames": [
+        "disconnected-0.svg"
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#8a8f98",
+        "light": "#5b626f"
+      }
+    },
+    "connecting": {
+      "frames": [
+        "connecting-0.svg",
+        "connecting-1.svg",
+        "connecting-2.svg",
+        "connecting-3.svg",
+        "connecting-4.svg",
+        "connecting-4.svg",
+        "connecting-4.svg",
+        "connecting-5.svg",
+        "connecting-6.svg",
+        "connecting-7.svg",
+        "connecting-7.svg",
+        "connecting-7.svg",
+        "connecting-7.svg",
+        "connecting-7.svg",
+        "connecting-7.svg",
+        "connecting-7.svg"
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#a1a6b0",
+        "light": "#626977"
+      }
+    },
+    "working": {
+      "frames": [
+        "working-0.svg",
+        "working-1.svg",
+        "working-2.svg",
+        "working-3.svg",
+        "working-4.svg",
+        "working-5.svg",
+        "working-6.svg",
+        "working-7.svg"
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#8faacc",
+        "light": "#326797"
+      }
+    },
+    "executing_tool": {
+      "frames": [
+        "executing_tool-0.svg",
+        "executing_tool-1.svg",
+        "executing_tool-2.svg",
+        "executing_tool-3.svg",
+        "executing_tool-4.svg",
+        "executing_tool-5.svg",
+        "executing_tool-6.svg",
+        "executing_tool-7.svg"
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#81cfe6",
+        "light": "#256780"
+      }
+    },
+    "needs_attention": {
+      "frames": [
+        "needs_attention-0.svg",
+        "needs_attention-1.svg",
+        "needs_attention-2.svg",
+        "needs_attention-3.svg",
+        "needs_attention-4.svg",
+        "needs_attention-5.svg",
+        "needs_attention-6.svg",
+        "needs_attention-7.svg",
+        "needs_attention-7.svg",
+        "needs_attention-7.svg",
+        "needs_attention-7.svg",
+        "needs_attention-7.svg",
+        "needs_attention-7.svg",
+        "needs_attention-7.svg",
+        "needs_attention-7.svg",
+        "needs_attention-7.svg"
+      ],
+      "ticks_per_frame": 2,
+      "colors": {
+        "dark": "#e0bb66",
+        "light": "#866114"
+      }
+    },
+    "idle": {
+      "frames": [
+        "idle-0.svg"
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#8a8f98",
+        "light": "#5b626f"
+      }
+    },
+    "completed": {
+      "frames": [
+        "completed-0.svg"
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#4aaf78",
+        "light": "#287b4c"
+      }
+    },
+    "errored": {
+      "frames": [
+        "errored-0.svg"
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#e06060",
+        "light": "#b23d43"
+      }
+    },
+    "failed": {
+      "frames": [
+        "failed-0.svg"
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#e06060",
+        "light": "#b23d43"
+      }
+    }
+  }
+}
