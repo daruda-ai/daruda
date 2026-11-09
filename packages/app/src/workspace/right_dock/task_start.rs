@@ -21,6 +21,7 @@ use crate::workspace::Workspace;
 use crate::workspace::lane_ops::{CreateWorktreePlan, InitialPane, LaneReveal};
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::AgentSessionStatus;
+use daruda_config::ModeChoice;
 
 /// Why a task did not start.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -334,19 +335,21 @@ impl Workspace {
         if task.lifecycle != Lifecycle::Backlog {
             return Err(TaskStartError::NotBacklog);
         }
-        let reveal = reveal_for(started_by);
+        let Requester { reveal, mode } = requester(started_by);
         let route = match &task.spec.flow {
             Some(flow) => StartRoute::Flow(Box::new(
                 self.prepare_task_flow_start(&task, flow, reveal, submitter, cx)?,
             )),
             // An existing lane needs no git repo, lock or checkout.
             None => match &task.spec.run_in {
-                TaskRunIn::ExistingLane { path } => {
-                    StartRoute::Existing(self.prepare_existing_lane_start(path, reveal)?)
-                }
-                TaskRunIn::NewWorktree => {
-                    StartRoute::New(self.prepare_worktree_start(&task, reveal)?)
-                }
+                TaskRunIn::ExistingLane { path } => StartRoute::Existing {
+                    start: self.prepare_existing_lane_start(path, reveal)?,
+                    mode,
+                },
+                TaskRunIn::NewWorktree => StartRoute::New {
+                    start: self.prepare_worktree_start(&task, reveal)?,
+                    mode,
+                },
             },
         };
         let exec = ExecutionRef {
@@ -355,7 +358,7 @@ impl Workspace {
         };
         let source = match &route {
             StartRoute::Flow(start) => start.source(),
-            StartRoute::Existing(_) | StartRoute::New(_) => TaskExecutionSource::AgentChat,
+            StartRoute::Existing { .. } | StartRoute::New { .. } => TaskExecutionSource::AgentChat,
         };
         let requested = RunsHost::task(
             crate::runs::TaskIntent::Start {
@@ -442,11 +445,13 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         match route {
-            StartRoute::Existing(lane) => {
-                let started = self.start_task_in_existing_lane(&exec, lane, window, cx);
+            StartRoute::Existing { start, mode } => {
+                let started = self.start_task_in_existing_lane(&exec, start, mode, window, cx);
                 self.answer_when_dispatched(started, exec, answer, cx);
             }
-            StartRoute::New(start) => self.create_task_worktree(start, exec, answer, window, cx),
+            StartRoute::New { start, mode } => {
+                self.create_task_worktree(start, mode, exec, answer, window, cx)
+            }
             StartRoute::Flow(start) => {
                 self.continue_task_flow_start(*start, exec, answer, window, cx)
             }
@@ -456,6 +461,7 @@ impl Workspace {
     fn create_task_worktree(
         &mut self,
         start: WorktreeStart,
+        mode: ModeChoice,
         exec: ExecutionRef,
         answer: Answer,
         window: &mut Window,
@@ -502,7 +508,7 @@ impl Workspace {
                                 ws.finalize_create_lane_as(
                                     plan.clone(),
                                     project_id,
-                                    InitialPane::AgentChat,
+                                    InitialPane::AgentChat(mode),
                                     None,
                                     reveal,
                                     window,
@@ -692,20 +698,41 @@ pub(super) struct WorktreeStart {
     pub(super) reveal: LaneReveal,
 }
 
+/// How a start's chat meets the person, by who asked for it.
+#[derive(Debug, PartialEq, Eq)]
+struct Requester {
+    reveal: LaneReveal,
+    /// Unused by a flow, whose nodes run in the flow file's own modes.
+    mode: ModeChoice,
+}
+
 /// Only a start made at this window brings its lane forward. One the phone
 /// or the orchestrator asked for runs behind the view the person is using —
-/// often the orchestrator's own tab, which a lane switch would take down.
-fn reveal_for(started_by: StartedBy) -> LaneReveal {
+/// often the orchestrator's own tab, which a lane switch would take down —
+/// and in the agent's delegated mode, since nobody there answers a prompt.
+fn requester(started_by: StartedBy) -> Requester {
     match started_by {
-        StartedBy::Desktop => LaneReveal::Foreground,
-        StartedBy::Phone | StartedBy::Orchestrator => LaneReveal::Background,
+        StartedBy::Desktop => Requester {
+            reveal: LaneReveal::Foreground,
+            mode: ModeChoice::FollowDefault,
+        },
+        StartedBy::Phone | StartedBy::Orchestrator => Requester {
+            reveal: LaneReveal::Background,
+            mode: ModeChoice::FollowDelegated,
+        },
     }
 }
 
 /// Where a recorded start continues.
 enum StartRoute {
-    Existing(super::task_existing_lane_ops::ExistingLaneStart),
-    New(WorktreeStart),
+    Existing {
+        start: super::task_existing_lane_ops::ExistingLaneStart,
+        mode: ModeChoice,
+    },
+    New {
+        start: WorktreeStart,
+        mode: ModeChoice,
+    },
     /// Boxed because a flow start carries a whole worktree start plus its
     /// inputs, about twice the other routes once Windows paths widen it.
     Flow(Box<super::task_flow_start::TaskFlowStart>),
@@ -715,9 +742,9 @@ impl StartRoute {
     /// The repository whose lock the start holds until its worktree exists.
     fn repo_lock(&self) -> Option<&Path> {
         match self {
-            Self::New(start) => Some(&start.plan.repo_root),
+            Self::New { start, .. } => Some(&start.plan.repo_root),
             Self::Flow(start) => start.repo_lock(),
-            Self::Existing(_) => None,
+            Self::Existing { .. } => None,
         }
     }
 }

@@ -250,6 +250,7 @@ fn closing_the_orchestrator_tab_does_not_connect_the_worktree_being_left(cx: &mu
                 .insert_agent_chat_pane(
                     ws.mirrors.agents[0].id.clone(),
                     ws.active_lane_cwds(),
+                    daruda_config::ModeChoice::FollowDefault,
                     window,
                     cx,
                 )

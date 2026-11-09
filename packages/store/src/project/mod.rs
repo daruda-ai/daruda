@@ -507,6 +507,13 @@ pub struct SerializedAgentChatContent {
     /// is not read back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picked_mode_id: Option<String>,
+    /// Without a pick, whether this pane's mode follows its agent's
+    /// delegated mode rather than its `default_mode`: a chat the phone or the
+    /// orchestrator asked for. A pick wins over it. A separate key rather than
+    /// a reshaped `picked_mode_id`, so a build that predates it reads such a
+    /// pane as following `default_mode` — the prompting side — not as a pick.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub follows_delegated_mode: bool,
     /// Model id this pane's user explicitly picked. Persisted so the next
     /// connection can request it during the handshake; an agent catalog's
     /// `default_model` is deliberately not recorded here, because it must stay

@@ -46,10 +46,13 @@ impl Workspace {
             return;
         }
         #[cfg(test)]
-        if let Some(probes) = cx
+        if let Some((probes, requested)) = cx
             .try_global::<super::TestAgentConnections>()
-            .map(|connections| connections.0.clone())
+            .map(|connections| (connections.probes.clone(), connections.requested.clone()))
         {
+            if let Some(preferences) = self.connect_session_preferences(pane_id, cx) {
+                requested.borrow_mut().push((pane_id, preferences));
+            }
             if let Some(view) = self.agent_chat_view(pane_id).cloned() {
                 let (handle, probe) = daruda_acp::AcpSessionHandle::detached_for_test();
                 probes.borrow_mut().push(probe);

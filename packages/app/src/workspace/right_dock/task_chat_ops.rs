@@ -1,5 +1,6 @@
 //! Task execution ownership and reopening its exact conversation.
 
+use daruda_config::ModeChoice;
 use daruda_store::accounts::AccountSelection;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneRef, PaneCwd};
@@ -256,7 +257,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Err(e) = self.begin_task_chat_open(task_id, window, cx)
+        if let Err(e) = self.begin_task_chat_open(task_id, ModeChoice::FollowDefault, window, cx)
             && let Some(message) = e.message()
         {
             self.task_chat_error(message, cx);
@@ -264,10 +265,12 @@ impl Workspace {
     }
 
     /// Bring up the chat a task's run belongs to: the pane already showing
-    /// it, else a new one that loads that exact session.
+    /// it, else a new one that loads that exact session with its mode from
+    /// `mode` — a pane already open keeps its own.
     pub(crate) fn begin_task_chat_open(
         &mut self,
         task_id: &str,
+        mode: ModeChoice,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneId, TaskChatError> {
@@ -304,11 +307,12 @@ impl Workspace {
             .filter(|_| execution.cwd.is_dir())
             .ok_or(TaskChatError::WorktreeMissing)?;
         self.activate_lane(lane, window, cx);
-        let mut pane = self.create_agent_chat_pane(
+        let mut pane = self.create_agent_chat_pane_in(
             Some(PaneCwd::Local(execution.cwd)),
             Some(session_id),
             execution.agent_id,
             Some(title),
+            mode,
             window,
             cx,
         );

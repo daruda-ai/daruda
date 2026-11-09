@@ -22,7 +22,11 @@ fn agent_with(default_model: Option<&str>, default_mode: Option<&str>) -> AgentD
 fn session_preferences_are_empty_without_a_pick_or_an_agent_default() {
     // Nothing to request: the adapter's own model and mode apply untouched.
     assert_eq!(
-        SessionPreferences::resolve(Some(&agent_with(None, None)), None, None),
+        SessionPreferences::resolve(
+            Some(&agent_with(None, None)),
+            None,
+            &ModeChoice::FollowDefault
+        ),
         SessionPreferences::default()
     );
     // Whitespace-only is neither a pick nor an override.
@@ -30,13 +34,13 @@ fn session_preferences_are_empty_without_a_pick_or_an_agent_default() {
         SessionPreferences::resolve(
             Some(&agent_with(Some(" "), Some("   "))),
             Some(""),
-            Some(" ")
+            &ModeChoice::Picked(" ".into())
         ),
         SessionPreferences::default()
     );
     // An id no longer in the catalog contributes no defaults.
     assert_eq!(
-        SessionPreferences::resolve(None, None, None),
+        SessionPreferences::resolve(None, None, &ModeChoice::FollowDefault),
         SessionPreferences::default()
     );
 }
@@ -44,7 +48,7 @@ fn session_preferences_are_empty_without_a_pick_or_an_agent_default() {
 #[test]
 fn session_preferences_without_a_pick_are_the_agent_defaults() {
     let agent = agent_with(Some("  opus "), Some("  plan  "));
-    let preferences = SessionPreferences::resolve(Some(&agent), None, None);
+    let preferences = SessionPreferences::resolve(Some(&agent), None, &ModeChoice::FollowDefault);
     assert_eq!(preferences.model.as_deref(), Some("opus"));
     assert_eq!(preferences.modes, vec!["plan".to_string()]);
 }
@@ -55,15 +59,72 @@ fn session_preferences_without_a_pick_are_the_agent_defaults() {
 #[test]
 fn session_preferences_put_each_pick_ahead_of_the_agent_default() {
     let agent = agent_with(Some("sonnet"), Some("bypassPermissions"));
-    let preferences = SessionPreferences::resolve(Some(&agent), Some("haiku"), Some("plan"));
+    let preferences = SessionPreferences::resolve(
+        Some(&agent),
+        Some("haiku"),
+        &ModeChoice::Picked("plan".into()),
+    );
     assert_eq!(preferences.model.as_deref(), Some("haiku"));
     assert_eq!(
         preferences.modes,
         vec!["plan".to_string(), "bypassPermissions".to_string()]
     );
     // A pick equal to the default is listed once.
-    let same = SessionPreferences::resolve(Some(&agent), None, Some(" bypassPermissions "));
+    let same = SessionPreferences::resolve(
+        Some(&agent),
+        None,
+        &ModeChoice::Picked(" bypassPermissions ".into()),
+    );
     assert_eq!(same.modes, vec!["bypassPermissions".to_string()]);
+}
+
+fn claude_with(default_mode: Option<&str>, delegated_mode: Option<&str>) -> AgentDefinition {
+    AgentDefinition {
+        default_mode: default_mode.map(str::to_string),
+        delegated_mode: delegated_mode.map(str::to_string),
+        ..AgentDefinition::new(
+            "claude".to_string(),
+            "Claude".to_string(),
+            AgentLaunch::Raw("npx -y @agentclientprotocol/claude-agent-acp@latest".to_string()),
+        )
+    }
+}
+
+/// A delegated session asks for the delegated mode first and keeps the
+/// agent's `default_mode` behind it, for an adapter that does not advertise
+/// the first (bypass under root).
+#[test]
+fn a_delegated_pane_puts_the_delegated_mode_ahead_of_the_default() {
+    let agent = claude_with(Some("default"), None);
+    let delegated = SessionPreferences::resolve(Some(&agent), None, &ModeChoice::FollowDelegated);
+    assert_eq!(
+        delegated.modes,
+        vec!["bypassPermissions".to_string(), "default".to_string()]
+    );
+    let stated = claude_with(Some("default"), Some(" acceptEdits "));
+    assert_eq!(
+        SessionPreferences::resolve(Some(&stated), None, &ModeChoice::FollowDelegated).modes,
+        vec!["acceptEdits".to_string(), "default".to_string()]
+    );
+    // An ordinary pane never asks for the delegated mode.
+    assert_eq!(
+        SessionPreferences::resolve(Some(&agent), None, &ModeChoice::FollowDefault).modes,
+        vec!["default".to_string()]
+    );
+    // A pick outranks it; an adapter with no known no-prompt mode adds none.
+    assert_eq!(
+        SessionPreferences::resolve(Some(&agent), None, &ModeChoice::Picked("plan".into())).modes,
+        vec!["plan".to_string(), "default".to_string()]
+    );
+    assert_eq!(
+        SessionPreferences::resolve(
+            Some(&agent_with(None, Some("plan"))),
+            None,
+            &ModeChoice::FollowDelegated
+        )
+        .modes,
+        vec!["plan".to_string()]
+    );
 }
 
 /// On by default, so a fresh pane reads as a column rather than a full-width

@@ -134,6 +134,7 @@ impl Workspace {
                     local_cwd,
                     remote_cwd,
                     session_host,
+                    daruda_config::ModeChoice::FollowDefault,
                     window,
                     cx,
                 )

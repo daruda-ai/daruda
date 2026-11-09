@@ -650,7 +650,7 @@ async fn a_config_edit_moves_live_sessions_off_unpicked_defaults(cx: &mut TestAp
                     .mode_for_chip()
                     .map(|m| m.current.clone()),
                 v.picked_model_id().map(str::to_owned),
-                v.pane_choices().mode_id,
+                v.pane_choices().mode,
             )
         })
     };
@@ -660,7 +660,7 @@ async fn a_config_edit_moves_live_sessions_off_unpicked_defaults(cx: &mut TestAp
             Some("opus".to_string()),
             Some("bypassPermissions".to_string()),
             None,
-            None
+            daruda_config::ModeChoice::FollowDefault
         ),
         "an untouched pane follows both edited defaults without picking them"
     );
@@ -671,7 +671,7 @@ async fn a_config_edit_moves_live_sessions_off_unpicked_defaults(cx: &mut TestAp
             Some("opus".to_string()),
             Some("plan".to_string()),
             None,
-            Some("plan".to_string())
+            daruda_config::ModeChoice::Picked("plan".to_string())
         ),
         "a picked mode stands; the unpicked model still follows"
     );

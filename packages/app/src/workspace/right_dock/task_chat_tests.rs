@@ -4,6 +4,7 @@ use super::*;
 use crate::runs::seed::commit_now;
 use crate::workspace::tests::build_workspace;
 use daruda_chat::view::AgentSessionStatus;
+use daruda_config::ModeChoice;
 use daruda_store::tasks::machine::SettleOutcome;
 use daruda_store::tasks::{Lifecycle, SessionEndReason, TaskExecutionSource};
 use gpui::{AppContext as _, TestAppContext};
@@ -509,18 +510,21 @@ fn task_chat_open_answers_with_the_pane_or_why_not(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             assert_eq!(
-                ws.begin_task_chat_open("missing", window, cx),
+                ws.begin_task_chat_open("missing", ModeChoice::FollowDefault, window, cx),
                 Err(TaskChatError::NotFound)
             );
             let never_ran = task(cx);
             assert_eq!(
-                ws.begin_task_chat_open(&never_ran, window, cx),
+                ws.begin_task_chat_open(&never_ran, ModeChoice::FollowDefault, window, cx),
                 Err(TaskChatError::NoSession)
             );
             let pane = pane(ws, window, cx);
             let id = task(cx);
             bind(ws, &id, pane, cx);
-            assert_eq!(ws.begin_task_chat_open(&id, window, cx), Ok(pane));
+            assert_eq!(
+                ws.begin_task_chat_open(&id, ModeChoice::FollowDefault, window, cx),
+                Ok(pane)
+            );
         })
     })
     .unwrap();

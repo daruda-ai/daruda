@@ -187,6 +187,31 @@ fn serialize_chat_content_width(
     }
 }
 
+/// A pane's mode source as its two stored keys: `picked_mode_id` for a pick,
+/// `follows_delegated_mode` for a delegated pane; neither for the default.
+fn serialize_mode_choice(mode: daruda_config::ModeChoice) -> (Option<String>, bool) {
+    use daruda_config::ModeChoice;
+    match mode {
+        ModeChoice::FollowDefault => (None, false),
+        ModeChoice::FollowDelegated => (None, true),
+        ModeChoice::Picked(id) => (Some(id), false),
+    }
+}
+
+/// Inverse of [`serialize_mode_choice`]. A pick wins over the delegated flag,
+/// so a file stating both reads as the person's own choice.
+fn deserialize_mode_choice(
+    picked_mode_id: Option<String>,
+    follows_delegated_mode: bool,
+) -> daruda_config::ModeChoice {
+    use daruda_config::ModeChoice;
+    match (picked_mode_id, follows_delegated_mode) {
+        (Some(id), _) => ModeChoice::Picked(id),
+        (None, true) => ModeChoice::FollowDelegated,
+        (None, false) => ModeChoice::FollowDefault,
+    }
+}
+
 fn serialize_chat_tail_window(
     tail: daruda_chat::rows::tail::TailWindow,
 ) -> daruda_store::project::SerializedChatTailWindow {
@@ -300,6 +325,7 @@ fn serialize_pane_content(
         // Only explicit choices are written, so an untouched pane keeps
         // following config.
         let choices = v.pane_choices();
+        let (picked_mode_id, follows_delegated_mode) = serialize_mode_choice(choices.mode);
         return Content::AgentChat(daruda_store::project::SerializedAgentChatContent {
             require_exact_resume: ac.restore.requires_exact(),
             access: v.access(),
@@ -309,7 +335,8 @@ fn serialize_pane_content(
             title: v.session_title().map(str::to_owned),
             agent_id: Some(v.agent_id().to_owned()),
             account_id: ac.account.to_persisted(),
-            picked_mode_id: choices.mode_id,
+            picked_mode_id,
+            follows_delegated_mode,
             model_id: choices.model_id,
             content_width: choices.content_width.map(serialize_chat_content_width),
             tail_window: choices.tail_steps.map(serialize_chat_tail_window),
@@ -377,6 +404,39 @@ fn serialize_layout(
                     .collect(),
                 ratios: ratios.clone(),
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{deserialize_mode_choice, serialize_mode_choice};
+    use daruda_config::ModeChoice;
+
+    /// A file written before delegated panes existed states a pick or
+    /// nothing: the pick stays a pick, and nothing follows `default_mode`.
+    #[test]
+    fn a_saved_mode_reads_back_as_the_choice_it_was() {
+        assert_eq!(
+            deserialize_mode_choice(Some("plan".into()), false),
+            ModeChoice::Picked("plan".into())
+        );
+        assert_eq!(
+            deserialize_mode_choice(None, false),
+            ModeChoice::FollowDefault
+        );
+        assert_eq!(
+            deserialize_mode_choice(Some("plan".into()), true),
+            ModeChoice::Picked("plan".into()),
+            "a pick wins over the delegated flag"
+        );
+        for choice in [
+            ModeChoice::FollowDefault,
+            ModeChoice::FollowDelegated,
+            ModeChoice::Picked("plan".into()),
+        ] {
+            let (picked, delegated) = serialize_mode_choice(choice.clone());
+            assert_eq!(deserialize_mode_choice(picked, delegated), choice);
         }
     }
 }

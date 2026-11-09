@@ -15,6 +15,7 @@ impl AgentChatView {
         status: AgentSessionStatus,
         session_id: Option<String>,
         agent: AgentIdentity,
+        mode_choice: daruda_config::ModeChoice,
         title: Option<String>,
         defaults: TranscriptDefaults,
         syntax_theme: String,
@@ -42,9 +43,9 @@ impl AgentChatView {
             cwd,
             status,
             session_id,
-            // Both picks are patched in by session restore right after
-            // construction — see `Workspace::rebuild_layout`.
-            picked_mode_id: None,
+            // A restored pane's mode and model are patched in by session
+            // restore right after construction — see `Workspace::rebuild_layout`.
+            mode_choice,
             picked_model_id: None,
             agent_id: agent.id,
             agent_program: None,

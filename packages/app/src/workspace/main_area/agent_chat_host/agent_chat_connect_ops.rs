@@ -35,8 +35,13 @@ struct AgentChatConnectionPlan {
     mcp_servers: Vec<daruda_acp::McpServer>,
 }
 
+/// Stands in for every connect while installed: each pane gets a detached
+/// handle, and what its connect would have asked the agent for is recorded.
 #[cfg(test)]
-struct TestAgentConnections(std::rc::Rc<std::cell::RefCell<Vec<daruda_acp::HandleProbe>>>);
+struct TestAgentConnections {
+    probes: std::rc::Rc<std::cell::RefCell<Vec<daruda_acp::HandleProbe>>>,
+    requested: std::rc::Rc<std::cell::RefCell<Vec<(PaneId, daruda_config::SessionPreferences)>>>,
+}
 
 #[cfg(test)]
 impl gpui::Global for TestAgentConnections {}
@@ -47,8 +52,22 @@ impl Workspace {
         cx: &mut gpui::App,
     ) -> std::rc::Rc<std::cell::RefCell<Vec<daruda_acp::HandleProbe>>> {
         let probes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        cx.set_global(TestAgentConnections(probes.clone()));
+        cx.set_global(TestAgentConnections {
+            probes: probes.clone(),
+            requested: Default::default(),
+        });
         probes
+    }
+
+    /// The model and modes each faked connect would have sent, in connect
+    /// order — the same resolution a real connect's plan takes.
+    pub(crate) fn faked_connect_preferences_for_test(
+        cx: &mut gpui::App,
+    ) -> Vec<(PaneId, daruda_config::SessionPreferences)> {
+        cx.global::<TestAgentConnections>()
+            .requested
+            .borrow()
+            .clone()
     }
 }
 

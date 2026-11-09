@@ -795,6 +795,7 @@ async fn a_pending_handoff_survives_a_restore(cx: &mut TestAppContext) {
             agent_id: Some(daruda_config::AgentDefinition::claude_default().id),
             account_id: None,
             picked_mode_id: None,
+            follows_delegated_mode: false,
             model_id: None,
             content_width: None,
             tail_window: None,

@@ -14,6 +14,7 @@ fn make_test_view(
                 name: "Claude".to_string(),
                 icon: None,
             },
+            daruda_config::ModeChoice::FollowDefault,
             None,
             daruda_chat::transcript_defaults::TranscriptDefaults::resolve(
                 None,

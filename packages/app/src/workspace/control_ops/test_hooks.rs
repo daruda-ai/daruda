@@ -24,8 +24,14 @@ impl Workspace {
     ) -> PaneId {
         let agent_id = self.open_agent_id(None);
         let cwds = self.active_lane_cwds();
-        self.insert_agent_chat_pane(agent_id, cwds, window, cx)
-            .expect("pane opened")
+        self.insert_agent_chat_pane(
+            agent_id,
+            cwds,
+            daruda_config::ModeChoice::FollowDefault,
+            window,
+            cx,
+        )
+        .expect("pane opened")
     }
 
     /// Add `count` lanes to the active project, each holding one agent-chat

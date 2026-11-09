@@ -64,6 +64,18 @@ impl Workspace {
         self.resolve_pane_launch(pane_id, cx)
     }
 
+    /// What a connect of `pane_id` asks its agent for. Requested on every
+    /// connect, a resume (`session/load`) included: a value the adapter
+    /// reports for itself never outranks these. `None` when the pane is gone.
+    pub(super) fn connect_session_preferences(
+        &self,
+        pane_id: PaneId,
+        cx: &Context<Self>,
+    ) -> Option<daruda_config::SessionPreferences> {
+        let view = self.agent_chat_view(pane_id)?.read(cx);
+        Some(view.session_preferences(&self.mirrors.agents))
+    }
+
     pub(super) fn prepare_agent_chat_connection(
         &mut self,
         pane_id: PaneId,
@@ -79,14 +91,15 @@ impl Workspace {
         // Read back after `resolve_pane_launch` so any stale-id reconcile it did
         // is picked up: the preferences below resolve against that agent, and
         // the id keys the dev-build wire-tap file name.
-        let view = self.agent_chat_view(pane_id)?.read(cx);
-        let agent_id = view.agent_id().to_owned();
-        // Requested on every connect, a resume (`session/load`) included: a
-        // value the adapter reports for itself never outranks these.
+        let agent_id = self
+            .agent_chat_view(pane_id)?
+            .read(cx)
+            .agent_id()
+            .to_owned();
         let daruda_config::SessionPreferences {
             model: initial_model,
             modes: initial_modes,
-        } = view.session_preferences(&self.mirrors.agents);
+        } = self.connect_session_preferences(pane_id, cx)?;
         let vocabulary_source = crate::lane::session_host::adapter_command(&launch)
             .trim()
             .to_string();

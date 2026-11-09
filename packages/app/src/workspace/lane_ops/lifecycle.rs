@@ -228,6 +228,7 @@ impl Workspace {
             return Err(crate::surface::strings::create_lane::err_no_active_project());
         }
         let new_path = &plan.new_path;
+        let is_chat = matches!(initial, InitialPane::AgentChat(_));
         // The agent-chat pane parks Idle until it is connected below.
         let pane = match initial {
             InitialPane::Terminal => {
@@ -242,7 +243,7 @@ impl Workspace {
                 )
                 .map_err(|e| e.to_string())?
             }
-            InitialPane::AgentChat => {
+            InitialPane::AgentChat(mode) => {
                 // No source pane (new lane), so open under the
                 // session-sticky default. A brand-new lane has neither a
                 // legacy `remote_cwd` nor a `session_host` yet, so an agent
@@ -255,6 +256,7 @@ impl Workspace {
                     Some(new_path.clone()),
                     None,
                     None,
+                    mode,
                     window,
                     cx,
                 )
@@ -279,7 +281,7 @@ impl Workspace {
         self.register_created_lane(plan, project_id, Some(runtime), reveal, window, cx);
         // Focusing the pane is what connects an Agent chat's session; one
         // left behind connects here.
-        if reveal == super::LaneReveal::Background && initial == InitialPane::AgentChat {
+        if reveal == super::LaneReveal::Background && is_chat {
             self.maybe_connect_agent_chat(pane_id, cx);
         }
         // Return the spawned pane's id so task-driven callers (start_task)

@@ -49,13 +49,13 @@ pub(in crate::workspace) enum LaneReveal {
 }
 
 /// The first pane a new lane opens with.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum InitialPane {
     /// A shell, as a lane the person makes by hand opens with.
     Terminal,
     /// An Agent chat rooted at the new checkout, as tasks and the control
-    /// surface ask for.
-    AgentChat,
+    /// surface ask for, with where its session mode comes from.
+    AgentChat(daruda_config::ModeChoice),
 }
 
 /// Counterpart to `CreateWorktreePlan` for the remove path.

@@ -7,8 +7,9 @@ use daruda_store::project::PaneCwd;
 use gpui::{Context, Window};
 
 use super::{
-    deserialize_chat_content_width, deserialize_chat_tail_window, deserialize_view_mode,
-    effective_cwd, normalize_ratios, restored_agent_account, restored_terminal_account,
+    deserialize_chat_content_width, deserialize_chat_tail_window, deserialize_mode_choice,
+    deserialize_view_mode, effective_cwd, normalize_ratios, restored_agent_account,
+    restored_terminal_account,
 };
 use crate::agent::launch_resolve::account_recipe_for_connect;
 use crate::workspace::Workspace;
@@ -175,7 +176,10 @@ impl Workspace {
                                 )
                             });
                             let choices = ChatPaneChoices {
-                                mode_id: ac.picked_mode_id.clone(),
+                                mode: deserialize_mode_choice(
+                                    ac.picked_mode_id.clone(),
+                                    ac.follows_delegated_mode,
+                                ),
                                 model_id: ac.model_id.clone(),
                                 content_width,
                                 tail_steps,

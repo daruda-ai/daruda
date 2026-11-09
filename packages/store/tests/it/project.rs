@@ -188,6 +188,7 @@ fn agent_chat_content_round_trip_preserves_account_id() {
         agent_id: Some("claude".to_string()),
         account_id: Some(id),
         picked_mode_id: None,
+        follows_delegated_mode: false,
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -258,6 +259,7 @@ fn agent_chat_content_round_trip_preserves_picked_mode_id() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         picked_mode_id: Some("acceptEdits".to_string()),
+        follows_delegated_mode: false,
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -282,6 +284,27 @@ fn the_superseded_mode_id_key_is_not_read_as_a_pick() {
     assert!(legacy.picked_mode_id.is_none());
 }
 
+/// A delegated pane keeps following the delegated mode after a restart; a
+/// file written before the key reads as following `default_mode`, and an
+/// ordinary pane does not write it.
+#[test]
+fn follows_delegated_mode_round_trips_and_is_absent_by_default() {
+    let mut content: SerializedAgentChatContent =
+        serde_json::from_str(r#"{"cwd":"/repo/lane","picked_mode_id":"plan"}"#).unwrap();
+    assert!(!content.follows_delegated_mode);
+    assert!(
+        !serde_json::to_string(&content)
+            .unwrap()
+            .contains("follows_delegated_mode")
+    );
+    content.picked_mode_id = None;
+    content.follows_delegated_mode = true;
+    let json = serde_json::to_string(&content).unwrap();
+    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
+    assert!(restored.follows_delegated_mode);
+    assert_eq!(restored.picked_mode_id, None);
+}
+
 #[test]
 fn agent_chat_content_round_trip_preserves_model_id() {
     // Every connect reapplies this pane's model, so the pick has to survive
@@ -295,6 +318,7 @@ fn agent_chat_content_round_trip_preserves_model_id() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         picked_mode_id: None,
+        follows_delegated_mode: false,
         model_id: Some("opus".to_string()),
         content_width: None,
         tail_window: None,
@@ -334,6 +358,7 @@ fn agent_chat_content_width_round_trips_and_an_absent_key_follows_config() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         picked_mode_id: None,
+        follows_delegated_mode: false,
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -386,6 +411,7 @@ fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         picked_mode_id: None,
+        follows_delegated_mode: false,
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -435,6 +461,7 @@ fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         picked_mode_id: None,
+        follows_delegated_mode: false,
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -494,6 +521,7 @@ fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         picked_mode_id: None,
+        follows_delegated_mode: false,
         model_id: None,
         content_width: None,
         tail_window: Some(SerializedChatTailWindow::Last(5)),
@@ -636,6 +664,7 @@ fn unset_view_preferences_are_left_out_of_the_json() {
         agent_id: None,
         account_id: None,
         picked_mode_id: None,
+        follows_delegated_mode: false,
         model_id: None,
         content_width: None,
         tail_window: None,
@@ -672,6 +701,7 @@ fn agent_chat_leaf_round_trip_preserves_cwd() {
             agent_id: Some("claude".to_string()),
             account_id: None,
             picked_mode_id: None,
+            follows_delegated_mode: false,
             model_id: None,
             content_width: None,
             tail_window: None,
@@ -716,6 +746,7 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
             agent_id: None,
             account_id: None,
             picked_mode_id: None,
+            follows_delegated_mode: false,
             model_id: None,
             content_width: None,
             tail_window: None,
@@ -1683,6 +1714,7 @@ fn a_pane_writes_the_new_visible_kinds_field_and_never_the_legacy_one() {
         agent_id: Some("claude".to_string()),
         account_id: None,
         picked_mode_id: None,
+        follows_delegated_mode: false,
         model_id: None,
         content_width: None,
         tail_window: None,

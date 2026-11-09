@@ -279,7 +279,7 @@ impl AgentChatView {
         if self.is_read_only() {
             return;
         }
-        self.picked_mode_id = Some(mode_id.clone());
+        self.mode_choice = daruda_config::ModeChoice::Picked(mode_id.clone());
         self.send_mode(mode_id, cx);
     }
 
@@ -304,7 +304,7 @@ impl AgentChatView {
         daruda_config::SessionPreferences::resolve(
             agents.iter().find(|a| a.id == self.agent_id),
             self.picked_model_id.as_deref(),
-            self.picked_mode_id.as_deref(),
+            &self.mode_choice,
         )
     }
 

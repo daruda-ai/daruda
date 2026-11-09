@@ -230,6 +230,11 @@ fn an_existing_lane_start_answers_with_where_it_runs(cx: &mut TestAppContext) {
         .unwrap();
     cx.run_until_parked();
     let pane = workspace.read_with(cx, |ws, _| ws.active_runtime().focused_pane_id);
+    assert_eq!(
+        cx.update(Workspace::faked_connect_preferences_for_test),
+        vec![(pane, daruda_config::SessionPreferences::default())],
+        "a desktop start follows default_mode, never the delegated one"
+    );
     let exec = cx.update(|cx| {
         let record = cx.global::<crate::runs::GlobalTasks>().get(&id).unwrap();
         assert_eq!(

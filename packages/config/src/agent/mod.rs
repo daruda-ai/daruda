@@ -18,8 +18,8 @@ pub use assemble::{LaunchTransport, assemble_launch_command, is_valid_env_name};
 pub(crate) use chat_config::LegacyTranscript;
 pub use chat_config::{
     AgentConfig, FAST_MODE_PLAIN_DESCRIPTION, INPUT_MAX_ROWS_DEFAULT, INPUT_MAX_ROWS_MAX,
-    INPUT_MAX_ROWS_MIN, QUESTION_TIMEOUT_MAX_SECS, READING_WIDTH_DEFAULT, READING_WIDTH_MAX,
-    READING_WIDTH_MIN, SessionPreferences, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
+    INPUT_MAX_ROWS_MIN, ModeChoice, QUESTION_TIMEOUT_MAX_SECS, READING_WIDTH_DEFAULT,
+    READING_WIDTH_MAX, READING_WIDTH_MIN, SessionPreferences, TAIL_WINDOW_ALL, TAIL_WINDOW_CHOICES,
     TAIL_WINDOW_DEFAULT, USE_READING_WIDTH_DEFAULT,
 };
 pub use delegated::{delegated_default, effective_delegated_mode};

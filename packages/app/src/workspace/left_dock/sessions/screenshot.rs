@@ -21,6 +21,7 @@ impl Workspace {
         self.insert_agent_chat_pane(
             self.open_agent_id(None),
             self.active_lane_cwds(),
+            daruda_config::ModeChoice::FollowDefault,
             window,
             cx,
         );

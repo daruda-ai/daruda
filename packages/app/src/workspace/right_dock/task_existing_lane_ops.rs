@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+use daruda_config::ModeChoice;
 use daruda_store::project::{LaneKind, LaneRef};
 use daruda_store::tasks::{ExecutionRef, TaskRecord};
 use gpui::{Context, Window};
@@ -129,6 +130,7 @@ impl Workspace {
         &mut self,
         exec: &ExecutionRef,
         start: ExistingLaneStart,
+        mode: ModeChoice,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(TaskStarted, gpui::Task<Result<u64, TaskStartError>>), TaskStartError> {
@@ -158,9 +160,9 @@ impl Workspace {
         let pane = match reveal {
             LaneReveal::Foreground => {
                 self.activate_lane(lane, window, cx);
-                self.open_task_chat_in_active_lane(window, cx)
+                self.open_task_chat_in_active_lane(mode, window, cx)
             }
-            LaneReveal::Background => self.open_task_chat_behind(lane, window, cx),
+            LaneReveal::Background => self.open_task_chat_behind(lane, mode, window, cx),
         }
         .ok_or(TaskStartError::PaneUnavailable)?;
         let dispatched = self.dispatch_claude_for_task(exec, &root, &branch, pane, window, cx)?;
@@ -176,12 +178,13 @@ impl Workspace {
 
     fn open_task_chat_in_active_lane(
         &mut self,
+        mode: ModeChoice,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneId> {
         let agent_id = self.open_agent_id(None);
         let cwds = self.active_lane_cwds();
-        let pane_id = self.insert_agent_chat_pane(agent_id, cwds, window, cx)?;
+        let pane_id = self.insert_agent_chat_pane(agent_id, cwds, mode, window, cx)?;
         self.reveal_new_agent_chat_pane(pane_id, window, cx);
         Some(pane_id)
     }
@@ -193,12 +196,13 @@ impl Workspace {
     fn open_task_chat_behind(
         &mut self,
         lane: LaneRef,
+        mode: ModeChoice,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneId> {
         let agent_id = self.open_agent_id(None);
         let (local, remote, host) = self.lane_cwds(lane);
-        let pane = self.create_new_agent_chat_pane(agent_id, local, remote, host, window, cx);
+        let pane = self.create_new_agent_chat_pane(agent_id, local, remote, host, mode, window, cx);
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         let rt = self.main_area.runtimes.entry(lane).or_default();

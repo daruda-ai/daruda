@@ -384,10 +384,14 @@ fn start_new_worktree_task(
         "{lifecycle:?}"
     );
     assert_eq!(probes.borrow().len(), 1, "the task's session connected");
+    let pane = started.chat().expect("an Agent chat run");
+    let requested = cx.update(super::Workspace::faked_connect_preferences_for_test);
+    assert_eq!(requested.len(), 1);
+    assert_eq!(requested[0].0, pane);
+    let modes = requested[0].1.modes.clone();
     Some(ws.read_with(cx, |ws, cx| {
         let lane = ws.lane_ref_at(&started.worktree).expect("lane registered");
         let rt = ws.main_area.runtimes.get(&lane).expect("lane runtime");
-        let pane = started.chat().expect("an Agent chat run");
         assert!(rt.panes.iter().any(|p| p.id == pane));
         assert_eq!(
             ws.agent_chat_view(pane).unwrap().read(cx).status(),
@@ -403,6 +407,7 @@ fn start_new_worktree_task(
                 .get(active.active_tab_index)
                 .is_some_and(|tab| ws.is_orchestrator_tab(tab))
                 && active.focused_pane_id == orchestrator,
+            modes,
         }
     }))
 }
@@ -412,6 +417,8 @@ struct NewWorktreeStart {
     after: daruda_store::project::LaneRef,
     lane: daruda_store::project::LaneRef,
     orchestrator_in_front: bool,
+    /// What the task's chat asked its agent for on its first connect.
+    modes: Vec<String>,
 }
 
 /// A worktree the orchestrator started a task in is made and its chat runs,
@@ -425,6 +432,11 @@ fn an_orchestrator_started_worktree_does_not_take_the_window(cx: &mut TestAppCon
     assert_ne!(start.lane, start.before);
     assert_eq!(start.after, start.before, "the active lane stays");
     assert!(start.orchestrator_in_front);
+    assert_eq!(
+        start.modes,
+        vec!["bypassPermissions".to_string()],
+        "its first connect already asks for the delegated mode"
+    );
 }
 
 /// Started from this window's Tasks page, the new worktree is brought up.
@@ -435,4 +447,8 @@ fn a_desktop_started_worktree_becomes_the_active_lane(cx: &mut TestAppContext) {
     };
     assert_eq!(start.after, start.lane);
     assert!(!start.orchestrator_in_front);
+    assert!(
+        start.modes.is_empty(),
+        "a desktop start follows default_mode"
+    );
 }

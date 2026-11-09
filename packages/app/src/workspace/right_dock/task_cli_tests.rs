@@ -387,7 +387,7 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
             let before = {
                 let v = view.read(cx);
                 (
-                    v.pane_choices().mode_id,
+                    v.pane_choices().mode,
                     v.picked_model_id().map(str::to_owned),
                 )
             };
@@ -438,7 +438,7 @@ fn cli_snapshot_refuses_every_input_path(cx: &mut TestAppContext) {
             assert!(v.is_read_only());
             assert_eq!(
                 (
-                    v.pane_choices().mode_id,
+                    v.pane_choices().mode,
                     v.picked_model_id().map(str::to_owned)
                 ),
                 before

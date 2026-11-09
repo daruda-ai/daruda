@@ -194,6 +194,22 @@ impl AgentConfig {
     }
 }
 
+/// Where a chat pane's session mode comes from. Kept per pane and saved
+/// with it, so a pane that follows config keeps following it — edits in
+/// Settings and restarts included — until a person picks a mode there.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ModeChoice {
+    /// The agent's `default_mode`: every pane a person opens.
+    #[default]
+    FollowDefault,
+    /// The agent's delegated mode ahead of its `default_mode`: a session
+    /// opened because the phone or the orchestrator asked, with nobody at the
+    /// desktop to answer a permission prompt.
+    FollowDelegated,
+    /// A mode the person picked in this pane; it outranks config.
+    Picked(String),
+}
+
 /// What a chat pane asks its agent for: the pane's own picks, each ahead of
 /// the agent's catalog default. The one rule behind both a connect and a live
 /// config edit, so the two cannot disagree on which value wins.
@@ -214,7 +230,7 @@ impl SessionPreferences {
     pub fn resolve(
         agent: Option<&AgentDefinition>,
         picked_model: Option<&str>,
-        picked_mode: Option<&str>,
+        mode: &ModeChoice,
     ) -> Self {
         let model = [picked_model, agent.and_then(|a| a.default_model.as_deref())]
             .into_iter()
@@ -222,10 +238,18 @@ impl SessionPreferences {
             .map(str::trim)
             .find(|id| !id.is_empty())
             .map(str::to_string);
+        let first = match mode {
+            ModeChoice::FollowDefault => None,
+            ModeChoice::FollowDelegated => agent.and_then(super::effective_delegated_mode),
+            ModeChoice::Picked(id) => Some(id.clone()),
+        };
         let mut modes: Vec<String> = Vec::new();
-        for id in [picked_mode, agent.and_then(|a| a.default_mode.as_deref())]
-            .into_iter()
-            .flatten()
+        for id in [
+            first.as_deref(),
+            agent.and_then(|a| a.default_mode.as_deref()),
+        ]
+        .into_iter()
+        .flatten()
         {
             let id = id.trim();
             if !id.is_empty() && !modes.iter().any(|m| m == id) {

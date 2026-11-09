@@ -128,6 +128,7 @@ fn new_test_view(
             name: "Claude".to_string(),
             icon: None,
         },
+        daruda_config::ModeChoice::FollowDefault,
         None,
         super::super::transcript_defaults::TranscriptDefaults {
             tail: super::super::rows::tail::StepWindow::default(),

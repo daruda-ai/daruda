@@ -2,6 +2,7 @@
 //! out to be saved and takes it back on restore, so the workspace owns
 //! the file format without reaching into the view's fields.
 
+use daruda_config::ModeChoice;
 use daruda_transcript::display_filter::DisplayFilter;
 use daruda_transcript::fold_mode::FoldMode;
 
@@ -9,11 +10,12 @@ use super::super::pane_choice::PaneChoice;
 use super::super::rows::tail::TailWindow;
 use super::{AgentChatView, ChatContentWidth};
 
-/// Each axis is `None` while the pane still follows config, so an
-/// untouched pane keeps tracking a config change after a restart.
+/// Each axis is `None` (the mode: a `Follow*` choice) while the pane still
+/// follows config, so an untouched pane keeps tracking a config change after
+/// a restart.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ChatPaneChoices {
-    pub mode_id: Option<String>,
+    pub mode: ModeChoice,
     pub model_id: Option<String>,
     pub content_width: Option<ChatContentWidth>,
     pub tail_steps: Option<TailWindow>,
@@ -25,7 +27,7 @@ pub struct ChatPaneChoices {
 impl AgentChatView {
     pub fn pane_choices(&self) -> ChatPaneChoices {
         ChatPaneChoices {
-            mode_id: self.picked_mode_id.clone(),
+            mode: self.mode_choice.clone(),
             model_id: self.picked_model_id.clone(),
             content_width: self.content_width_chosen.then_some(self.content_width),
             tail_steps: self.tail_steps.chosen(),
@@ -36,10 +38,10 @@ impl AgentChatView {
     }
 
     /// Re-apply saved choices over the constructor's config seeds. The
-    /// mode and model picks are taken as given — the lazy connect asks
-    /// for them over the agent's defaults.
+    /// mode and model choices are taken as given — the lazy connect resolves
+    /// them against the agent's config.
     pub fn restore_pane_choices(&mut self, choices: ChatPaneChoices) {
-        self.picked_mode_id = choices.mode_id;
+        self.mode_choice = choices.mode;
         self.picked_model_id = choices.model_id;
         if let Some(width) = choices.content_width {
             self.content_width = width;
@@ -78,7 +80,7 @@ mod tests {
     fn restored_choices_are_what_the_pane_saves_next(cx: &mut gpui::TestAppContext) {
         let view = make_test_view(cx);
         let choices = ChatPaneChoices {
-            mode_id: Some("plan".into()),
+            mode: ModeChoice::Picked("plan".into()),
             model_id: Some("opus".into()),
             content_width: Some(ChatContentWidth::Full),
             tail_steps: Some(TailWindow::Last(3)),

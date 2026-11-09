@@ -248,8 +248,16 @@ impl Workspace {
         self.activate_lane(target, window, cx);
         let agent_id = self.open_agent_id(agent.as_deref());
         let cwds = self.active_lane_cwds();
-        self.insert_agent_chat_pane(agent_id, cwds, window, cx)
-            .ok_or(ControlError::TargetGone)
+        // Whoever called the control surface is not at the desktop to answer
+        // a permission prompt.
+        self.insert_agent_chat_pane(
+            agent_id,
+            cwds,
+            daruda_config::ModeChoice::FollowDelegated,
+            window,
+            cx,
+        )
+        .ok_or(ControlError::TargetGone)
     }
 
     /// The insert half of [`Self::control_chat_new`], for a test that must not
@@ -315,7 +323,9 @@ impl Workspace {
             .finalize_create_lane(
                 plan,
                 project,
-                crate::workspace::lane_ops::InitialPane::AgentChat,
+                crate::workspace::lane_ops::InitialPane::AgentChat(
+                    daruda_config::ModeChoice::FollowDelegated,
+                ),
                 agent.as_deref(),
                 window,
                 cx,

@@ -238,6 +238,7 @@ async fn new_panes_use_system_default_until_matching_domain_default_exists(
                     Some(std::env::temp_dir()),
                     None,
                     None,
+                    daruda_config::ModeChoice::FollowDefault,
                     window,
                     cx,
                 );
@@ -267,6 +268,7 @@ async fn new_panes_use_system_default_until_matching_domain_default_exists(
                     Some(std::env::temp_dir()),
                     None,
                     None,
+                    daruda_config::ModeChoice::FollowDefault,
                     window,
                     cx,
                 );
@@ -314,6 +316,7 @@ async fn new_locally_resolved_legacy_agent_pane_uses_domain_default(cx: &mut Tes
                     Some(std::env::temp_dir()),
                     None,
                     Some(daruda_store::project::LaneSessionHost::Local),
+                    daruda_config::ModeChoice::FollowDefault,
                     window,
                     cx,
                 )
@@ -621,6 +624,7 @@ async fn restore_resets_only_a_cross_domain_agent_chat_pin(cx: &mut TestAppConte
             agent_id: Some(agent_id),
             account_id: Some(claude_account),
             picked_mode_id: None,
+            follows_delegated_mode: false,
             model_id: None,
             content_width: None,
             tail_window: None,

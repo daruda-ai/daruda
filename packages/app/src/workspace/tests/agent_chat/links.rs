@@ -30,6 +30,7 @@ async fn rendered_chat_links_open_outside_files_as_read_only_references(cx: &mut
                     .insert_agent_chat_pane(
                         daruda_config::AgentDefinition::claude_default().id,
                         (Some(cwd), None, None),
+                        daruda_config::ModeChoice::FollowDefault,
                         window,
                         cx,
                     )

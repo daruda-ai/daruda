@@ -12,7 +12,7 @@ use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, Tab
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 use daruda_chat::transcript_defaults::TranscriptDefaults;
 use daruda_chat::view::{AgentChatView, AgentSessionStatus};
-use daruda_config::AgentLaunch;
+use daruda_config::{AgentLaunch, ModeChoice};
 use daruda_store::project::{LaneSessionHost, PaneCwd};
 use gpui::{AppContext as _, Context, Entity, Window};
 use std::path::PathBuf;
@@ -41,9 +41,10 @@ impl Workspace {
     }
 
     /// Construct an Agent chat `Pane` (no tab side-effects), parked `Idle` (or
-    /// `Error` with no lane cwd). The live ACP session is *not* started here —
-    /// `focus_pane` connects it lazily on first focus, so cold restore doesn't
-    /// spin up an agent process per pane.
+    /// `Error` with no lane cwd), following the agent's `default_mode` — a
+    /// restore then overwrites that with the pane's saved choice. The live ACP
+    /// session is *not* started here — `focus_pane` connects it lazily on
+    /// first focus, so cold restore doesn't spin up an agent process per pane.
     pub(in crate::workspace) fn create_agent_chat_pane(
         &mut self,
         cwd: Option<PaneCwd>,
@@ -53,11 +54,36 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Pane {
+        self.create_agent_chat_pane_in(
+            cwd,
+            session_id,
+            agent_id,
+            title,
+            ModeChoice::FollowDefault,
+            window,
+            cx,
+        )
+    }
+
+    /// [`Self::create_agent_chat_pane`] with its mode source `mode`, set at
+    /// construction so no connect can run before it.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::workspace) fn create_agent_chat_pane_in(
+        &mut self,
+        cwd: Option<PaneCwd>,
+        session_id: Option<String>,
+        agent_id: String,
+        title: Option<String>,
+        mode: ModeChoice,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Pane {
         self.build_agent_chat_pane(
             PaneCwdOutcome::Ready(cwd),
             session_id,
             agent_id,
             title,
+            mode,
             window,
             cx,
         )
@@ -68,12 +94,14 @@ impl Workspace {
     /// a `Pane` for an already-decided cwd `outcome`. Account defaults to the
     /// configured default for this agent's own auth domain; session restore
     /// overwrites that seed via `Pane::agent_chat_content_mut` right after.
+    #[allow(clippy::too_many_arguments)]
     fn build_agent_chat_pane(
         &mut self,
         outcome: PaneCwdOutcome,
         session_id: Option<String>,
         agent_id: String,
         title: Option<String>,
+        mode: ModeChoice,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Pane {
@@ -138,6 +166,7 @@ impl Workspace {
                     status,
                     session_id,
                     agent_identity(agent_id, agent_name),
+                    mode,
                     title,
                     defaults,
                     syntax_theme,
@@ -193,13 +222,17 @@ impl Workspace {
     /// Construct a fresh Agent chat pane for `agent_id`. The single
     /// fresh-creation entry point; `session_id`/`title` are always `None` — a
     /// fresh pane never resumes (only restore passes those, via
-    /// [`Self::create_agent_chat_pane`] directly).
+    /// [`Self::create_agent_chat_pane`] directly). `mode` is where its session
+    /// mode comes from: `FollowDelegated` for a pane the phone or the
+    /// orchestrator asked for, `FollowDefault` for one a person opens.
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::workspace) fn create_new_agent_chat_pane(
         &mut self,
         agent_id: String,
         local_cwd: Option<PathBuf>,
         remote_cwd: Option<String>,
         session_host: Option<LaneSessionHost>,
+        mode: ModeChoice,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Pane {
@@ -217,7 +250,7 @@ impl Workspace {
                 s::agent_chat::session_host_unusable(daruda_settings::labels::host_error(reason)),
             ),
         };
-        self.build_agent_chat_pane(outcome, None, agent_id, None, window, cx)
+        self.build_agent_chat_pane(outcome, None, agent_id, None, mode, window, cx)
     }
 
     /// The active lane's local path, legacy `remote_cwd`, and `session_host`
@@ -285,7 +318,9 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let cwds = self.active_lane_cwds();
-        if let Some(pane_id) = self.insert_agent_chat_pane(agent_id, cwds, window, cx) {
+        if let Some(pane_id) =
+            self.insert_agent_chat_pane(agent_id, cwds, ModeChoice::FollowDefault, window, cx)
+        {
             self.reveal_new_agent_chat_pane(pane_id, window, cx);
         }
     }
@@ -299,13 +334,15 @@ impl Workspace {
     /// `cwds` is the `(local, remote, session_host)` triple the pane roots at,
     /// passed in rather than read from the active lane: the orchestrator's
     /// window has no lane and roots its pane at a directory of its own, so it
-    /// reuses this sequence instead of copying it.
+    /// reuses this sequence instead of copying it. `mode` is as for
+    /// [`Self::create_new_agent_chat_pane`].
     ///
     /// `None` when the active lane cannot host a pane.
     pub(in crate::workspace) fn insert_agent_chat_pane(
         &mut self,
         agent_id: String,
         cwds: (Option<PathBuf>, Option<String>, Option<LaneSessionHost>),
+        mode: ModeChoice,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneId> {
@@ -322,6 +359,7 @@ impl Workspace {
             local_cwd,
             remote_cwd,
             session_host,
+            mode,
             window,
             cx,
         );
@@ -423,7 +461,8 @@ impl Workspace {
         // does not have falls back exactly as a stale `last_agent_id` would.
         let agent_id = self.open_agent_id(agent_id);
         let cwds = self.active_lane_cwds();
-        let pane_id = self.insert_agent_chat_pane(agent_id, cwds, window, cx)?;
+        let pane_id =
+            self.insert_agent_chat_pane(agent_id, cwds, ModeChoice::FollowDefault, window, cx)?;
         let view = self.agent_chat_view(pane_id).cloned()?;
         // The seed builds embed entities, which re-enter the window.
         view.update(cx, |v, cx| seed(v, window, cx));

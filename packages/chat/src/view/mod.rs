@@ -391,11 +391,11 @@ pub struct AgentChatView {
     /// session or seeded from restore. Present → the lazy connect resumes via
     /// `session/load` instead of starting fresh.
     pub(super) session_id: Option<String>,
-    /// Session-mode id the *user* picked for this pane — set only by the mode
-    /// chip and its cycle shortcut, never mirrored from what the adapter
-    /// reports, so a mode the adapter switched to on its own cannot outrank
-    /// the agent's `default_mode`. Persisted, and requested on every connect.
-    pub(super) picked_mode_id: Option<String>,
+    /// Where this pane's session mode comes from. Becomes `Picked` only by
+    /// the mode chip and its cycle shortcut, never mirrored from what the
+    /// adapter reports, so a mode the adapter switched to on its own cannot
+    /// outrank config. Persisted, and resolved on every connect.
+    pub(super) mode_choice: daruda_config::ModeChoice,
     /// Model id the *user* picked for this pane — set only by the model chip,
     /// never mirrored from what the adapter reports and never written by the
     /// connect-time apply of the agent's `default_model` (that would make the

@@ -345,7 +345,8 @@ fn only_a_user_mode_pick_is_remembered(cx: &mut gpui::TestAppContext) {
                 cx,
             );
             assert_eq!(
-                v.picked_mode_id, None,
+                v.mode_choice,
+                daruda_config::ModeChoice::FollowDefault,
                 "a mode the adapter reported is not a pick"
             );
 
@@ -359,8 +360,8 @@ fn only_a_user_mode_pick_is_remembered(cx: &mut gpui::TestAppContext) {
                 cx,
             );
             assert_eq!(
-                v.picked_mode_id.as_deref(),
-                Some("bypassPermissions"),
+                v.mode_choice,
+                daruda_config::ModeChoice::Picked("bypassPermissions".into()),
                 "the adapter switching on its own leaves the user's pick standing"
             );
         })

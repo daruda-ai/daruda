@@ -321,7 +321,7 @@ fn a_phone_start_runs_in_its_lane_without_taking_the_window(cx: &mut TestAppCont
         })
         .unwrap();
     cx.run_until_parked();
-    workspace.read_with(cx, |ws, cx| {
+    let pane = workspace.read_with(cx, |ws, cx| {
         assert_eq!(ws.active, here, "the active lane stays");
         assert_eq!(ws.active_runtime().focused_pane_id, focused);
         let rt = ws.main_area.runtimes.get(&owner).unwrap();
@@ -336,7 +336,19 @@ fn a_phone_start_runs_in_its_lane_without_taking_the_window(cx: &mut TestAppCont
             &daruda_chat::view::AgentSessionStatus::Connected,
             "its session connects without being shown"
         );
+        pane
     });
+    assert_eq!(
+        cx.update(Workspace::faked_connect_preferences_for_test),
+        vec![(
+            pane,
+            daruda_config::SessionPreferences {
+                model: None,
+                modes: vec!["bypassPermissions".into()],
+            }
+        )],
+        "its first connect already asks for the delegated mode"
+    );
     assert_eq!(probes.borrow().len(), 1);
     assert!(
         running_in(&state(&id, cx)).is_some(),
