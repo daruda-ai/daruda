@@ -5,7 +5,7 @@ use daruda_project::lane::git::discard::DiscardPlan;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::fixture::{has_git, open};
+use crate::fixture::{git_output, has_git, open};
 
 fn entry(x: char, y: char, path: &str, original: Option<&str>) -> GitFileEntry {
     GitFileEntry {
@@ -75,12 +75,7 @@ fn a_path_listed_staged_and_unstaged_is_planned_once() {
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(dir)
-        .args(args)
-        .output()
-        .unwrap();
+    let out = git_output(dir, args);
     assert!(
         out.status.success(),
         "git {args:?}: {}",
@@ -239,11 +234,7 @@ fn discarding_an_add_add_conflict_keeps_heads_copy() {
     std::fs::write(root.join("both"), "main\n").unwrap();
     git(root, &["add", "both"]);
     git(root, &["commit", "-qm", "main"]);
-    let _ = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(root)
-        .args(["merge", "-q", "side"])
-        .output();
+    let _ = git_output(root, &["merge", "-q", "side"]);
     assert!(git(root, &["status", "--porcelain"]).starts_with("AA both"));
 
     open(root).discard(&[PathBuf::from("both")]).unwrap();

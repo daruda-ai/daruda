@@ -1,18 +1,6 @@
 //! Public API tests for how daruda configures its `git` children.
 
-use std::path::Path;
-
-use crate::fixture::{has_git, open};
-
-fn run(dir: &Path, args: &[&str]) {
-    let status = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(dir)
-        .args(args)
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?} failed in {dir:?}");
-}
+use crate::fixture::{git, git_output, has_git, open};
 
 /// The reason this module exists: a status read must leave `.git/index`
 /// byte-identical. The plain run at the end is what proves the fixture
@@ -25,12 +13,12 @@ fn a_status_read_does_not_rewrite_the_index() {
     }
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    run(root, &["init", "-q"]);
-    run(root, &["config", "user.email", "daruda@test"]);
-    run(root, &["config", "user.name", "daruda"]);
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "daruda@test"]);
+    git(root, &["config", "user.name", "daruda"]);
     std::fs::write(root.join("f.txt"), b"one\n").unwrap();
-    run(root, &["add", "f.txt"]);
-    run(root, &["commit", "-qm", "initial"]);
+    git(root, &["add", "f.txt"]);
+    git(root, &["commit", "-qm", "initial"]);
 
     // Re-write the same bytes under a later mtime so the index's stat
     // cache goes stale. The sleep buys a distinct timestamp: within one
@@ -51,12 +39,7 @@ fn a_status_read_does_not_rewrite_the_index() {
         "a status read through daruda must not touch the index"
     );
 
-    daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(root)
-        .args(["status", "--porcelain=v1"])
-        .output()
-        .unwrap();
+    git_output(root, &["status", "--porcelain=v1"]);
     assert_ne!(
         std::fs::read(&index).unwrap(),
         before,

@@ -162,8 +162,9 @@ daruda_acp = { workspace = true, features = ["test-support"] }
 daruda_agent = { workspace = true, features = ["test-support"] }
 # Test-only observation hooks the workspace tests read back.
 daruda_chat = { workspace = true, features = ["test-support"] }
-# `FakeGit`, and a fixed git config in place of the developer's for every
-# test that still reaches real git through the project crate.
+# `FakeGit`, the only git app tests use. The feature's isolated git config
+# stays off unless a test opts in at runtime, so this binary runs real git
+# exactly as a release build does.
 daruda_project = { workspace = true, features = ["test-support"] }
 # A store that never touches the developer's own `config.toml`, and read-back
 # hooks on an open Settings.

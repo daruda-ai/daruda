@@ -1,9 +1,9 @@
 //! Public API tests for lane.
 
+use daruda_project::lane::Lane;
 use daruda_project::lane::availability::LaneAvailability;
-use daruda_project::lane::{Lane, git};
 
-use crate::fixture::{has_git, init, open};
+use crate::fixture::{git, has_git, init, open, system_git};
 use daruda_store::project::{LaneKind, LaneStatus};
 use std::path::PathBuf;
 
@@ -45,7 +45,7 @@ fn bootstrap_non_git_returns_single_default() {
     let dir = std::env::temp_dir().join("daruda_boot_non_git");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let wts = Lane::bootstrap_from_project(&dir, &git::SystemGit);
+    let wts = Lane::bootstrap_from_project(&dir, &system_git());
     assert_eq!(wts.len(), 1);
     assert_eq!(wts[0].id, 0);
     assert_eq!(wts[0].kind, LaneKind::Default);
@@ -62,26 +62,11 @@ fn bootstrap_git_repo_single_worktree() {
     std::fs::create_dir_all(&dir).unwrap();
     let dir = daruda_core::path::canonicalize(&dir).unwrap();
     init(&dir);
-    daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&dir)
-        .args(["config", "user.email", "daruda@test"])
-        .output()
-        .unwrap();
-    daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&dir)
-        .args(["config", "user.name", "daruda"])
-        .output()
-        .unwrap();
-    daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&dir)
-        .args(["commit", "--allow-empty", "-m", "initial"])
-        .output()
-        .unwrap();
+    git(&dir, &["config", "user.email", "daruda@test"]);
+    git(&dir, &["config", "user.name", "daruda"]);
+    git(&dir, &["commit", "--allow-empty", "-m", "initial"]);
 
-    let wts = Lane::bootstrap_from_project(&dir, &git::SystemGit);
+    let wts = Lane::bootstrap_from_project(&dir, &system_git());
     assert_eq!(wts.len(), 1);
     assert!(wts[0].is_git());
     let _ = std::fs::remove_dir_all(&dir);
@@ -97,26 +82,14 @@ fn bootstrap_git_repo_multi_worktree_sorts_main_first() {
     std::fs::create_dir_all(&dir).unwrap();
     let dir = daruda_core::path::canonicalize(&dir).unwrap();
     init(&dir);
-    let _ = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&dir)
-        .args(["config", "user.email", "daruda@test"])
-        .output();
-    let _ = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&dir)
-        .args(["config", "user.name", "daruda"])
-        .output();
-    let _ = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&dir)
-        .args(["commit", "--allow-empty", "-m", "initial"])
-        .output();
+    git(&dir, &["config", "user.email", "daruda@test"]);
+    git(&dir, &["config", "user.name", "daruda"]);
+    git(&dir, &["commit", "--allow-empty", "-m", "initial"]);
 
     let extra = dir.join("wt-side");
     open(&dir).add_lane(&extra, Some("side"), None).unwrap();
 
-    let wts = Lane::bootstrap_from_project(&dir, &git::SystemGit);
+    let wts = Lane::bootstrap_from_project(&dir, &system_git());
     assert_eq!(wts.len(), 2);
     // The project_root's lane must sort to id 0.
     assert_eq!(wts[0].path, dir);

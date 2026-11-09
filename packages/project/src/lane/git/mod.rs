@@ -26,7 +26,7 @@ mod status;
 pub use backend::{Git, GitRepo, SystemGit};
 pub(crate) use command::git_command;
 #[cfg(any(test, feature = "test-support"))]
-pub use command::isolated_git_env;
+pub use command::isolate_git_config_for_tests;
 #[cfg(any(test, feature = "test-support"))]
 pub mod fake;
 #[cfg(any(test, feature = "test-support"))]

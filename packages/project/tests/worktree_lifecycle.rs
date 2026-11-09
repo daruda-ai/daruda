@@ -3,11 +3,18 @@
 
 use std::path::Path;
 
-use daruda_project::lane::git::{Git, GitWorktreeInfo, SystemGit, isolated_git_env};
+use daruda_project::lane::git::{Git, GitWorktreeInfo, SystemGit, isolate_git_config_for_tests};
 
+/// The real git backend, with the developer's own config swapped out first.
+fn system_git() -> SystemGit {
+    isolate_git_config_for_tests();
+    SystemGit
+}
+
+// The twin of `tests/it/fixture.rs::git`; this file is its own test binary.
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = daruda_core::process::command("git")
-        .envs(isolated_git_env())
+        .envs(isolate_git_config_for_tests())
         .current_dir(dir)
         .args(args)
         .output()
@@ -17,12 +24,12 @@ fn git(dir: &Path, args: &[&str]) -> String {
 }
 
 fn lanes(repo: &Path) -> Vec<GitWorktreeInfo> {
-    SystemGit.probe(repo).expect("a repository").lanes
+    system_git().probe(repo).expect("a repository").lanes
 }
 
 #[test]
 fn a_lane_worktree_is_created_listed_and_removed() {
-    if !SystemGit.available() {
+    if !system_git().available() {
         return;
     }
     let temp = tempfile::tempdir().unwrap();
@@ -32,17 +39,17 @@ fn a_lane_worktree_is_created_listed_and_removed() {
     let lane = base.join("repo-feature");
 
     std::fs::create_dir_all(&repo).unwrap();
-    SystemGit.init(&repo).unwrap();
+    system_git().init(&repo).unwrap();
     git(
         &repo,
         &["commit", "--allow-empty", "--quiet", "-m", "initial"],
     );
     assert_eq!(
-        SystemGit.probe(&repo).map(|probe| probe.repo_root),
+        system_git().probe(&repo).map(|probe| probe.repo_root),
         Some(repo.clone())
     );
 
-    let main = SystemGit.open(&repo);
+    let main = system_git().open(&repo);
     main.add_lane(&lane, Some("feature"), None).unwrap();
     assert_eq!(git(&lane, &["symbolic-ref", "--short", "HEAD"]), "feature");
     let listed = lanes(&repo);

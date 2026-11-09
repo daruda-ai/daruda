@@ -1,24 +1,6 @@
-//! The single place a `git` child process is configured.
-//!
-//! Every repo-targeting invocation in the app goes through
-//! [`git_command`]. The flags it pins are not preferences — each one
-//! closes a way the CLI would otherwise corrupt what daruda reads back:
-//!
-//! - `--no-optional-locks` keeps a read-only `git status` from rewriting
-//!   `.git/index` to refresh its stat cache. That write is what a `.git`
-//!   watcher would see, re-triggering the status it came from. It does not
-//!   cover `diff HEAD --numstat`, which still refreshes a stat-stale index
-//!   (a known defect, tracked separately).
-//! - `core.fsmonitor=false` stops a repo-supplied hook from running as a
-//!   side effect of a status read.
-//! - `log.showSignature=false` keeps a signature block out of
-//!   `--pretty`/`--format` output the parsers here assume is bare.
-//! - `--no-pager` and the `C` locale keep output machine-shaped: several
-//!   call sites match on git's own English stderr.
-//!
-//! Test builds also replace the developer's system and global config with
-//! [`isolated_git_env`], so hooks, signing, and templates there cannot change
-//! what a real-git test observes.
+//! The single place a `git` child process is configured: every
+//! repo-targeting invocation goes through [`git_command`], and each pinned
+//! flag closes a way the CLI would otherwise corrupt what daruda reads back.
 
 use std::path::Path;
 use std::process::Command;
@@ -28,21 +10,57 @@ pub(crate) fn git_command(cwd: &Path) -> Command {
     let mut command = daruda_core::process::command("git");
     command
         .current_dir(cwd)
+        // A repo-supplied fsmonitor hook would run as a side effect of a read.
         .args(["-c", "core.fsmonitor=false"])
+        // A signature block would break the bare `--pretty`/`--format` parsers.
         .args(["-c", "log.showSignature=false"])
+        // Keeps a read-only `git status` from rewriting `.git/index`, which a
+        // `.git` watcher would see as a change. `diff HEAD --numstat` still
+        // refreshes a stat-stale index.
         .arg("--no-optional-locks")
         .arg("--no-pager")
-        // `LANGUAGE` outranks `LC_ALL`/`LANG` in gettext's resolution
-        // order, so it must be cleared rather than overridden.
+        // Several call sites match git's English stderr. `LANGUAGE` outranks
+        // `LC_ALL`/`LANG` in gettext's order, so it is cleared, not overridden.
         .env("LC_ALL", "C")
         .env("LANG", "C")
         .env_remove("LANGUAGE");
     #[cfg(any(test, feature = "test-support"))]
-    command.envs(isolated_git_env());
+    isolate(&mut command, isolation_on());
     command
 }
 
-/// The config every test-build git process reads instead of the developer's.
+/// Set only by [`isolate_git_config_for_tests`]. A `test-support` build that
+/// never calls it, such as the app binary `cargo test` links, runs git exactly
+/// as production does.
+#[cfg(any(test, feature = "test-support"))]
+static ISOLATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// This crate's own unit-test binary never ships, so it is isolated
+/// unconditionally rather than relying on each test to opt in.
+#[cfg(any(test, feature = "test-support"))]
+fn isolation_on() -> bool {
+    cfg!(test) || ISOLATE.load(std::sync::atomic::Ordering::Acquire)
+}
+
+#[cfg(any(test, feature = "test-support"))]
+fn isolate(command: &mut Command, on: bool) {
+    if on {
+        command.envs(isolated_git_env());
+    }
+}
+
+/// Points every later git process at a fixed test config instead of the
+/// developer's system and global config, so their hooks, signing, and
+/// templates cannot change what a real-git test observes. Idempotent.
+///
+/// Returns that environment for fixtures that spawn `git` themselves.
+#[cfg(any(test, feature = "test-support"))]
+pub fn isolate_git_config_for_tests() -> [(&'static str, &'static std::ffi::OsStr); 2] {
+    ISOLATE.store(true, std::sync::atomic::Ordering::Release);
+    isolated_git_env()
+}
+
+/// The config every isolated git process reads instead of the developer's.
 #[cfg(any(test, feature = "test-support"))]
 const ISOLATED_GIT_CONFIG: &str = "\
 [user]
@@ -56,18 +74,14 @@ const ISOLATED_GIT_CONFIG: &str = "\
 \tgpgsign = false
 ";
 
-/// Environment that points git at a fixed test config and away from the
-/// system one. For fixtures that spawn `git` without [`git_command`].
-///
-/// The file is written once per process under a pid-based name, so parallel
-/// test binaries never read one another's half-written copy.
 #[cfg(any(test, feature = "test-support"))]
-pub fn isolated_git_env() -> [(&'static str, &'static std::ffi::OsStr); 2] {
+fn isolated_git_env() -> [(&'static str, &'static std::ffi::OsStr); 2] {
     static GLOBAL: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     let global = GLOBAL.get_or_init(|| {
-        let path =
-            std::env::temp_dir().join(format!("daruda-test-gitconfig-{}", std::process::id()));
-        if let Err(error) = std::fs::write(&path, ISOLATED_GIT_CONFIG) {
+        // The name carries a version so a changed config never reuses a stale
+        // file; bump it with `ISOLATED_GIT_CONFIG`.
+        let path = std::env::temp_dir().join("daruda-test-gitconfig-v1");
+        if let Err(error) = write_isolated_config(&path) {
             panic!(
                 "write the isolated test git config {}: {error}",
                 path.display()
@@ -81,14 +95,81 @@ pub fn isolated_git_env() -> [(&'static str, &'static std::ffi::OsStr); 2] {
     ]
 }
 
+/// Shared by every test binary, so it is published by rename: a reader never
+/// sees a half-written copy. A target already holding the bytes is success,
+/// which also covers a rename refused because another process has it open.
+#[cfg(any(test, feature = "test-support"))]
+fn write_isolated_config(path: &Path) -> std::io::Result<()> {
+    let current = || std::fs::read(path).is_ok_and(|bytes| bytes == ISOLATED_GIT_CONFIG.as_bytes());
+    if current() {
+        return Ok(());
+    }
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(format!(".{}.tmp", std::process::id()));
+    let temp = std::path::PathBuf::from(temp);
+    std::fs::write(&temp, ISOLATED_GIT_CONFIG)?;
+    let renamed = std::fs::rename(&temp, path);
+    // SILENT-OK: the temp file only lingers if the rename failed, and a
+    // leftover in the temp directory is harmless.
+    let _ = std::fs::remove_file(&temp);
+    match renamed {
+        Err(_) if current() => Ok(()),
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn config(dir: &Path, args: &[&str]) -> String {
+    fn config_env(command: &Command) -> Vec<String> {
+        command
+            .get_envs()
+            .map(|(key, _)| key.to_string_lossy().into_owned())
+            .filter(|key| key.starts_with("GIT_CONFIG"))
+            .collect()
+    }
+
+    /// Without the switch a `test-support` build adds nothing to git's
+    /// environment: it reads the developer's config like production.
+    #[test]
+    fn without_the_switch_git_reads_the_normal_config() {
+        let mut command = Command::new("git");
+        isolate(&mut command, false);
+        assert!(config_env(&command).is_empty());
+    }
+
+    #[test]
+    fn with_the_switch_git_reads_only_the_isolated_config() {
+        let mut command = Command::new("git");
+        isolate(&mut command, true);
+        let mut keys = config_env(&command);
+        keys.sort();
+        assert_eq!(keys, ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM"]);
+    }
+
+    #[test]
+    fn the_config_file_is_rewritten_only_when_its_bytes_differ() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gitconfig");
+        std::fs::write(&path, "stale").unwrap();
+        write_isolated_config(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), ISOLATED_GIT_CONFIG);
+        write_isolated_config(&path).unwrap();
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    fn config(dir: &Path, args: &[&str]) -> Vec<u8> {
         let out = git_command(dir).arg("config").args(args).output().unwrap();
         assert!(out.status.success(), "git config {args:?}: {out:?}");
-        String::from_utf8(out.stdout).unwrap().trim().to_owned()
+        out.stdout
+    }
+
+    fn config_value(dir: &Path, args: &[&str]) -> String {
+        String::from_utf8(config(dir, args))
+            .unwrap()
+            .trim()
+            .to_owned()
     }
 
     /// Whatever the developer's own config says, a test-build git reads the
@@ -100,12 +181,18 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(
-            config(dir.path(), &["--global", "--get", "user.name"]),
+            config_value(dir.path(), &["--global", "--get", "user.name"]),
             "daruda-test"
         );
-        assert_eq!(config(dir.path(), &["--get", "init.defaultBranch"]), "main");
-        assert_eq!(config(dir.path(), &["--get", "commit.gpgsign"]), "false");
-        let origins = config(dir.path(), &["--list", "--show-origin"]);
+        assert_eq!(
+            config_value(dir.path(), &["--get", "init.defaultBranch"]),
+            "main"
+        );
+        assert_eq!(
+            config_value(dir.path(), &["--get", "commit.gpgsign"]),
+            "false"
+        );
+        let origins = config_value(dir.path(), &["--list", "--show-origin"]);
         let global = isolated_git_env()[1].1.to_string_lossy().into_owned();
         for line in origins.lines() {
             assert!(

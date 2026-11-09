@@ -1,6 +1,6 @@
 //! Public API tests for git.
 
-use crate::fixture::{git, has_git, init, lanes, open, repo_root};
+use crate::fixture::{git, git_output, has_git, init, lanes, open, repo_root, system_git};
 use daruda_project::lane::git::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -97,7 +97,7 @@ fn probe_finds_no_repo_in_a_plain_dir() {
         return;
     }
     let dir = unique_tmpdir("plain");
-    assert!(SystemGit.probe(&dir).is_none());
+    assert!(system_git().probe(&dir).is_none());
     teardown(&dir);
 }
 
@@ -258,22 +258,12 @@ fn delete_branch_after_worktree_removal() {
     open(&dir).remove_lane(&wt, false).unwrap();
 
     // Branch still exists post-remove (git keeps it).
-    let pre = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&dir)
-        .args(["rev-parse", "--verify", "temp/work"])
-        .output()
-        .unwrap();
+    let pre = git_output(&dir, &["rev-parse", "--verify", "temp/work"]);
     assert!(pre.status.success(), "branch should exist before delete");
 
     open(&dir).delete_branch("temp/work").unwrap();
 
-    let post = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&dir)
-        .args(["rev-parse", "--verify", "temp/work"])
-        .output()
-        .unwrap();
+    let post = git_output(&dir, &["rev-parse", "--verify", "temp/work"]);
     assert!(!post.status.success(), "branch must be gone after delete");
     teardown(&dir);
 }
@@ -381,16 +371,8 @@ fn add_worktree_with_explicit_base_ref() {
     commit_initial(&dir);
     // Branch "side" at the initial commit, then advance "main"
     // by another empty commit so HEAD diverges from "side".
-    let _ = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&dir)
-        .args(["branch", "side"])
-        .output();
-    let _ = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&dir)
-        .args(["commit", "--allow-empty", "-m", "advance-main"])
-        .output();
+    git(&dir, &["branch", "side"]);
+    git(&dir, &["commit", "--allow-empty", "-m", "advance-main"]);
 
     // Build the lane with explicit base = "side". The new
     // branch must point at "side"'s commit, not the current HEAD.
@@ -399,20 +381,8 @@ fn add_worktree_with_explicit_base_ref() {
         .add_lane(&wt_path, Some("feat/from-side"), Some("side"))
         .unwrap();
 
-    let side_sha = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&dir)
-        .args(["rev-parse", "side"])
-        .output()
-        .unwrap()
-        .stdout;
-    let wt_sha = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(&wt_path)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .unwrap()
-        .stdout;
+    let side_sha = git_output(&dir, &["rev-parse", "side"]).stdout;
+    let wt_sha = git_output(&wt_path, &["rev-parse", "HEAD"]).stdout;
     assert_eq!(side_sha, wt_sha, "lane must inherit base ref's commit");
     teardown(&dir);
 }
@@ -655,7 +625,7 @@ fn system_git_delegates_to_the_git_cli() {
     commit_initial(&dir);
     std::fs::write(dir.join("new.txt"), "x\n").unwrap();
 
-    let git = SystemGit;
+    let git = system_git();
     assert!(git.available());
     let repo = git.open(&dir);
     assert_eq!(repo.path(), dir.as_path());
