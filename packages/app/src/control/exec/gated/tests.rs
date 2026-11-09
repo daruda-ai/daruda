@@ -1,5 +1,6 @@
 use super::*;
 use crate::control::{approval, exec::CommandOrigin, guards};
+use crate::surface::strings as s;
 use gpui::TestAppContext;
 
 fn setup(cx: &mut App) -> crate::telegram::global::TestOutbox {
