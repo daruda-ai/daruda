@@ -1180,7 +1180,10 @@ fn closing_last_tab_of_only_lane_keeps_window(cx: &mut TestAppContext) {
         "closing the only lane's last tab keeps the window"
     );
     ws.read_with(cx, |ws, _| {
-        assert!(ws.active_runtime().tabs.is_empty(), "lane shows empty state");
+        assert!(
+            ws.active_runtime().tabs.is_empty(),
+            "lane shows empty state"
+        );
         assert!(ws.active_runtime().panes.is_empty());
     });
 
