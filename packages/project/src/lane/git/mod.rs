@@ -254,12 +254,22 @@ pub fn git_init(path: &Path) -> Result<(), GitError> {
 /// Cheap availability probe — runs `git --version`. Use this to
 /// decide whether to show the "Initialize Git Repo" button vs. hide
 /// the lane UI entirely.
+///
+/// A success is remembered, so repeated callers cost no process; a failure
+/// is not, so installing git while daruda runs is still picked up.
 pub fn has_git() -> bool {
-    daruda_core::process::command("git")
+    static FOUND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if FOUND.load(std::sync::atomic::Ordering::Relaxed) {
+        return true;
+    }
+    let found = daruda_core::process::command("git")
         .arg("--version")
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .is_ok_and(|o| o.status.success());
+    if found {
+        FOUND.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    found
 }
 
 /// True when `path` is inside a git repository (any lane counts).
@@ -465,17 +475,17 @@ pub fn git_dirs(path: &Path) -> Result<GitDirs, GitError> {
     })
 }
 
-/// Aggregated repo probe: combines `has_git` + `is_git_repo` +
-/// `repo_root` + `list_worktrees` into one call. Returns `None` when
-/// git is unusable or the path isn't a repo, so callers can branch on
-/// a single Option instead of threading three fallible probes.
+/// Aggregated repo probe: combines `is_git_repo` + `repo_root` +
+/// `list_worktrees` into one call. Returns `None` when git is unusable or
+/// the path isn't a repo — a missing git already fails `is_git_repo` — so
+/// callers can branch on a single Option instead of threading the probes.
 pub struct RepoProbe {
     pub repo_root: PathBuf,
     pub lanes: Vec<GitWorktreeInfo>,
 }
 
 pub fn probe_repo(project_root: &Path) -> Option<RepoProbe> {
-    if !has_git() || !is_git_repo(project_root) {
+    if !is_git_repo(project_root) {
         return None;
     }
     let repo_root = repo_root(project_root)?;
