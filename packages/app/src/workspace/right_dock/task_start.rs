@@ -540,7 +540,7 @@ impl Workspace {
                                 .map_err(|detail| TaskStartError::FinalizeFailed { detail })
                             })
                             .and_then(|pane| {
-                                let dispatched = ws.dispatch_claude_for_task(
+                                let dispatched = ws.dispatch_task_to_chat(
                                     &exec,
                                     &plan.new_path,
                                     &plan.branch,
@@ -580,7 +580,7 @@ impl Workspace {
     /// queueing leaves the task Dispatching until its PromptSent arrives.
     pub(super) fn answer_when_dispatched(
         &mut self,
-        started: Result<(TaskStarted, gpui::Task<Result<u64, TaskStartError>>), TaskStartError>,
+        started: Result<(TaskStarted, gpui::Task<Result<(), TaskStartError>>), TaskStartError>,
         exec: ExecutionRef,
         answer: Answer,
         cx: &mut Context<Self>,
@@ -593,10 +593,7 @@ impl Workspace {
             }
         };
         cx.spawn(async move |ws, cx| {
-            let outcome = match dispatched.await {
-                Ok(_) => Ok(started),
-                Err(e) => Err(e),
-            };
+            let outcome = dispatched.await.map(|()| started);
             let finished = ws.update(cx, |ws, cx| {
                 ws.finish_task_start(outcome.clone(), None, &answer, cx)
             });
@@ -614,7 +611,7 @@ impl Workspace {
     ///
     /// Takes `pane_id` rather than relying on `focused_pane_id`: a start
     /// asked for elsewhere opens its pane behind the one the window shows.
-    pub(super) fn dispatch_claude_for_task(
+    pub(super) fn dispatch_task_to_chat(
         &mut self,
         exec: &ExecutionRef,
         worktree_path: &Path,
@@ -622,7 +619,7 @@ impl Workspace {
         pane_id: PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<gpui::Task<Result<u64, TaskStartError>>, TaskStartError> {
+    ) -> Result<gpui::Task<Result<(), TaskStartError>>, TaskStartError> {
         // A cancel that landed while the lane was made ends the start here.
         let task = cx
             .global::<GlobalTasks>()
@@ -648,18 +645,16 @@ impl Workspace {
         let exec = exec.clone();
         let branch = branch.to_owned();
         Ok(cx.spawn_in(window, async move |ws, cx| {
-            let seq = prepared
+            prepared
                 .await
                 .map_err(|error| TaskStartError::NotRecorded {
                     detail: error.to_string(),
                 })?;
-            let result = match ws.update_in(cx, |ws, window, cx| {
-                ws.deliver_prepared_task(&exec, &task, &branch, pane_id, seq, window, cx)
-            }) {
-                Ok(Ok(dispatched)) => dispatched.await,
-                Ok(Err(error)) => Err(error),
-                Err(_) => Err(TaskStartError::WindowClosed),
-            };
+            let result = ws
+                .update_in(cx, |ws, window, cx| {
+                    ws.deliver_prepared_task(&exec, &task, &branch, pane_id, window, cx)
+                })
+                .unwrap_or(Err(TaskStartError::WindowClosed));
             if let Err(error) = &result {
                 gpui::AsyncApp::update(cx, |cx| fail_start(&exec, error, cx));
             }
@@ -667,17 +662,15 @@ impl Workspace {
         }))
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn deliver_prepared_task(
         &mut self,
         exec: &ExecutionRef,
         task: &TaskRecord,
         branch: &str,
         pane_id: PaneId,
-        prepared_seq: u64,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<gpui::Task<Result<u64, TaskStartError>>, TaskStartError> {
+    ) -> Result<(), TaskStartError> {
         if RunsHost::pane_execution(self.run_pane(pane_id), cx) != Some(exec) {
             return Err(TaskStartError::PaneUnavailable);
         }
@@ -710,7 +703,7 @@ impl Workspace {
             });
         }
         cx.notify();
-        Ok(gpui::Task::ready(Ok(prepared_seq)))
+        Ok(())
     }
 }
 

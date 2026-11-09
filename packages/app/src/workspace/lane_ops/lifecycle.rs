@@ -284,9 +284,8 @@ impl Workspace {
         if reveal == super::LaneReveal::Background && is_chat {
             self.maybe_connect_agent_chat(pane_id, cx);
         }
-        // Return the spawned pane's id so task-driven callers (start_task)
-        // write into that PTY directly rather than relying on
-        // `focused_pane_id`, which races with activate_lane's focus state.
+        // Task starts deliver their prompt to this pane by id: a background
+        // lane leaves `focused_pane_id` elsewhere.
         Ok(pane_id)
     }
 

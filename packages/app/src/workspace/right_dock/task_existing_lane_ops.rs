@@ -133,7 +133,7 @@ impl Workspace {
         chat: TaskChat,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<(TaskStarted, gpui::Task<Result<u64, TaskStartError>>), TaskStartError> {
+    ) -> Result<(TaskStarted, gpui::Task<Result<(), TaskStartError>>), TaskStartError> {
         let ExistingLaneStart {
             lane,
             root,
@@ -165,7 +165,7 @@ impl Workspace {
             LaneReveal::Background => self.open_task_chat_behind(lane, chat, window, cx),
         }
         .ok_or(TaskStartError::PaneUnavailable)?;
-        let dispatched = self.dispatch_claude_for_task(exec, &root, &branch, pane, window, cx)?;
+        let dispatched = self.dispatch_task_to_chat(exec, &root, &branch, pane, window, cx)?;
         Ok((
             TaskStarted {
                 exec: exec.clone(),

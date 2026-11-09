@@ -9,17 +9,6 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<Pane, PaneSpawnError> {
         let cwd = self.default_cwd_for_new_pane();
-        self.create_pane_at(cwd, window, cx)
-    }
-
-    /// `create_pane` rooted at `cwd` rather than the inherited default — a
-    /// task started in a lane must run at that lane's root.
-    pub(in crate::workspace) fn create_pane_at(
-        &mut self,
-        cwd: Option<PathBuf>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<Pane, PaneSpawnError> {
         let account = self.default_account_selection_for_new_pane(None);
         let prepared = self.resolve_account(account, AccountDomain::Any);
         self.create_pane_with_cwd(cwd, account, prepared.as_ref(), window, cx)

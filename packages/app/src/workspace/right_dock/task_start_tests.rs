@@ -62,7 +62,7 @@ async fn dispatch_while_switching_lanes(release: bool, cx: &mut TestAppContext) 
                 ws.active_runtime_mut().panes.push(pane);
                 let pane = pane_id;
                 let dispatched = ws
-                    .dispatch_claude_for_task(&exec, root.path(), "main", pane, window, cx)
+                    .dispatch_task_to_chat(&exec, root.path(), "main", pane, window, cx)
                     .unwrap();
                 if release {
                     RunsHost::release_execution(
