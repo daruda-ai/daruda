@@ -240,3 +240,34 @@ async fn the_approved_work_takes_the_mode_its_card_named(cx: &mut TestAppContext
     );
     assert!(done.recv().await.unwrap().is_some());
 }
+
+/// A creation refused after git kept its worktree, so its slot is spent as
+/// a success's would be.
+#[gpui::test]
+async fn a_kept_worktree_spends_its_budget_slot(cx: &mut TestAppContext) {
+    let (_fixture, at) = window(cx);
+    let _outbound = cx.update(setup);
+    let worktree = crate::control::result::LaneHandle {
+        workspace: at.0,
+        project: at.1,
+        lane: 9,
+    };
+    let done = cx.update(|cx| {
+        let dispatch = run_gated_with(
+            command(at),
+            CommandOrigin::Orchestrator,
+            move |_, _, _, _| {
+                async move { Err(ControlError::AgentUnavailableWorktreeKept { worktree }) }
+                    .boxed_local()
+            },
+            cx,
+        );
+        approve(dispatch, cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        done.recv().await.unwrap(),
+        Some(Err(ControlError::AgentUnavailableWorktreeKept { worktree }))
+    );
+    cx.update(|cx| assert_eq!(guards::spent_budget_for_test(cx), 16));
+}
