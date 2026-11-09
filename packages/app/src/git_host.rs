@@ -1,11 +1,11 @@
 //! The app-wide [`Git`] backend. This global is the only way app code reaches
-//! git; tests replace it with a fake so they spawn no `git` processes.
+//! git; test builds default to a fake so they spawn no `git` processes.
 
 use std::sync::Arc;
 
 use gpui::{App, Global};
 
-use crate::lane::git::{Git, SystemGit};
+use crate::lane::git::Git;
 
 pub(crate) struct GitHost(Arc<dyn Git>);
 
@@ -22,12 +22,26 @@ impl GitHost {
         cx.set_global(GitHost(git));
     }
 
-    /// Install the system `git` unless a backend is already present.
+    /// Install the default backend unless one is already present: the
+    /// system `git`, or in test builds an empty [`FakeGit`] so a test that
+    /// never asked for git cannot reach the real CLI.
+    ///
+    /// [`FakeGit`]: crate::lane::git::FakeGit
     pub(crate) fn init_if_missing(cx: &mut App) {
         if !cx.has_global::<GitHost>() {
-            Self::set_global(Arc::new(SystemGit), cx);
+            Self::set_global(default_backend(), cx);
         }
     }
+}
+
+#[cfg(not(test))]
+fn default_backend() -> Arc<dyn Git> {
+    Arc::new(crate::lane::git::SystemGit)
+}
+
+#[cfg(test)]
+fn default_backend() -> Arc<dyn Git> {
+    Arc::new(crate::lane::git::FakeGit::new())
 }
 
 #[cfg(test)]
@@ -46,12 +60,17 @@ mod tests {
         });
     }
 
+    /// The default reaches no real repository: a fake opened on this very
+    /// checkout reports no commits, where the system `git` would find one.
     #[gpui::test]
-    fn init_if_missing_installs_a_backend_when_absent(cx: &mut gpui::TestAppContext) {
+    fn init_if_missing_installs_the_fake_in_test_builds(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
             assert!(!cx.has_global::<GitHost>());
             GitHost::init_if_missing(cx);
-            assert!(cx.has_global::<GitHost>());
+            let git = GitHost::global(cx);
+            let here = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+            assert!(git.probe(here).is_none(), "no repository is scripted");
+            assert!(git.open(here).head_message().is_err());
         });
     }
 }

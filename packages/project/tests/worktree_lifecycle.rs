@@ -3,24 +3,26 @@
 
 use std::path::Path;
 
-use daruda_project::lane::git::{
-    add_lane, current_branch, delete_branch, has_git, init, list_worktrees, remove_lane, repo_root,
-};
+use daruda_project::lane::git::{Git, GitWorktreeInfo, SystemGit, isolated_git_env};
 
-fn commit_empty(repo: &Path) {
-    let status = daruda_core::process::command("git")
-        .envs(daruda_project::lane::git::isolated_git_env())
-        .current_dir(repo)
-        .args(["-c", "user.email=daruda@test", "-c", "user.name=daruda"])
-        .args(["commit", "--allow-empty", "--quiet", "-m", "initial"])
-        .status()
-        .expect("git commit spawns");
-    assert!(status.success(), "initial commit");
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = daruda_core::process::command("git")
+        .envs(isolated_git_env())
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .expect("git spawns");
+    assert!(out.status.success(), "git {args:?}: {out:?}");
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+fn lanes(repo: &Path) -> Vec<GitWorktreeInfo> {
+    SystemGit.probe(repo).expect("a repository").lanes
 }
 
 #[test]
 fn a_lane_worktree_is_created_listed_and_removed() {
-    if !has_git() {
+    if !SystemGit.available() {
         return;
     }
     let temp = tempfile::tempdir().unwrap();
@@ -29,13 +31,21 @@ fn a_lane_worktree_is_created_listed_and_removed() {
     let repo = base.join("repo");
     let lane = base.join("repo-feature");
 
-    init(&repo).unwrap();
-    commit_empty(&repo);
-    assert_eq!(repo_root(&repo).as_deref(), Some(repo.as_path()));
+    std::fs::create_dir_all(&repo).unwrap();
+    SystemGit.init(&repo).unwrap();
+    git(
+        &repo,
+        &["commit", "--allow-empty", "--quiet", "-m", "initial"],
+    );
+    assert_eq!(
+        SystemGit.probe(&repo).map(|probe| probe.repo_root),
+        Some(repo.clone())
+    );
 
-    add_lane(&repo, &lane, Some("feature"), None).unwrap();
-    assert_eq!(current_branch(&lane).unwrap().as_deref(), Some("feature"));
-    let listed = list_worktrees(&repo).unwrap();
+    let main = SystemGit.open(&repo);
+    main.add_lane(&lane, Some("feature"), None).unwrap();
+    assert_eq!(git(&lane, &["symbolic-ref", "--short", "HEAD"]), "feature");
+    let listed = lanes(&repo);
     assert!(
         listed
             .iter()
@@ -43,15 +53,10 @@ fn a_lane_worktree_is_created_listed_and_removed() {
         "new lane is listed: {listed:?}"
     );
 
-    remove_lane(&repo, &lane, false).unwrap();
+    main.remove_lane(&lane, false).unwrap();
     assert!(!lane.exists());
-    assert!(
-        list_worktrees(&repo)
-            .unwrap()
-            .iter()
-            .all(|w| w.path != lane)
-    );
+    assert!(lanes(&repo).iter().all(|w| w.path != lane));
     // A lane already gone is the outcome the caller asked for.
-    remove_lane(&repo, &lane, false).unwrap();
-    delete_branch(&repo, "feature").unwrap();
+    main.remove_lane(&lane, false).unwrap();
+    main.delete_branch("feature").unwrap();
 }

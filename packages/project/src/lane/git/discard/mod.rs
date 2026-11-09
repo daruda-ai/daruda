@@ -75,7 +75,7 @@ impl DiscardPlan {
 
 /// Put `pinned` back to HEAD, reading the status afresh from
 /// `worktree_root` and skipping any pinned path that no longer has a change.
-pub fn discard(worktree_root: &Path, pinned: &[PathBuf]) -> Result<(), GitError> {
+pub(crate) fn discard(worktree_root: &Path, pinned: &[PathBuf]) -> Result<(), GitError> {
     if pinned.is_empty() {
         return Ok(());
     }

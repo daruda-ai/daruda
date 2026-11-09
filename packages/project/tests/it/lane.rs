@@ -2,6 +2,8 @@
 
 use daruda_project::lane::availability::LaneAvailability;
 use daruda_project::lane::{Lane, git};
+
+use crate::fixture::{has_git, init, open};
 use daruda_store::project::{LaneKind, LaneStatus};
 use std::path::PathBuf;
 
@@ -52,14 +54,14 @@ fn bootstrap_non_git_returns_single_default() {
 
 #[test]
 fn bootstrap_git_repo_single_worktree() {
-    if !git::has_git() {
+    if !has_git() {
         return;
     }
     let dir = std::env::temp_dir().join(format!("daruda_boot_git_single_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let dir = daruda_core::path::canonicalize(&dir).unwrap();
-    git::init(&dir).unwrap();
+    init(&dir);
     daruda_core::process::command("git")
         .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
@@ -87,14 +89,14 @@ fn bootstrap_git_repo_single_worktree() {
 
 #[test]
 fn bootstrap_git_repo_multi_worktree_sorts_main_first() {
-    if !git::has_git() {
+    if !has_git() {
         return;
     }
     let dir = std::env::temp_dir().join(format!("daruda_boot_git_multi_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let dir = daruda_core::path::canonicalize(&dir).unwrap();
-    git::init(&dir).unwrap();
+    init(&dir);
     let _ = daruda_core::process::command("git")
         .envs(daruda_project::lane::git::isolated_git_env())
         .current_dir(&dir)
@@ -112,7 +114,7 @@ fn bootstrap_git_repo_multi_worktree_sorts_main_first() {
         .output();
 
     let extra = dir.join("wt-side");
-    git::add_lane(&dir, &extra, Some("side"), None).unwrap();
+    open(&dir).add_lane(&extra, Some("side"), None).unwrap();
 
     let wts = Lane::bootstrap_from_project(&dir, &git::SystemGit);
     assert_eq!(wts.len(), 2);

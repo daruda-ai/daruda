@@ -113,7 +113,7 @@ pub struct AgainstBase {
 /// has one — the lane is compared against what the base looks like upstream,
 /// not a local copy that may be behind. A name no local branch carries falls
 /// back to `origin/<name>`.
-pub fn resolve_base_ref(repo: &Path, name: &str) -> Result<ResolvedBase, BaseProblem> {
+pub(crate) fn resolve_base_ref(repo: &Path, name: &str) -> Result<ResolvedBase, BaseProblem> {
     if verify(repo, &format!("refs/heads/{name}"))?.is_some() {
         let upstream = run_git(
             repo,
@@ -149,7 +149,7 @@ pub fn resolve_base_ref(repo: &Path, name: &str) -> Result<ResolvedBase, BasePro
 /// The two tips a comparison would be taken between, or why there is none.
 /// Cheap — two `rev-parse`s — so a caller can compare it against what it
 /// last computed and skip the diff when neither side moved.
-pub fn base_tips(
+pub(crate) fn base_tips(
     wt: &Path,
     base_name: Option<&str>,
     current_branch: Option<&str>,
@@ -164,7 +164,7 @@ pub fn base_tips(
 }
 
 /// What the lane committed between the merge-base of `tips` and its HEAD.
-pub fn changes_since(wt: &Path, tips: BaseTips) -> Result<AgainstBase, BaseProblem> {
+pub(crate) fn changes_since(wt: &Path, tips: BaseTips) -> Result<AgainstBase, BaseProblem> {
     let merge_base = merge_base(wt, &tips.base.sha, &tips.head)?;
     let names = run_git(
         wt,
@@ -192,7 +192,7 @@ pub fn changes_since(wt: &Path, tips: BaseTips) -> Result<AgainstBase, BaseProbl
 
 /// `git diff -M <from> <to> -- <paths>` for one file. Both sides of a rename
 /// go in the pathspec, or git cannot pair them and shows a delete and an add.
-pub fn git_diff_range(
+pub(crate) fn git_diff_range(
     wt: &Path,
     from: &str,
     to: &str,
@@ -211,7 +211,7 @@ pub fn git_diff_range(
 }
 
 /// The file as it was at `rev` — the Raw view of a range pane.
-pub fn git_show_at(wt: &Path, rev: &str, repo_rel: &Path) -> Result<Vec<u8>, GitError> {
+pub(crate) fn git_show_at(wt: &Path, rev: &str, repo_rel: &Path) -> Result<Vec<u8>, GitError> {
     let spec = format!("{rev}:{}", super::status::tree_path(repo_rel));
     let output = super::git_command(wt)
         .args(["show", &spec])

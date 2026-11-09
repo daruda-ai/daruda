@@ -159,7 +159,7 @@ const TRACKING_FORMAT: &str =
 /// Branch, upstream and divergence for the lane rooted at `path`, read
 /// from refs alone. This is the axis a fetch or push moves, and it is
 /// roughly twenty times cheaper than [`git_worktree_status`].
-pub fn git_tracking(path: &Path) -> Result<GitTracking, GitError> {
+pub(crate) fn git_tracking(path: &Path) -> Result<GitTracking, GitError> {
     let raw = run_git(path, ["for-each-ref", TRACKING_FORMAT, "refs/heads"])?;
     let mut tracking = parse_tracking_output(&raw);
     if tracking.branch.is_none() {
@@ -182,7 +182,7 @@ pub fn git_tracking(path: &Path) -> Result<GitTracking, GitError> {
 /// The diffstat call is non-fatal — a fresh `git init` repo has no HEAD,
 /// so the call errors and `diffstat` stays empty (dock simply omits
 /// the `+N −M` column for that lane until the first commit lands).
-pub fn git_worktree_status(path: &Path) -> Result<GitWorktreeStatus, GitError> {
+pub(crate) fn git_worktree_status(path: &Path) -> Result<GitWorktreeStatus, GitError> {
     let raw = run_git(path, ["status", "--porcelain=v1", "-z"])?;
     let mut data = parse_git_status_output(&raw);
     if let Ok(stats) = git_diff_numstat(path) {
@@ -196,7 +196,7 @@ pub fn git_worktree_status(path: &Path) -> Result<GitWorktreeStatus, GitError> {
 /// `git status --porcelain -- .` limited to `path`'s subtree, trimmed — a
 /// flow node's change list, scoped so nodes sharing a repo differ. Decoded
 /// lossily, so a non-UTF-8 path never drops the whole list.
-pub fn git_status_scoped(path: &Path) -> Result<String, GitError> {
+pub(crate) fn git_status_scoped(path: &Path) -> Result<String, GitError> {
     let output = super::git_command(path)
         .args(["status", "--porcelain", "--", "."])
         .output()
@@ -219,7 +219,7 @@ pub fn git_status_scoped(path: &Path) -> Result<String, GitError> {
 /// Failure is non-fatal for the left dock: a brand-new repo with no
 /// commits has no HEAD, and `git diff HEAD` exits non-zero. Callers
 /// surface this as "no diffstat available" rather than an error.
-pub fn git_diff_numstat(wt_path: &Path) -> Result<Vec<(u32, u32, PathBuf)>, GitError> {
+pub(crate) fn git_diff_numstat(wt_path: &Path) -> Result<Vec<(u32, u32, PathBuf)>, GitError> {
     let raw = run_git(wt_path, ["diff", "HEAD", "--numstat", "-z"])?;
     Ok(parse_numstat(&raw))
 }
@@ -257,7 +257,7 @@ pub(crate) fn parse_numstat(text: &str) -> Vec<(u32, u32, PathBuf)> {
 /// `git diff [--cached] -- <path>` as a UTF-8 string.
 /// Runs from `wt_path` (the lane directory) so that paths relative to the
 /// lane are resolved correctly for both main and linked lanes.
-pub fn git_diff(wt_path: &Path, path: &Path, staged: bool) -> Result<String, GitError> {
+pub(crate) fn git_diff(wt_path: &Path, path: &Path, staged: bool) -> Result<String, GitError> {
     let mut args: Vec<String> = vec!["--literal-pathspecs".into(), "diff".into()];
     if staged {
         args.push("--cached".into());
@@ -271,7 +271,7 @@ pub fn git_diff(wt_path: &Path, path: &Path, staged: bool) -> Result<String, Git
 ///
 /// Unlike `git diff`, this exits with code 1 when differences are found (which is
 /// always the case for new files), so it uses a custom runner that accepts code 1.
-pub fn git_diff_untracked(wt_path: &Path, path: &Path) -> Result<String, GitError> {
+pub(crate) fn git_diff_untracked(wt_path: &Path, path: &Path) -> Result<String, GitError> {
     let output = super::git_command(wt_path)
         .args(["diff", "--no-index", "/dev/null"])
         .arg(path)
@@ -288,7 +288,7 @@ pub fn git_diff_untracked(wt_path: &Path, path: &Path) -> Result<String, GitErro
 }
 
 /// `git add -- <path>` — stage a specific file.
-pub fn git_add(repo_root: &Path, path: &Path) -> Result<(), GitError> {
+pub(crate) fn git_add(repo_root: &Path, path: &Path) -> Result<(), GitError> {
     let args: Vec<&OsStr> = vec![
         OsStr::new("--literal-pathspecs"),
         OsStr::new("add"),
@@ -301,7 +301,7 @@ pub fn git_add(repo_root: &Path, path: &Path) -> Result<(), GitError> {
 /// `git add -- <path>...` — stage a batch of paths in a single git
 /// invocation. Used by per-directory "stage all in this dir" so we
 /// don't fork-and-exec git once per file.
-pub fn git_add_paths(repo_root: &Path, paths: &[PathBuf]) -> Result<(), GitError> {
+pub(crate) fn git_add_paths(repo_root: &Path, paths: &[PathBuf]) -> Result<(), GitError> {
     if paths.is_empty() {
         return Ok(());
     }
@@ -318,7 +318,7 @@ pub fn git_add_paths(repo_root: &Path, paths: &[PathBuf]) -> Result<(), GitError
 ///
 /// Must run from the lane path (`wt_path`) so linked lanes only stage
 /// their own changes, not those of sibling lanes sharing the same repo.
-pub fn git_add_all(wt_path: &Path) -> Result<(), GitError> {
+pub(crate) fn git_add_all(wt_path: &Path) -> Result<(), GitError> {
     run_git(wt_path, ["add", "--all"]).map(|_| ())
 }
 
@@ -326,14 +326,17 @@ pub fn git_add_all(wt_path: &Path) -> Result<(), GitError> {
 ///
 /// Requires git ≥ 2.23 (macOS 12 Monterey ships git 2.30+, which satisfies
 /// our minimum deployment target).
-pub fn git_restore_staged(repo_root: &Path, path: &Path) -> Result<(), GitError> {
+pub(crate) fn git_restore_staged(repo_root: &Path, path: &Path) -> Result<(), GitError> {
     git_restore_staged_paths(repo_root, &[path.to_path_buf()])
 }
 
 /// Unstage selected paths, including rename sources, without changing disk
 /// contents. An unborn repository removes index entries instead of restoring
 /// from HEAD. Companion to [`git_add_paths`] for per-directory actions.
-pub fn git_restore_staged_paths(repo_root: &Path, paths: &[PathBuf]) -> Result<(), GitError> {
+pub(crate) fn git_restore_staged_paths(
+    repo_root: &Path,
+    paths: &[PathBuf],
+) -> Result<(), GitError> {
     if paths.is_empty() {
         return Ok(());
     }
@@ -385,29 +388,29 @@ fn unstage_paths(repo_root: &Path, paths: &[PathBuf]) -> Result<(), GitError> {
 }
 
 /// `git commit -m <message>`.
-pub fn git_commit(repo_root: &Path, message: &str) -> Result<(), GitError> {
+pub(crate) fn git_commit(repo_root: &Path, message: &str) -> Result<(), GitError> {
     run_git(repo_root, ["commit", "-m", message]).map(|_| ())
 }
 
 /// `git push`.
-pub fn git_push(repo_root: &Path) -> Result<(), GitError> {
+pub(crate) fn git_push(repo_root: &Path) -> Result<(), GitError> {
     run_git(repo_root, ["push"]).map(|_| ())
 }
 
 /// Unstage every path, preserving working-tree bytes even before the first commit.
-pub fn git_restore_all_staged(wt_path: &Path) -> Result<(), GitError> {
+pub(crate) fn git_restore_all_staged(wt_path: &Path) -> Result<(), GitError> {
     unstage_paths(wt_path, &[PathBuf::from(".")])
 }
 
 /// `git commit --amend -m <message>` — replace the tip commit with staged changes
 /// and the given message.
-pub fn git_commit_amend(repo_root: &Path, message: &str) -> Result<(), GitError> {
+pub(crate) fn git_commit_amend(repo_root: &Path, message: &str) -> Result<(), GitError> {
     run_git(repo_root, ["commit", "--amend", "-m", message]).map(|_| ())
 }
 
 /// `git log -1 --pretty=%B` — the tip commit's full message (subject + body),
 /// with the trailing newline trimmed. Errors if the repo has no commits yet.
-pub fn git_head_message(repo_root: &Path) -> Result<String, GitError> {
+pub(crate) fn git_head_message(repo_root: &Path) -> Result<String, GitError> {
     run_git(repo_root, ["log", "-1", "--pretty=%B"]).map(|s| s.trim_end().to_string())
 }
 
@@ -422,17 +425,17 @@ pub(super) fn tree_path(path: &Path) -> String {
 }
 
 /// `git fetch` — download objects and refs from all remotes.
-pub fn git_fetch(repo_root: &Path) -> Result<(), GitError> {
+pub(crate) fn git_fetch(repo_root: &Path) -> Result<(), GitError> {
     run_git(repo_root, ["fetch"]).map(|_| ())
 }
 
 /// `git pull` — fetch and integrate with the current branch.
-pub fn git_pull(repo_root: &Path) -> Result<(), GitError> {
+pub(crate) fn git_pull(repo_root: &Path) -> Result<(), GitError> {
     run_git(repo_root, ["pull"]).map(|_| ())
 }
 
 /// `git show :<path>` — retrieve the staged (index) content of a file as raw bytes.
-pub fn git_show_staged(repo_root: &Path, path: &Path) -> Result<Vec<u8>, GitError> {
+pub(crate) fn git_show_staged(repo_root: &Path, path: &Path) -> Result<Vec<u8>, GitError> {
     let arg = format!(":{}", tree_path(path));
     let output = super::git_command(repo_root)
         .args(["show", &arg])

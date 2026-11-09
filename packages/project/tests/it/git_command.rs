@@ -1,7 +1,8 @@
-//! Public API tests for git command.
+//! Public API tests for how daruda configures its `git` children.
 
-use daruda_project::lane::git::git_command;
 use std::path::Path;
+
+use crate::fixture::{has_git, open};
 
 fn run(dir: &Path, args: &[&str]) {
     let status = daruda_core::process::command("git")
@@ -19,7 +20,7 @@ fn run(dir: &Path, args: &[&str]) {
 /// git had nothing to refresh in.
 #[test]
 fn a_status_read_does_not_rewrite_the_index() {
-    if !daruda_project::lane::git::has_git() {
+    if !has_git() {
         return;
     }
     let temp = tempfile::tempdir().unwrap();
@@ -41,14 +42,13 @@ fn a_status_read_does_not_rewrite_the_index() {
     let index = root.join(".git").join("index");
     let before = std::fs::read(&index).unwrap();
 
-    git_command(root)
-        .args(["status", "--porcelain=v1"])
-        .output()
-        .unwrap();
+    // `status_scoped` is a bare `git status`; `worktree_status` also runs
+    // `git diff HEAD --numstat`, which refreshes a stale index regardless.
+    open(root).status_scoped().unwrap();
     assert_eq!(
         std::fs::read(&index).unwrap(),
         before,
-        "a status read through the builder must not touch the index"
+        "a status read through daruda must not touch the index"
     );
 
     daruda_core::process::command("git")

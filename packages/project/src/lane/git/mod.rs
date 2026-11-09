@@ -24,14 +24,15 @@ pub mod discard;
 mod status;
 
 pub use backend::{Git, GitRepo, SystemGit};
-pub use command::git_command;
+pub(crate) use command::git_command;
 #[cfg(any(test, feature = "test-support"))]
 pub use command::isolated_git_env;
 #[cfg(any(test, feature = "test-support"))]
 pub mod fake;
 #[cfg(any(test, feature = "test-support"))]
 pub use fake::{FakeFailure, FakeGit, FakeRepo, GitCall, GitOp};
-pub use status::*;
+pub(crate) use status::*;
+pub use status::{GitFileEntry, GitTracking, GitWorktreeStatus};
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -255,7 +256,7 @@ fn capture_git_output(mut reader: impl std::io::Read, limit: usize) -> Result<Ve
 /// `git init` in `path`. Used by the Git Changes view's "Initialize
 /// Git Repo" button — turns a non-git worktree into a fresh repo so
 /// the user can start staging immediately.
-pub fn git_init(path: &Path) -> Result<(), GitError> {
+pub(crate) fn git_init(path: &Path) -> Result<(), GitError> {
     run_git(path, ["init"]).map(|_| ())
 }
 
@@ -265,7 +266,7 @@ pub fn git_init(path: &Path) -> Result<(), GitError> {
 ///
 /// A success is remembered, so repeated callers cost no process; a failure
 /// is not, so installing git while daruda runs is still picked up.
-pub fn has_git() -> bool {
+pub(crate) fn has_git() -> bool {
     static FOUND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if FOUND.load(std::sync::atomic::Ordering::Relaxed) {
         return true;
@@ -281,7 +282,7 @@ pub fn has_git() -> bool {
 }
 
 /// True when `path` is inside a git repository (any lane counts).
-pub fn is_git_repo(path: &Path) -> bool {
+pub(crate) fn is_git_repo(path: &Path) -> bool {
     run_git(path, ["rev-parse", "--is-inside-work-tree"])
         .map(|s| s.trim() == "true")
         .unwrap_or(false)
@@ -289,7 +290,7 @@ pub fn is_git_repo(path: &Path) -> bool {
 
 /// Top-level directory of the repo that owns `path` (the common
 /// git dir). Returns `None` when `path` isn't inside a repo.
-pub fn repo_root(path: &Path) -> Option<PathBuf> {
+pub(crate) fn repo_root(path: &Path) -> Option<PathBuf> {
     run_git(path, ["rev-parse", "--show-toplevel"])
         .ok()
         .map(|s| PathBuf::from(s.trim()))
@@ -299,7 +300,7 @@ pub fn repo_root(path: &Path) -> Option<PathBuf> {
 /// HEAD / non-repo. Uses `git symbolic-ref --short HEAD` which fails
 /// cleanly when detached — we map that to `Ok(None)` rather than an
 /// error so the caller can render "(detached)" without a special case.
-pub fn current_branch(path: &Path) -> Result<Option<String>, GitError> {
+pub(crate) fn current_branch(path: &Path) -> Result<Option<String>, GitError> {
     match run_git(path, ["symbolic-ref", "--short", "HEAD"]) {
         Ok(s) => Ok(Some(s.trim().to_string())),
         Err(GitError::Exit { .. }) => Ok(None),
@@ -313,7 +314,7 @@ pub fn current_branch(path: &Path) -> Result<Option<String>, GitError> {
 /// the conventional local `main` / `master`, and finally falls back
 /// to whatever branch is checked out. Detection lives here because
 /// `daruda_store` is git-free and only holds the persisted value.
-pub fn default_branch(repo_root: &Path) -> Option<String> {
+pub(crate) fn default_branch(repo_root: &Path) -> Option<String> {
     if let Ok(s) = run_git(
         repo_root,
         ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
@@ -339,8 +340,10 @@ pub fn default_branch(repo_root: &Path) -> Option<String> {
     current_branch(repo_root).ok().flatten()
 }
 
-/// `git init` at `path`. Creates the directory if missing.
-pub fn init(path: &Path) -> Result<(), GitError> {
+/// `git init` at `path`. Creates the directory if missing. A test fixture:
+/// the app initializes an existing directory through [`git_init`].
+#[cfg(test)]
+pub(crate) fn init(path: &Path) -> Result<(), GitError> {
     std::fs::create_dir_all(path).map_err(GitError::Spawn)?;
     run_git(path, ["init", "--quiet"]).map(|_| ())
 }
@@ -356,7 +359,7 @@ pub fn init(path: &Path) -> Result<(), GitError> {
 ///
 /// `repo_root` must be the main repository (any existing lane
 /// path works; git resolves the shared gitdir).
-pub fn add_lane(
+pub(crate) fn add_lane(
     repo_root: &Path,
     new_path: &Path,
     new_branch: Option<&str>,
@@ -402,7 +405,7 @@ pub fn add_lane(
 /// The outcome the caller wants (no worktree at `path`) is already true
 /// in that case, so `already_removed` recognizes it directly against
 /// the filesystem rather than matching git's stderr wording.
-pub fn remove_lane(repo_root: &Path, path: &Path, force: bool) -> Result<(), GitError> {
+pub(crate) fn remove_lane(repo_root: &Path, path: &Path, force: bool) -> Result<(), GitError> {
     let mut args: Vec<String> = vec!["worktree".into(), "remove".into()];
     if force {
         args.push("--force".into());
@@ -432,7 +435,7 @@ fn already_removed(code: Option<i32>, path: &Path) -> bool {
 /// the branch is no longer checked out anywhere, so deletion is safe
 /// (git still rejects deleting the currently-checked-out branch of
 /// the main lane, surfacing as `GitError::Exit`).
-pub fn delete_branch(repo_root: &Path, branch: &str) -> Result<(), GitError> {
+pub(crate) fn delete_branch(repo_root: &Path, branch: &str) -> Result<(), GitError> {
     run_git(repo_root, ["branch", "-D", branch]).map(|_| ())
 }
 
@@ -440,7 +443,7 @@ pub fn delete_branch(repo_root: &Path, branch: &str) -> Result<(), GitError> {
 /// lane (including the main one). The porcelain format is
 /// stable: blank-line-separated records, each `key value` lines.
 /// Unknown keys are ignored so future git versions don't break us.
-pub fn list_worktrees(repo_root: &Path) -> Result<Vec<GitWorktreeInfo>, GitError> {
+pub(crate) fn list_worktrees(repo_root: &Path) -> Result<Vec<GitWorktreeInfo>, GitError> {
     let stdout = run_git(repo_root, ["worktree", "list", "--porcelain"])?;
     parse_worktree_list(&stdout)
 }
@@ -462,7 +465,7 @@ pub struct GitDirs {
 /// `git rev-parse --git-dir --git-common-dir` — both paths in one call.
 /// Git answers with paths relative to `path` for the main worktree, so
 /// they are resolved here and the caller always gets absolute ones.
-pub fn git_dirs(path: &Path) -> Result<GitDirs, GitError> {
+pub(crate) fn git_dirs(path: &Path) -> Result<GitDirs, GitError> {
     let out = run_git(path, ["rev-parse", "--git-dir", "--git-common-dir"])?;
     let mut lines = out.lines();
     let (Some(git_dir), Some(common_dir)) = (lines.next(), lines.next()) else {
@@ -492,7 +495,7 @@ pub struct RepoProbe {
     pub lanes: Vec<GitWorktreeInfo>,
 }
 
-pub fn probe_repo(project_root: &Path) -> Option<RepoProbe> {
+pub(crate) fn probe_repo(project_root: &Path) -> Option<RepoProbe> {
     if !is_git_repo(project_root) {
         return None;
     }
@@ -582,7 +585,7 @@ pub enum MergeOutcome {
 /// Exit 1 → the unmerged paths, as git lists them → `Conflicts(files)`;
 /// none unmerged → `Err`, since git declined to merge at all.
 /// Any other exit code → `Err(GitError::Exit)`.
-pub fn git_merge(target_path: &Path, source_branch: &str) -> Result<MergeOutcome, GitError> {
+pub(crate) fn git_merge(target_path: &Path, source_branch: &str) -> Result<MergeOutcome, GitError> {
     let output = git_command(target_path)
         .args(["merge", "--no-ff", "--no-edit", source_branch])
         .output()
@@ -630,7 +633,7 @@ pub fn git_merge(target_path: &Path, source_branch: &str) -> Result<MergeOutcome
 
 /// `git merge --abort` — cancel an in-progress conflicted merge and
 /// restore the target lane to its pre-merge state.
-pub fn git_merge_abort(target_path: &Path) -> Result<(), GitError> {
+pub(crate) fn git_merge_abort(target_path: &Path) -> Result<(), GitError> {
     run_git(target_path, ["merge", "--abort"]).map(|_| ())
 }
 

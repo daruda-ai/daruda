@@ -1,5 +1,6 @@
 //! Public API tests for git.
 
+use crate::fixture::{git, has_git, init, lanes, open, repo_root};
 use daruda_project::lane::git::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,14 +35,9 @@ fn require_git() -> bool {
 }
 
 fn commit_initial(repo: &Path) {
-    for args in [
-        vec!["config", "user.email", "daruda@test"],
-        vec!["config", "user.name", "daruda"],
-        vec!["commit", "--allow-empty", "-m", "initial"],
-    ] {
-        let output = git_command(repo).args(&args).output().unwrap();
-        assert!(output.status.success(), "git {args:?}: {output:?}");
-    }
+    git(repo, &["config", "user.email", "daruda@test"]);
+    git(repo, &["config", "user.name", "daruda"]);
+    git(repo, &["commit", "--allow-empty", "-m", "initial"]);
 }
 
 /// What `-z` is for: without it git C-quotes a path holding a space or a
@@ -52,8 +48,7 @@ fn a_real_status_reports_spaced_and_non_ascii_paths_verbatim() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let git = |args: &[&str]| {
-        let out = git_command(root).args(args).output().unwrap();
-        assert!(out.status.success(), "git {args:?}: {out:?}");
+        git(root, args);
     };
     git(&["init", "-q"]);
     git(&["config", "user.email", "t@example.com"]);
@@ -66,7 +61,7 @@ fn a_real_status_reports_spaced_and_non_ascii_paths_verbatim() {
     std::fs::write(root.join("한글.md"), "x\ny\n").unwrap();
     std::fs::write(root.join("untracked 파일.txt"), "").unwrap();
 
-    let status = git_worktree_status(root).unwrap();
+    let status = open(root).worktree_status().unwrap();
     let staged: Vec<_> = status.staged.iter().map(|e| e.path.clone()).collect();
     let unstaged: Vec<_> = status.unstaged.iter().map(|e| e.path.clone()).collect();
     assert_eq!(staged, vec![PathBuf::from("새 이름.rs")]);
@@ -91,34 +86,33 @@ fn init_creates_repo() {
         return;
     }
     let dir = unique_tmpdir("init");
-    init(&dir).unwrap();
-    assert!(is_git_repo(&dir));
+    init(&dir);
     assert_eq!(repo_root(&dir).as_deref(), Some(dir.as_path()));
     teardown(&dir);
 }
 
 #[test]
-fn is_git_repo_false_for_plain_dir() {
+fn probe_finds_no_repo_in_a_plain_dir() {
     if !require_git() {
         return;
     }
     let dir = unique_tmpdir("plain");
-    assert!(!is_git_repo(&dir));
-    assert!(repo_root(&dir).is_none());
+    assert!(SystemGit.probe(&dir).is_none());
     teardown(&dir);
 }
 
 #[test]
-fn current_branch_after_init_is_main_or_master() {
+fn default_branch_falls_back_to_the_checked_out_branch() {
     if !require_git() {
         return;
     }
     let dir = unique_tmpdir("branch");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
-    let b = current_branch(&dir).unwrap();
-    // Git defaults to `main` on newer versions, `master` on older.
-    assert!(b.as_deref() == Some("main") || b.as_deref() == Some("master"));
+    // Neither `origin/HEAD` nor `main`/`master` exists, so only the
+    // checked-out branch can answer.
+    git(&dir, &["branch", "-m", "trunk"]);
+    assert_eq!(open(&dir).default_branch().as_deref(), Some("trunk"));
     teardown(&dir);
 }
 
@@ -128,10 +122,10 @@ fn head_message_errors_when_no_commits() {
         return;
     }
     let dir = unique_tmpdir("headmsg_empty");
-    init(&dir).unwrap();
+    init(&dir);
     // No commit yet → `git log -1` fails; the empty-box amend path turns this
     // into the "nothing to amend" toast.
-    assert!(git_head_message(&dir).is_err());
+    assert!(open(&dir).head_message().is_err());
     teardown(&dir);
 }
 
@@ -142,7 +136,7 @@ fn default_branch_none_on_non_repo() {
     }
     let dir = unique_tmpdir("default_nonrepo");
     // Plain directory, never `git init`-ed.
-    assert_eq!(default_branch(&dir), None);
+    assert_eq!(open(&dir).default_branch(), None);
     teardown(&dir);
 }
 
@@ -152,13 +146,15 @@ fn add_and_list_worktrees_round_trip() {
         return;
     }
     let dir = unique_tmpdir("addlist");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
 
     let wt_path = dir.join("wt-feature");
-    add_lane(&dir, &wt_path, Some("feat/xyz"), None).unwrap();
+    open(&dir)
+        .add_lane(&wt_path, Some("feat/xyz"), None)
+        .unwrap();
 
-    let listed = list_worktrees(&dir).unwrap();
+    let listed = lanes(&dir);
     assert_eq!(listed.len(), 2);
     let feat = listed.iter().find(|w| w.path == wt_path).unwrap();
     assert_eq!(feat.branch.as_deref(), Some("feat/xyz"));
@@ -171,15 +167,17 @@ fn remove_worktree_deletes_entry() {
         return;
     }
     let dir = unique_tmpdir("remove");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
 
     let wt_path = dir.join("wt-remove");
-    add_lane(&dir, &wt_path, Some("scratch"), None).unwrap();
-    assert_eq!(list_worktrees(&dir).unwrap().len(), 2);
+    open(&dir)
+        .add_lane(&wt_path, Some("scratch"), None)
+        .unwrap();
+    assert_eq!(lanes(&dir).len(), 2);
 
-    remove_lane(&dir, &wt_path, false).unwrap();
-    let listed = list_worktrees(&dir).unwrap();
+    open(&dir).remove_lane(&wt_path, false).unwrap();
+    let listed = lanes(&dir);
     assert_eq!(listed.len(), 1);
     assert!(listed.iter().all(|w| w.path != wt_path));
     teardown(&dir);
@@ -199,16 +197,18 @@ fn remove_lane_succeeds_when_the_worktree_was_already_removed_elsewhere() {
         return;
     }
     let dir = unique_tmpdir("extfullremove");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
 
     let wt_path = dir.join("wt-extfull");
-    add_lane(&dir, &wt_path, Some("scratch/extfull"), None).unwrap();
-    remove_lane(&dir, &wt_path, false).unwrap(); // the "external" removal
+    open(&dir)
+        .add_lane(&wt_path, Some("scratch/extfull"), None)
+        .unwrap();
+    open(&dir).remove_lane(&wt_path, false).unwrap(); // the "external" removal
 
     // daruda's Lane entry is still sitting in the list at this point —
     // the user now clicks Remove in the app for the same target.
-    remove_lane(&dir, &wt_path, false).unwrap();
+    open(&dir).remove_lane(&wt_path, false).unwrap();
     teardown(&dir);
 }
 
@@ -218,16 +218,20 @@ fn add_worktree_with_existing_branch_fails_cleanly() {
         return;
     }
     let dir = unique_tmpdir("dup");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
 
     let first = dir.join("wt-first");
-    add_lane(&dir, &first, Some("dup-branch"), None).unwrap();
+    open(&dir)
+        .add_lane(&first, Some("dup-branch"), None)
+        .unwrap();
 
     // Re-using `-b dup-branch` must fail — ensures GitError::Exit
     // carries a useful message.
     let second = dir.join("wt-second");
-    let err = add_lane(&dir, &second, Some("dup-branch"), None).unwrap_err();
+    let err = open(&dir)
+        .add_lane(&second, Some("dup-branch"), None)
+        .unwrap_err();
     match err {
         GitError::Exit { stderr, .. } => {
             assert!(!stderr.is_empty());
@@ -243,15 +247,15 @@ fn delete_branch_after_worktree_removal() {
         return;
     }
     let dir = unique_tmpdir("delbranch");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
 
     // Create a lane (creates the branch as a side effect),
     // then remove the lane so the branch is no longer checked
     // out anywhere — the modal flow does this same sequence.
     let wt = dir.join("wt-temp");
-    add_lane(&dir, &wt, Some("temp/work"), None).unwrap();
-    remove_lane(&dir, &wt, false).unwrap();
+    open(&dir).add_lane(&wt, Some("temp/work"), None).unwrap();
+    open(&dir).remove_lane(&wt, false).unwrap();
 
     // Branch still exists post-remove (git keeps it).
     let pre = daruda_core::process::command("git")
@@ -262,7 +266,7 @@ fn delete_branch_after_worktree_removal() {
         .unwrap();
     assert!(pre.status.success(), "branch should exist before delete");
 
-    delete_branch(&dir, "temp/work").unwrap();
+    open(&dir).delete_branch("temp/work").unwrap();
 
     let post = daruda_core::process::command("git")
         .envs(daruda_project::lane::git::isolated_git_env())
@@ -280,13 +284,12 @@ fn delete_branch_rejects_currently_checked_out() {
         return;
     }
     let dir = unique_tmpdir("delbranch_curr");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
-    // The default branch (main/master, depending on git version)
-    // is currently checked out at `dir`. Attempting to delete it
-    // must fail cleanly.
-    let current = current_branch(&dir).unwrap().unwrap();
-    let err = delete_branch(&dir, &current).unwrap_err();
+    // The default branch is currently checked out at `dir`.
+    // Attempting to delete it must fail cleanly.
+    let current = git(&dir, &["symbolic-ref", "--short", "HEAD"]);
+    let err = open(&dir).delete_branch(&current).unwrap_err();
     match err {
         GitError::Exit { stderr, .. } => assert!(!stderr.is_empty()),
         other => panic!("expected Exit error, got {other:?}"),
@@ -300,19 +303,19 @@ fn git_add_stages_file() {
         return;
     }
     let dir = unique_tmpdir("git_add");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
 
     let file = dir.join("hello.txt");
     std::fs::write(&file, "hello").unwrap();
 
     // File is untracked — not in staged before add.
-    let before = git_worktree_status(&dir).unwrap();
+    let before = open(&dir).worktree_status().unwrap();
     assert!(before.staged.is_empty(), "nothing staged before git_add");
 
-    git_add(&dir, std::path::Path::new("hello.txt")).unwrap();
+    open(&dir).add(std::path::Path::new("hello.txt")).unwrap();
 
-    let after = git_worktree_status(&dir).unwrap();
+    let after = open(&dir).worktree_status().unwrap();
     assert_eq!(after.staged.len(), 1, "one staged entry after git_add");
     assert_eq!(after.staged[0].x, 'A');
     teardown(&dir);
@@ -324,15 +327,15 @@ fn git_add_all_stages_all_files() {
         return;
     }
     let dir = unique_tmpdir("git_add_all");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
 
     std::fs::write(dir.join("a.txt"), "a").unwrap();
     std::fs::write(dir.join("b.txt"), "b").unwrap();
 
-    git_add_all(&dir).unwrap();
+    open(&dir).add_all().unwrap();
 
-    let status = git_worktree_status(&dir).unwrap();
+    let status = open(&dir).worktree_status().unwrap();
     assert_eq!(status.staged.len(), 2, "both files staged after add --all");
     teardown(&dir);
 }
@@ -343,19 +346,19 @@ fn git_restore_staged_unstages_file() {
         return;
     }
     let dir = unique_tmpdir("git_restore");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
 
     let rel = std::path::Path::new("restore_me.txt");
     std::fs::write(dir.join(rel), "data").unwrap();
-    git_add(&dir, rel).unwrap();
+    open(&dir).add(rel).unwrap();
 
-    let after_add = git_worktree_status(&dir).unwrap();
+    let after_add = open(&dir).worktree_status().unwrap();
     assert_eq!(after_add.staged.len(), 1, "file staged after add");
 
-    git_restore_staged(&dir, rel).unwrap();
+    open(&dir).restore_staged(rel).unwrap();
 
-    let after_restore = git_worktree_status(&dir).unwrap();
+    let after_restore = open(&dir).worktree_status().unwrap();
     assert!(
         after_restore.staged.is_empty(),
         "nothing staged after restore --staged"
@@ -374,7 +377,7 @@ fn add_worktree_with_explicit_base_ref() {
         return;
     }
     let dir = unique_tmpdir("base_ref");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
     // Branch "side" at the initial commit, then advance "main"
     // by another empty commit so HEAD diverges from "side".
@@ -392,7 +395,9 @@ fn add_worktree_with_explicit_base_ref() {
     // Build the lane with explicit base = "side". The new
     // branch must point at "side"'s commit, not the current HEAD.
     let wt_path = dir.join("wt-from-side");
-    add_lane(&dir, &wt_path, Some("feat/from-side"), Some("side")).unwrap();
+    open(&dir)
+        .add_lane(&wt_path, Some("feat/from-side"), Some("side"))
+        .unwrap();
 
     let side_sha = daruda_core::process::command("git")
         .envs(daruda_project::lane::git::isolated_git_env())
@@ -421,12 +426,12 @@ fn git_dirs_separate_a_linked_worktree_from_the_shared_repository() {
         return;
     }
     let dir = unique_tmpdir("git_dirs");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
     let linked = dir.join("side-wt");
-    add_lane(&dir, &linked, Some("side"), None).unwrap();
+    open(&dir).add_lane(&linked, Some("side"), None).unwrap();
 
-    let main = git_dirs(&dir).unwrap();
+    let main = open(&dir).dirs().unwrap();
     assert!(
         main.git_dir.is_absolute(),
         "relative paths must be resolved"
@@ -436,7 +441,7 @@ fn git_dirs_separate_a_linked_worktree_from_the_shared_repository() {
         "the main worktree's own dir is the shared one"
     );
 
-    let side = git_dirs(&linked).unwrap();
+    let side = open(&linked).dirs().unwrap();
     assert_ne!(
         side.git_dir, side.common_dir,
         "a linked worktree keeps its own index and HEAD"
@@ -452,7 +457,7 @@ fn git_dirs_separate_a_linked_worktree_from_the_shared_repository() {
 
 fn regression_repo(committed: bool) -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
-    init(temp.path()).unwrap();
+    init(temp.path());
     if committed {
         commit_initial(temp.path());
     }
@@ -467,33 +472,30 @@ fn explicit_file_staging_and_diffs_use_literal_pathspecs() {
         for name in ["[id].tsx", "i.tsx"] {
             std::fs::write(root.join(name), "base\n").unwrap();
         }
-        git_add_all(root).unwrap();
-        git_commit(root, "base").unwrap();
+        open(root).add_all().unwrap();
+        open(root).commit("base").unwrap();
         for (name, text) in [("[id].tsx", "selected\n"), ("i.tsx", "sibling\n")] {
             std::fs::write(root.join(name), text).unwrap();
         }
         if batch {
-            git_add_paths(root, &[PathBuf::from("[id].tsx")]).unwrap();
+            open(root).add_paths(&[PathBuf::from("[id].tsx")]).unwrap();
         } else {
-            git_add(root, Path::new("[id].tsx")).unwrap();
+            open(root).add(Path::new("[id].tsx")).unwrap();
         }
-        let staged = git_worktree_status(root).unwrap().staged;
+        let staged = open(root).worktree_status().unwrap().staged;
         assert_eq!(
             staged.iter().map(|e| e.path.as_path()).collect::<Vec<_>>(),
             vec![Path::new("[id].tsx")]
         );
-        git_add_all(root).unwrap();
-        let diff = git_diff(root, Path::new("[id].tsx"), true).unwrap();
+        open(root).add_all().unwrap();
+        let diff = open(root).diff(Path::new("[id].tsx"), true).unwrap();
         assert!(diff.contains("selected"));
         assert!(!diff.contains("sibling"), "{diff}");
-        let from = git_command(root)
-            .args(["rev-parse", "HEAD"])
-            .output()
+        let from = git(root, &["rev-parse", "HEAD"]);
+        open(root).commit("changes").unwrap();
+        let range = open(root)
+            .diff_range(from.trim(), "HEAD", &[Path::new("[id].tsx")])
             .unwrap();
-        let from = String::from_utf8(from.stdout).unwrap();
-        git_commit(root, "changes").unwrap();
-        let range =
-            base::git_diff_range(root, from.trim(), "HEAD", &[Path::new("[id].tsx")]).unwrap();
         assert!(!range.contains("sibling"), "{range}");
     }
 }
@@ -506,13 +508,15 @@ fn explicit_file_unstaging_uses_literal_pathspecs() {
         for name in ["[id].tsx", "i.tsx"] {
             std::fs::write(root.join(name), "new\n").unwrap();
         }
-        git_add_all(root).unwrap();
+        open(root).add_all().unwrap();
         if batch {
-            git_restore_staged_paths(root, &[PathBuf::from("[id].tsx")]).unwrap();
+            open(root)
+                .restore_staged_paths(&[PathBuf::from("[id].tsx")])
+                .unwrap();
         } else {
-            git_restore_staged(root, Path::new("[id].tsx")).unwrap();
+            open(root).restore_staged(Path::new("[id].tsx")).unwrap();
         }
-        let staged = git_worktree_status(root).unwrap().staged;
+        let staged = open(root).worktree_status().unwrap().staged;
         assert_eq!(
             staged.iter().map(|e| e.path.as_path()).collect::<Vec<_>>(),
             vec![Path::new("i.tsx")]
@@ -526,17 +530,21 @@ fn unstaging_a_rename_restores_both_index_paths() {
         let temp = regression_repo(true);
         let root = temp.path();
         std::fs::write(root.join("old.txt"), "original\n").unwrap();
-        git_add_all(root).unwrap();
-        git_commit(root, "base").unwrap();
+        open(root).add_all().unwrap();
+        open(root).commit("base").unwrap();
         std::fs::create_dir(root.join("other")).unwrap();
         std::fs::rename(root.join("old.txt"), root.join("other/new.txt")).unwrap();
-        git_add_all(root).unwrap();
+        open(root).add_all().unwrap();
         if batch {
-            git_restore_staged_paths(root, &[PathBuf::from("other/new.txt")]).unwrap();
+            open(root)
+                .restore_staged_paths(&[PathBuf::from("other/new.txt")])
+                .unwrap();
         } else {
-            git_restore_staged(root, Path::new("other/new.txt")).unwrap();
+            open(root)
+                .restore_staged(Path::new("other/new.txt"))
+                .unwrap();
         }
-        assert!(git_worktree_status(root).unwrap().staged.is_empty());
+        assert!(open(root).worktree_status().unwrap().staged.is_empty());
         assert_eq!(
             std::fs::read(root.join("other/new.txt")).unwrap(),
             b"original\n"
@@ -551,15 +559,15 @@ fn all_unstage_entry_points_preserve_files_before_the_first_commit() {
         let temp = regression_repo(false);
         let root = temp.path();
         std::fs::write(root.join("new.txt"), "staged\n").unwrap();
-        git_add_all(root).unwrap();
+        open(root).add_all().unwrap();
         std::fs::write(root.join("new.txt"), "later worktree bytes\n").unwrap();
         match mode {
-            0 => git_restore_staged(root, Path::new("new.txt")),
-            1 => git_restore_staged_paths(root, &[PathBuf::from("new.txt")]),
-            _ => git_restore_all_staged(root),
+            0 => open(root).restore_staged(Path::new("new.txt")),
+            1 => open(root).restore_staged_paths(&[PathBuf::from("new.txt")]),
+            _ => open(root).restore_all_staged(),
         }
         .unwrap();
-        assert!(git_worktree_status(root).unwrap().staged.is_empty());
+        assert!(open(root).worktree_status().unwrap().staged.is_empty());
         assert_eq!(
             std::fs::read(root.join("new.txt")).unwrap(),
             b"later worktree bytes\n"
@@ -570,8 +578,14 @@ fn all_unstage_entry_points_preserve_files_before_the_first_commit() {
 #[test]
 fn unstaging_an_empty_unborn_index_succeeds() {
     let temp = regression_repo(false);
-    git_restore_all_staged(temp.path()).unwrap();
-    assert!(git_worktree_status(temp.path()).unwrap().staged.is_empty());
+    open(temp.path()).restore_all_staged().unwrap();
+    assert!(
+        open(temp.path())
+            .worktree_status()
+            .unwrap()
+            .staged
+            .is_empty()
+    );
 }
 
 #[test]
@@ -629,15 +643,15 @@ fn base_problem_preserves_environment_failure() {
     );
 }
 
-/// The trait boundary is a pure delegation: a handle from [`SystemGit`]
-/// reads exactly what the free functions it wraps read.
+/// A handle from [`SystemGit`] is rooted where it was opened and reads the
+/// worktree through the real CLI.
 #[test]
 fn system_git_delegates_to_the_git_cli() {
     if !require_git() {
         return;
     }
     let dir = unique_tmpdir("system_git");
-    init(&dir).unwrap();
+    init(&dir);
     commit_initial(&dir);
     std::fs::write(dir.join("new.txt"), "x\n").unwrap();
 
@@ -645,12 +659,11 @@ fn system_git_delegates_to_the_git_cli() {
     assert!(git.available());
     let repo = git.open(&dir);
     assert_eq!(repo.path(), dir.as_path());
-    assert_eq!(
-        repo.worktree_status().unwrap(),
-        git_worktree_status(&dir).unwrap()
-    );
-    assert_eq!(repo.default_branch(), default_branch(&dir));
-    assert!(repo.default_branch().is_some());
+    let status = repo.worktree_status().unwrap();
+    assert!(status.staged.is_empty());
+    assert_eq!(status.unstaged.len(), 1);
+    assert_eq!(status.unstaged[0].path, PathBuf::from("new.txt"));
+    assert_eq!(repo.default_branch().as_deref(), Some("main"));
     assert_eq!(repo.status_scoped().unwrap(), "?? new.txt");
     teardown(&dir);
 }

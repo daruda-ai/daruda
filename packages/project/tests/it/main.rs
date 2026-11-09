@@ -1,6 +1,7 @@
 //! Integration tests that exercise only the public `daruda_project` API.
 
 mod availability;
+mod fixture;
 mod git;
 mod git_command;
 mod git_discard;

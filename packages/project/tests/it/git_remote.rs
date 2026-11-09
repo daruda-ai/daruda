@@ -3,17 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use daruda_project::lane::git::*;
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = git_command(dir).args(args).output().unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?} in {dir:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).trim().to_owned()
-}
+use crate::fixture::{git, has_git, init, open};
 
 fn identify(repo: &Path) {
     git(repo, &["config", "user.email", "daruda@test"]);
@@ -48,12 +38,12 @@ fn a_commit_lands_its_message_and_a_push_reaches_the_remote() {
     let temp = tempfile::tempdir().unwrap();
     let (origin, work) = pushed_repo(temp.path());
     std::fs::write(work.join("f.txt"), "two\n").unwrap();
-    git_add(&work, Path::new("f.txt")).unwrap();
+    open(&work).add(Path::new("f.txt")).unwrap();
 
-    git_commit(&work, "mine").unwrap();
-    assert_eq!(git_head_message(&work).unwrap(), "mine");
+    open(&work).commit("mine").unwrap();
+    assert_eq!(open(&work).head_message().unwrap(), "mine");
     assert!(
-        git_worktree_status(&work).unwrap().staged.is_empty(),
+        open(&work).worktree_status().unwrap().staged.is_empty(),
         "the staged change is committed"
     );
     assert_eq!(
@@ -61,7 +51,7 @@ fn a_commit_lands_its_message_and_a_push_reaches_the_remote() {
         "initial"
     );
 
-    git_push(&work).unwrap();
+    open(&work).push().unwrap();
     assert_eq!(git(&origin, &["log", "-1", "--format=%s", "main"]), "mine");
 }
 
@@ -86,7 +76,7 @@ fn a_fetch_moves_the_shared_remote_ref_and_every_lanes_tracking() {
         ],
     );
     let linked = temp.path().join("side-wt");
-    add_lane(&clone, &linked, Some("side"), None).unwrap();
+    open(&clone).add_lane(&linked, Some("side"), None).unwrap();
     git(&clone, &["branch", "--set-upstream-to=origin/main", "side"]);
     // A commit the clone cannot see until it fetches.
     std::fs::write(seed.join("f.txt"), "two\n").unwrap();
@@ -94,19 +84,19 @@ fn a_fetch_moves_the_shared_remote_ref_and_every_lanes_tracking() {
     git(&seed, &["push", "-q", "origin", "main"]);
 
     for lane in [&clone, &linked] {
-        let tracking = git_tracking(lane).unwrap();
+        let tracking = open(lane).tracking().unwrap();
         assert_eq!(tracking.upstream.as_deref(), Some("origin/main"));
         assert_eq!(tracking.behind, 0, "{lane:?} before the fetch");
     }
 
-    git_fetch(&clone).unwrap();
+    open(&clone).fetch().unwrap();
 
-    let common = git_dirs(&clone).unwrap().common_dir;
-    assert_eq!(git_dirs(&linked).unwrap().common_dir, common);
+    let common = open(&clone).dirs().unwrap().common_dir;
+    assert_eq!(open(&linked).dirs().unwrap().common_dir, common);
     let moved = std::fs::read_to_string(common.join("refs/remotes/origin/main")).unwrap();
     assert_eq!(moved.trim(), git(&origin, &["rev-parse", "main"]));
     for lane in [&clone, &linked] {
-        assert_eq!(git_tracking(lane).unwrap().behind, 1, "{lane:?} after");
+        assert_eq!(open(lane).tracking().unwrap().behind, 1, "{lane:?} after");
     }
 }
 
@@ -119,20 +109,19 @@ fn a_commit_in_a_linked_lane_rewrites_its_own_index() {
     }
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("work");
-    std::fs::create_dir_all(&root).unwrap();
-    init(&root).unwrap();
+    init(&root);
     identify(&root);
     git(&root, &["commit", "-q", "--allow-empty", "-m", "initial"]);
     let linked = temp.path().join("side-wt");
-    add_lane(&root, &linked, Some("side"), None).unwrap();
+    open(&root).add_lane(&linked, Some("side"), None).unwrap();
     std::fs::write(linked.join("side.txt"), "staged\n").unwrap();
-    git_add(&linked, Path::new("side.txt")).unwrap();
-    assert_eq!(git_worktree_status(&linked).unwrap().staged.len(), 1);
+    open(&linked).add(Path::new("side.txt")).unwrap();
+    assert_eq!(open(&linked).worktree_status().unwrap().staged.len(), 1);
 
-    let index = git_dirs(&linked).unwrap().git_dir.join("index");
+    let index = open(&linked).dirs().unwrap().git_dir.join("index");
     let before = std::fs::read(&index).unwrap();
-    git_commit(&linked, "outside daruda").unwrap();
+    open(&linked).commit("outside daruda").unwrap();
 
     assert_ne!(std::fs::read(&index).unwrap(), before, "the index moved");
-    assert!(git_worktree_status(&linked).unwrap().staged.is_empty());
+    assert!(open(&linked).worktree_status().unwrap().staged.is_empty());
 }

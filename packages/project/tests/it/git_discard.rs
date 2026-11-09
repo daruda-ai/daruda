@@ -1,9 +1,11 @@
 //! Public API tests for git discard.
 
 use daruda_project::lane::git::GitFileEntry;
-use daruda_project::lane::git::discard::{DiscardPlan, discard};
+use daruda_project::lane::git::discard::DiscardPlan;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+use crate::fixture::{has_git, open};
 
 fn entry(x: char, y: char, path: &str, original: Option<&str>) -> GitFileEntry {
     GitFileEntry {
@@ -98,7 +100,7 @@ fn repo() -> tempfile::TempDir {
 }
 
 fn all(root: &Path) -> Vec<PathBuf> {
-    let status = daruda_project::lane::git::git_worktree_status(root).unwrap();
+    let status = open(root).worktree_status().unwrap();
     status
         .staged
         .iter()
@@ -110,7 +112,7 @@ fn all(root: &Path) -> Vec<PathBuf> {
 /// Every shape of change at once, then one discard of all of them.
 #[test]
 fn discarding_every_change_leaves_the_tree_at_head() {
-    if !daruda_project::lane::git::has_git() {
+    if !has_git() {
         return;
     }
     let temp = repo();
@@ -132,7 +134,7 @@ fn discarding_every_change_leaves_the_tree_at_head() {
     git(root, &["mv", "from", "to"]);
     std::fs::write(root.join("junk"), "untracked\n").unwrap();
 
-    discard(root, &all(root)).unwrap();
+    open(root).discard(&all(root)).unwrap();
 
     assert_eq!(
         git(root, &["status", "--porcelain"]),
@@ -154,7 +156,7 @@ fn discarding_every_change_leaves_the_tree_at_head() {
 /// A name with glob characters is that one file, not a pattern.
 #[test]
 fn a_glob_named_file_discards_only_itself() {
-    if !daruda_project::lane::git::has_git() {
+    if !has_git() {
         return;
     }
     let temp = repo();
@@ -172,7 +174,7 @@ fn a_glob_named_file_discards_only_itself() {
         std::fs::write(root.join(name), "edited\n").unwrap();
     }
     let restored: Vec<_> = names.iter().step_by(2).map(PathBuf::from).collect();
-    discard(root, &restored).unwrap();
+    open(root).discard(&restored).unwrap();
     for (index, name) in names.iter().enumerate() {
         let want = if index.is_multiple_of(2) {
             "base\n"
@@ -191,7 +193,7 @@ fn a_glob_named_file_discards_only_itself() {
 /// changes beside it are left as they were.
 #[test]
 fn discarding_one_staged_only_file_leaves_the_rest() {
-    if !daruda_project::lane::git::has_git() {
+    if !has_git() {
         return;
     }
     let temp = repo();
@@ -206,7 +208,7 @@ fn discarding_one_staged_only_file_leaves_the_rest() {
     std::fs::write(root.join("edited.txt"), "edited\n").unwrap();
     std::fs::write(root.join("junk.txt"), "junk\n").unwrap();
 
-    discard(root, &[PathBuf::from("staged.txt")]).unwrap();
+    open(root).discard(&[PathBuf::from("staged.txt")]).unwrap();
 
     assert_eq!(
         std::fs::read_to_string(root.join("staged.txt")).unwrap(),
@@ -221,7 +223,7 @@ fn discarding_one_staged_only_file_leaves_the_rest() {
 /// Both sides added the file; undoing the conflict keeps HEAD's copy.
 #[test]
 fn discarding_an_add_add_conflict_keeps_heads_copy() {
-    if !daruda_project::lane::git::has_git() {
+    if !has_git() {
         return;
     }
     let temp = repo();
@@ -244,7 +246,7 @@ fn discarding_an_add_add_conflict_keeps_heads_copy() {
         .output();
     assert!(git(root, &["status", "--porcelain"]).starts_with("AA both"));
 
-    discard(root, &[PathBuf::from("both")]).unwrap();
+    open(root).discard(&[PathBuf::from("both")]).unwrap();
     assert_eq!(
         std::fs::read_to_string(root.join("both")).unwrap(),
         "main\n"
@@ -256,7 +258,7 @@ fn discarding_an_add_add_conflict_keeps_heads_copy() {
 /// was read is left alone, and a listed file since committed is not undone.
 #[test]
 fn only_paths_still_changed_from_the_pinned_list_are_touched() {
-    if !daruda_project::lane::git::has_git() {
+    if !has_git() {
         return;
     }
     let temp = repo();
@@ -272,7 +274,7 @@ fn only_paths_still_changed_from_the_pinned_list_are_touched() {
     git(root, &["commit", "-qm", "agent"]);
     std::fs::write(root.join("fresh"), "unseen\n").unwrap();
 
-    discard(root, &pinned).unwrap();
+    open(root).discard(&pinned).unwrap();
     assert!(
         root.join("added").exists(),
         "a committed file is not undone"
@@ -282,5 +284,7 @@ fn only_paths_still_changed_from_the_pinned_list_are_touched() {
 
 #[test]
 fn an_empty_pin_runs_no_git() {
-    discard(Path::new("/definitely/not/a/repo"), &[]).unwrap();
+    open(Path::new("/definitely/not/a/repo"))
+        .discard(&[])
+        .unwrap();
 }
