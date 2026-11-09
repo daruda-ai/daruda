@@ -270,6 +270,28 @@ how it ended, naming the desktop when it answered first. A phone-started turn
 keeps its question for the phone; a task run the orchestrator or phone started
 still declines it.
 
+A chat opened at the phone's or the orchestrator's request — `task_start`,
+`task_open` (when it opens a new pane), `chat_new`, `worktree_create`, and a
+phone `/task` — runs in its agent's `delegated_mode`
+(`daruda_config::effective_delegated_mode`; unset means the policy default,
+Claude `bypassPermissions` and Codex `agent-full-access`, else the agent's
+`default_mode`). A desktop Start or menu chat, the orchestrator's own pane
+and flows use `default_mode` or the flow's mode. The split is one function,
+`workspace::mode_for(StartedBy)`, which both the op and its card read. The
+pane persists the result as `ModeChoice` (`FollowDefault`,
+`FollowDelegated`, `Picked`), set before its first connect; a live config
+edit moves a following session to the new mode, and a person's pick stands.
+The agent is resolved when the card is built and pinned as
+`ChatAgent::Pinned`; the pane open resolves it again
+(`Workspace::resolve_chat_agent`), so an agent removed meanwhile is refused as
+`agent_unavailable` rather than replaced. A `worktree_create` refused after
+git keeps its worktree as a lane with nothing open; a recorded task start
+fails as `AgentMissing`. A card discloses the agent, the requested mode and
+the prompt through `agent_text`: titles and prompts are flattened to one
+line without bidi or invisible characters, and a long prompt shows its start
+and end around the count it leaves out; a card for a chat already open names
+no mode, since that pane keeps its own.
+
 `control/approval` owns the process-wide pending decision. The orchestrator's
 host-owned card strip remains answerable without a remote channel. Desktop and
 eligible remote cards share the first answer; settlement edits remote cards and
