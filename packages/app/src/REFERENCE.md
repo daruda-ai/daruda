@@ -77,8 +77,10 @@ resolve that ID through `RunsHost` before the owning workspace binds the
 session; a missing agent PID does not prevent routing or session attachment.
 Every Task starts as an Agent chat or a flow; no start creates a Claude CLI
 run. CLI runs already in the log keep their `LanePrepared` terminal ID (schema
-7; older preparation records without it still replay), and hooks, PID exits
-and startup reconciliation still settle them. Their chats open read-only.
+7; older preparation records without it still replay). That terminal belongs
+to an earlier launch whose routed status files the first desktop startup
+deletes, so only an unrouted session-keyed hook, an observed PID exit, or
+startup reconciliation settles such a run. Their chats open read-only.
 No pane is ever bound to a CLI run, so a hook reaches one only through the
 session it already recorded. The task log uses schema 9: task specs and edits
 carry no execution surface or auto-execute flag, and the copies older logs,
@@ -87,12 +89,12 @@ Only observed PIDs advance CLI process state. The tracker polls those PIDs;
 it has no pane discovery, process-tree walk or session-directory watcher.
 On restart, an already recorded Claude PID is verified against its account's
 single session file. No other PID is discovered by that check.
-A confirmed exit without a completion hook settles a still-running run as an
-error; a completed run or pending result read keeps its own outcome.
+A confirmed exit marks a still-running run interrupted by the restart; a
+completed run or pending result read keeps its own outcome.
 Routed status and lock files use terminal IDs, while session IDs remain the
 run attachment key. Session replacement retires the old in-memory status;
 SessionEnd retains a final marker and removes the live session from memory,
-so even a session ending before the first watcher read can settle its run.
+so a session ending before the watcher's first read is still seen to end.
 The next SessionStart overwrites that marker. Pane teardown clears memory, and the first
 desktop startup sweeps retired terminal files without unlinking lock paths.
 Forwarded interrupt keys clear a busy terminal locally without a completion.

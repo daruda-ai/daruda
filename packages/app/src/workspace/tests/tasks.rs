@@ -88,9 +88,10 @@ fn lifecycle(id: &str, cx: &mut TestAppContext) -> Lifecycle {
     })
 }
 
-/// Deleting a running task stops its run before the delete is recorded.
+/// Deleting a running task removes it. The task machine accepts `Deleted`
+/// only from Backlog or a terminal lifecycle, so its run had to end first.
 #[gpui::test]
-fn deleting_a_running_task_cancels_it_first(cx: &mut TestAppContext) {
+fn deleting_a_running_task_ends_its_run_and_removes_it(cx: &mut TestAppContext) {
     let (wh, workspace) = build_workspace(cx);
     let task_id = seed_running_task(&workspace, cx, "sess-delete");
     cx.update_window(wh.into(), |_, window, cx| {
@@ -101,7 +102,7 @@ fn deleting_a_running_task_cancels_it_first(cx: &mut TestAppContext) {
     cx.update(|cx| {
         assert!(
             cx.global::<GlobalTasks>().get(&task_id).is_none(),
-            "a running task is cancelled, then deleted"
+            "a running task ends, then is deleted"
         );
     });
 }

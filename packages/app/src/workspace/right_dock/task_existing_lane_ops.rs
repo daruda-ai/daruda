@@ -140,17 +140,19 @@ impl Workspace {
             branch,
             reveal,
         } = start;
+        // A cancel that landed while the start was recorded ends it here,
+        // before a pane opens.
         let preparing = cx
             .global::<GlobalTasks>()
             .get(&exec.task_id)
             .is_some_and(|task| {
                 matches!(
-                    task.lifecycle,
-                    daruda_store::tasks::Lifecycle::Preparing { .. }
+                    &task.lifecycle,
+                    daruda_store::tasks::Lifecycle::Preparing { exec: current, .. } if current == exec
                 )
             });
         if !preparing {
-            return Err(TaskStartError::NotFound);
+            return Err(TaskStartError::NotBacklog);
         }
         // The lane may have closed while the start was recorded.
         if self.lane_for(lane).is_none() {

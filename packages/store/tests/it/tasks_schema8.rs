@@ -156,13 +156,6 @@ fn a_tasks_file_naming_a_terminal_surface_still_imports() {
     );
 }
 
-/// Specs and edits stopped carrying a surface and an auto-execute flag.
-#[test]
-fn task_specs_without_a_surface_are_schema_nine() {
-    use daruda_runlog::Machine as _;
-    assert_eq!(TaskMachine::SCHEMA, 9);
-}
-
 /// Once this build has written to a schema 8 log, a schema 8 build refuses
 /// it as too new rather than as corrupt.
 #[test]

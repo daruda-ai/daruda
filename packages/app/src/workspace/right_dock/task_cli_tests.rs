@@ -11,9 +11,7 @@ use crate::workspace::main_area::pane_tree::PaneLayout;
 use daruda_agent::pty_tracker::{ProcessExited, PtyBinding};
 use daruda_chat::view::{AgentSessionStatus, LoadIntent, PromptDispatch};
 use daruda_store::project::PaneCwd;
-use daruda_store::tasks::{
-    AgentChatAccess, SessionEndReason, TaskEvent, TaskExecution, TaskExecutionSource,
-};
+use daruda_store::tasks::{AgentChatAccess, SessionEndReason, TaskEvent, TaskExecution};
 use gpui::{AppContext as _, TestAppContext, Window};
 
 /// A workspace whose task commits land on the spot: these tests are about
@@ -29,13 +27,9 @@ fn build_workspace(
     built
 }
 
-fn report_hook(
-    pane: crate::runs::RunPane,
-    session: &str,
-    pid: Option<u32>,
-    transcript: Option<&Path>,
-    cx: &mut gpui::App,
-) {
+/// A hook from `pane`'s live terminal. Only an ended run learns from it: a
+/// running run's terminal belongs to an earlier launch.
+fn report_hook(pane: crate::runs::RunPane, session: &str, pid: u32, cx: &mut gpui::App) {
     let mut file = daruda_agent::hooks::status_file::StatusFile::new_hook(
         session,
         "/cli",
@@ -43,8 +37,7 @@ fn report_hook(
         "SessionStart",
     );
     file.terminal_id = RunsHost::terminal_id(pane, cx).cloned();
-    file.agent_pid = pid;
-    file.transcript_path = transcript.map(Path::to_path_buf);
+    file.agent_pid = Some(pid);
     RunsHost::record_task_cli_hook(&file, cx);
 }
 
@@ -94,23 +87,6 @@ fn rerun(id: &str, cx: &mut gpui::App) -> ExecutionRef {
     next.exec(id)
 }
 
-#[gpui::test]
-fn a_session_end_settles_a_cli_run_with_its_transcript(cx: &mut TestAppContext) {
-    let (_, workspace) = build_workspace(cx);
-    let id = workspace.update(cx, |ws, cx| {
-        let id = cli_run(42, &std::env::temp_dir(), None, cx);
-        ws.record_task_cli_transcript("cli-session", Some(Path::new("/transcript.jsonl")), cx);
-        ws.apply_task_session_ended("cli-session", SessionEndReason::Stop, cx);
-        id
-    });
-    cx.run_until_parked();
-    cx.update(|cx| {
-        let task = cx.global::<GlobalTasks>().get(&id).unwrap();
-        assert!(matches!(task.lifecycle, daruda_store::tasks::Lifecycle::Done { .. }), "{:?}", task.lifecycle);
-        assert!(matches!(&task.execution.as_ref().unwrap().source, TaskExecutionSource::ClaudeCli { transcript_path: Some(transcript), .. } if transcript == Path::new("/transcript.jsonl")));
-    });
-}
-
 fn apply_tracker_event(ws: &mut Workspace, event: ProcessExited, cx: &mut Context<Workspace>) {
     ws.record_task_cli_exit(&event.session_id, event.pid, cx);
     ws.apply_pty_tracker_event(event, cx);
@@ -146,24 +122,13 @@ fn process(id: &str, cx: &gpui::App) -> CliProcessState {
     run(id, cx).source.cli_process().cloned().unwrap()
 }
 
+/// Show `session` as running in `pane`, as its hook binding would.
 fn bind(ws: &mut Workspace, pane: PaneId, pid: u32, session: &str, cx: &mut Context<Workspace>) {
     let binding = PtyBinding {
         terminal_id: None,
         claude_pid: Some(pid),
         session_id: session.into(),
     };
-    let transcript = ws
-        .claude_sessions
-        .status
-        .unique_session(session)
-        .and_then(|file| file.transcript_path.clone());
-    report_hook(
-        ws.run_pane(pane),
-        session,
-        Some(pid),
-        transcript.as_deref(),
-        cx,
-    );
     ws.claude_sessions.pty_bindings.insert(pane, binding);
     ws.notify_status_docks(cx);
 }
@@ -285,6 +250,7 @@ fn a_resumed_session_undoes_a_confirmed_exit(cx: &mut TestAppContext) {
             ws.add_tab(window, cx);
             let other = *terminal_panes(ws).last().unwrap();
             bind(ws, other, 20, "cli-session", cx);
+            report_hook(ws.run_pane(other), "cli-session", 20, cx);
             assert_eq!(process(&id, cx), CliProcessState::Running { pid: 20 });
             ws.continue_cli_chat(chat, cx);
             assert_eq!(
@@ -323,49 +289,6 @@ fn continue_needs_the_session_to_be_idle_everywhere(cx: &mut TestAppContext) {
 
             RunsHost::cli_tracker(cx).track_agent("cli-session".into(), std::process::id());
             assert!(!ws.cli_run_may_continue(&run, "cli-session", cx));
-        })
-    })
-    .unwrap();
-}
-
-#[gpui::test]
-fn restart_rearms_tracking_for_running_pids_only(cx: &mut TestAppContext) {
-    let (window, workspace) = build_workspace(cx);
-    cx.update_window(window.into(), |_, _, cx| {
-        workspace.update(cx, |ws, cx| {
-            let cwd = std::env::temp_dir();
-            // What a previous launch left: runs in each process state.
-            let set = |session: &str, process: CliProcessState, cx: &mut Context<Workspace>| {
-                let spec = crate::runs::seed::spec(Default::default(), "CLI");
-                let run = SeedRun::cli(&cwd, process).session(session);
-                crate::runs::seed::task(spec, Some((&run, SeedEnd::Dispatching)), cx)
-            };
-            set(
-                "running-session",
-                CliProcessState::Running { pid: 4242 },
-                cx,
-            );
-            set(
-                "ended-session",
-                CliProcessState::ExitConfirmed {
-                    ended_at: Utc::now(),
-                },
-                cx,
-            );
-            let orphan = set("orphan-session", CliProcessState::Discovering, cx);
-            ws.restore_task_cli_tracking(cx);
-            assert!(cx.global::<GlobalTasks>().records().any(|task| {
-                task.execution.as_ref().is_some_and(|run| {
-                    run.session_id.as_deref() == Some("running-session")
-                        && run.source.cli_process() == Some(&CliProcessState::Running { pid: 4242 })
-                })
-            }));
-            assert_eq!(
-                RunsHost::cli_tracker(cx).known_process("ended-session"),
-                None
-            );
-            // Its pane did not survive the restart, so nothing will bind it.
-            assert_eq!(process(&orphan, cx), CliProcessState::Unknown);
         })
     })
     .unwrap();

@@ -2,7 +2,7 @@
 //! stands and why it ended. The task log records causes; these name them.
 
 use daruda_store::tasks::machine::{ErrorCause, InterruptCause, StartFailure, UndeliveredReason};
-use daruda_store::tasks::{Lifecycle, SessionEndReason, TASK_TOOL_USE_FAILURE_THRESHOLD};
+use daruda_store::tasks::{Lifecycle, RECORDED_TOOL_FAILURE_COUNT, SessionEndReason};
 use gpui::SharedString;
 
 use crate::surface::strings;
@@ -65,7 +65,7 @@ fn error_text(cause: &ErrorCause) -> String {
         ErrorCause::StartFailed(failure) => start_failure_text(*failure),
         ErrorCause::SessionFailed => strings::task::error_session_failed(),
         ErrorCause::ToolFailures => {
-            strings::task::error_tool_use_failure(TASK_TOOL_USE_FAILURE_THRESHOLD)
+            strings::task::error_tool_use_failure(RECORDED_TOOL_FAILURE_COUNT)
         }
         ErrorCause::Imported { message } => message.clone(),
     }

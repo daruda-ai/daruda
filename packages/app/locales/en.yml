@@ -358,8 +358,7 @@ task:
   error_prompt_undelivered: "prompt could not reach the pane (pane closed)"
   error_remote_lane: "Tasks cannot run in remote worktrees. Choose a local worktree."
   error_session_failed: "session error"
-  # Escalation wording — why daruda ended the task itself. Keeps the ACP stop
-  # reason verbatim so it still matches what the adapter reported.
+  # Label for a task the log records as ended by repeated tool failures.
   error_tool_use_failure: "tool_use_failure x%{count}"
   # Lifecycle labels for a run that is starting, never reached its agent, or
   # was stopped before it finished.

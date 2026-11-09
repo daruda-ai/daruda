@@ -14,11 +14,6 @@ use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::LoadIntent;
 
 impl Workspace {
-    #[cfg(test)]
-    pub(in crate::workspace) fn restore_task_cli_tracking(&mut self, cx: &mut Context<Self>) {
-        RunsHost::restore_cli_tracking(&self.data_dir, cx);
-    }
-
     pub(in crate::workspace) fn record_task_cli_transcript(
         &mut self,
         session_id: &str,

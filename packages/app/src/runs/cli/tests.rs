@@ -393,3 +393,88 @@ fn a_live_terminal_resuming_an_ended_runs_session_reports_its_process(cx: &mut T
         );
     });
 }
+
+#[gpui::test]
+fn a_session_end_settles_a_cli_run_with_its_transcript(cx: &mut TestAppContext) {
+    let id = cx.update(|cx| {
+        RunsHost::inline_commits_for_test(cx);
+        let run = old_run("cli-session", 42);
+        let id = seed::task(
+            seed::spec(Default::default(), "CLI"),
+            Some((&run, SeedEnd::Running)),
+            cx,
+        );
+        RunsHost::record_cli_transcript("cli-session", Path::new("/transcript.jsonl"), cx);
+        RunsHost::settle_cli_session("cli-session", SessionEndReason::Stop, cx);
+        id
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let task = cx.global::<GlobalTasks>().get(&id).unwrap();
+        assert!(
+            matches!(task.lifecycle, Lifecycle::Done { .. }),
+            "{:?}",
+            task.lifecycle
+        );
+        assert!(matches!(
+            &task.execution.as_ref().unwrap().source,
+            daruda_store::tasks::TaskExecutionSource::ClaudeCli {
+                transcript_path: Some(transcript),
+                ..
+            } if transcript == Path::new("/transcript.jsonl")
+        ));
+    });
+}
+
+#[gpui::test]
+fn restart_rearms_tracking_for_running_pids_only(cx: &mut TestAppContext) {
+    let data_dir = tempfile::tempdir().unwrap();
+    cx.update(|cx| {
+        RunsHost::inline_commits_for_test(cx);
+        // What a previous launch left: runs in each process state.
+        let set = |session: &str, process: CliProcessState, cx: &mut gpui::App| {
+            let run = SeedRun::cli("/cli", process).session(session);
+            seed::task(
+                seed::spec(Default::default(), "CLI"),
+                Some((&run, SeedEnd::Dispatching)),
+                cx,
+            )
+        };
+        set(
+            "running-session",
+            CliProcessState::Running { pid: 4242 },
+            cx,
+        );
+        set(
+            "ended-session",
+            CliProcessState::ExitConfirmed {
+                ended_at: Utc::now(),
+            },
+            cx,
+        );
+        let orphan = set("orphan-session", CliProcessState::Discovering, cx);
+        RunsHost::restore_cli_tracking(data_dir.path(), cx);
+        assert!(cx.global::<GlobalTasks>().records().any(|task| {
+            task.execution.as_ref().is_some_and(|run| {
+                run.session_id.as_deref() == Some("running-session")
+                    && run.source.cli_process() == Some(&CliProcessState::Running { pid: 4242 })
+            })
+        }));
+        assert_eq!(
+            RunsHost::cli_tracker(cx).known_process("ended-session"),
+            None
+        );
+        // Its pane did not survive the restart, so nothing will bind it.
+        assert_eq!(
+            cx.global::<GlobalTasks>()
+                .get(&orphan)
+                .unwrap()
+                .execution
+                .as_ref()
+                .unwrap()
+                .source
+                .cli_process(),
+            Some(&CliProcessState::Unknown)
+        );
+    });
+}

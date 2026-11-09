@@ -28,9 +28,9 @@ use crate::record::RUN_REPORT_FILE as RUN_MD;
 const WRITE_RECORD: &str = "recording what the run did";
 
 /// Keeps every run's artifacts out of the user's `git status`. The ignore
-/// file lives inside the runs directory rather than at `.daruda/`, so that the
-/// visibility of the `task-*.md` files already living there is not silently
-/// changed.
+/// file lives inside the runs directory rather than at `.daruda/`, so that
+/// whatever else a repository keeps under `.daruda/` stays as visible as it
+/// was.
 const GITIGNORE: &str = ".gitignore";
 const GITIGNORE_BODY: &str = "*\n";
 const WRITE_GITIGNORE: &str = "hiding the run directory from git";

@@ -35,7 +35,7 @@ pub use migrate::migrate_legacy;
 pub use persistence::{load_tasks, load_tasks_in, tasks_path_in};
 pub use store::{ReconcileBlocked, Reconciling, TaskStore, TaskStoreError};
 pub use task::{
-    AgentType, SCHEMA_VERSION, SessionEndReason, SubTask, TASK_TOOL_USE_FAILURE_THRESHOLD, Task,
+    AgentType, RECORDED_TOOL_FAILURE_COUNT, SCHEMA_VERSION, SessionEndReason, SubTask, Task,
     TaskExecution, TaskFilter, TaskFlow, TaskId, TaskRunIn, TaskScope, TaskState, TasksState,
     new_task_id,
 };

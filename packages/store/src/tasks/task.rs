@@ -19,7 +19,7 @@ pub const SCHEMA_VERSION: u32 = 2;
 /// The `PostToolUseFailure` count named in the label of a task the log
 /// records as ended by `ErrorCause::ToolFailures`. Daruda does not count
 /// failures; this value only words those recorded errors.
-pub const TASK_TOOL_USE_FAILURE_THRESHOLD: u32 = 5;
+pub const RECORDED_TOOL_FAILURE_COUNT: u32 = 5;
 
 /// ULID encoded as string — sortable by creation time, globally unique
 /// without coordination.
