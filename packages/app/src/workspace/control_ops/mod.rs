@@ -212,7 +212,7 @@ impl Workspace {
     ///
     /// Activates the worktree first, because that is the only way daruda opens
     /// a pane: the runtime a pane is inserted into is the *active* one, and
-    /// `finalize_create_lane` does the same for the pane it makes. So this
+    /// `finalize_chat_lane` does the same for the pane it makes. So this
     /// changes what is on screen — an agent's tool call moves the user's view.
     pub(crate) fn control_chat_new(
         &mut self,
@@ -311,7 +311,7 @@ impl Workspace {
 
     /// Register a worktree that is already on disk, and report both handles.
     ///
-    /// Delegates to `finalize_create_lane`, which owns branch bookkeeping and
+    /// Delegates to `finalize_chat_lane`, which owns branch bookkeeping and
     /// the initial pane, so nothing here becomes a second way to make a lane.
     pub(in crate::workspace) fn control_lane_finalize(
         &mut self,
@@ -321,13 +321,18 @@ impl Workspace {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Result<(LaneRef, PaneRef), ControlError> {
-        use crate::workspace::lane_ops::{FinalizeError, InitialPane};
+        use crate::workspace::lane_ops::{FinalizeError, LaneReveal};
         let pane = self
-            .finalize_create_lane(plan, project, InitialPane::AgentChat(chat), window, cx)
+            .finalize_chat_lane(plan, project, chat, LaneReveal::Foreground, window, cx)
             .map_err(|e| match e {
                 // The worktree is registered with no chat in it; the agent
-                // the card named is not replaced by another.
-                FinalizeError::AgentUnavailable => ControlError::AgentUnavailable,
+                // the card named is not replaced by another, and the caller
+                // is told where the worktree is.
+                FinalizeError::AgentUnavailable { lane } => {
+                    ControlError::AgentUnavailableWorktreeKept {
+                        worktree: crate::control::result::LaneHandle::new(self.uuid(), lane),
+                    }
+                }
                 // The checkout is on disk and only the bookkeeping failed,
                 // which is not something a caller can fix by asking
                 // differently — so the detail says that rather than

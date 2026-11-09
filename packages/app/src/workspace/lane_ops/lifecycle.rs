@@ -5,7 +5,7 @@ use crate::runs::RunsHost;
 use daruda_store::project::{LaneId, LaneRef, ProjectId};
 use gpui::{Context, Window};
 
-use super::{CreateWorktreePlan, FinalizeError, InitialPane, RemoveWorktreePlan, git_repo_root_of};
+use super::{CreateWorktreePlan, FinalizeError, RemoveWorktreePlan, git_repo_root_of};
 use crate::lane::availability::LaneAvailability;
 use crate::workspace::LaneRuntime;
 use crate::workspace::Workspace;
@@ -181,37 +181,52 @@ impl Workspace {
         git_repo_root_of(&self.project_for(project)?.lanes)
     }
 
-    /// Post-git UI-thread work: spawn a pane at the new checkout, wrap it
-    /// in a Tab / LaneRuntime, register the Lane, and activate it. Errors
-    /// leave the created worktree orphaned on disk (recover via `git
-    /// worktree prune`) and bubble the message back to the modal — except a
-    /// chat whose pinned agent is gone, which registers the lane with
-    /// nothing open and opens no other agent in its place.
-    pub(in crate::workspace) fn finalize_create_lane(
+    /// Post-git UI-thread work for a lane a person makes by hand: spawn a
+    /// shell at the new checkout, wrap it in a Tab / LaneRuntime, register
+    /// the Lane, and activate it. Errors leave the created worktree orphaned
+    /// on disk (recover via `git worktree prune`) and bubble the message back
+    /// to the modal.
+    pub(in crate::workspace) fn finalize_terminal_lane(
         &mut self,
         plan: CreateWorktreePlan,
         project_id: ProjectId,
-        initial: InitialPane,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<PaneId, FinalizeError> {
-        self.finalize_create_lane_as(
+    ) -> Result<PaneId, String> {
+        if self.project_for(project_id).is_none() {
+            return Err(crate::surface::strings::create_lane::err_no_active_project());
+        }
+        let account = self.default_account_selection_for_new_pane(None);
+        let prepared = self.resolve_account(account, pane::AccountDomain::Any);
+        let pane = self
+            .create_pane_with_cwd(
+                Some(plan.new_path.clone()),
+                account,
+                prepared.as_ref(),
+                window,
+                cx,
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(self.register_lane_with_pane(
             plan,
             project_id,
-            initial,
+            pane,
             super::LaneReveal::Foreground,
             window,
             cx,
-        )
+        ))
     }
 
-    /// [`Self::finalize_create_lane`], registering the lane behind the one
-    /// the window shows when `reveal` is `Background`.
-    pub(in crate::workspace) fn finalize_create_lane_as(
+    /// The same for an Agent chat rooted at the new checkout, as tasks and
+    /// the control surface ask for, registered behind the lane the window
+    /// shows when `reveal` is `Background`. A chat whose pinned agent is
+    /// gone registers the lane with nothing open and opens no other agent
+    /// in its place.
+    pub(in crate::workspace) fn finalize_chat_lane(
         &mut self,
         plan: CreateWorktreePlan,
         project_id: ProjectId,
-        initial: InitialPane,
+        chat: crate::workspace::ChatOpen,
         reveal: super::LaneReveal,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -221,43 +236,45 @@ impl Workspace {
                 crate::surface::strings::create_lane::err_no_active_project(),
             ));
         }
-        let new_path = &plan.new_path;
-        let is_chat = matches!(initial, InitialPane::AgentChat(_));
-        // The agent-chat pane parks Idle until it is connected below.
-        let pane = match initial {
-            InitialPane::Terminal => {
-                let account = self.default_account_selection_for_new_pane(None);
-                let prepared = self.resolve_account(account, pane::AccountDomain::Any);
-                self.create_pane_with_cwd(
-                    Some(new_path.clone()),
-                    account,
-                    prepared.as_ref(),
-                    window,
-                    cx,
-                )
-                .map_err(|e| FinalizeError::Failed(e.to_string()))?
-            }
-            InitialPane::AgentChat(chat) => {
-                let Ok(agent_id) = self.resolve_chat_agent(&chat.agent) else {
-                    self.register_created_lane(plan, project_id, None, reveal, window, cx);
-                    return Err(FinalizeError::AgentUnavailable);
-                };
-                // No source pane (new lane). A brand-new lane has neither a
-                // legacy `remote_cwd` nor a `session_host` yet, so an agent
-                // whose command needs the legacy `{{cwd}}` token parks in
-                // the "no remote path set" error rather than connecting;
-                // every other launch shape resolves to `Local`.
-                self.create_new_agent_chat_pane(
-                    agent_id,
-                    Some(new_path.clone()),
-                    None,
-                    None,
-                    chat.mode,
-                    window,
-                    cx,
-                )
-            }
+        let Ok(agent_id) = self.resolve_chat_agent(&chat.agent) else {
+            let lane = self.register_created_lane(plan, project_id, None, reveal, window, cx);
+            return Err(FinalizeError::AgentUnavailable { lane });
         };
+        // The pane parks Idle until it is connected below. No source pane
+        // (new lane): a brand-new lane has neither a legacy `remote_cwd` nor
+        // a `session_host` yet, so an agent whose command needs the legacy
+        // `{{cwd}}` token parks in the "no remote path set" error rather
+        // than connecting; every other launch shape resolves to `Local`.
+        let pane = self.create_new_agent_chat_pane(
+            agent_id,
+            Some(plan.new_path.clone()),
+            None,
+            None,
+            chat.mode,
+            window,
+            cx,
+        );
+        let pane_id = self.register_lane_with_pane(plan, project_id, pane, reveal, window, cx);
+        // Focusing the pane is what connects an Agent chat's session; one
+        // left behind connects here.
+        if reveal == super::LaneReveal::Background {
+            self.maybe_connect_agent_chat(pane_id, cx);
+        }
+        // Task starts deliver their prompt to this pane by id: a background
+        // lane leaves `focused_pane_id` elsewhere.
+        Ok(pane_id)
+    }
+
+    /// Wrap `pane` in the new lane's only tab and register the lane.
+    fn register_lane_with_pane(
+        &mut self,
+        plan: CreateWorktreePlan,
+        project_id: ProjectId,
+        pane: pane::Pane,
+        reveal: super::LaneReveal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> PaneId {
         let pane_id = pane.id;
         let tab_id = self.alloc_id();
         let tab = pane::TabEntry {
@@ -275,14 +292,7 @@ impl Workspace {
             focused_pane_id: pane_id,
         };
         self.register_created_lane(plan, project_id, Some(runtime), reveal, window, cx);
-        // Focusing the pane is what connects an Agent chat's session; one
-        // left behind connects here.
-        if reveal == super::LaneReveal::Background && is_chat {
-            self.maybe_connect_agent_chat(pane_id, cx);
-        }
-        // Task starts deliver their prompt to this pane by id: a background
-        // lane leaves `focused_pane_id` elsewhere.
-        Ok(pane_id)
+        pane_id
     }
 
     /// Register the worktree `git worktree add` just made as a lane of

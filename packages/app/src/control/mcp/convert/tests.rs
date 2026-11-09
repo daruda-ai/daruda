@@ -244,11 +244,40 @@ fn every_new_refusal_travels_as_its_code() {
         (ControlError::ApprovalUnavailable, "approval_unavailable"),
         (ControlError::ApprovalsPending, "approvals_pending"),
         (ControlError::AgentUnavailable, "agent_unavailable"),
+        (
+            ControlError::AgentUnavailableWorktreeKept {
+                worktree: crate::control::result::LaneHandle {
+                    workspace: daruda_store::project::WorkspaceUuid::new(),
+                    project: 1,
+                    lane: 2,
+                },
+            },
+            "agent_unavailable_worktree_kept",
+        ),
     ] {
         let v = to_tool_result(&Err(error));
         assert_eq!(v["isError"], true);
         assert_eq!(payload(&v)["code"], code);
     }
+}
+
+/// A worktree a refused chat left behind travels with its handle, so the
+/// caller can open a chat there instead of retrying a name git now refuses.
+#[test]
+fn a_kept_worktree_travels_with_its_handle() {
+    let worktree = crate::control::result::LaneHandle {
+        workspace: daruda_store::project::WorkspaceUuid::new(),
+        project: 3,
+        lane: 7,
+    };
+    let v = to_tool_result(&Err(ControlError::AgentUnavailableWorktreeKept {
+        worktree,
+    }));
+    assert_eq!(v["isError"], true);
+    let inner = payload(&v);
+    assert_eq!(inner["code"], "agent_unavailable_worktree_kept");
+    assert_eq!(inner["worktree"]["project"], 3);
+    assert_eq!(inner["worktree"]["worktree"], 7);
 }
 
 /// The model's most common failure has to be the most branchable one:

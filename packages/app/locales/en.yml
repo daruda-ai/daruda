@@ -2463,6 +2463,8 @@ control:
   error_task_branch_taken: "Another worktree already has that branch checked out."
   error_approvals_pending: "Too many approvals are already waiting. Answer one first."
   error_agent_unavailable: "The agent that approval named is no longer set up, so no chat was opened."
+  # The same, found after git made the worktree: it is kept, empty.
+  error_agent_unavailable_worktree_kept: "The agent that approval named is no longer set up, so no chat was opened. The worktree was still created and stays in daruda with nothing open in it."
   error_approval_unavailable: "daruda could not ask for approval — no desktop or remote channel is available."
   error_lane_create_busy: "A worktree is already being created in that repository. Try again in a moment."
   error_self_target_refused: "That would have the agent prompt itself."

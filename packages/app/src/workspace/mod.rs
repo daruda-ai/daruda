@@ -506,7 +506,7 @@ pub struct Workspace {
     pub(in crate::workspace) persistence_suspended: bool,
     /// Per-repo lock that prevents two concurrent `start_task`
     /// invocations from racing on `git worktree add` against the same
-    /// repository. Cleared after `finalize_create_lane` returns.
+    /// repository. Released once git returns, before the lane is finalized.
     pub(in crate::workspace) pending_lane_creates: HashSet<std::path::PathBuf>,
     /// Background watches and their pumps — see [`lifetimes::Pumps`].
     pub(in crate::workspace) pumps: lifetimes::Pumps,

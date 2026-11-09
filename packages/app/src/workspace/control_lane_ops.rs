@@ -3,7 +3,7 @@
 //! Its own file because it is the one control operation that cannot answer in
 //! one turn of the event loop: `git worktree add` is blocking, so this is
 //! plan → background git → register, the same three steps the task workflow
-//! runs. `finalize_create_lane` owns the third one, so nothing here becomes a
+//! runs. `finalize_chat_lane` owns the third one, so nothing here becomes a
 //! second way to make a lane.
 //!
 //! The orchestration lives inside `crate::workspace` so `CreateWorktreePlan`

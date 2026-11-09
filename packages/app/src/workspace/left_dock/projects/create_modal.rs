@@ -27,7 +27,7 @@ use crate::ui::select::{self, SelectOption, SelectState};
 use crate::ui::{InputEvent, InputState, button, button_primary, form_input};
 use crate::workspace::ModalView;
 use crate::workspace::Workspace;
-use crate::workspace::lane_ops::{CreateWorktreePlan, FinalizeError};
+use crate::workspace::lane_ops::CreateWorktreePlan;
 use daruda_config::SessionHostEntry;
 use daruda_core::git::sanitize_branch_name;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -278,7 +278,7 @@ impl CreateWorktreeModal {
         };
         // Resolve base_ref against the project at submit time. Best-effort:
         // if the workspace is gone we proceed with the raw input and
-        // finalize_create_lane will reject if the project itself is gone.
+        // finalize_terminal_lane will reject if the project itself is gone.
         if let Some(ws) = self.workspace.upgrade() {
             plan.base_ref = ws
                 .read(cx)
@@ -319,26 +319,11 @@ impl CreateWorktreeModal {
                         Ok(()) => match workspace.upgrade() {
                             Some(ws) => ws
                                 .update(app_cx, |ws, cx| {
-                                    ws.finalize_create_lane(
-                                        plan.clone(),
-                                        project_id,
-                                        crate::workspace::lane_ops::InitialPane::Terminal,
-                                        window,
-                                        cx,
-                                    )
+                                    ws.finalize_terminal_lane(plan.clone(), project_id, window, cx)
                                 })
                                 // The left dock opener doesn't need the
-                                // newly-spawned pane id — only
-                                // start_task does. Discard it. A shell has
-                                // no agent to lose, so only `Failed` is
-                                // reachable here.
-                                .map(|_pane_id| ())
-                                .map_err(|e| match e {
-                                    FinalizeError::Failed(message) => message,
-                                    FinalizeError::AgentUnavailable => {
-                                        s::control::error_agent_unavailable()
-                                    }
-                                }),
+                                // newly-spawned pane id. Discard it.
+                                .map(|_pane_id| ()),
                             None => Ok(()),
                         },
                     };

@@ -1,6 +1,7 @@
 //! An agent an approval card pinned is removed after the early check but
 //! before its chat opens: the open is refused rather than handed to another
-//! agent, and no prompt reaches anything.
+//! agent, no prompt reaches anything, and a worktree git already made is
+//! kept and named in the refusal.
 
 use super::*;
 use crate::control::result::ControlError;
@@ -49,7 +50,8 @@ fn lane_count(ws: &Workspace) -> usize {
 }
 
 /// `worktree_create`'s agent goes while git runs: the worktree is kept as a
-/// lane with nothing open in it, and no other agent opens there.
+/// lane with nothing open in it, no other agent opens there, and the caller
+/// is told which worktree it kept.
 #[gpui::test]
 async fn a_worktree_whose_pinned_agent_left_during_git_opens_no_chat(cx: &mut TestAppContext) {
     if !crate::lane::git::has_git() {
@@ -81,12 +83,19 @@ async fn a_worktree_whose_pinned_agent_left_during_git_opens_no_chat(cx: &mut Te
         })
         .unwrap();
     cx.executor().allow_parking();
-    assert_eq!(answer.recv().await, Ok(Err(ControlError::AgentUnavailable)));
+    let refused = answer.recv().await.expect("answered");
     cx.run_until_parked();
     assert!(checkout.is_dir(), "git made the worktree");
     workspace.read_with(cx, |ws, _| {
         assert_eq!(lane_count(ws), lanes + 1, "and it is kept as a lane");
         let lane = ws.lane_ref_at(&checkout).expect("registered");
+        assert_eq!(
+            refused,
+            Err(ControlError::AgentUnavailableWorktreeKept {
+                worktree: crate::control::result::LaneHandle::new(ws.uuid(), lane)
+            }),
+            "the refusal names the worktree it kept"
+        );
         assert!(
             ws.main_area
                 .runtimes
@@ -126,6 +135,89 @@ fn an_existing_lane_task_whose_pinned_agent_left_opens_no_chat(cx: &mut TestAppC
     cx.run_until_parked();
     assert_eq!(answer.try_recv(), Ok(Err(TaskStartError::AgentUnavailable)));
     workspace.read_with(cx, |ws, _| assert_eq!(ws.all_pane_ids(), panes));
+    let lifecycle = cx.update(|cx| {
+        cx.global::<crate::runs::GlobalTasks>()
+            .get(&id)
+            .unwrap()
+            .lifecycle
+            .clone()
+    });
+    assert!(
+        matches!(
+            lifecycle,
+            Lifecycle::Error {
+                cause: daruda_store::tasks::machine::ErrorCause::StartFailed(
+                    daruda_store::tasks::machine::StartFailure::AgentMissing
+                ),
+                ..
+            }
+        ),
+        "the recorded start fails as a missing agent: {lifecycle:?}"
+    );
+}
+
+/// A new-worktree task start's pinned agent goes while the start is
+/// recorded: git still makes the worktree, which is kept as a lane with
+/// nothing open; the start fails as a missing agent, and the control answer
+/// names the worktree it left.
+#[gpui::test]
+async fn a_new_worktree_task_whose_pinned_agent_left_keeps_its_worktree(cx: &mut TestAppContext) {
+    if !crate::lane::git::has_git() {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    super::tasks::git_repo(temp.path());
+    let project = daruda_store::project::Project::from_path(temp.path());
+    let (window, workspace) = build_workspace_with(cx, &with_other(), Some(project));
+    workspace.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
+    cx.run_until_parked();
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let (id, answer, panes, lanes) = cx
+        .update_window(window.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                let mut spec = crate::runs::seed::spec(ws.projects[0].uuid, "Fix it");
+                spec.run_in = TaskRunIn::NewWorktree;
+                spec.branch_name = "pinned-task".into();
+                let id = crate::runs::seed::task(spec, None, cx);
+                let panes = ws.all_pane_ids();
+                let lanes = lane_count(ws);
+                let submitter = crate::runs::FlowSubmitter::Orchestrator { solicited: false };
+                let answer = ws.control_task_start(&id, submitter, Some(OTHER.into()), window, cx);
+                ws.reload_config(&without_other(), cx);
+                (id, answer, panes, lanes)
+            })
+        })
+        .unwrap();
+    cx.executor().allow_parking();
+    let refused = answer.recv().await.expect("answered");
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, _| {
+        assert_eq!(
+            lane_count(ws),
+            lanes + 1,
+            "git made the worktree, kept as a lane"
+        );
+        let Err(ControlError::AgentUnavailableWorktreeKept { worktree }) = refused else {
+            panic!("the answer names the worktree the start left: {refused:?}");
+        };
+        assert_eq!(worktree.workspace, ws.uuid());
+        let lane = worktree.lane_ref();
+        let kept = ws.lane_for(lane).expect("the task's worktree is registered");
+        assert!(kept.path.is_dir(), "on disk");
+        assert!(
+            matches!(&kept.kind, daruda_store::project::LaneKind::Git { branch: Some(b), .. } if b == "pinned-task"),
+            "on the task's branch: {:?}",
+            kept.kind
+        );
+        assert!(
+            ws.main_area
+                .runtimes
+                .get(&lane)
+                .is_none_or(|rt| rt.panes.is_empty()),
+            "with nothing open in it"
+        );
+        assert_eq!(ws.all_pane_ids(), panes, "no other agent opened anywhere");
+    });
     let lifecycle = cx.update(|cx| {
         cx.global::<crate::runs::GlobalTasks>()
             .get(&id)

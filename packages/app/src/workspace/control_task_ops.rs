@@ -196,7 +196,7 @@ impl Workspace {
         &self,
         outcome: Result<TaskStarted, TaskStartError>,
     ) -> ControlTaskStart {
-        let started = outcome.map_err(control_start_error)?;
+        let started = outcome.map_err(|e| control_start_error(e, self.uuid()))?;
         let lane = self
             .lane_ref_at(&started.worktree)
             .ok_or(ControlError::TargetGone)?;
@@ -232,7 +232,11 @@ fn control_commit_error(e: TaskCommitError) -> ControlError {
 
 /// A start failure in the control vocabulary. The detail strings are for
 /// the model reading the result, not for a person, so they stay English.
-fn control_start_error(e: TaskStartError) -> ControlError {
+/// `workspace` qualifies a worktree the failure left behind.
+fn control_start_error(
+    e: TaskStartError,
+    workspace: daruda_store::project::WorkspaceUuid,
+) -> ControlError {
     match e {
         TaskStartError::RemoteLane => ControlError::TaskStartFailed {
             detail: daruda_store::tasks::TaskRejected::RemoteLane.to_string(),
@@ -259,6 +263,11 @@ fn control_start_error(e: TaskStartError) -> ControlError {
         },
         TaskStartError::FlowRefused { detail, .. } => ControlError::TaskStartFailed { detail },
         TaskStartError::AgentUnavailable => ControlError::AgentUnavailable,
+        TaskStartError::AgentUnavailableWorktreeKept { lane } => {
+            ControlError::AgentUnavailableWorktreeKept {
+                worktree: crate::control::result::LaneHandle::new(workspace, lane),
+            }
+        }
     }
 }
 

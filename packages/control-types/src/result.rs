@@ -765,6 +765,13 @@ pub enum ControlError {
     /// The agent an approval card named was removed before the work ran.
     /// Refused rather than opened under another agent the person never saw.
     AgentUnavailable,
+    /// [`Self::AgentUnavailable`], found after git had already made the
+    /// worktree: `worktree` is registered with no chat in it. Its own code,
+    /// because the recovery differs — a retry with the same name fails on
+    /// the branch, while a chat can be opened in `worktree` as it is.
+    AgentUnavailableWorktreeKept {
+        worktree: LaneHandle,
+    },
 }
 
 impl std::fmt::Display for ControlError {
@@ -847,6 +854,10 @@ impl std::fmt::Display for ControlError {
             Self::AgentUnavailable => {
                 write!(f, "the agent the approval named is no longer configured")
             }
+            Self::AgentUnavailableWorktreeKept { .. } => write!(
+                f,
+                "the agent the approval named is no longer configured; the worktree was created and kept with no chat in it"
+            ),
         }
     }
 }

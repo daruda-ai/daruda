@@ -284,13 +284,20 @@ edit moves a following session to the new mode, and a person's pick stands.
 The agent is resolved when the card is built and pinned as
 `ChatAgent::Pinned`; the pane open resolves it again
 (`Workspace::resolve_chat_agent`), so an agent removed meanwhile is refused as
-`agent_unavailable` rather than replaced. A `worktree_create` refused after
-git keeps its worktree as a lane with nothing open; a recorded task start
-fails as `AgentMissing`. A card discloses the agent, the requested mode and
-the prompt through `agent_text`: titles and prompts are flattened to one
-line without bidi or invisible characters, and a long prompt shows its start
-and end around the count it leaves out; a card for a chat already open names
-no mode, since that pane keeps its own.
+`agent_unavailable` rather than replaced. Found after git, the worktree is
+kept as a lane with nothing open and the refusal is
+`agent_unavailable_worktree_kept`, carrying its handle, so the caller can
+open a chat there rather than retry a branch name git now refuses; it spends
+the agent's worktree budget like a success. A recorded task start fails as
+`AgentMissing` either way. A card discloses the agent, the requested mode,
+the task title and the prompt through `agent_text`: titles and prompts are
+flattened to one line, their quote marks neutralized, a long one shows its
+start and end around the count it leaves out, and the invisible characters
+dropped (bidi, zero-width, tag) are counted, since the agent still receives
+them. A mode name the adapter advertised that daruda's seed does not match
+is shown beside the mode id. Phone `/task` rows quote titles the same way.
+A card for a chat already open names no mode, since that pane keeps its
+own.
 
 `control/approval` owns the process-wide pending decision. The orchestrator's
 host-owned card strip remains answerable without a remote channel. Desktop and

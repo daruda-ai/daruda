@@ -156,7 +156,7 @@ fn run_gated_with(
                     Ok(permit) => {
                         let outcome = perform(asked, caller, cx).await;
                         if let Some(permit) = permit {
-                            cx.update(|cx| permit.finish(outcome.is_ok(), cx));
+                            cx.update(|cx| permit.finish(left_a_worktree(&outcome), cx));
                         }
                         outcome
                     }
@@ -254,6 +254,15 @@ fn guard_gated(asked: &Asked, cx: &mut App) -> Result<(), ControlError> {
         // more by the resume itself.
         Asked::FlowResume(_) => Ok(()),
     }
+}
+
+/// Whether a creation spent its slot: a refusal that kept its worktree
+/// made one as surely as a success did.
+fn left_a_worktree(outcome: &ControlOutcome) -> bool {
+    matches!(
+        outcome,
+        Ok(_) | Err(ControlError::AgentUnavailableWorktreeKept { .. })
+    )
 }
 
 fn task_creates_lane(task: &daruda_store::tasks::TaskRecord) -> bool {

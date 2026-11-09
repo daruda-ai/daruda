@@ -17,7 +17,7 @@ use daruda_store::tasks::{
 use gpui::{App, Context, Window};
 
 use crate::runs::{GlobalTasks, RunsHost, TaskCommitError};
-use crate::workspace::lane_ops::{CreateWorktreePlan, FinalizeError, InitialPane, LaneReveal};
+use crate::workspace::lane_ops::{CreateWorktreePlan, FinalizeError, LaneReveal};
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{ChatAgent, ChatOpen, Workspace, mode_for};
 use daruda_chat::view::AgentSessionStatus;
@@ -61,6 +61,11 @@ pub(crate) enum TaskStartError {
     /// The agent a control start's card named was removed. Before the start
     /// was recorded, nothing was; after, no pane opened under another agent.
     AgentUnavailable,
+    /// [`Self::AgentUnavailable`] found after git made the task's new
+    /// worktree: `lane` is registered with nothing open in it.
+    AgentUnavailableWorktreeKept {
+        lane: daruda_store::project::LaneRef,
+    },
     /// The task's flow is not one its lane can run by that name.
     FlowMissing,
     /// The task's flow could not run as the task describes it, or refused
@@ -106,14 +111,16 @@ pub(super) type Answer = smol::channel::Sender<TaskStartOutcome>;
 
 impl TaskStartError {
     /// The cause the task log records for a start that failed after it was
-    /// requested; `None` where no run was recorded to fail.
+    /// requested; `None` where no run was recorded to fail. Only a recorded
+    /// start asks: a refusal taken before recording reaches
+    /// `finish_task_start` with no execution, so its cause is never read.
     fn failure(&self) -> Option<StartFailure> {
         Some(match self {
             Self::NotFound => StartFailure::NotFound,
             Self::NotBacklog | Self::NotRecorded { .. } | Self::RemoteLane => return None,
-            // Refused before recording, there is no run to fail; once it was
-            // recorded, the pinned agent went while its pane was opened.
-            Self::AgentUnavailable => StartFailure::AgentMissing,
+            Self::AgentUnavailable | Self::AgentUnavailableWorktreeKept { .. } => {
+                StartFailure::AgentMissing
+            }
             Self::ProjectNotOpen => StartFailure::ProjectNotOpen,
             Self::NoGitRepo => StartFailure::NoGitRepo,
             Self::RepoBusy => StartFailure::RepoBusy,
@@ -142,6 +149,7 @@ impl TaskStartError {
             Self::NotFound
             | Self::NotBacklog
             | Self::AgentUnavailable
+            | Self::AgentUnavailableWorktreeKept { .. }
             | Self::PaneUnavailable
             | Self::PromptUndelivered { .. }
             | Self::WindowClosed => return None,
@@ -523,19 +531,20 @@ impl Workspace {
                         return false;
                     };
                     workspace.update(app_cx, |ws, cx| {
-                        // Lock is released *before* finalize_create_lane
-                        // runs. If finalize fails the new git worktree is
-                        // already on disk — daruda just doesn't know about
-                        // it (`git worktree prune` cleans it up). Released
+                        // Lock is released *before* finalize_chat_lane runs,
                         // so a retry against the same repo isn't blocked.
+                        // The worktree is on disk either way: a failed
+                        // finalize leaves it unregistered (`git worktree
+                        // prune` cleans it up), a removed agent registers it
+                        // with nothing open.
                         ws.release_repo_lock(&plan.repo_root);
                         let started = result
                             .map_err(|detail| TaskStartError::GitAddFailed { detail })
                             .and_then(|()| {
-                                ws.finalize_create_lane_as(
+                                ws.finalize_chat_lane(
                                     plan.clone(),
                                     project_id,
-                                    InitialPane::AgentChat(chat.clone()),
+                                    chat.clone(),
                                     reveal,
                                     window,
                                     cx,
@@ -544,8 +553,8 @@ impl Workspace {
                                     FinalizeError::Failed(detail) => {
                                         TaskStartError::FinalizeFailed { detail }
                                     }
-                                    FinalizeError::AgentUnavailable => {
-                                        TaskStartError::AgentUnavailable
+                                    FinalizeError::AgentUnavailable { lane } => {
+                                        TaskStartError::AgentUnavailableWorktreeKept { lane }
                                     }
                                 })
                             })

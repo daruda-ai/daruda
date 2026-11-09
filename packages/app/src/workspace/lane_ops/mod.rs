@@ -48,25 +48,15 @@ pub(in crate::workspace) enum LaneReveal {
     Background,
 }
 
-/// The first pane a new lane opens with.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::workspace) enum InitialPane {
-    /// A shell, as a lane the person makes by hand opens with.
-    Terminal,
-    /// An Agent chat rooted at the new checkout, as tasks and the control
-    /// surface ask for.
-    AgentChat(crate::workspace::ChatOpen),
-}
-
-/// Why a created worktree did not open with its first pane.
+/// Why a created worktree did not open with its first chat.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum FinalizeError {
     /// Nothing was registered; the message says why, as the create form
     /// shows it.
     Failed(String),
-    /// The chat's pinned agent is gone. The lane is registered with nothing
+    /// The chat's pinned agent is gone. `lane` is registered with nothing
     /// open, so the worktree on disk is not lost to the person.
-    AgentUnavailable,
+    AgentUnavailable { lane: daruda_store::project::LaneRef },
 }
 
 /// Counterpart to `CreateWorktreePlan` for the remove path.
@@ -89,7 +79,7 @@ pub(in crate::workspace) fn lane_label(project_name: &str, lane: &crate::lane::L
 impl Workspace {
     /// Resolve the base ref for a new lane against the active project
     /// (lanes are created into `active_project()`, matching
-    /// `finalize_create_lane`). Single resolution point — both
+    /// `finalize_terminal_lane`). Single resolution point — both
     /// `add_lane` consumers route through this so the recorded base
     /// always matches what git actually branched from.
     pub(in crate::workspace) fn resolve_lane_base_ref(
