@@ -1,8 +1,8 @@
 use crate::lane::git::{GitDirs, GitError};
-use crate::workspace::tests::GitFixture;
 use crate::workspace::Workspace;
 use crate::workspace::left_dock::git_ops::health::{COOLDOWN, ReadOrigin};
 use crate::workspace::left_dock::git_ops::status::ReadRequest;
+use crate::workspace::tests::GitFixture;
 use daruda_store::observability::error_report::ErrorReport;
 use daruda_store::project::LaneRef;
 use gpui::{Context, TestAppContext};
@@ -96,7 +96,6 @@ fn git_refresh_health_tracking_failure_reports_the_whole_outage(cx: &mut TestApp
     use daruda_store::observability::error_report::ErrorSeverity;
 
     let temp = tempfile::tempdir().unwrap();
-    crate::test_support::fake_git(cx);
     let (_window, ws) = crate::workspace::tests::build_workspace_with(
         cx,
         &daruda_config::Config::default(),
@@ -147,7 +146,6 @@ fn git_refresh_health_repository_failure_keeps_its_axis_diagnostic(cx: &mut Test
     use daruda_store::observability::error_report::ErrorSeverity;
 
     let temp = tempfile::tempdir().unwrap();
-    crate::test_support::fake_git(cx);
     let (_window, ws) = crate::workspace::tests::build_workspace_with(
         cx,
         &daruda_config::Config::default(),
@@ -198,7 +196,6 @@ fn git_refresh_health_repository_failure_keeps_its_axis_diagnostic(cx: &mut Test
 #[gpui::test]
 fn git_refresh_health_blocks_launches_and_reports_until_recovery(cx: &mut TestAppContext) {
     let temp = tempfile::tempdir().unwrap();
-    crate::test_support::fake_git(cx);
     let (_window, ws) = crate::workspace::tests::build_workspace_with(
         cx,
         &daruda_config::Config::default(),
@@ -263,7 +260,6 @@ fn git_refresh_health_blocks_launches_and_reports_until_recovery(cx: &mut TestAp
 #[gpui::test]
 fn git_refresh_health_drops_old_results_and_releases_slots(cx: &mut TestAppContext) {
     let temp = tempfile::tempdir().unwrap();
-    crate::test_support::fake_git(cx);
     let (_window, ws) = crate::workspace::tests::build_workspace_with(
         cx,
         &daruda_config::Config::default(),

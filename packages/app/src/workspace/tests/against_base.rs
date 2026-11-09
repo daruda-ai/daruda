@@ -19,6 +19,7 @@ fn feature_tips(head: &str) -> BaseTips {
 }
 
 fn feature_repo(repo: FakeRepo, head: &str, files: Vec<RangeFile>) -> FakeRepo {
+    // An empty range is the lane after a second commit took the file back out.
     let commits = if files.is_empty() { 2 } else { 1 };
     repo.branch("feature")
         .default_branch("main")

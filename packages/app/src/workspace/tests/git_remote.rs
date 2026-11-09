@@ -175,8 +175,8 @@ fn external_commit_refreshes_linked_lane_through_the_git_dir_watcher(cx: &mut Te
         assert_eq!(ws.lane_git_worktree(target).unwrap().staged.len(), 1);
     });
 
-    // What a real commit in a linked lane rewrites (`a_commit_in_a_linked_
-    // lane_rewrites_its_own_index` in daruda_project).
+    // What a real commit in a linked lane rewrites, per daruda_project's
+    // `a_commit_in_a_linked_lane_rewrites_its_own_index`.
     std::fs::write(lanes.side.join("index"), b"after the commit").unwrap();
     wait_for_watch_refresh(cx, &ws, |ws| {
         ws.lane_git_worktree(target)
@@ -242,8 +242,8 @@ fn external_fetch_refreshes_tracking_for_every_lane(cx: &mut TestAppContext) {
         }
     });
 
-    // What a real fetch writes (`a_fetch_moves_the_shared_remote_ref_and_
-    // every_lanes_tracking` in daruda_project).
+    // What a real fetch writes, per daruda_project's
+    // `a_fetch_moves_the_shared_remote_ref_and_every_lanes_tracking`.
     let remote_ref = lanes.common.join("refs").join("remotes").join("origin");
     std::fs::create_dir_all(&remote_ref).unwrap();
     std::fs::write(remote_ref.join("main"), b"0123456789abcdef\n").unwrap();

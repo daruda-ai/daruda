@@ -161,7 +161,6 @@ mod tests {
     /// locks do not interfere.
     #[gpui::test]
     fn one_op_holds_the_lock_and_releases_it_before_its_continuation(cx: &mut TestAppContext) {
-        crate::test_support::fake_git(cx);
         let (_wh, ws) = crate::workspace::tests::build_workspace(cx);
         let target = ws.read_with(cx, |ws, _| ws.active);
 

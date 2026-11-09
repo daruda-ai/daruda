@@ -182,9 +182,10 @@ async fn task_start_runs_the_task_the_listing_numbered(cx: &mut gpui::TestAppCon
     });
 }
 
-/// A start that fails after the reply — here git refuses a branch that
-/// is already checked out — reaches the phone as a notice of its own. That
-/// real git refuses it is `daruda_project`'s `tests/it/git.rs`.
+/// A start that fails after the reply — here git, scripted to fail, refuses
+/// a branch that already exists — reaches the phone as a notice of its own.
+/// That real git refuses it is `daruda_project`'s
+/// `add_worktree_with_existing_branch_fails_cleanly`.
 #[gpui::test]
 async fn a_task_start_that_fails_later_is_told_as_a_notice(cx: &mut gpui::TestAppContext) {
     use crate::control::spec::{ControlCommand, Ordinal, TaskCommand};
@@ -288,7 +289,7 @@ async fn a_task_start_that_fails_later_is_told_as_a_notice(cx: &mut gpui::TestAp
     assert_eq!(
         crate::test_support::added_lane(&fake).new_branch.as_deref(),
         Some("main"),
-        "the start asked git for the checked-out branch"
+        "the start asked git for the existing branch"
     );
     assert_eq!(fake.calls().len(), 1, "the only write: {:?}", fake.calls());
 }
