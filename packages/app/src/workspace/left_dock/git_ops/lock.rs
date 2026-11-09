@@ -143,7 +143,7 @@ mod tests {
     use gpui::{AppContext, TestAppContext};
 
     use super::GitLock;
-    use crate::lane::git::GitError;
+    use crate::lane::git::{FakeRepo, GitError};
 
     /// Every locked op reports success or failure, so the helpers below can
     /// stand in for real git work without hiding the shape the lock depends on.
@@ -161,6 +161,7 @@ mod tests {
     /// locks do not interfere.
     #[gpui::test]
     fn one_op_holds_the_lock_and_releases_it_before_its_continuation(cx: &mut TestAppContext) {
+        crate::test_support::fake_git(cx);
         let (_wh, ws) = crate::workspace::tests::build_workspace(cx);
         let target = ws.read_with(cx, |ws, _| ws.active);
 
@@ -209,7 +210,7 @@ mod tests {
         });
     }
 
-    /// A workspace over a real repo with a second lane pointed at the same
+    /// A workspace over a fake repo with a second lane pointed at the same
     /// checkout — enough for both lanes to answer a tracking read, which is
     /// what the repo lock's fan-out has to reach.
     fn build_two_lane_git_workspace(
@@ -221,24 +222,11 @@ mod tests {
         LaneRef,
     ) {
         let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().to_path_buf();
-        for args in [
-            vec!["init", "-q"],
-            vec!["config", "user.email", "daruda@test"],
-            vec!["config", "user.name", "daruda"],
-            vec!["commit", "-qm", "initial", "--allow-empty"],
-        ] {
-            assert!(
-                daruda_core::process::command("git")
-                    .current_dir(&root)
-                    .args(&args)
-                    .status()
-                    .unwrap()
-                    .success()
-            );
-        }
+        // Lanes carry canonical paths; the fake resolves handles by prefix.
+        let root = daruda_core::path::canonicalize(temp.path()).unwrap();
+        crate::test_support::fake_git(cx).add_repo(FakeRepo::at(&root).branch("main"));
         // The tempdir must outlive the workspace; leaking the handle keeps the
-        // checkout alive for the whole test.
+        // directory alive for the whole test.
         std::mem::forget(temp);
 
         let (_wh, ws) = crate::workspace::tests::build_workspace_with(
@@ -279,9 +267,6 @@ mod tests {
     /// fresh too — that is the ahead/behind badge nobody was updating.
     #[gpui::test]
     fn a_repo_op_refreshes_every_lane_and_an_index_op_only_its_own(cx: &mut TestAppContext) {
-        if !crate::lane::git::has_git() {
-            return;
-        }
         let (_wh, ws, first, second) = build_two_lane_git_workspace(cx);
         ws.update(cx, |ws, _| {
             for target in [first, second] {
@@ -328,9 +313,6 @@ mod tests {
     /// spend a subprocess to learn nothing.
     #[gpui::test]
     fn a_failed_op_invalidates_nothing(cx: &mut TestAppContext) {
-        if !crate::lane::git::has_git() {
-            return;
-        }
         let (_wh, ws, first, _second) = build_two_lane_git_workspace(cx);
         ws.update(cx, |ws, _| {
             let git = &mut ws.lane_scoped_mut(first).git;
@@ -352,9 +334,6 @@ mod tests {
     fn git_refresh_health_post_write_bypasses_cooldown(cx: &mut TestAppContext) {
         use super::super::health::{ReadOrigin, ReadOutcome};
         use crate::lane::git::GitEnvironmentFailure;
-        if !crate::lane::git::has_git() {
-            return;
-        }
         let (_wh, ws, first, second) = build_two_lane_git_workspace(cx);
         for lock in [GitLock::Index, GitLock::Repo] {
             ws.update(cx, |ws, cx| {
@@ -386,9 +365,6 @@ mod tests {
     fn git_refresh_health_activation_during_probe_refreshes_current_lane(cx: &mut TestAppContext) {
         use super::super::health::{ReadOrigin, ReadOutcome};
         use crate::lane::git::GitEnvironmentFailure;
-        if !crate::lane::git::has_git() {
-            return;
-        }
         let (wh, ws, first, second) = build_two_lane_git_workspace(cx);
         cx.update_window(wh, |_, window, cx| {
             ws.update(cx, |ws, cx| {
@@ -418,9 +394,6 @@ mod tests {
     fn git_refresh_health_manual_intent_survives_inflight_failure(cx: &mut TestAppContext) {
         use super::super::health::ReadOrigin;
         use super::super::status::ReadRequest;
-        if !crate::lane::git::has_git() {
-            return;
-        }
         let (_wh, ws, first, _) = build_two_lane_git_workspace(cx);
         ws.update(cx, |ws, cx| {
             ws.lane_scoped_mut(first).git.worktree = None;

@@ -259,13 +259,15 @@ impl Workspace {
 mod tests {
     use gpui::TestAppContext;
 
-    fn run_git(dir: &std::path::Path, args: &[&str]) {
-        let status = daruda_core::process::command("git")
-            .current_dir(dir)
-            .args(args)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed in {dir:?}");
+    use crate::lane::git::{FakeRepo, GitDirs, GitWorktreeInfo};
+
+    fn lane(path: &std::path::Path, branch: &str) -> GitWorktreeInfo {
+        GitWorktreeInfo {
+            path: path.to_path_buf(),
+            branch: Some(branch.into()),
+            head: None,
+            bare: false,
+        }
     }
 
     /// The watch set is what decides whether an outside commit or fetch ever
@@ -274,27 +276,33 @@ mod tests {
     /// only the common dir and staging in the linked lane is.
     #[gpui::test]
     fn every_lane_is_watched_through_its_own_dir_and_the_shared_one(cx: &mut TestAppContext) {
-        if !crate::lane::git::has_git() {
-            return;
-        }
         let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().to_path_buf();
-        run_git(&root, &["init", "-q"]);
-        run_git(&root, &["config", "user.email", "daruda@test"]);
-        run_git(&root, &["config", "user.name", "daruda"]);
-        run_git(&root, &["commit", "-qm", "initial", "--allow-empty"]);
+        // The lanes carry canonical paths — on macOS the raw tempdir is the
+        // `/var` alias of `/private/var`.
+        let root = daruda_core::path::canonicalize(temp.path()).unwrap();
         let linked = root.join("side-wt");
-        run_git(
-            &root,
-            &[
-                "worktree",
-                "add",
-                "-q",
-                linked.to_str().unwrap(),
-                "-b",
-                "side",
-            ],
+        // Git's own layout for a linked worktree (asserted against real git in
+        // `git_dirs_separate_a_linked_worktree_from_the_shared_repository`), as
+        // plain directories so the real watchers attach.
+        let common = root.join(".git");
+        let side = common.join("worktrees").join("side");
+        for dir in [&linked, &side] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let fake = crate::test_support::fake_git(cx);
+        fake.add_repo(
+            FakeRepo::at(&root)
+                .branch("main")
+                .worktrees(vec![lane(&root, "main"), lane(&linked, "side")])
+                .dirs(GitDirs {
+                    git_dir: common.clone(),
+                    common_dir: common.clone(),
+                }),
         );
+        fake.add_repo(FakeRepo::at(&linked).branch("side").dirs(GitDirs {
+            git_dir: side.clone(),
+            common_dir: common.clone(),
+        }));
 
         let (_wh, ws) = crate::workspace::tests::build_workspace_with(
             cx,
@@ -316,12 +324,6 @@ mod tests {
             );
             let mut watched: Vec<_> = ws.git.watch.live.keys().cloned().collect();
             watched.sort();
-
-            // The lanes carry canonical paths, so the expectations must too
-            // — on macOS the raw tempdir is the `/var` alias of `/private/var`.
-            let canonical = daruda_core::path::canonicalize(&root).unwrap();
-            let common = crate::lane::git::git_dirs(&canonical).unwrap().common_dir;
-            let side = crate::lane::git::git_dirs(&linked).unwrap().git_dir;
             let mut expected = vec![common, side];
             expected.sort();
             assert_eq!(

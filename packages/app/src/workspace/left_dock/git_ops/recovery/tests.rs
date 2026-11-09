@@ -1,10 +1,11 @@
-use crate::lane::git::GitError;
+use crate::lane::git::{FakeRepo, GitDirs, GitError};
 use crate::workspace::Workspace;
 use crate::workspace::left_dock::git_ops::health::{COOLDOWN, ReadOrigin};
 use crate::workspace::left_dock::git_ops::status::ReadRequest;
 use daruda_store::observability::error_report::ErrorReport;
 use daruda_store::project::LaneRef;
 use gpui::{Context, TestAppContext};
+use std::path::Path;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -12,17 +13,27 @@ use std::sync::{
 
 fn no_repeat(_: &mut Workspace, _: LaneRef, _: &mut Context<Workspace>) {}
 
+/// Install a fake git that answers for a repository at `dir`. Its git dir is
+/// a plain directory inside the checkout, so the watcher a recovered dirs
+/// probe attaches has something real to watch.
+fn install_fake_repo(cx: &mut TestAppContext, dir: &Path) {
+    let root = daruda_core::path::canonicalize(dir).unwrap();
+    let git_dir = root.join("git-dir");
+    std::fs::create_dir(&git_dir).unwrap();
+    crate::test_support::fake_git(cx).add_repo(FakeRepo::at(&root).branch("main").dirs(GitDirs {
+        git_dir: git_dir.clone(),
+        common_dir: git_dir,
+    }));
+}
+
 #[gpui::test]
 fn git_refresh_health_manual_request_waits_for_another_lanes_failed_probe(cx: &mut TestAppContext) {
     use crate::lane::git::GitEnvironmentFailure;
     use crate::workspace::left_dock::git_ops::health::ReadOutcome;
     use gpui::AppContext;
 
-    if !crate::lane::git::has_git() {
-        return;
-    }
     let temp = tempfile::tempdir().unwrap();
-    crate::lane::git::git_init(temp.path()).unwrap();
+    install_fake_repo(cx, temp.path());
     let (window, ws) = crate::workspace::tests::build_workspace_with(
         cx,
         &daruda_config::Config::default(),
@@ -91,6 +102,7 @@ fn git_refresh_health_tracking_failure_reports_the_whole_outage(cx: &mut TestApp
     use daruda_store::observability::error_report::ErrorSeverity;
 
     let temp = tempfile::tempdir().unwrap();
+    crate::test_support::fake_git(cx);
     let (_window, ws) = crate::workspace::tests::build_workspace_with(
         cx,
         &daruda_config::Config::default(),
@@ -141,6 +153,7 @@ fn git_refresh_health_repository_failure_keeps_its_axis_diagnostic(cx: &mut Test
     use daruda_store::observability::error_report::ErrorSeverity;
 
     let temp = tempfile::tempdir().unwrap();
+    crate::test_support::fake_git(cx);
     let (_window, ws) = crate::workspace::tests::build_workspace_with(
         cx,
         &daruda_config::Config::default(),
@@ -191,6 +204,7 @@ fn git_refresh_health_repository_failure_keeps_its_axis_diagnostic(cx: &mut Test
 #[gpui::test]
 fn git_refresh_health_blocks_launches_and_reports_until_recovery(cx: &mut TestAppContext) {
     let temp = tempfile::tempdir().unwrap();
+    crate::test_support::fake_git(cx);
     let (_window, ws) = crate::workspace::tests::build_workspace_with(
         cx,
         &daruda_config::Config::default(),
@@ -255,6 +269,7 @@ fn git_refresh_health_blocks_launches_and_reports_until_recovery(cx: &mut TestAp
 #[gpui::test]
 fn git_refresh_health_drops_old_results_and_releases_slots(cx: &mut TestAppContext) {
     let temp = tempfile::tempdir().unwrap();
+    crate::test_support::fake_git(cx);
     let (_window, ws) = crate::workspace::tests::build_workspace_with(
         cx,
         &daruda_config::Config::default(),
@@ -307,11 +322,8 @@ fn git_refresh_health_timer_recovers_and_reprobes_directories(cx: &mut TestAppCo
     use crate::lane::git::GitEnvironmentFailure;
     use crate::workspace::lane_scoped::GitDirsState;
     use crate::workspace::left_dock::git_ops::health::ReadOutcome;
-    if !crate::lane::git::has_git() {
-        return;
-    }
     let temp = tempfile::tempdir().unwrap();
-    crate::lane::git::git_init(temp.path()).unwrap();
+    install_fake_repo(cx, temp.path());
     let (_window, ws) = crate::workspace::tests::build_workspace_with(
         cx,
         &daruda_config::Config::default(),

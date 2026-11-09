@@ -36,6 +36,16 @@ pub(crate) fn init_gpui_component(cx: &mut TestAppContext) {
     });
 }
 
+/// Install a fresh [`FakeGit`](crate::lane::git::FakeGit) as the app's git
+/// backend and return a clone sharing its state. Call it before building a
+/// workspace: construction keeps a backend that is already installed.
+pub(crate) fn fake_git(cx: &mut TestAppContext) -> crate::lane::git::FakeGit {
+    let fake = crate::lane::git::FakeGit::new();
+    let backend = std::sync::Arc::new(fake.clone());
+    cx.update(|cx| crate::git_host::GitHost::set_global(backend, cx));
+    fake
+}
+
 /// A window built for the external control surface: the workspace, its window
 /// handle, and — for the variants that open one — an agent-chat pane.
 ///
