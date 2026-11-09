@@ -180,8 +180,9 @@ impl SettingsView {
             .into_any_element()
     }
 
-    /// The fields most users change — name, session mode, model, transcript —
-    /// then the advanced toggle and, when open, the advanced block.
+    /// The fields most users change — name, the session mode with the
+    /// autonomous run mode beside it, model, transcript — then the advanced
+    /// toggle and, when open, the advanced block.
     fn render_agent_card_details(
         &self,
         catalog_index: usize,
@@ -215,10 +216,6 @@ impl SettingsView {
                 daruda_ui::select::select(&row.default_mode_select, cx, 0),
             ))
             .child(field_row(
-                s::settings::agent_field_default_model(),
-                daruda_ui::select::select(&row.default_model_select, cx, 0),
-            ))
-            .child(field_row(
                 s::settings::agent_field_delegated_mode(),
                 daruda_ui::select::select(&row.delegated_mode_select, cx, 0),
             ))
@@ -228,6 +225,10 @@ impl SettingsView {
                     .text_color(t.text_muted)
                     .child(s::settings::agent_delegated_mode_description()),
             )
+            .child(field_row(
+                s::settings::agent_field_default_model(),
+                daruda_ui::select::select(&row.default_model_select, cx, 0),
+            ))
             .child(field_row(
                 s::settings::agent_field_question_timeout(),
                 daruda_ui::input(&row.question_timeout_input, cx, 0),
