@@ -262,14 +262,11 @@ fn task_creates_lane(task: &daruda_store::tasks::TaskRecord) -> bool {
     )
 }
 
-/// One line naming what the user is being asked to allow. Built here rather
-/// than on `GatedCommand`, which is the contract every adapter shares and
-/// deliberately carries no rendered sentences.
-///
-/// A target that cannot be named is refused rather than asked about: a card
-/// with the place left blank asks the person to approve without saying where.
-/// A chat's card names its pinned agent and the mode `mode` resolves to.
-/// Titles and prompts someone else wrote pass through `agent_text` first.
+/// One line naming what the user is being asked to allow, built here because
+/// `GatedCommand` carries no rendered sentences. A target that cannot be
+/// named is refused rather than asked about. A chat's card names its pinned
+/// agent and the mode `mode` resolves to; others' titles and prompts pass
+/// through `agent_text` first.
 fn approval_summary(
     asked: &Asked,
     mode: &daruda_config::ModeChoice,

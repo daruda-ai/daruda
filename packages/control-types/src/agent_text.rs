@@ -88,16 +88,12 @@ pub fn one_line(raw: &str) -> String {
         .join(" ")
 }
 
-/// Bidi controls, which reorder the text after them; zero-width spaces,
-/// invisible operators and the soft hyphen, which hide where words break;
-/// and tag characters, which carry text no one sees but an agent still reads.
-///
-/// ZWNJ/ZWJ (U+200C/U+200D) pass: they cannot reorder or hide a word, and
-/// Persian, Indic scripts and emoji sequences need them. Other blank-looking
-/// characters pass too (Hangul fillers U+115F, U+1160, U+3164, U+FFA0, the
-/// blank Braille pattern U+2800): they are letters or symbols, render as a
-/// gap at most, cannot reorder their neighbours, and dropping them would
-/// corrupt legitimate Hangul and Braille.
+/// Bidi controls reorder the text after them; zero-width spaces, invisible
+/// operators and the soft hyphen hide word breaks; tag characters carry text
+/// no one sees but an agent reads. ZWNJ/ZWJ pass: they hide nothing, and
+/// Persian, Indic and emoji sequences need them. Hangul fillers (U+115F,
+/// U+1160, U+3164, U+FFA0) and blank Braille (U+2800) pass as letters that
+/// show a gap at most and reorder nothing; dropping them corrupts real text.
 fn hides_or_reorders(c: char) -> bool {
     matches!(
         c,
