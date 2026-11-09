@@ -212,14 +212,15 @@ async fn already_open_approvals_cannot_share_the_last_creation_slot(cx: &mut Tes
 }
 
 /// The approved work receives the mode its card named rather than reading
-/// one again: an orchestrator's chat is asked for its delegated mode.
+/// one again: the card built from the mode the work receives is the card the
+/// user was shown, and an orchestrator's chat asks for its delegated mode.
 #[gpui::test]
 async fn the_approved_work_takes_the_mode_its_card_named(cx: &mut TestAppContext) {
-    let (_fixture, at) = window(cx);
+    let (fixture, at) = window(cx);
     let _outbound = cx.update(setup);
     let (seen, mode) = smol::channel::bounded(1);
-    let done = cx.update(|cx| {
-        let dispatch = run_gated_with(
+    let dispatch = cx.update(|cx| {
+        run_gated_with(
             command(at),
             CommandOrigin::Orchestrator,
             move |_, mode, _, _| {
@@ -230,14 +231,22 @@ async fn the_approved_work_takes_the_mode_its_card_named(cx: &mut TestAppContext
                 .boxed_local()
             },
             cx,
-        );
-        approve(dispatch, cx)
+        )
     });
     cx.run_until_parked();
-    assert_eq!(
-        mode.recv().await.unwrap(),
-        daruda_config::ModeChoice::FollowDelegated
-    );
+    let shown = cx.update(|cx| approval::waiting_summaries_for_test(cx));
+    let done = cx.update(|cx| approve(dispatch, cx));
+    cx.run_until_parked();
+    let mode = mode.recv().await.unwrap();
+    assert_eq!(mode, daruda_config::ModeChoice::FollowDelegated);
+    let card = fixture.workspace.read_with(cx, |ws, _| {
+        let agent = ws.open_agent_id(None);
+        s::control::approval_lane_create(
+            quoted_title("new-work"),
+            disclosure::agent_phrase(&ws.control_chat_disclosure(&agent, &mode)),
+        )
+    });
+    assert_eq!(shown, [card]);
     assert!(done.recv().await.unwrap().is_some());
 }
 
