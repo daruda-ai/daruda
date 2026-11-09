@@ -192,13 +192,21 @@ mod tests {
             config_value(dir.path(), &["--get", "commit.gpgsign"]),
             "false"
         );
-        let origins = config_value(dir.path(), &["--list", "--show-origin"]);
-        let global = isolated_git_env()[1].1.to_string_lossy().into_owned();
-        for line in origins.lines() {
+        // With `-z` each entry is `<origin>\0<key>\n<value>\0` and the origin
+        // path is printed unquoted, so it compares verbatim on every OS.
+        let listing = config(dir.path(), &["--list", "--show-origin", "-z"]);
+        let global = format!("file:{}", isolated_git_env()[1].1.to_string_lossy());
+        let fields: Vec<&[u8]> = listing.split(|byte| *byte == 0).collect();
+        let origins = fields.chunks(2).filter(|entry| entry.len() == 2);
+        let mut seen = 0;
+        for entry in origins {
+            let origin = String::from_utf8_lossy(entry[0]);
             assert!(
-                line.starts_with(&format!("file:{global}")) || line.starts_with("command line:"),
-                "config leaked in from outside the isolated file: {line}"
+                origin == global || origin == "command line:",
+                "config leaked in from outside the isolated file: {origin}"
             );
+            seen += 1;
         }
+        assert!(seen > 0, "no config entries listed: {listing:?}");
     }
 }
