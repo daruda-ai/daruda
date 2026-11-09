@@ -321,6 +321,7 @@ fn every_error_variant_round_trips_through_json() {
         ControlError::LaneNameInvalid,
         ControlError::ApprovalUnavailable,
         ControlError::ApprovalsPending,
+        ControlError::AgentUnavailable,
         ControlError::TaskNotRecorded {
             detail: "the task log is read-only".into(),
         },

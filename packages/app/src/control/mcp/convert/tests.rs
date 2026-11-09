@@ -243,6 +243,7 @@ fn every_new_refusal_travels_as_its_code() {
         (ControlError::LaneNameInvalid, "lane_name_invalid"),
         (ControlError::ApprovalUnavailable, "approval_unavailable"),
         (ControlError::ApprovalsPending, "approvals_pending"),
+        (ControlError::AgentUnavailable, "agent_unavailable"),
     ] {
         let v = to_tool_result(&Err(error));
         assert_eq!(v["isError"], true);

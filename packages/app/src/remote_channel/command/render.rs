@@ -347,6 +347,7 @@ pub(crate) fn render_error(error: &ControlError) -> String {
         ControlError::TaskNotRecorded { .. } => s::control::error_task_not_recorded(),
         ControlError::TaskNoSession => s::control::error_task_no_session(),
         ControlError::TaskAgentUnavailable => s::control::error_task_agent_unavailable(),
+        ControlError::AgentUnavailable => s::control::error_agent_unavailable(),
     }
 }
 

@@ -258,6 +258,7 @@ fn control_start_error(e: TaskStartError) -> ControlError {
             detail: crate::workspace::task_flow::TaskFlowProblem::NotFound.to_string(),
         },
         TaskStartError::FlowRefused { detail, .. } => ControlError::TaskStartFailed { detail },
+        TaskStartError::AgentUnavailable => ControlError::AgentUnavailable,
     }
 }
 

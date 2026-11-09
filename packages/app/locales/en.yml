@@ -2454,6 +2454,7 @@ control:
   error_lane_name_invalid: "That is not a usable branch name."
   error_task_branch_taken: "Another worktree already has that branch checked out."
   error_approvals_pending: "Too many approvals are already waiting. Answer one first."
+  error_agent_unavailable: "The agent that approval named is no longer set up, so nothing was opened."
   error_approval_unavailable: "daruda could not ask for approval — no desktop or remote channel is available."
   error_lane_create_busy: "A worktree is already being created in that repository. Try again in a moment."
   error_self_target_refused: "That would have the agent prompt itself."

@@ -762,6 +762,9 @@ pub enum ControlError {
     TaskNoSession,
     /// The agent or account the task's run used is no longer configured.
     TaskAgentUnavailable,
+    /// The agent an approval card named was removed before the work ran.
+    /// Refused rather than opened under another agent the person never saw.
+    AgentUnavailable,
 }
 
 impl std::fmt::Display for ControlError {
@@ -841,6 +844,9 @@ impl std::fmt::Display for ControlError {
             Self::TaskNotRecorded { detail } => write!(f, "task change was not recorded: {detail}"),
             Self::TaskNoSession => write!(f, "task has no session to open"),
             Self::TaskAgentUnavailable => write!(f, "task's agent is no longer configured"),
+            Self::AgentUnavailable => {
+                write!(f, "the agent the approval named is no longer configured")
+            }
         }
     }
 }

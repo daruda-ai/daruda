@@ -240,3 +240,74 @@ fn a_task_create_card_names_no_mode(cx: &mut TestAppContext) {
     assert!(!card.contains(&claude.name), "{card}");
     refuse(id, cx);
 }
+
+/// The agent a card pinned is removed while it waits: approving opens no
+/// other agent in its place, and nothing is recorded, created or opened.
+#[gpui::test]
+async fn an_approval_whose_pinned_agent_was_removed_is_refused(cx: &mut TestAppContext) {
+    let (fixture, lane, claude) = host(cx);
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let created = fixture.workspace.update(cx, |ws, cx| {
+        ws.control_task_create(
+            lane.project,
+            crate::test_support::new_task("Login", "Fix the login", Some(lane)),
+            cx,
+        )
+        .unwrap()
+    });
+    cx.run_until_parked();
+    let task = created.await.unwrap();
+    cx.executor().allow_parking();
+    let commands = [
+        GatedCommand::ChatNew {
+            lane,
+            agent: Some("other".into()),
+        },
+        GatedCommand::LaneCreate {
+            workspace: lane.workspace,
+            project: lane.project,
+            name: "removed-agent".into(),
+            base_ref: None,
+            agent: Some("other".into()),
+            prompt: None,
+        },
+        GatedCommand::TaskStart { task: task.clone() },
+    ];
+    for command in commands {
+        fixture.workspace.update(cx, |ws, _| {
+            set_catalog(ws, &claude);
+            ws.last_agent_id = Some("other".into());
+        });
+        let (id, outcome, card) = ask(command, cx);
+        assert!(card.contains("Other Agent"), "{card}");
+        let before = fixture
+            .workspace
+            .read_with(cx, |ws, _| (ws.all_pane_ids(), lane_count(ws)));
+        fixture
+            .workspace
+            .update(cx, |ws, _| ws.mirrors.agents = vec![claude.clone()].into());
+        cx.update(|cx| assert!(resolve_desktop(id.0, "approve", cx)));
+        let refused = outcome.recv().await.unwrap().unwrap();
+        cx.run_until_parked();
+        assert_eq!(
+            refused,
+            Err(crate::control::result::ControlError::AgentUnavailable)
+        );
+        let after = fixture
+            .workspace
+            .read_with(cx, |ws, _| (ws.all_pane_ids(), lane_count(ws)));
+        assert_eq!(after, before);
+    }
+    let lifecycle = cx.update(|cx| {
+        cx.global::<crate::runs::GlobalTasks>()
+            .get(&task)
+            .unwrap()
+            .lifecycle
+            .clone()
+    });
+    assert_eq!(lifecycle, daruda_store::tasks::Lifecycle::Backlog);
+}
+
+fn lane_count(ws: &Workspace) -> usize {
+    ws.projects.iter().map(|p| p.lanes.len()).sum()
+}

@@ -38,6 +38,10 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<CreatedLane> {
         let (tx, rx) = smol::channel::bounded(1);
+        if !self.pinned_agent_configured(agent.as_deref()) {
+            let _ = tx.try_send(Err(ControlError::AgentUnavailable));
+            return rx;
+        }
         let plan = match self.control_lane_plan(project, &name, base_ref) {
             Ok(plan) => plan,
             Err(e) => {

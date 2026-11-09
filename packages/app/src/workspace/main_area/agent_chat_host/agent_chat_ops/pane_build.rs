@@ -28,6 +28,13 @@ impl Workspace {
         )
     }
 
+    /// Whether `pinned`, an agent a person already approved, is still in the
+    /// catalog; `None` pins nothing. [`Self::open_agent_id`] would replace a
+    /// removed one with an agent and mode that person never saw.
+    pub(in crate::workspace) fn pinned_agent_configured(&self, pinned: Option<&str>) -> bool {
+        pinned.is_none_or(|id| self.mirrors.agents.iter().any(|a| a.id == id))
+    }
+
     /// How long a question from `agent_id` may wait untouched: its catalog
     /// entry's own value, else the global one. Applied at pane creation, on
     /// an agent switch and on every config reload.

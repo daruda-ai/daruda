@@ -59,6 +59,9 @@ pub(crate) enum TaskStartError {
     NotRecorded {
         detail: String,
     },
+    /// The agent a control start's card named was removed before the start
+    /// ran; nothing was recorded or spawned.
+    AgentUnavailable,
     /// The task's flow is not one its lane can run by that name.
     FlowMissing,
     /// The task's flow could not run as the task describes it, or refused
@@ -108,7 +111,10 @@ impl TaskStartError {
     fn failure(&self) -> Option<StartFailure> {
         Some(match self {
             Self::NotFound => StartFailure::NotFound,
-            Self::NotBacklog | Self::NotRecorded { .. } | Self::RemoteLane => return None,
+            Self::NotBacklog
+            | Self::NotRecorded { .. }
+            | Self::RemoteLane
+            | Self::AgentUnavailable => return None,
             Self::ProjectNotOpen => StartFailure::ProjectNotOpen,
             Self::NoGitRepo => StartFailure::NoGitRepo,
             Self::RepoBusy => StartFailure::RepoBusy,
@@ -136,6 +142,7 @@ impl TaskStartError {
             ),
             Self::NotFound
             | Self::NotBacklog
+            | Self::AgentUnavailable
             | Self::PaneUnavailable
             | Self::PromptUndelivered { .. }
             | Self::WindowClosed => return None,
@@ -348,6 +355,9 @@ impl Workspace {
                 self.prepare_task_flow_start(&task, flow, reveal, submitter, cx)?,
             )),
             None => {
+                if !self.pinned_agent_configured(agent.as_deref()) {
+                    return Err(TaskStartError::AgentUnavailable);
+                }
                 let chat = TaskChat {
                     agent: self.open_agent_id(agent.as_deref()),
                     mode,

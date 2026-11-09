@@ -409,8 +409,7 @@ async fn perform_gated(
         .map(|(target, chat)| (chat, Some(target))),
     };
     let (chat, lane) = created?;
-    // Read back rather than echo the request: an agent id the catalog does
-    // not hold resolves to the default, so what opened is the only honest
+    // Read back rather than echo the request: what opened is the only honest
     // answer. The announcement keeps the command's delivery provenance.
     let label = cx.update(|cx| announce_chat(chat, caller, cx));
     let agent = label.map_or_else(String::new, |l| l.agent);

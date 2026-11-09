@@ -244,7 +244,7 @@ impl Workspace {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> Result<PaneId, ControlError> {
-        // Both checks *before* activating: revealing a worktree and then
+        // Every check *before* activating: revealing a worktree and then
         // refusing to open a pane in it leaves the user staring at an empty
         // state for a tool call that failed.
         let Some(lane) = self.lane_for(target) else {
@@ -252,6 +252,9 @@ impl Workspace {
         };
         if lane.availability != crate::lane::availability::LaneAvailability::Present {
             return Err(ControlError::TargetGone);
+        }
+        if !self.pinned_agent_configured(agent.as_deref()) {
+            return Err(ControlError::AgentUnavailable);
         }
         self.activate_lane(target, window, cx);
         let agent_id = self.open_agent_id(agent.as_deref());
