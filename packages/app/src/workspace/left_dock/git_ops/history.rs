@@ -117,11 +117,12 @@ impl Workspace {
 
         let message_bg = message.clone();
         let repo_for_report = repo_root.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&repo_root);
         self.spawn_locked_git_work(
             GitLock::Repo,
             active_ref,
             cx,
-            move || crate::lane::git::git_commit(&repo_root, &message_bg),
+            move || repo.commit(&message_bg),
             move |ws, result, cx| {
                 match result {
                     Ok(()) => {
@@ -203,9 +204,10 @@ impl Workspace {
         // `&mut Window` for `set_text`.
         let wh = window.window_handle();
         let repo_for_report = repo_root.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&repo_root);
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move || crate::lane::git::git_head_message(&repo_root),
+            move || repo.head_message(),
             move |ws, result, cx| match result {
                 Ok(message) if !message.trim().is_empty() => {
                     let input = ws.git.commit_input.clone();
@@ -350,11 +352,12 @@ impl Workspace {
         let active_ref = self.active;
 
         let repo_for_report = repo_root.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&repo_root);
         self.spawn_locked_git_work(
             GitLock::Repo,
             active_ref,
             cx,
-            move || crate::lane::git::git_commit_amend(&repo_root, &message),
+            move || repo.commit_amend(&message),
             move |ws, result, cx| {
                 match result {
                     Ok(()) => {
@@ -445,11 +448,12 @@ impl Workspace {
 
         let active_ref = self.active;
         let repo_for_report = repo_root.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&repo_root);
         self.spawn_locked_git_work(
             GitLock::Repo,
             active_ref,
             cx,
-            move || crate::lane::git::git_push(&repo_root),
+            move || repo.push(),
             move |ws, result, cx| {
                 cx.notify();
                 if let Err(e) = result {
@@ -476,11 +480,12 @@ impl Workspace {
         };
         let active_ref = self.active;
         let repo_for_report = repo_root.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&repo_root);
         self.spawn_locked_git_work(
             GitLock::Repo,
             active_ref,
             cx,
-            move || crate::lane::git::git_fetch(&repo_root),
+            move || repo.fetch(),
             move |ws, result, cx| {
                 if let Err(e) = result {
                     let report = ErrorReport::new(app_strings::error::git_fetch_failed())
@@ -504,11 +509,12 @@ impl Workspace {
         };
         let active_ref = self.active;
         let repo_for_report = repo_root.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&repo_root);
         self.spawn_locked_git_work(
             GitLock::Repo,
             active_ref,
             cx,
-            move || crate::lane::git::git_pull(&repo_root),
+            move || repo.pull(),
             move |ws, result, cx| {
                 if let Err(e) = result {
                     let report = ErrorReport::new(app_strings::error::git_pull_failed())

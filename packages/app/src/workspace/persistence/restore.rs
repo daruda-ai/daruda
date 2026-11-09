@@ -99,6 +99,7 @@ impl Workspace {
         // Mint dense runtime ids `0..N` for the hydrated projects; the
         // counter advances past the highest minted id — same monotonic
         // invariant `add_project` enforces.
+        let git = crate::git_host::GitHost::global(cx);
         self.projects = project_states
             .iter()
             .enumerate()
@@ -109,12 +110,7 @@ impl Workspace {
                     .get(&ps.uuid)
                     .cloned()
                     .unwrap_or_default();
-                let mut p = crate::project::Project::from_disk(
-                    runtime_id,
-                    ps,
-                    &ov,
-                    &crate::lane::git::SystemGit,
-                );
+                let mut p = crate::project::Project::from_disk(runtime_id, ps, &ov, git.as_ref());
                 let root = p.root.clone();
                 anchor_lane_paths_to_project_root(&mut p.lanes, &root);
                 p

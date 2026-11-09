@@ -22,13 +22,14 @@ impl Workspace {
         }
         let path = wt.path.clone();
         let path_for_report = path.clone();
+        let git = crate::git_host::GitHost::global(cx);
         self.spawn_locked_git_work(
             GitLock::Repo,
             target,
             cx,
             move || -> Result<Option<_>, crate::lane::git::GitError> {
-                crate::lane::git::git_init(&path)?;
-                Ok(crate::lane::git::probe_repo(&path))
+                git.init(&path)?;
+                Ok(git.probe(&path))
             },
             move |ws, result, cx| {
                 // Clears the Git view's disabled/loading state; the Ok(None)

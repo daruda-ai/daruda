@@ -7,13 +7,15 @@
 //! vocabulary.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use daruda_flow::event::RunNotice;
-use daruda_flow::request::{Budget, CostLimit, RunRequest};
+use daruda_flow::request::{AskGitStatus, Budget, CostLimit, RunRequest};
 use gpui::Context;
 
 use super::Workspace;
 use super::command::flow_picker::FlowPurpose;
+use crate::lane::git::Git;
 
 mod catalog;
 mod run_ids;
@@ -303,7 +305,7 @@ impl Workspace {
             // spent is carried by the run log, not by this.
             budget: budget_from(&self.config_flow()),
             is_alive: Box::new(is_alive),
-            git_status: Some(std::sync::Arc::new(git_status)),
+            git_status: Some(git_status(crate::git_host::GitHost::global(cx))),
             events: Some(tx),
             ask: Some(ask_tx),
             resume: Some(continuation),
@@ -414,7 +416,7 @@ impl Workspace {
             node_install_dir: node_install_dir.clone(),
             budget: budget_from(&self.config_flow()),
             is_alive: Box::new(process_is_alive),
-            git_status: Some(std::sync::Arc::new(git_status)),
+            git_status: Some(git_status(crate::git_host::GitHost::global(cx))),
             events: Some(tx),
             ask: Some(ask_tx),
             // This assembles a run that is starting. Picking one up reads
@@ -460,20 +462,14 @@ pub(in crate::workspace) fn process_is_alive(pid: u32) -> bool {
     daruda_core::process::is_alive(pid)
 }
 
-/// The working tree at `cwd`, as `git status --porcelain` sees it.
+/// The working tree at a node's `cwd`, as `git status --porcelain` sees it.
 ///
 /// Scoped to that directory with `-- .`, which is what makes the note mean
 /// anything once nodes run in directories of their own: `git status` is
 /// otherwise repository-wide, and every node in one repo would report the
 /// same list however different their directories.
-fn git_status(cwd: &Path) -> Option<String> {
-    let out = crate::lane::git::git_command(cwd)
-        .args(["status", "--porcelain", "--", "."])
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+fn git_status(git: Arc<dyn Git>) -> AskGitStatus {
+    Arc::new(move |cwd: &Path| git.open(cwd).status_scoped().ok())
 }
 
 #[cfg(test)]

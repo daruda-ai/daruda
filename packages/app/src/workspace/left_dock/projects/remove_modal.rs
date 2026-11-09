@@ -112,7 +112,7 @@ impl RemoveWorktreeModal {
 
         let me = cx.entity().downgrade();
         let workspace = self.workspace.clone();
-        let repo_root = self.plan.repo_root.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&self.plan.repo_root);
         let path: PathBuf = self.plan.path.clone();
         let lock_dir = self.plan.lock_dir.clone();
         let force = self.allow_force;
@@ -129,15 +129,14 @@ impl RemoveWorktreeModal {
                 let result: Result<(), String> = async_cx
                     .background_executor()
                     .spawn(async move {
-                        crate::lane::git::remove_lane(&repo_root, &path, force)
-                            .map_err(|e| e.to_string())?;
+                        repo.remove_lane(&path, force).map_err(|e| e.to_string())?;
                         crate::workspace::flow_paths::forget_lane_lock(lock_dir);
                         // Branch removal is best-effort *after* the
                         // lane is gone — failure here surfaces as
                         // an inline error but the lane is already
                         // detached, so we don't roll back.
                         if let Some(b) = &branch_to_delete {
-                            crate::lane::git::delete_branch(&repo_root, b).map_err(|e| {
+                            repo.delete_branch(b).map_err(|e| {
                                 s::modal::remove_lane_branch_delete_failed(b, e.to_string())
                             })?;
                         }

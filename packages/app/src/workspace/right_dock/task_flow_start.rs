@@ -199,19 +199,15 @@ impl Workspace {
             reveal,
             ..
         } = start;
+        let repo = crate::git_host::GitHost::global(cx).open(&plan.repo_root);
         cx.spawn_in(window, async move |ws, cx| {
             let added = cx
                 .background_executor()
                 .spawn({
                     let plan = plan.clone();
                     async move {
-                        crate::lane::git::add_lane(
-                            &plan.repo_root,
-                            &plan.new_path,
-                            Some(&plan.branch),
-                            plan.base_ref.as_deref(),
-                        )
-                        .map_err(|e| e.to_string())
+                        repo.add_lane(&plan.new_path, Some(&plan.branch), plan.base_ref.as_deref())
+                            .map_err(|e| e.to_string())
                     }
                 })
                 .await;

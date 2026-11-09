@@ -126,12 +126,8 @@ impl Workspace {
         #[allow(clippy::unwrap_or_default)]
         let uuid = find_existing_project_uuid_for_root(&self.workspace_store, &root)
             .unwrap_or_else(ProjectUuid::new);
-        let mut project = crate::project::Project::new_with_uuid(
-            new_id,
-            uuid,
-            root,
-            &crate::lane::git::SystemGit,
-        );
+        let git = crate::git_host::GitHost::global(cx);
+        let mut project = crate::project::Project::new_with_uuid(new_id, uuid, root, git.as_ref());
         project.tab_order = tab_order;
         let target = project.first_lane_ref();
         self.projects.push(project);
@@ -165,9 +161,10 @@ impl Workspace {
             .filter(|p| p.lanes.iter().any(|l| l.is_git()))
             .map(|p| p.root.clone())
         {
+            let repo = git.open(&root);
             crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
                 cx,
-                move || crate::lane::git::default_branch(&root),
+                move || repo.default_branch(),
                 move |ws, detected, cx| {
                     if let Some(branch) = detected {
                         ws.set_project_default_branch(new_id, branch, cx);
@@ -315,10 +312,12 @@ impl Workspace {
         &mut self,
         cx: &mut Context<Self>,
     ) {
+        let git = crate::git_host::GitHost::global(cx);
         for (project_id, root) in self.git_project_roots() {
+            let repo = git.open(&root);
             crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
                 cx,
-                move || crate::lane::git::default_branch(&root),
+                move || repo.default_branch(),
                 move |ws, detected, cx| {
                     let Some(p) = ws.projects.get(project_id) else {
                         return;
@@ -360,12 +359,12 @@ impl Workspace {
             .filter(|p| has_placeholder_lanes(p))
             .map(|p| (p.id, p.root.clone()))
             .collect();
+        let git = crate::git_host::GitHost::global(cx);
         for (project_id, root) in targets {
+            let git = git.clone();
             crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
                 cx,
-                move || {
-                    crate::lane::Lane::bootstrap_from_project(&root, &crate::lane::git::SystemGit)
-                },
+                move || crate::lane::Lane::bootstrap_from_project(&root, git.as_ref()),
                 move |ws, lanes, cx| ws.apply_discovered_lanes(project_id, lanes, cx),
             )
             .detach();

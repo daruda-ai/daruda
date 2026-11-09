@@ -15,6 +15,7 @@ use super::{
     DiffSource, FileViewMode, PaneFileContent, build_diff_rows, build_raw_rows, count_diff_stats,
     parse_diff_hunks,
 };
+use crate::lane::git::{Git, GitRepo};
 use crate::path_ext::PathExt;
 use crate::ui::mermaid_palette::MermaidPalette;
 use crate::ui::row_highlight::{LanguageHint, highlight_hunks, highlight_raw_rows};
@@ -62,6 +63,7 @@ pub(in crate::workspace) fn disk_holds(path: &std::path::Path, baseline: &str) -
 /// Load file content for the pane-area file viewer. Called from a background task.
 #[allow(clippy::too_many_arguments)]
 pub(in crate::workspace) fn load_file_content(
+    git: &dyn Git,
     wt_path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
     path: &std::path::Path,
@@ -72,10 +74,10 @@ pub(in crate::workspace) fn load_file_content(
 ) -> LoadOutcome {
     match mode {
         FileViewMode::Raw | FileViewMode::Preview => {
-            load_raw(wt_path, repo_root, path, source, mermaid_palette)
+            load_raw(git, wt_path, repo_root, path, source, mermaid_palette)
         }
         FileViewMode::Changes => {
-            LoadOutcome::plain(load_diff(repo_root, path, source, live_status))
+            LoadOutcome::plain(load_diff(git, repo_root, path, source, live_status))
         }
     }
 }
@@ -87,6 +89,7 @@ enum GitBlob<'a> {
 }
 
 fn load_raw(
+    git: &dyn Git,
     wt_path: &std::path::Path,
     repo_root: Option<&std::path::Path>,
     path: &std::path::Path,
@@ -130,9 +133,10 @@ fn load_raw(
         } else {
             path.to_path_buf()
         };
+        let wt_repo = git.open(wt_path);
         match blob {
-            GitBlob::Index => crate::lane::git::git_show_staged(wt_path, &repo_rel),
-            GitBlob::At(rev) => crate::lane::git::base::git_show_at(wt_path, rev, &repo_rel),
+            GitBlob::Index => wt_repo.show_staged(&repo_rel),
+            GitBlob::At(rev) => wt_repo.show_at(rev, &repo_rel),
         }
         .map_err(|e| e.to_string())
     } else {
@@ -207,15 +211,17 @@ fn load_raw(
 /// Returns `None` when either side isn't readable UTF-8 text (binary file,
 /// missing from the index, or an IO/path error) so the caller can fall
 /// back to `git diff`.
-fn in_app_unstaged_diff(repo: &std::path::Path, path: &std::path::Path) -> Option<String> {
-    let rel = daruda_core::path::strip_root(path, repo).unwrap_or_else(|| path.to_path_buf());
-    let old = crate::lane::git::git_show_staged(repo, &rel).ok()?;
+fn in_app_unstaged_diff(repo: &dyn GitRepo, path: &std::path::Path) -> Option<String> {
+    let rel =
+        daruda_core::path::strip_root(path, repo.path()).unwrap_or_else(|| path.to_path_buf());
+    let old = repo.show_staged(&rel).ok()?;
     let old = String::from_utf8(old).ok()?;
     let new = std::fs::read_to_string(path).ok()?;
     Some(super::line_diff::unified_diff_text(&old, &new))
 }
 
 fn load_diff(
+    git: &dyn Git,
     repo_root: Option<&std::path::Path>,
     path: &std::path::Path,
     source: &DiffSource,
@@ -231,24 +237,25 @@ fn load_diff(
     // `path` is absolute when opened from the left dock.  git diff accepts
     // absolute paths when run from the repo root, so we pass it directly.
     // For legacy relative paths from old session state, behaviour is unchanged.
-    let repo = repo_root.expect("repo_root is Some: is_git() was checked at function entry");
+    let repo =
+        git.open(repo_root.expect("repo_root is Some: is_git() was checked at function entry"));
     let diff_result = match source {
-        _ if is_untracked => crate::lane::git::git_diff_untracked(repo, path),
+        _ if is_untracked => repo.diff_untracked(path),
         // Unstaged diff computed in-app with the Histogram algorithm
         // (index ↔ working tree, matching `git diff` with no options).
         // Any failure (binary, unreadable, missing from index, path issue)
         // falls back to `git diff` so behaviour never regresses.
-        DiffSource::WorkingTree => match in_app_unstaged_diff(repo, path) {
+        DiffSource::WorkingTree => match in_app_unstaged_diff(repo.as_ref(), path) {
             Some(text) => Ok(text),
-            None => crate::lane::git::git_diff(repo, path, false),
+            None => repo.diff(path, false),
         },
-        DiffSource::Index => crate::lane::git::git_diff(repo, path, true),
+        DiffSource::Index => repo.diff(path, true),
         DiffSource::Range {
             from, to, old_path, ..
         } => {
             let mut paths = vec![path];
             paths.extend(old_path.as_deref());
-            crate::lane::git::base::git_diff_range(repo, from, to, &paths)
+            repo.diff_range(from, to, &paths)
         }
     };
 

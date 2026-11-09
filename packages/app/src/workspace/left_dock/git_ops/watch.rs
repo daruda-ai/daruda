@@ -143,9 +143,10 @@ impl Workspace {
                 break;
             };
             self.lane_scoped_mut(target).git.dirs = GitDirsState::Probing;
+            let repo = crate::git_host::GitHost::global(cx).open(&path);
             crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
                 cx,
-                move || crate::lane::git::git_dirs(&path),
+                move || repo.dirs(),
                 move |ws, result, cx| {
                     ws.complete_git_read(
                         target,

@@ -2,10 +2,12 @@
 //! the delete-project chooser that routes to either.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use daruda_store::project::ProjectId;
 use gpui::{AppContext as _, Context, Window};
 
+use crate::lane::git::GitRepo;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 
@@ -122,6 +124,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let git = crate::git_host::GitHost::global(cx);
         let Some(project) = self.active_project() else {
             return;
         };
@@ -131,7 +134,7 @@ impl Workspace {
         // lanes we'll remove. Default-kind lanes are skipped —
         // they're not git-managed, so `fs::remove_dir_all` on
         // `project_path` is sufficient.
-        let removals: Vec<(PathBuf, PathBuf, Option<PathBuf>)> = project
+        let removals: Vec<(Arc<dyn GitRepo>, PathBuf, Option<PathBuf>)> = project
             .lanes
             .iter()
             .filter_map(|wt| {
@@ -142,7 +145,7 @@ impl Workspace {
                 } = &wt.kind
                 {
                     Some((
-                        repo_root.clone(),
+                        git.open(repo_root),
                         worktree_root.clone(),
                         crate::workspace::flow_paths::lane_lock_dir(&self.lock_root, worktree_root),
                     ))
@@ -157,11 +160,10 @@ impl Workspace {
             let executor = async_cx.background_executor().clone();
             let mut errors: Vec<(PathBuf, String)> = Vec::new();
             for (repo, wt_root, lock_dir) in removals {
-                let repo_clone = repo.clone();
                 let wt_clone = wt_root.clone();
                 let result = executor
                     .spawn(async move {
-                        crate::lane::git::remove_lane(&repo_clone, &wt_clone, false).inspect(
+                        repo.remove_lane(&wt_clone, false).inspect(
                             |()| crate::workspace::flow_paths::forget_lane_lock(lock_dir),
                         )
                     })

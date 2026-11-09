@@ -20,6 +20,7 @@ mod env_strip;
 pub(crate) mod file_name;
 pub mod files;
 mod fuzzy;
+mod git_host;
 mod globals;
 mod hooks;
 mod keep_awake;

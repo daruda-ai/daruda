@@ -63,6 +63,7 @@ impl Workspace {
         }
 
         let weak = cx.weak_entity();
+        let repo = crate::git_host::GitHost::global(cx).open(&plan.repo_root);
         window
             .spawn(cx, async move |async_cx| {
                 let add = {
@@ -70,8 +71,7 @@ impl Workspace {
                     async_cx
                         .background_executor()
                         .spawn(async move {
-                            crate::lane::git::add_lane(
-                                &plan.repo_root,
+                            repo.add_lane(
                                 &plan.new_path,
                                 Some(&plan.branch),
                                 plan.base_ref.as_deref(),

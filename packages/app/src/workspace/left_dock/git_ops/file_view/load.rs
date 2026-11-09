@@ -101,6 +101,7 @@ impl Workspace {
         // Computed here because the loader runs GPUI-free on a background
         // thread.
         let mermaid_palette = mermaid_palette::file_viewer_palette(cx);
+        let git = crate::git_host::GitHost::global(cx);
 
         let request_for_load = request.clone();
         let request_for_match = request;
@@ -109,6 +110,7 @@ impl Workspace {
             cx,
             move || {
                 crate::workspace::main_area::file_view_pane::file_content::load_file_content(
+                    git.as_ref(),
                     &wt_path,
                     repo_root.as_deref(),
                     &path_bg,

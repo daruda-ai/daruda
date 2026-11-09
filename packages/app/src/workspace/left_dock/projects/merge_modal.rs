@@ -192,12 +192,12 @@ impl MergeModal {
         let workspace = self.workspace.clone();
         let source_branch = self.source_branch.clone();
         let source_path = self.source_path.clone();
-        let source_repo_root = self.source_repo_root.clone();
+        let source_repo = crate::git_host::GitHost::global(cx).open(&self.source_repo_root);
         let source_lock_dir = workspace.upgrade().and_then(|ws| {
             crate::workspace::flow_paths::lane_lock_dir(&ws.read(cx).lock_root, &self.source_path)
         });
         let target = &self.target_options[self.selected_idx];
-        let target_path = target.wt_path.clone();
+        let target_repo = crate::git_host::GitHost::global(cx).open(&target.wt_path);
         let remove_after_merge = self.remove_after_merge;
         // Both refs resolve against this modal's own project, not the
         // active one — see `MergeModal::project`.
@@ -216,7 +216,7 @@ impl MergeModal {
 
                 let merge_result = async_cx
                     .background_executor()
-                    .spawn(async move { crate::lane::git::git_merge(&target_path, &source_branch) })
+                    .spawn(async move { target_repo.merge(&source_branch) })
                     .await;
 
                 // Snapshot before merge_result is moved into the closure.
@@ -299,15 +299,13 @@ impl MergeModal {
                             // Remove lane directory first, then delete the branch.
                             // Branch deletion is best-effort — if it fails the lane
                             // is already detached, so we surface the error without rolling back.
-                            crate::lane::git::remove_lane(&source_repo_root, &source_path, false)
+                            source_repo
+                                .remove_lane(&source_path, false)
                                 .inspect(|()| {
                                     crate::workspace::flow_paths::forget_lane_lock(source_lock_dir);
                                 })
                                 .and_then(|()| {
-                                    crate::lane::git::delete_branch(
-                                        &source_repo_root,
-                                        &source_branch_for_removal,
-                                    )
+                                    source_repo.delete_branch(&source_branch_for_removal)
                                 })
                                 .map_err(|e| e.to_string())
                         })
@@ -362,7 +360,7 @@ impl MergeModal {
             self.dismiss(window, cx);
             return;
         };
-        let target_path = target.wt_path.clone();
+        let target_repo = crate::git_host::GitHost::global(cx).open(&target.wt_path);
         let target_ref = self.target_ref();
         let workspace = self.workspace.clone();
         let me = cx.entity().downgrade();
@@ -372,7 +370,7 @@ impl MergeModal {
                 async_cx
                     .background_executor()
                     .spawn(async move {
-                        let _ = crate::lane::git::git_merge_abort(&target_path);
+                        let _ = target_repo.merge_abort();
                     })
                     .await;
                 // SILENT-OK: workspace may drop after merge modal closes

@@ -162,13 +162,14 @@ impl Workspace {
             return;
         };
         let path_for_report = path.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&path);
         self.run_git_axis(
             ReadRequest {
                 target,
                 recovery_origin: None,
             },
             |git| &mut git.tracking_refresh,
-            move || crate::lane::git::git_tracking(&path),
+            move || repo.tracking(),
             move |ws, result, cx| {
                 match result {
                     Ok(data) => {
@@ -248,6 +249,7 @@ impl Workspace {
         };
         let path_for_report = path.clone();
         let manual = self.lane_scoped_mut(target).git.manual_refresh_pending;
+        let repo = crate::git_host::GitHost::global(cx).open(&path);
         self.run_git_axis(
             ReadRequest {
                 target,
@@ -258,7 +260,7 @@ impl Workspace {
                 }),
             },
             |git| &mut git.worktree_refresh,
-            move || crate::lane::git::git_worktree_status(&path),
+            move || repo.worktree_status(),
             move |ws, result, cx| {
                 match result {
                     Ok(data) => {

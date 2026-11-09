@@ -35,11 +35,12 @@ impl Workspace {
         };
         let path_for_report = path.clone();
         let wt_for_report = wt_top.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&wt_top);
         self.spawn_locked_git_work(
             GitLock::Index,
             target,
             cx,
-            move || crate::lane::git::git_add(&wt_top, &path),
+            move || repo.add(&path),
             move |ws, result, cx| {
                 if let Err(e) = result {
                     let report = ErrorReport::new(app_strings::error::git_add_failed())
@@ -75,11 +76,12 @@ impl Workspace {
         };
         let path_for_report = path.clone();
         let wt_for_report = wt_top.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&wt_top);
         self.spawn_locked_git_work(
             GitLock::Index,
             target,
             cx,
-            move || crate::lane::git::git_restore_staged(&wt_top, &path),
+            move || repo.restore_staged(&path),
             move |ws, result, cx| {
                 if let Err(e) = result {
                     let report = ErrorReport::new(app_strings::error::git_restore_staged_failed())
@@ -116,11 +118,12 @@ impl Workspace {
         };
         let wt_for_report = wt_top.clone();
         let paths_count = paths.len();
+        let repo = crate::git_host::GitHost::global(cx).open(&wt_top);
         self.spawn_locked_git_work(
             GitLock::Index,
             target,
             cx,
-            move || crate::lane::git::git_add_paths(&wt_top, &paths),
+            move || repo.add_paths(&paths),
             move |ws, result, cx| {
                 if let Err(e) = result {
                     let report = ErrorReport::new(app_strings::error::git_add_paths_failed())
@@ -157,11 +160,12 @@ impl Workspace {
         };
         let wt_for_report = wt_top.clone();
         let paths_count = paths.len();
+        let repo = crate::git_host::GitHost::global(cx).open(&wt_top);
         self.spawn_locked_git_work(
             GitLock::Index,
             target,
             cx,
-            move || crate::lane::git::git_restore_staged_paths(&wt_top, &paths),
+            move || repo.restore_staged_paths(&paths),
             move |ws, result, cx| {
                 if let Err(e) = result {
                     let report =
@@ -189,11 +193,12 @@ impl Workspace {
             return;
         };
         let path_for_report = wt_top.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&wt_top);
         self.spawn_locked_git_work(
             GitLock::Index,
             target,
             cx,
-            move || crate::lane::git::git_add_all(&wt_top),
+            move || repo.add_all(),
             move |ws, result, cx| {
                 if let Err(e) = result {
                     let report = ErrorReport::new(app_strings::error::git_add_all_failed())
@@ -219,11 +224,12 @@ impl Workspace {
             return;
         };
         let path_for_report = wt_top.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&wt_top);
         self.spawn_locked_git_work(
             GitLock::Index,
             target,
             cx,
-            move || crate::lane::git::git_restore_all_staged(&wt_top),
+            move || repo.restore_all_staged(),
             move |ws, result, cx| {
                 if let Err(e) = result {
                     let report =
@@ -350,11 +356,12 @@ impl Workspace {
             return;
         }
         let path_for_report = wt_top.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&wt_top);
         self.spawn_locked_git_work(
             GitLock::Index,
             target,
             cx,
-            move || crate::lane::git::discard::discard(&wt_top, &pinned),
+            move || repo.discard(&pinned),
             move |ws, result, cx| {
                 if let Err(e) = result {
                     let report = ErrorReport::new(app_strings::error::git_restore_failed())

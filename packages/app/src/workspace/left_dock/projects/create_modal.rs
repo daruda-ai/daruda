@@ -290,7 +290,7 @@ impl CreateWorktreeModal {
 
         let me = cx.entity().downgrade();
         let workspace = self.workspace.clone();
-        let git_repo = plan.repo_root.clone();
+        let git_repo = crate::git_host::GitHost::global(cx).open(&plan.repo_root);
         let git_path = plan.new_path.clone();
         let git_branch = plan.branch.clone();
         let git_base = plan.base_ref.clone();
@@ -299,13 +299,9 @@ impl CreateWorktreeModal {
                 let result: Result<(), String> = async_cx
                     .background_executor()
                     .spawn(async move {
-                        crate::lane::git::add_lane(
-                            &git_repo,
-                            &git_path,
-                            Some(&git_branch),
-                            git_base.as_deref(),
-                        )
-                        .map_err(|e| e.to_string())
+                        git_repo
+                            .add_lane(&git_path, Some(&git_branch), git_base.as_deref())
+                            .map_err(|e| e.to_string())
                     })
                     .await;
 

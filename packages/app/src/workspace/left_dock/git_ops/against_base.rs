@@ -12,7 +12,7 @@ use gpui::{Context, Window};
 
 use std::path::PathBuf;
 
-use crate::lane::git::base::{self, AgainstBase, BaseProblem, BaseTips, RangeFile};
+use crate::lane::git::base::{AgainstBase, BaseProblem, BaseTips, RangeFile};
 use crate::lane::paths::LanePaths;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::DiffSource;
@@ -95,6 +95,7 @@ impl Workspace {
         };
 
         let path_for_report = path.clone();
+        let repo = crate::git_host::GitHost::global(cx).open(&path);
         self.run_git_axis(
             super::status::ReadRequest {
                 target,
@@ -102,14 +103,14 @@ impl Workspace {
             },
             |git| &mut git.against_base_refresh,
             move || {
-                let tips = match base::base_tips(&path, base_name.as_deref(), branch.as_deref()) {
+                let tips = match repo.base_tips(base_name.as_deref(), branch.as_deref()) {
                     Ok(tips) => tips,
                     Err(problem) => return Read::Fresh(Err(problem)),
                 };
                 if cached.as_ref() == Some(&tips) {
                     return Read::Unchanged;
                 }
-                Read::Fresh(base::changes_since(&path, tips))
+                Read::Fresh(repo.changes_since(tips))
             },
             move |ws, read, cx| {
                 // Most ref events land here with both tips unmoved.
