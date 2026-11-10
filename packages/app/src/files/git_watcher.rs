@@ -7,8 +7,9 @@
 //! run by daruda or by a terminal beside it — with no way to reach the UI.
 //!
 //! This watcher covers exactly that gap. It is safe now because
-//! `lane::git::git_command` pins `--no-optional-locks`, so daruda's own
-//! reads no longer write; what remains is a precise ignore list for the
+//! `lane::git::git_command` pins `--no-optional-locks` and the worktree
+//! diffs run as plumbing (`diff-index`, `diff-files`), so daruda's own
+//! reads do not write; what remains is a precise ignore list for the
 //! paths git churns without changing what daruda shows.
 
 use std::path::{Path, PathBuf};

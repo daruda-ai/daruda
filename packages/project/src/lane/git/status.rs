@@ -55,9 +55,9 @@ pub struct GitWorktreeStatus {
     /// Files with an unstaged change or untracked status.
     pub unstaged: Vec<GitFileEntry>,
     /// `(added, removed)` per tracked file path, sourced from
-    /// `git diff HEAD --numstat`. Untracked files are absent (no HEAD
+    /// `git diff-index --numstat HEAD`. Untracked files are absent (no HEAD
     /// baseline to compare against). Empty when the repo has no
-    /// commits yet (`git diff HEAD` errors gracefully).
+    /// commits yet (the diff against `HEAD` errors gracefully).
     pub diffstat: std::collections::HashMap<PathBuf, (u32, u32)>,
 }
 
@@ -175,7 +175,7 @@ pub(crate) fn git_tracking(path: &Path) -> Result<GitTracking, GitError> {
 }
 
 /// `git status --porcelain=v1 -z` for the lane rooted at `path`, plus a
-/// follow-up `git diff HEAD --numstat -z` to populate per-file diffstat.
+/// follow-up `git diff-index --numstat -z HEAD` to populate per-file diffstat.
 /// NUL-separated so a path with a space or non-ASCII byte arrives as
 /// written, not C-quoted; a rename is keyed by its destination.
 ///
@@ -210,17 +210,22 @@ pub(crate) fn git_status_scoped(path: &Path) -> Result<String, GitError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// `git diff HEAD --numstat` — `(added, removed, path)` per tracked file
+/// `git diff-index -M --numstat HEAD` — `(added, removed, path)` per tracked file
 /// with any working-tree or staged divergence from HEAD. Binary files
 /// emit `-\t-\t<path>`; the parser maps those to `(0, 0)` so the left dock
 /// row can decide whether to show a stat at all (typically not, since
 /// "+0 −0" implies "no change" which is misleading for binary diffs).
 ///
 /// Failure is non-fatal for the left dock: a brand-new repo with no
-/// commits has no HEAD, and `git diff HEAD` exits non-zero. Callers
+/// commits has no HEAD, and the diff exits non-zero. Callers
 /// surface this as "no diffstat available" rather than an error.
+///
+/// Plumbing, not `git diff`: the porcelain refreshes a stat-stale index and
+/// writes it back whatever `--no-optional-locks` says, and the git-dir
+/// watcher would take that write for a working-tree change. Plumbing also
+/// leaves rename detection off, hence the explicit `-M`.
 pub(crate) fn git_diff_numstat(wt_path: &Path) -> Result<Vec<(u32, u32, PathBuf)>, GitError> {
-    let raw = run_git(wt_path, ["diff", "HEAD", "--numstat", "-z"])?;
+    let raw = run_git(wt_path, ["diff-index", "-M", "--numstat", "-z", "HEAD"])?;
     Ok(parse_numstat(&raw))
 }
 

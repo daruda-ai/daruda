@@ -86,7 +86,7 @@ pub(super) fn unified_file_row(
     };
     let status_symbol = crate::workspace::left_dock::git_ops::git_status_symbol(status_char);
 
-    // `git diff HEAD --numstat` cache for this file. Untracked / fresh
+    // `git diff-index --numstat HEAD` cache for this file. Untracked / fresh
     // repos with no HEAD have no entry — render the row without a
     // diffstat tail in that case.
     let diffstat = snap

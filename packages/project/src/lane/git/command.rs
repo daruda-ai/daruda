@@ -15,8 +15,8 @@ pub(crate) fn git_command(cwd: &Path) -> Command {
         // A signature block would break the bare `--pretty`/`--format` parsers.
         .args(["-c", "log.showSignature=false"])
         // Keeps a read-only `git status` from rewriting `.git/index`, which a
-        // `.git` watcher would see as a change. `diff HEAD --numstat` still
-        // refreshes a stat-stale index.
+        // `.git` watcher would see as a change. Porcelain `git diff` ignores
+        // it and still writes, so worktree diffs here use plumbing.
         .arg("--no-optional-locks")
         .arg("--no-pager")
         // Several call sites match git's English stderr. `LANGUAGE` outranks

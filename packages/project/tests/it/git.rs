@@ -77,7 +77,10 @@ fn a_real_status_reports_spaced_and_non_ascii_paths_verbatim() {
         ]
     );
     assert_eq!(status.diffstat.get(Path::new("한글.md")), Some(&(1, 0)));
-    assert!(status.diffstat.contains_key(Path::new("새 이름.rs")));
+    // A pure rename counts no lines, keyed by its destination only — what
+    // rename detection gives; without it the move is a delete plus an add.
+    assert_eq!(status.diffstat.get(Path::new("새 이름.rs")), Some(&(0, 0)));
+    assert!(!status.diffstat.contains_key(Path::new("old name.rs")));
 }
 
 #[test]

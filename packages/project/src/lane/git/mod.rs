@@ -597,9 +597,10 @@ pub(crate) fn git_merge(target_path: &Path, source_branch: &str) -> Result<Merge
             // Ask git which paths are unmerged rather than reading them out
             // of its prose: a `CONFLICT` line spells the path inside a
             // sentence, so a name with a space was cut at the first word.
+            // Plumbing: porcelain `git diff` would also rewrite the index.
             let unmerged = run_git(
                 target_path,
-                ["diff", "--name-only", "--diff-filter=U", "-z"],
+                ["diff-files", "--name-only", "--diff-filter=U", "-z"],
             )?;
             let files: Vec<String> = unmerged
                 .split('\0')
