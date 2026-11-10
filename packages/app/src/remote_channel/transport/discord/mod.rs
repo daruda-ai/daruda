@@ -1,7 +1,8 @@
 //! Discord Gateway sessions and REST messages; interactions are deferred at receipt.
 
 use super::{
-    Credentials, Incoming, IncomingKind, Message, Result, TransportError, chunks, http, socket,
+    Credentials, Incoming, IncomingKind, Message, Result, SentPart, TransportError, chunks, http,
+    socket,
 };
 use crate::remote_channel::cards::EditFailure;
 use daruda_config::remote::RemoteRecipient;
@@ -251,7 +252,7 @@ pub fn send(
     credentials: &Credentials,
     recipient: &RemoteRecipient,
     message: Message,
-    mut on_sent: impl FnMut(&str),
+    mut on_sent: impl FnMut(SentPart),
 ) -> Result<Vec<String>> {
     let mut ids = Vec::new();
     for payload in payloads(&message) {
@@ -262,7 +263,13 @@ pub fn send(
             &payload,
         )?;
         let id = http::required(&value, "id")?;
-        on_sent(id);
+        on_sent(SentPart {
+            id: id.to_owned(),
+            text: payload["content"].as_str().unwrap_or_default().to_owned(),
+            buttons: payload["components"]
+                .as_array()
+                .is_some_and(|rows| !rows.is_empty()),
+        });
         ids.push(id.to_owned());
     }
     Ok(ids)

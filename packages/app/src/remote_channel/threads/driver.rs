@@ -5,7 +5,7 @@ use super::{Book, ConversationKey, PaneConversation, Scope};
 use crate::remote_channel::bridge::{MessageTail, PaneRef};
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
-use crate::remote_channel::transport::{self, Credentials, IncomingKind, Message, slack};
+use crate::remote_channel::transport::{self, Credentials, IncomingKind, Message, SentPart, slack};
 use crate::surface::strings as s;
 use daruda_config::remote::{ChannelKind, RemoteRecipient};
 use daruda_store::remote_threads::RemoteThreadStore;
@@ -168,7 +168,7 @@ pub(crate) fn deliver(
     credentials: &Credentials,
     recipient: &RemoteRecipient,
     mut message: Message,
-    on_sent: impl FnMut(&str),
+    on_sent: impl FnMut(SentPart),
 ) -> Posted {
     let (root, started) = match &plan.root {
         Some(root) => (root.clone(), None),

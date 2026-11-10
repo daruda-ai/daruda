@@ -2,7 +2,7 @@
 //! replies under it. Other transports have no thread concept here; callers
 //! ask [`crate::remote_channel::transport::pane_threads`] before using this.
 
-use super::{Credentials, Message, Result, api, literal_block, post, post_payload};
+use super::{Credentials, Message, Result, SentPart, api, literal_block, post, post_payload};
 use crate::remote_channel::transport::http;
 use daruda_config::remote::RemoteRecipient;
 
@@ -30,7 +30,7 @@ pub(crate) fn post_in_thread(
     recipient: &RemoteRecipient,
     root: &str,
     message: Message,
-    on_sent: impl FnMut(&str),
+    on_sent: impl FnMut(SentPart),
 ) -> Result<Vec<String>> {
     post(credentials, recipient, message, Some(root), on_sent)
 }

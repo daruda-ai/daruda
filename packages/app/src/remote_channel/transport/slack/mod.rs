@@ -1,7 +1,8 @@
 //! Slack Web API and Socket Mode adapter.
 
 use super::{
-    Credentials, Incoming, IncomingKind, Message, Result, TransportError, chunks, http, socket,
+    Credentials, Incoming, IncomingKind, Message, Result, SentPart, TransportError, chunks, http,
+    socket,
 };
 use crate::remote_channel::cards::EditFailure;
 use daruda_config::remote::RemoteRecipient;
@@ -210,7 +211,7 @@ pub fn send(
     credentials: &Credentials,
     recipient: &RemoteRecipient,
     message: Message,
-    on_sent: impl FnMut(&str),
+    on_sent: impl FnMut(SentPart),
 ) -> Result<Vec<String>> {
     post(credentials, recipient, message, None, on_sent)
 }
@@ -221,7 +222,7 @@ fn post(
     recipient: &RemoteRecipient,
     message: Message,
     thread: Option<&str>,
-    mut on_sent: impl FnMut(&str),
+    mut on_sent: impl FnMut(SentPart),
 ) -> Result<Vec<String>> {
     let (text, markdown) = super::format::slack(&message);
     let parts = body_parts(&text, &message.header);
@@ -248,7 +249,11 @@ fn post(
         let payload = post_payload(recipient, &fallback, message_blocks, thread);
         let response = api(&credentials.bot, "chat.postMessage", &payload)?;
         let id = http::required(&response, "ts")?;
-        on_sent(id);
+        on_sent(SentPart {
+            id: id.to_owned(),
+            text: fallback,
+            buttons: keyboard.is_some(),
+        });
         ids.push(id.to_owned());
     }
     Ok(ids)

@@ -1,12 +1,12 @@
 use super::RemoteChannels;
 use crate::remote_channel::{
-    bridge::{InlineKeyboard, MessageTail, Outbound, PaneRef},
+    bridge::{InlineKeyboard, Outbound, PaneRef},
     cards::{
         Begun, CardId, CardScope, EditOutcome, SendClaim, SendOutcome, Settlement, quit::QuitEdit,
     },
     runtime::BotSession,
     threads::driver::{self, ThreadPlan},
-    transport::{self, Message},
+    transport::{self, Message, SentPart},
 };
 use daruda_config::remote::{ChannelKind, RemoteRecipient};
 use futures::{
@@ -32,8 +32,18 @@ pub(super) struct Receipt {
     id: String,
     owner: String,
     recipient: RemoteRecipient,
-    ids: Vec<String>,
-    original: String,
+    parts: Vec<SentPart>,
+}
+
+impl Receipt {
+    fn message_ids(&self) -> impl Iterator<Item = &String> {
+        self.parts.iter().map(|part| &part.id)
+    }
+
+    /// The parts a settlement rewrites: those whose buttons must go.
+    fn with_buttons(&self) -> impl Iterator<Item = &SentPart> {
+        self.parts.iter().filter(|part| part.buttons)
+    }
 }
 
 pub(super) struct Prepared {
@@ -42,9 +52,34 @@ pub(super) struct Prepared {
     recipient: RemoteRecipient,
     message: Message,
     pane: Option<PaneRef>,
-    original: String,
     /// The pane's thread, on a channel that gives panes their own.
     thread: Option<ThreadPlan>,
+}
+
+#[cfg(test)]
+impl Prepared {
+    /// What sending this message as parts `ids` would report: buttons ride
+    /// on the last part, as every transport sends them.
+    pub(super) fn parts(&self, ids: Vec<String>) -> Vec<SentPart> {
+        let tail = match &self.message.tail {
+            crate::remote_channel::bridge::MessageTail::Plain(text)
+            | crate::remote_channel::bridge::MessageTail::Markdown(text) => text,
+        };
+        let text = if self.message.header.is_empty() {
+            tail.clone()
+        } else {
+            format!("{}\n{tail}", self.message.header)
+        };
+        let last = ids.len().saturating_sub(1);
+        ids.into_iter()
+            .enumerate()
+            .map(|(index, id)| SentPart {
+                id,
+                text: text.clone(),
+                buttons: index == last && self.message.keyboard.is_some(),
+            })
+            .collect()
+    }
 }
 
 pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
@@ -73,14 +108,6 @@ pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
             None,
         ),
     };
-    let tail = match &message.tail {
-        MessageTail::Plain(text) | MessageTail::Markdown(text) => text,
-    };
-    let original = if message.header.is_empty() {
-        tail.clone()
-    } else {
-        format!("{}\n{tail}", message.header)
-    };
     let thread = pane.and_then(|pane| {
         driver::plan(
             &pending.id,
@@ -97,7 +124,6 @@ pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
         recipient: pending.recipient.clone(),
         message,
         pane,
-        original,
         thread,
     })
 }
@@ -147,7 +173,7 @@ pub(super) fn edit(receipt: Receipt, label: String, cx: &mut App) {
     if desk.owner() != Some(&receipt.owner) {
         return;
     }
-    for id in &receipt.ids {
+    for id in receipt.message_ids() {
         desk.note_settled(id.clone());
     }
     let id = receipt.id.clone();
@@ -181,13 +207,7 @@ fn flush_connection(id: &str, cx: &mut App) {
             continue;
         }
         #[cfg(test)]
-        if let Some(result) = crate::remote_channel::cards::tests::capture(
-            &receipt.id,
-            receipt.ids.clone(),
-            &receipt.original,
-            &label,
-            cx,
-        ) {
+        if let Some(result) = captured(&receipt, &label, cx) {
             let outcome = EditOutcome::logged(result, EDIT_FAILED, EDIT_DEDUP);
             finish_edit(&receipt, attempt, outcome, cx);
             continue;
@@ -196,7 +216,7 @@ fn flush_connection(id: &str, cx: &mut App) {
             // A gone message does not stop the rest of a split card from
             // losing its buttons; a transient failure retries all of them.
             let mut outcome = EditOutcome::Edited;
-            for message_id in &receipt.ids {
+            for part in receipt.with_buttons() {
                 let serving = cx.update(|cx| {
                     let connection = cx.global::<RemoteChannels>().connections.get(&receipt.id)?;
                     if !connection.desk.borrow().edits().contains(attempt) {
@@ -209,9 +229,8 @@ fn flush_connection(id: &str, cx: &mut App) {
                     break;
                 };
                 let recipient = receipt.recipient.clone();
-                let original = receipt.original.clone();
+                let part = part.clone();
                 let label = label.clone();
-                let message_id = message_id.clone();
                 let result = cx
                     .background_executor()
                     .spawn(async move {
@@ -222,8 +241,8 @@ fn flush_connection(id: &str, cx: &mut App) {
                             kind,
                             &bot.credentials,
                             &recipient,
-                            &message_id,
-                            &original,
+                            &part.id,
+                            &part.text,
                             &label,
                         ))
                     })
@@ -253,13 +272,13 @@ fn flush_connection(id: &str, cx: &mut App) {
 fn quit_edit(kind: ChannelKind, bot: Arc<BotSession>, receipt: Receipt, label: String) -> QuitEdit {
     QuitEdit::new(QUIT_EDIT_FAILED, QUIT_EDIT_DEDUP, move || {
         let mut result = Ok(());
-        for message_id in &receipt.ids {
+        for part in receipt.with_buttons() {
             let edited = transport::edit(
                 kind,
                 &bot.credentials,
                 &receipt.recipient,
-                message_id,
-                &receipt.original,
+                &part.id,
+                &part.text,
                 &label,
             );
             if let Err(failure) = edited {
@@ -268,6 +287,28 @@ fn quit_edit(kind: ChannelKind, bot: Arc<BotSession>, receipt: Receipt, label: S
         }
         result
     })
+}
+
+/// The test seam's answer for `receipt`'s edits, one capture per rewritten
+/// part; the first failure stands for the receipt.
+#[cfg(test)]
+fn captured(
+    receipt: &Receipt,
+    label: &str,
+    cx: &mut App,
+) -> Option<Result<(), crate::remote_channel::cards::EditFailure>> {
+    let mut answer = None;
+    for part in receipt.with_buttons() {
+        let result = crate::remote_channel::cards::tests::capture(
+            &receipt.id,
+            vec![part.id.clone()],
+            &part.text,
+            label,
+            cx,
+        )?;
+        answer = Some(answer.unwrap_or(Ok(())).and(result));
+    }
+    Some(answer.unwrap_or(Ok(())))
 }
 
 const QUIT_EDIT_FAILED: &str = "Remote card failed to edit at quit";
@@ -315,7 +356,7 @@ impl RemoteChannels {
             };
             let desk = connection.desk.get_mut();
             for (receipt, label) in desk.close_for_quit(cancelled) {
-                for message in &receipt.ids {
+                for message in receipt.message_ids() {
                     desk.note_settled(message.clone());
                 }
                 owed.push((receipt, label));
@@ -327,13 +368,7 @@ impl RemoteChannels {
                 continue;
             };
             #[cfg(test)]
-            if let Some(result) = crate::remote_channel::cards::tests::capture(
-                &receipt.id,
-                receipt.ids.clone(),
-                &receipt.original,
-                &label,
-                cx,
-            ) {
+            if let Some(result) = captured(&receipt, &label, cx) {
                 edits.push(QuitEdit::new(
                     QUIT_EDIT_FAILED,
                     QUIT_EDIT_DEDUP,
@@ -402,8 +437,7 @@ impl RemoteChannels {
 pub(super) fn finish(
     pending: &Pending,
     pane: Option<PaneRef>,
-    outcome: SendOutcome<Vec<String>>,
-    original: String,
+    outcome: SendOutcome<Vec<SentPart>>,
     cx: &mut App,
 ) {
     let live = current(pending, cx);
@@ -415,31 +449,30 @@ pub(super) fn finish(
     else {
         return;
     };
-    let ids: &[String] = match &outcome {
-        SendOutcome::Delivered(ids) => ids,
-        SendOutcome::Unconfirmed | SendOutcome::NotSent => &[],
+    let ids: Vec<String> = match &outcome {
+        SendOutcome::Delivered(parts) => parts.iter().map(|part| part.id.clone()).collect(),
+        SendOutcome::Unconfirmed | SendOutcome::NotSent => Vec::new(),
     };
     // Only the live session's messages take a reply.
     let replies = match (live, pane) {
         (true, Some(pane)) => {
-            for id in ids {
+            for id in &ids {
                 connection
                     .core
                     .record_delivered(id.clone(), pane, orchestrator);
             }
-            ids.to_vec()
+            ids
         }
         _ => Vec::new(),
     };
     if let Some(card) = &pending.card {
         let desk = connection.desk.get_mut();
         let outcome = match (outcome, desk.owner()) {
-            (SendOutcome::Delivered(ids), Some(owner)) => SendOutcome::Delivered(Receipt {
+            (SendOutcome::Delivered(parts), Some(owner)) => SendOutcome::Delivered(Receipt {
                 id: pending.id.clone(),
                 owner: owner.clone(),
                 recipient: pending.recipient.clone(),
-                ids,
-                original,
+                parts,
             }),
             // Without a bound identity no edit can own the messages.
             (SendOutcome::Delivered(_), None) => SendOutcome::Unconfirmed,
@@ -486,7 +519,7 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
 /// The transports report every failure as one message-only error, so a send
 /// that posted no chunk is unconfirmed: the platform may have taken it before
 /// the reply was lost. Any posted chunk is a receipt settlement can edit.
-fn sent_outcome(sent: Vec<String>) -> SendOutcome<Vec<String>> {
+fn sent_outcome(sent: Vec<SentPart>) -> SendOutcome<Vec<SentPart>> {
     if sent.is_empty() {
         SendOutcome::Unconfirmed
     } else {
@@ -501,7 +534,6 @@ fn spawn_connection(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
                 continue;
             };
             let pane = prepared.pane;
-            let original = prepared.original.clone();
             let (outcome, result, thread) = cx
                 .background_executor()
                 .spawn(async move {
@@ -509,7 +541,7 @@ fn spawn_connection(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
                         return (SendOutcome::NotSent, Ok(Vec::new()), None);
                     }
                     let mut sent = Vec::new();
-                    let record = |id: &str| sent.push(id.to_owned());
+                    let record = |part| sent.push(part);
                     let (result, started) = match &prepared.thread {
                         Some(plan) => {
                             let posted = driver::deliver(
@@ -540,7 +572,7 @@ fn spawn_connection(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
                 if let Some((plan, root)) = &thread {
                     driver::record_root(plan, root.clone(), cx);
                 }
-                finish(&pending, pane, outcome, original, cx);
+                finish(&pending, pane, outcome, cx);
             });
             if let Err(error) = result {
                 crate::remote_channel::log_error(

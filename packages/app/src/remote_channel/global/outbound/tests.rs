@@ -37,11 +37,10 @@ fn complete(sending: Vec<(Pending, Prepared)>, cx: &mut App) {
         finish(
             &pending,
             prepared.pane,
-            SendOutcome::Delivered(vec![
+            SendOutcome::Delivered(prepared.parts(vec![
                 format!("{}-1", pending.id),
                 format!("{}-2", pending.id),
-            ]),
-            prepared.original,
+            ])),
             cx,
         );
     }
@@ -75,7 +74,16 @@ fn a_desktop_approval_settles_every_channel_using_its_delivered_ids(cx: &mut gpu
         assert_eq!(channels, ["personal", "telegram", "work"]);
         assert!(edits.iter().all(|edit| edit.original == "Create worktree"
             && edit.label == crate::surface::strings::control::approval_approved_desktop()));
-        assert_eq!(edits.iter().map(|edit| edit.ids.len()).sum::<usize>(), 5);
+        // Each remote card went out in two parts with its buttons on the
+        // second; only that part is rewritten, so the first keeps its text.
+        assert_eq!(
+            edits
+                .iter()
+                .filter(|edit| edit.channel != "telegram")
+                .flat_map(|edit| edit.ids.iter().map(String::as_str))
+                .collect::<std::collections::BTreeSet<_>>(),
+            ["personal-2", "work-2"].into()
+        );
         assert!(!approval::resolve(
             id,
             ApprovalChoice::Refused,
@@ -269,17 +277,10 @@ fn a_duplicate_send_failure_does_not_forget_delivered_card_tokens(cx: &mut gpui:
         finish(
             &pending,
             prepared.pane,
-            SendOutcome::Delivered(vec!["message".into()]),
-            prepared.original.clone(),
+            SendOutcome::Delivered(prepared.parts(vec!["message".into()])),
             cx,
         );
-        finish(
-            &pending,
-            prepared.pane,
-            SendOutcome::Unconfirmed,
-            prepared.original,
-            cx,
-        );
+        finish(&pending, prepared.pane, SendOutcome::Unconfirmed, cx);
         assert!(matches!(
             cx.global_mut::<RemoteChannels>()
                 .connections
@@ -308,8 +309,7 @@ fn a_fresh_remote_receipt_extends_the_deadline_but_a_duplicate_does_not(
             finish(
                 pending,
                 prepared.pane,
-                SendOutcome::Delivered(vec!["message".into()]),
-                prepared.original.clone(),
+                SendOutcome::Delivered(prepared.parts(vec!["message".into()])),
                 cx,
             );
         }
@@ -328,8 +328,7 @@ fn a_fresh_remote_receipt_extends_the_deadline_but_a_duplicate_does_not(
             finish(
                 pending,
                 prepared.pane,
-                SendOutcome::Delivered(vec!["duplicate".into()]),
-                prepared.original.clone(),
+                SendOutcome::Delivered(prepared.parts(vec!["duplicate".into()])),
                 cx,
             );
         }
@@ -374,8 +373,7 @@ fn an_old_remote_owner_cannot_extend_a_replacement_attempt(cx: &mut gpui::TestAp
         finish(
             &old,
             prepared.pane,
-            SendOutcome::Delivered(vec!["retired-message".into()]),
-            prepared.original,
+            SendOutcome::Delivered(prepared.parts(vec!["retired-message".into()])),
             cx,
         );
         assert!(
@@ -405,11 +403,10 @@ fn relay_keeps_channel_claimed(delivered: bool, cx: &mut gpui::TestAppContext) {
             &pending,
             prepared.pane,
             if delivered {
-                SendOutcome::Delivered(vec!["sent".into()])
+                SendOutcome::Delivered(prepared.parts(vec!["sent".into()]))
             } else {
                 SendOutcome::Unconfirmed
             },
-            prepared.original,
             cx,
         );
         assert!(crate::remote_channel::send_approval_card(
@@ -606,5 +603,47 @@ fn an_inflight_receipt_keeps_its_settlement_across_a_same_bot_recovery(
         ));
         approval::relay_outstanding(cx);
         assert!(remote.try_recv().is_err());
+    });
+}
+
+/// The defect this guards: a card split over two messages had both rewritten
+/// with the first part's text, so the second part's content was replaced by
+/// a copy of the first. Only the part with buttons is rewritten, with its own
+/// text.
+#[gpui::test]
+fn a_split_card_rewrites_only_its_buttoned_part_with_its_own_text(cx: &mut gpui::TestAppContext) {
+    use crate::remote_channel::transport::SentPart;
+    cx.update(|cx| {
+        let (mut remote, _telegram) = queued(cx);
+        let (id, _answer) = approval::request("Create worktree".into(), Delivery::Explicit, cx);
+        for (pending, prepared) in begin(&mut remote, cx) {
+            let part = |n: &str, text: &str, buttons| SentPart {
+                id: format!("{}-{n}", pending.id),
+                text: text.into(),
+                buttons,
+            };
+            finish(
+                &pending,
+                prepared.pane,
+                SendOutcome::Delivered(vec![
+                    part("1", "first half", false),
+                    part("2", "second half", true),
+                ]),
+                cx,
+            );
+        }
+        assert!(approval::resolve_desktop(id.0, "approve", cx));
+        let edits: Vec<_> = cx
+            .global::<EditCapture>()
+            .edits
+            .iter()
+            .filter(|edit| edit.channel != "telegram")
+            .map(|edit| (edit.ids.clone(), edit.original.clone()))
+            .collect();
+        assert_eq!(edits.len(), 2, "one rewrite per channel");
+        for (ids, original) in edits {
+            assert!(ids.len() == 1 && ids[0].ends_with("-2"), "{ids:?}");
+            assert_eq!(original, "second half");
+        }
     });
 }

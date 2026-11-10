@@ -38,6 +38,17 @@ pub enum IncomingKind {
 
 pub type Message = PreparedPing;
 
+/// One message a send posted: its id, the text it shows, and whether it
+/// carries buttons. Settling a card rewrites exactly the parts with buttons,
+/// each with its own text, so a long card split over several messages does
+/// not have every part overwritten with the first one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SentPart {
+    pub id: String,
+    pub text: String,
+    pub buttons: bool,
+}
+
 impl PreparedPing {
     pub fn plain(text: String, keyboard: Option<InlineKeyboard>) -> Self {
         Self {
@@ -81,7 +92,7 @@ pub fn send_recording(
     credentials: &Credentials,
     recipient: &RemoteRecipient,
     message: Message,
-    on_sent: impl FnMut(&str),
+    on_sent: impl FnMut(SentPart),
 ) -> Result<Vec<String>> {
     match kind {
         ChannelKind::Slack => slack::send(credentials, recipient, message, on_sent),

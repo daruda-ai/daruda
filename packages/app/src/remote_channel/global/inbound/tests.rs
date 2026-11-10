@@ -640,8 +640,13 @@ fn callbacks_before_send_completion_cannot_schedule_a_stale_edit(cx: &mut TestAp
         super::super::outbound::finish(
             &pending,
             None,
-            crate::remote_channel::cards::SendOutcome::Delivered(vec!["early-message".into()]),
-            prompt.summary.clone(),
+            crate::remote_channel::cards::SendOutcome::Delivered(vec![
+                crate::remote_channel::transport::SentPart {
+                    id: "early-message".into(),
+                    text: prompt.summary.clone(),
+                    buttons: true,
+                },
+            ]),
             cx,
         );
         assert_eq!(cx.global::<EditCapture>().edits.len(), 1);
@@ -778,7 +783,6 @@ fn a_remote_card_sent_without_a_receipt_still_answers_its_tap(cx: &mut TestAppCo
                 pending,
                 None,
                 crate::remote_channel::cards::SendOutcome::Unconfirmed,
-                "Create worktree".into(),
                 cx,
             );
         }
@@ -819,7 +823,6 @@ fn settling_a_remote_card_without_a_receipt_leaves_its_buttons_to_a_stale_tap(
                 pending,
                 None,
                 crate::remote_channel::cards::SendOutcome::Unconfirmed,
-                "Create worktree".into(),
                 cx,
             );
         }
@@ -869,7 +872,6 @@ fn a_remote_card_that_never_left_is_offered_once_more(cx: &mut TestAppContext) {
                 pending,
                 None,
                 crate::remote_channel::cards::SendOutcome::NotSent,
-                "Create worktree".into(),
                 cx,
             );
         }

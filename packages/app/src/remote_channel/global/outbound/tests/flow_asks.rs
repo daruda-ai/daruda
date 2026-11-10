@@ -274,13 +274,7 @@ fn a_retired_flow_send_cannot_forget_a_new_owners_callback_tokens(cx: &mut gpui:
         let token = prepared.message.keyboard.as_ref().unwrap().rows[0][1]
             .1
             .clone();
-        finish(
-            &old,
-            old_prepared.pane,
-            SendOutcome::Unconfirmed,
-            old_prepared.original,
-            cx,
-        );
+        finish(&old, old_prepared.pane, SendOutcome::Unconfirmed, cx);
         assert!(matches!(
             cx.global_mut::<RemoteChannels>()
                 .connections
