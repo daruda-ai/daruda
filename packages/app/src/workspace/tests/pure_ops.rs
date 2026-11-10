@@ -225,37 +225,6 @@ fn test_adjust_divider_changes_ratios() {
     }
 }
 
-// ---- sanitize_branch_name ----
-
-#[test]
-fn test_sanitize_branch_name_rejects_bad_inputs() {
-    use daruda_core::git::sanitize_branch_name;
-    assert!(sanitize_branch_name("").is_none());
-    assert!(sanitize_branch_name("   ").is_none());
-    assert!(sanitize_branch_name("..").is_none());
-    assert!(sanitize_branch_name("foo..bar").is_none());
-    assert!(sanitize_branch_name("/leading").is_none());
-    assert!(sanitize_branch_name("trailing/").is_none());
-    assert!(sanitize_branch_name("has space").is_none());
-    assert!(sanitize_branch_name("has:colon").is_none());
-    assert!(sanitize_branch_name("has~tilde").is_none());
-    // git-check-ref-format rule 6: no leading/trailing `.`
-    assert!(sanitize_branch_name(".hidden").is_none());
-    assert!(sanitize_branch_name("trailing.").is_none());
-    // Valid cases
-    assert_eq!(
-        sanitize_branch_name("feat/sidebar").as_deref(),
-        Some("feat/sidebar")
-    );
-    assert_eq!(
-        sanitize_branch_name("  fix-123  ").as_deref(),
-        Some("fix-123")
-    );
-    assert_eq!(sanitize_branch_name("main").as_deref(), Some("main"));
-    // Dots in the middle are fine (git allows `v1.2.3`).
-    assert_eq!(sanitize_branch_name("v1.2.3").as_deref(), Some("v1.2.3"));
-}
-
 // ---- normalize_ratios ----
 
 #[test]

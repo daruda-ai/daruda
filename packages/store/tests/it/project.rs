@@ -177,18 +177,17 @@ fn legacy_leaf_without_account_id_field_loads_as_none() {
     }
 }
 
-#[test]
-fn agent_chat_content_round_trip_preserves_account_id() {
-    use daruda_store::accounts::AccountId;
-    let id = AccountId::new();
-    let content = SerializedAgentChatContent {
+/// An agent-chat pane as a file written before any of its optional fields
+/// existed: only the lane cwd.
+fn bare_agent_chat() -> SerializedAgentChatContent {
+    SerializedAgentChatContent {
         require_exact_resume: false,
         access: Default::default(),
         cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
         session_id: None,
         title: None,
-        agent_id: Some("claude".to_string()),
-        account_id: Some(id),
+        agent_id: None,
+        account_id: None,
         picked_mode_id: None,
         follows_delegated_mode: false,
         model_id: None,
@@ -199,81 +198,101 @@ fn agent_chat_content_round_trip_preserves_account_id() {
         visible_kinds: None,
         fold_mode: None,
         pending_handoff: None,
-    };
-    let json = serde_json::to_string(&content).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.account_id, Some(id));
-
-    // Legacy payload (pre-account_id) still loads, defaulting to None.
-    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
-    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
-    assert!(legacy.account_id.is_none());
+    }
 }
 
-/// A recap still owed survives a save; a file written before the field
-/// existed owes none, and an absent one is not written at all.
+/// Every pane choice survives the restart that ends the session it was made
+/// in: each connect reapplies them. Two fixtures cover the values one cannot
+/// hold at once — both content widths (turning reading width *off* must be
+/// written as much as turning it on), a delegated pane beside a pick, an
+/// all-unchecked kind list beside a chosen one, and the two tail levels set
+/// independently.
 #[test]
-fn agent_chat_pending_handoff_round_trips_and_legacy_owes_none() {
-    let mut content: SerializedAgentChatContent =
-        serde_json::from_str(r#"{"cwd":"/repo/lane","session_id":"new"}"#).unwrap();
-    assert_eq!(content.pending_handoff, None);
-    assert!(
-        !serde_json::to_string(&content)
-            .unwrap()
-            .contains("pending_handoff")
+fn every_agent_chat_field_round_trips_through_a_leaf() {
+    use daruda_store::accounts::AccountId;
+    use daruda_store::tasks::{AgentChatAccess, ExecutionRef};
+    let picked = SerializedAgentChatContent {
+        require_exact_resume: true,
+        access: AgentChatAccess::CliSnapshot(ExecutionRef {
+            task_id: "task".into(),
+            execution_id: "run".into(),
+        }),
+        session_id: Some("sess-abc123".to_string()),
+        title: Some("Fix the parser".to_string()),
+        agent_id: Some("claude".to_string()),
+        account_id: Some(AccountId::new()),
+        picked_mode_id: Some("acceptEdits".to_string()),
+        model_id: Some("opus".to_string()),
+        content_width: Some(SerializedChatContentWidth::Full),
+        tail_window: Some(SerializedChatTailWindow::Last(5)),
+        tail_window_calls: Some(SerializedChatTailWindow::Last(2)),
+        visible_kinds: Some(vec!["tools".to_string(), "tool_edit".to_string()]),
+        fold_mode: Some(vec![
+            "summary".to_string(),
+            "last.tool=expanded".to_string(),
+        ]),
+        pending_handoff: Some("<conversation_handoff to-agent=\"Codex\">".into()),
+        ..bare_agent_chat()
+    };
+    let delegated = SerializedAgentChatContent {
+        follows_delegated_mode: true,
+        content_width: Some(SerializedChatContentWidth::Reading),
+        tail_window: Some(SerializedChatTailWindow::All),
+        visible_kinds: Some(Vec::new()),
+        fold_mode: Some(vec!["auto".to_string()]),
+        ..bare_agent_chat()
+    };
+    for content in [picked, delegated] {
+        let leaf = SerializedLayout::Leaf {
+            pane_id: 9,
+            content: SerializedPaneContent::AgentChat(content),
+        };
+        let json = serde_json::to_string(&leaf).unwrap();
+        let restored: SerializedLayout = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, leaf, "{json}");
+    }
+}
+
+/// A file written before any optional field existed loads with each one at
+/// its default — no account, mode, model, or recap owed, an interactive pane,
+/// every view preference following config — and a pane that never chose
+/// writes none of those keys back.
+#[test]
+fn a_bare_agent_chat_loads_with_defaults_and_writes_no_optional_key() {
+    let legacy: SerializedAgentChatContent =
+        serde_json::from_str(r#"{"cwd":"/repo/lane"}"#).unwrap();
+    assert_eq!(legacy, bare_agent_chat());
+
+    let leaf: SerializedLayout =
+        serde_json::from_str(r#"{"type":"Leaf","pane_id":9,"agent_chat":{"cwd":"/repo/lane"}}"#)
+            .unwrap();
+    assert_eq!(
+        leaf,
+        SerializedLayout::Leaf {
+            pane_id: 9,
+            content: SerializedPaneContent::AgentChat(bare_agent_chat()),
+        }
     );
 
-    content.pending_handoff = Some("<conversation_handoff to-agent=\"Codex\">".into());
-    let json = serde_json::to_string(&content).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.pending_handoff, content.pending_handoff);
-}
-
-/// A CLI snapshot pane must come back read-only, naming the same run; a pane
-/// saved before access was recorded is an ordinary interactive chat.
-#[test]
-fn agent_chat_access_round_trips_and_legacy_is_interactive() {
-    use daruda_store::tasks::AgentChatAccess;
-    let mut content: SerializedAgentChatContent =
-        serde_json::from_str(r#"{"cwd":"/repo/lane","session_id":"cli"}"#).unwrap();
-    assert_eq!(content.access, AgentChatAccess::Interactive);
-
-    content.access = AgentChatAccess::CliSnapshot(daruda_store::tasks::ExecutionRef {
-        task_id: "task".into(),
-        execution_id: "run".into(),
-    });
-    let json = serde_json::to_string(&content).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.access, content.access);
-    assert_eq!(restored.session_id.as_deref(), Some("cli"));
-}
-
-#[test]
-fn agent_chat_content_round_trip_preserves_picked_mode_id() {
-    // Every connect requests the pane's own pick ahead of the agent default,
-    // so it has to survive the restart that ends the session it was made in.
-    let content = SerializedAgentChatContent {
-        require_exact_resume: false,
-        access: Default::default(),
-        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
-        session_id: Some("sess-abc123".to_string()),
-        title: None,
-        agent_id: Some("claude".to_string()),
-        account_id: None,
-        picked_mode_id: Some("acceptEdits".to_string()),
-        follows_delegated_mode: false,
-        model_id: None,
-        content_width: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        visible_kinds: None,
-        fold_mode: None,
-        pending_handoff: None,
-    };
-    let json = serde_json::to_string(&content).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.picked_mode_id, Some("acceptEdits".to_string()));
+    let json = serde_json::to_string(&bare_agent_chat()).unwrap();
+    for key in [
+        "require_exact_resume",
+        "session_id",
+        "title",
+        "agent_id",
+        "account_id",
+        "mode_id",
+        "follows_delegated_mode",
+        "model_id",
+        "content_width",
+        "tail_window",
+        "display_filter",
+        "visible_kinds",
+        "fold_mode",
+        "pending_handoff",
+    ] {
+        assert!(!json.contains(key), "{key} should be omitted: {json}");
+    }
 }
 
 /// The superseded `mode_id` key recorded whatever mode the adapter reported,
@@ -284,285 +303,6 @@ fn the_superseded_mode_id_key_is_not_read_as_a_pick() {
     let legacy: SerializedAgentChatContent =
         serde_json::from_str(r#"{"cwd":"/repo/lane","mode_id":"auto"}"#).unwrap();
     assert!(legacy.picked_mode_id.is_none());
-}
-
-/// A delegated pane keeps following the delegated mode after a restart; a
-/// file written before the key reads as following `default_mode`, and an
-/// ordinary pane does not write it.
-#[test]
-fn follows_delegated_mode_round_trips_and_is_absent_by_default() {
-    let mut content: SerializedAgentChatContent =
-        serde_json::from_str(r#"{"cwd":"/repo/lane","picked_mode_id":"plan"}"#).unwrap();
-    assert!(!content.follows_delegated_mode);
-    assert!(
-        !serde_json::to_string(&content)
-            .unwrap()
-            .contains("follows_delegated_mode")
-    );
-    content.picked_mode_id = None;
-    content.follows_delegated_mode = true;
-    let json = serde_json::to_string(&content).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert!(restored.follows_delegated_mode);
-    assert_eq!(restored.picked_mode_id, None);
-}
-
-#[test]
-fn agent_chat_content_round_trip_preserves_model_id() {
-    // Every connect reapplies this pane's model, so the pick has to survive
-    // the restart that ends the session it was made in.
-    let content = SerializedAgentChatContent {
-        require_exact_resume: false,
-        access: Default::default(),
-        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
-        session_id: Some("sess-abc123".to_string()),
-        title: None,
-        agent_id: Some("claude".to_string()),
-        account_id: None,
-        picked_mode_id: None,
-        follows_delegated_mode: false,
-        model_id: Some("opus".to_string()),
-        content_width: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        visible_kinds: None,
-        fold_mode: None,
-        pending_handoff: None,
-    };
-    let json = serde_json::to_string(&content).unwrap();
-    assert!(
-        !json.contains("mode_id"),
-        "an unset mode/model must stay out of the payload: {json}"
-    );
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.model_id, Some("opus".to_string()));
-
-    // Legacy payload (pre-model_id) still loads, defaulting to None.
-    let legacy_json = r#"{"cwd":"/repo/lane","picked_mode_id":"acceptEdits"}"#;
-    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
-    assert!(legacy.model_id.is_none());
-    assert_eq!(legacy.picked_mode_id, Some("acceptEdits".to_string()));
-}
-
-/// Both widths survive a save, and an absent key means "follow config". Both
-/// have to be *written*: the pane that turned reading width off says as much as
-/// the one that turned it on, and skipping either would read back as unset and
-/// silently take the config value instead.
-#[test]
-fn agent_chat_content_width_round_trips_and_an_absent_key_follows_config() {
-    let base = SerializedAgentChatContent {
-        require_exact_resume: false,
-        access: Default::default(),
-        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
-        session_id: Some("sess-abc123".to_string()),
-        title: None,
-        agent_id: Some("claude".to_string()),
-        account_id: None,
-        picked_mode_id: None,
-        follows_delegated_mode: false,
-        model_id: None,
-        content_width: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        visible_kinds: None,
-        fold_mode: None,
-        pending_handoff: None,
-    };
-    for width in [
-        SerializedChatContentWidth::Full,
-        SerializedChatContentWidth::Reading,
-    ] {
-        let content = SerializedAgentChatContent {
-            require_exact_resume: false,
-            content_width: Some(width),
-            ..base.clone()
-        };
-        let json = serde_json::to_string(&content).unwrap();
-        let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            restored.content_width,
-            Some(width),
-            "{width:?} must survive"
-        );
-    }
-
-    let json = serde_json::to_string(&base).unwrap();
-    assert!(
-        !json.contains("content_width"),
-        "a pane that never chose writes no key: {json}"
-    );
-
-    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
-    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
-    assert_eq!(
-        legacy.content_width, None,
-        "a file written before the key existed follows config"
-    );
-}
-
-#[test]
-fn agent_chat_display_filter_round_trips_and_legacy_stays_unset() {
-    let content = SerializedAgentChatContent {
-        require_exact_resume: false,
-        access: Default::default(),
-        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
-        session_id: None,
-        title: None,
-        agent_id: Some("claude".to_string()),
-        account_id: None,
-        picked_mode_id: None,
-        follows_delegated_mode: false,
-        model_id: None,
-        content_width: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: Some(vec!["tools".to_string(), "tool_edit".to_string()]),
-        visible_kinds: None,
-        fold_mode: None,
-        pending_handoff: None,
-    };
-    let json = serde_json::to_string(&content).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(
-        restored.display_filter,
-        Some(vec!["tools".to_string(), "tool_edit".to_string()])
-    );
-
-    let cleared = SerializedAgentChatContent {
-        require_exact_resume: false,
-        display_filter: Some(Vec::new()),
-        visible_kinds: None,
-        ..content
-    };
-    let json = serde_json::to_string(&cleared).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.display_filter, Some(Vec::new()));
-
-    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
-    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
-    assert_eq!(legacy.display_filter, None);
-
-    let newer_json = r#"{"cwd":"/repo/lane","display_filter":["tools","from_the_future"]}"#;
-    let newer: SerializedAgentChatContent = serde_json::from_str(newer_json).unwrap();
-    assert_eq!(
-        newer.display_filter,
-        Some(vec!["tools".to_string(), "from_the_future".to_string()])
-    );
-}
-
-#[test]
-fn agent_chat_fold_mode_round_trips_and_legacy_stays_unset() {
-    let content = SerializedAgentChatContent {
-        require_exact_resume: false,
-        access: Default::default(),
-        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
-        session_id: None,
-        title: None,
-        agent_id: Some("claude".to_string()),
-        account_id: None,
-        picked_mode_id: None,
-        follows_delegated_mode: false,
-        model_id: None,
-        content_width: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        visible_kinds: None,
-        fold_mode: Some(vec![
-            "summary".to_string(),
-            "last.tool=expanded".to_string(),
-        ]),
-        pending_handoff: None,
-    };
-    let json = serde_json::to_string(&content).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(
-        restored.fold_mode,
-        Some(vec![
-            "summary".to_string(),
-            "last.tool=expanded".to_string()
-        ])
-    );
-
-    let auto = SerializedAgentChatContent {
-        require_exact_resume: false,
-        fold_mode: Some(vec!["auto".to_string()]),
-        display_filter: None,
-        visible_kinds: None,
-        ..content
-    };
-    let json = serde_json::to_string(&auto).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.fold_mode, Some(vec!["auto".to_string()]));
-
-    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
-    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
-    assert_eq!(legacy.fold_mode, None);
-
-    let newer_json = r#"{"cwd":"/repo/lane","fold_mode":["auto","last.wormhole=expanded"]}"#;
-    let newer: SerializedAgentChatContent = serde_json::from_str(newer_json).unwrap();
-    assert_eq!(
-        newer.fold_mode,
-        Some(vec![
-            "auto".to_string(),
-            "last.wormhole=expanded".to_string()
-        ])
-    );
-}
-
-#[test]
-fn agent_chat_tail_window_round_trips_and_legacy_stays_unset() {
-    let content = SerializedAgentChatContent {
-        require_exact_resume: false,
-        access: Default::default(),
-        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
-        session_id: None,
-        title: None,
-        agent_id: Some("claude".to_string()),
-        account_id: None,
-        picked_mode_id: None,
-        follows_delegated_mode: false,
-        model_id: None,
-        content_width: None,
-        tail_window: Some(SerializedChatTailWindow::Last(5)),
-        tail_window_calls: Some(SerializedChatTailWindow::Last(2)),
-        display_filter: None,
-        visible_kinds: None,
-        fold_mode: None,
-        pending_handoff: None,
-    };
-    let json = serde_json::to_string(&content).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(
-        restored.tail_window,
-        Some(SerializedChatTailWindow::Last(5))
-    );
-    assert_eq!(
-        restored.tail_window_calls,
-        Some(SerializedChatTailWindow::Last(2)),
-        "the two levels round-trip independently"
-    );
-
-    let all = SerializedAgentChatContent {
-        require_exact_resume: false,
-        tail_window: Some(SerializedChatTailWindow::All),
-        tail_window_calls: None,
-        display_filter: None,
-        visible_kinds: None,
-        fold_mode: None,
-        ..content
-    };
-    let json = serde_json::to_string(&all).unwrap();
-    let restored: SerializedAgentChatContent = serde_json::from_str(&json).unwrap();
-    assert_eq!(restored.tail_window, Some(SerializedChatTailWindow::All));
-    assert_eq!(restored.tail_window_calls, None);
-
-    let legacy_json = r#"{"cwd":"/repo/lane"}"#;
-    let legacy: SerializedAgentChatContent = serde_json::from_str(legacy_json).unwrap();
-    assert_eq!(legacy.tail_window, None);
-    assert_eq!(legacy.tail_window_calls, None);
 }
 
 /// A file written before the axis split states only `tail_window`. It restores
@@ -593,8 +333,18 @@ fn a_future_view_preference_degrades_instead_of_losing_the_project() {
     assert_eq!(content.tail_window, None, "unreadable → treated as unset");
     assert_eq!(content.tail_window_calls, None);
     assert_eq!(content.content_width, None, "unreadable → follows config");
-    assert!(content.display_filter.is_some());
-    assert!(content.fold_mode.is_some());
+    // A token a newer build wrote is kept verbatim for that build to read.
+    assert_eq!(
+        content.display_filter,
+        Some(vec!["tool_read".to_string(), "tool_wormhole".to_string()])
+    );
+    assert_eq!(
+        content.fold_mode,
+        Some(vec![
+            "auto".to_string(),
+            "last.wormhole=expanded".to_string()
+        ])
+    );
     assert_eq!(
         content.cwd,
         Some(PaneCwd::Local(PathBuf::from("/repo/lane")))
@@ -656,82 +406,6 @@ fn a_future_view_preference_degrades_instead_of_losing_the_project() {
 }
 
 #[test]
-fn unset_view_preferences_are_left_out_of_the_json() {
-    let content = SerializedAgentChatContent {
-        require_exact_resume: false,
-        access: Default::default(),
-        cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
-        session_id: None,
-        title: None,
-        agent_id: None,
-        account_id: None,
-        picked_mode_id: None,
-        follows_delegated_mode: false,
-        model_id: None,
-        content_width: None,
-        tail_window: None,
-        tail_window_calls: None,
-        display_filter: None,
-        visible_kinds: None,
-        fold_mode: None,
-        pending_handoff: None,
-    };
-    let json = serde_json::to_string(&content).unwrap();
-    for key in [
-        "tail_window",
-        "display_filter",
-        "fold_mode",
-        "content_width",
-    ] {
-        assert!(!json.contains(key), "{key} should be omitted: {json}");
-    }
-}
-
-#[test]
-fn agent_chat_leaf_round_trip_preserves_cwd() {
-    // AgentChat panes persist the anchored lane cwd plus the ACP
-    // session id + title, so a restart restores the pane kind + cwd and
-    // resumes the prior session via `session/load` on attach.
-    let leaf = SerializedLayout::Leaf {
-        pane_id: 9,
-        content: SerializedPaneContent::AgentChat(SerializedAgentChatContent {
-            require_exact_resume: false,
-            access: Default::default(),
-            cwd: Some(PaneCwd::Local(PathBuf::from("/repo/lane"))),
-            session_id: Some("sess-abc123".to_string()),
-            title: Some("Fix the parser".to_string()),
-            agent_id: Some("claude".to_string()),
-            account_id: None,
-            picked_mode_id: None,
-            follows_delegated_mode: false,
-            model_id: None,
-            content_width: None,
-            tail_window: None,
-            tail_window_calls: None,
-            display_filter: None,
-            visible_kinds: None,
-            fold_mode: None,
-            pending_handoff: None,
-        }),
-    };
-
-    let json = serde_json::to_string(&leaf).unwrap();
-    let restored: SerializedLayout = serde_json::from_str(&json).unwrap();
-    match restored {
-        SerializedLayout::Leaf {
-            content: SerializedPaneContent::AgentChat(ac),
-            ..
-        } => {
-            assert_eq!(ac.cwd, Some(PaneCwd::Local(PathBuf::from("/repo/lane"))));
-            assert_eq!(ac.session_id, Some("sess-abc123".to_string()));
-            assert_eq!(ac.title, Some("Fix the parser".to_string()));
-            assert_eq!(ac.agent_id, Some("claude".to_string()));
-        }
-        _ => panic!("expected Leaf with agent_chat content"),
-    }
-}
-
-#[test]
 fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
     // A `PaneCwd::Remote` cwd (no pane constructs one yet, but the wire
     // shape must round-trip and stay distinguishable from
@@ -776,27 +450,6 @@ fn agent_chat_leaf_round_trip_preserves_remote_cwd() {
         } => {
             assert_eq!(ac.cwd, Some(PaneCwd::Remote("host:/repo/lane".to_string())));
             assert_eq!(ac.cwd.as_ref().and_then(PaneCwd::as_local), None);
-        }
-        _ => panic!("expected Leaf with agent_chat content"),
-    }
-}
-
-#[test]
-fn agent_chat_leaf_without_session_fields_loads_as_none() {
-    // Back-compat: state files written before session persistence existed
-    // carry an `agent_chat` object with only `cwd` — the new `session_id`,
-    // `title`, and `agent_id` fields must default to `None`.
-    let legacy_json = r#"{"type":"Leaf","pane_id":9,"agent_chat":{"cwd":"/repo/lane"}}"#;
-    let restored: SerializedLayout = serde_json::from_str(legacy_json).unwrap();
-    match restored {
-        SerializedLayout::Leaf {
-            content: SerializedPaneContent::AgentChat(ac),
-            ..
-        } => {
-            assert_eq!(ac.cwd, Some(PaneCwd::Local(PathBuf::from("/repo/lane"))));
-            assert_eq!(ac.session_id, None);
-            assert_eq!(ac.title, None);
-            assert_eq!(ac.agent_id, None);
         }
         _ => panic!("expected Leaf with agent_chat content"),
     }
