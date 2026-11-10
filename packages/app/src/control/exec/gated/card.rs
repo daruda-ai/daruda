@@ -21,27 +21,19 @@ pub(super) enum CardText {
 
 /// One line naming what the user is being asked to allow, built here because
 /// `GatedCommand` carries no rendered sentences. A target that cannot be
-/// named is refused rather than asked about. A chat's card names its pinned
-/// agent and the mode `mode` resolves to; others' titles and prompts pass
+/// named is refused rather than asked about. A chat's card names the agent
+/// and mode `Asked` carries as `shown`; others' titles and prompts pass
 /// through `agent_text` first.
-pub(super) fn approval_summary(
-    asked: &Asked,
-    mode: &daruda_config::ModeChoice,
-    cx: &mut App,
-) -> Result<CardText, ControlError> {
+pub(super) fn approval_summary(asked: &Asked, cx: &mut App) -> Result<CardText, ControlError> {
     use disclosure::{agent_phrase, prompt_phrase};
     Ok(CardText::Now(match asked {
         Asked::LaneCreate {
-            workspace,
-            project,
             name,
-            agent,
             prompt,
+            shown,
             ..
         } => {
-            let agent = in_project_window(*workspace, *project, cx, |ws, _, _| {
-                Ok(agent_phrase(&ws.control_chat_disclosure(agent, mode)))
-            })?;
+            let agent = agent_phrase(shown);
             // The guard already refused a name that hides or reorders text;
             // quoting it as well keeps the card safe if that rule changes.
             let name = quoted_title(name);
@@ -50,15 +42,14 @@ pub(super) fn approval_summary(
                 None => s::control::approval_lane_create(&name, agent),
             }
         }
-        Asked::ChatNew { lane, agent } => {
-            let (path, agent) = in_lane_window(*lane, cx, |ws, _window, _cx| {
-                let path = quoted_title(&s::control::lane_path(
+        Asked::ChatNew { lane, shown, .. } => {
+            let path = in_lane_window(*lane, cx, |ws, _window, _cx| {
+                Ok(quoted_title(&s::control::lane_path(
                     ws.control_project_name(lane.project),
                     ws.control_lane_name(lane.lane_ref()),
-                ));
-                Ok((path, agent_phrase(&ws.control_chat_disclosure(agent, mode))))
+                )))
             })?;
-            s::control::approval_chat_new(&path, agent)
+            s::control::approval_chat_new(&path, agent_phrase(shown))
         }
         Asked::TaskCreate {
             workspace,
@@ -112,28 +103,29 @@ pub(super) fn approval_summary(
         }
         // A flow given the prompt hands it to its agents, so its card quotes
         // it as a chat's does.
-        Asked::TaskStart { task, agent } => match task_flow_summary(task, cx) {
-            Some(flow) => match flow.takes_prompt.then(|| task_prompt(task, cx)).flatten() {
-                Some(prompt) => s::control::approval_task_start_flow_prompt(
-                    task_title(task, cx),
-                    &flow.summary,
-                    prompt,
-                ),
-                None => s::control::approval_task_start_flow(task_title(task, cx), &flow.summary),
-            },
+        Asked::TaskStart { task, shown, .. } => match shown {
             None => {
+                let flow = task_flow_summary(task, cx).ok_or(ControlError::TaskNotFound)?;
+                match flow.takes_prompt.then(|| task_prompt(task, cx)).flatten() {
+                    Some(prompt) => s::control::approval_task_start_flow_prompt(
+                        task_title(task, cx),
+                        &flow.summary,
+                        prompt,
+                    ),
+                    None => {
+                        s::control::approval_task_start_flow(task_title(task, cx), &flow.summary)
+                    }
+                }
+            }
+            Some(shown) => {
                 let prompt = task_prompt(task, cx);
-                let (location, agent) = in_task_window(task, cx, |ws, _, cx| {
-                    let location = cx
-                        .global::<GlobalTasks>()
+                let location = in_task_window(task, cx, |ws, _, cx| {
+                    cx.global::<GlobalTasks>()
                         .get(task)
                         .map(|t| ws.control_task_start_location(t))
-                        .ok_or(ControlError::TaskNotFound)?;
-                    Ok((
-                        location,
-                        agent_phrase(&ws.control_chat_disclosure(agent, mode)),
-                    ))
+                        .ok_or(ControlError::TaskNotFound)
                 })?;
+                let agent = agent_phrase(shown);
                 let title = task_title(task, cx);
                 match prompt {
                     Some(prompt) => {
@@ -143,19 +135,16 @@ pub(super) fn approval_summary(
                 }
             }
         },
-        // A chat already open keeps its own mode; only a new pane takes `mode`.
-        // Which one this is is read now: a pane opened or closed before the
-        // answer can make the card's mode claim stale. The open then follows
-        // the pane as it finds it, with the card's `mode` for a new one.
-        Asked::TaskOpen { task } => {
-            let agent = in_task_window(task, cx, |ws, _, cx| {
-                Ok(ws
-                    .task_chat_reopen_agent(task, cx)
-                    .map(|agent| agent_phrase(&ws.control_chat_disclosure(&agent, mode))))
-            })?;
-            match agent {
-                Some(agent) => s::control::approval_task_open_new(task_title(task, cx), agent),
-                None => s::control::approval_task_open(task_title(task, cx)),
+        // A chat already open keeps its own mode, but may close before the
+        // answer, so the card names the new pane's mode either way; the
+        // open follows the pane as it finds it.
+        Asked::TaskOpen { task, shown } => {
+            let open = in_task_window(task, cx, |ws, _, cx| Ok(ws.task_chat_pane_open(task, cx)))?;
+            let title = task_title(task, cx);
+            match shown.as_ref().map(agent_phrase) {
+                Some(agent) if open => s::control::approval_task_open_existing(title, agent),
+                Some(agent) => s::control::approval_task_open_new(title, agent),
+                None => s::control::approval_task_open(title),
             }
         }
         Asked::FlowResume(target) => return flow_resume::summary(target, cx).map(CardText::Read),

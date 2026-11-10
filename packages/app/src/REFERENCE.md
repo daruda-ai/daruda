@@ -288,7 +288,14 @@ edit moves a following session to the new mode, and a person's pick stands.
 The agent is resolved when the card is built and pinned as
 `ChatAgent::Pinned`; the pane open resolves it again
 (`Workspace::resolve_chat_agent`), so an agent removed meanwhile is refused as
-`agent_unavailable` rather than replaced. Found after git, the worktree is
+`agent_unavailable` rather than replaced. The card's `ChatDisclosure` (agent
+name and requested-mode label) travels with the approved command as `Asked`'s
+`shown`; after approval, before any git work or pane, `Asked::still_shown`
+reads it again the same way and refuses a difference as `approval_stale` (a
+mode or agent name edited in Settings, or an adapter's renamed mode, while
+the card waited). A `task_open` card names the mode a new pane would take
+even while a pane still shows the run, since that pane may close before the
+answer. Found after git, the worktree is
 kept as a lane with nothing open and the refusal is
 `agent_unavailable_worktree_kept`, carrying its handle, so the caller can
 open a chat there rather than retry a branch name git now refuses; it spends

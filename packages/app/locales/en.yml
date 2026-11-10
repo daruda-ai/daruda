@@ -2468,6 +2468,9 @@ control:
   error_task_branch_taken: "Another worktree already has that branch checked out."
   error_approvals_pending: "Too many approvals are already waiting. Answer one first."
   error_agent_unavailable: "The agent that approval named is no longer set up, so no chat was opened."
+  # The approved card's agent name or permission mode changed in settings
+  # (or its adapter renamed the mode) before the approval landed.
+  error_approval_stale: "The agent or permission mode that approval named changed before it was approved, so nothing was created. Ask again to see the current one."
   # The same, found after git made the worktree: it is kept, empty.
   error_agent_unavailable_worktree_kept: "The agent that approval named is no longer set up, so no chat was opened. The worktree was still created and stays in daruda with nothing open in it."
   error_approval_unavailable: "daruda could not ask for approval — no desktop or remote channel is available."
@@ -2503,8 +2506,12 @@ control:
   # A flow given the task's prompt as an input; `prompt` is a one-line
   # excerpt of it, as its agents receive it.
   approval_task_start_flow_prompt: "daruda wants to start the task %{title} %{flow}, giving it the prompt %{prompt}. Allow?"
-  # The task's chat is already open, and keeps its own mode.
+  # The task's run has no session a new pane could load: only a pane
+  # already showing it can come up.
   approval_task_open: "daruda wants to open the chat of the task %{title}. Allow?"
+  # The task's chat is already open and keeps its own mode; should it close
+  # before the answer, a new pane opens instead. `agent` is approval_agent.
+  approval_task_open_existing: "daruda wants to open the chat of the task %{title} (a new chat would use %{agent}). Allow?"
   # The task's chat reopens in a new pane; `agent` is approval_agent.
   approval_task_open_new: "daruda wants to reopen the chat of the task %{title} with %{agent}. Allow?"
   # A flow run the app quit or a crash cut off: `passed` of its `total`

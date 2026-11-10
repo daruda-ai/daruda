@@ -353,19 +353,26 @@ impl Workspace {
         })
     }
 
-    /// The agent a reopen of `task_id`'s chat would open a new pane under,
-    /// or `None` when it would bring up a pane already open (which keeps
-    /// its own mode) or open nothing at all.
-    pub(crate) fn task_chat_reopen_agent(&self, task_id: &str, cx: &gpui::App) -> Option<String> {
+    /// The agent a reopen of `task_id`'s chat opens a new pane under: now,
+    /// or once the pane showing it closes. `None` when its run has no
+    /// session a new pane could load.
+    pub(crate) fn task_chat_new_pane_agent(&self, task_id: &str, cx: &gpui::App) -> Option<String> {
         let execution = cx
             .global::<GlobalTasks>()
             .get(task_id)?
             .execution
             .as_ref()?;
         execution.session_id.as_ref()?;
-        self.open_task_chat_pane(task_id, execution, cx)
-            .is_none()
-            .then(|| execution.agent_id.clone())
+        Some(execution.agent_id.clone())
+    }
+
+    /// Whether a pane already shows `task_id`'s run, which a reopen brings
+    /// up as it is, in its own mode.
+    pub(crate) fn task_chat_pane_open(&self, task_id: &str, cx: &gpui::App) -> bool {
+        cx.global::<GlobalTasks>()
+            .get(task_id)
+            .and_then(|task| task.execution.as_ref())
+            .is_some_and(|execution| self.open_task_chat_pane(task_id, execution, cx).is_some())
     }
 
     fn reveal_task_chat(

@@ -1724,6 +1724,7 @@ control:
   error_task_branch_taken: "다른 워크트리가 이미 그 브랜치를 체크아웃하고 있습니다."
   error_approvals_pending: "대기 중인 승인이 너무 많습니다. 먼저 하나에 답해 주세요."
   error_agent_unavailable: "승인 요청에 적힌 에이전트가 더 이상 설정되어 있지 않아 채팅을 열지 않았습니다."
+  error_approval_stale: "승인 요청에 적힌 에이전트나 권한 모드가 승인 전에 바뀌어 아무것도 만들지 않았습니다. 지금 설정을 보려면 다시 요청하세요."
   error_agent_unavailable_worktree_kept: "승인 요청에 적힌 에이전트가 더 이상 설정되어 있지 않아 채팅을 열지 않았습니다. 워크트리는 이미 만들어져 아무것도 열리지 않은 채 daruda에 남아 있습니다."
   error_approval_unavailable: "승인을 요청할 수 없습니다 — 사용할 수 있는 데스크톱이나 원격 채널이 없습니다."
   error_lane_create_busy: "그 저장소에 이미 워크트리를 만들고 있습니다. 잠시 후 다시 시도하세요."
@@ -1745,6 +1746,7 @@ control:
   approval_task_start_flow: "daruda가 작업 %{title}을(를) 시작하려고 합니다: %{flow}. 허용할까요?"
   approval_task_start_flow_prompt: "daruda가 작업 %{title}을(를) 시작하려고 합니다: %{flow}. 프롬프트: %{prompt}. 허용할까요?"
   approval_task_open: "daruda가 작업 %{title}의 대화를 열려고 합니다. 허용할까요?"
+  approval_task_open_existing: "daruda가 작업 %{title}의 대화를 열려고 합니다(새 대화를 열게 되면 에이전트: %{agent}). 허용할까요?"
   approval_task_open_new: "daruda가 작업 %{title}의 대화를 다시 열려고 합니다. 에이전트: %{agent}. 허용할까요?"
   # A flow run the app quit or a crash cut off: `passed` of its `total`
   # steps had passed, and the step it was on runs again from the start.

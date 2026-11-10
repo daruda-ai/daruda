@@ -322,6 +322,7 @@ fn every_error_variant_round_trips_through_json() {
         ControlError::ApprovalUnavailable,
         ControlError::ApprovalsPending,
         ControlError::AgentUnavailable,
+        ControlError::ApprovalStale,
         ControlError::TaskStartFailedWorktreeKept {
             worktree: LaneHandle {
                 workspace: daruda_store::project::WorkspaceUuid::new(),

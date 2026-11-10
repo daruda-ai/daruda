@@ -4,10 +4,85 @@
 //! hide what the agent is about to be told. Prompts and titles are quoted
 //! through `agent_text`, with this card's localized markers.
 
+use daruda_config::ModeChoice;
 use daruda_control_types::agent_text::{QuoteMarkers, prompt_excerpt, title_excerpt};
+use gpui::App;
 
+use crate::control::exec::{in_lane_window, in_project_window, in_task_window};
+use crate::control::result::{ControlError, LaneHandle};
+use crate::runs::GlobalTasks;
 use crate::surface::strings as s;
 use crate::workspace::ChatDisclosure;
+
+// How each command's chat is disclosed, read from the window that opens it.
+// A card reads it once; the approved work reads it again and compares, so a
+// settings or adapter change meanwhile cannot open a chat the card never named.
+
+/// `agent`'s chat in a new worktree of `project`. `agent` is pinned: once
+/// the catalog drops it, this refuses as the work would.
+pub(super) fn in_project(
+    workspace: daruda_store::project::WorkspaceUuid,
+    project: daruda_store::project::ProjectId,
+    agent: &str,
+    mode: &ModeChoice,
+    cx: &mut App,
+) -> Result<ChatDisclosure, ControlError> {
+    in_project_window(workspace, project, cx, |ws, _, _| {
+        ws.control_pinned_chat_disclosure(agent, mode)
+            .ok_or(ControlError::AgentUnavailable)
+    })
+}
+
+/// `agent`'s chat in `lane`, pinned as for [`in_project`].
+pub(super) fn in_lane(
+    lane: LaneHandle,
+    agent: &str,
+    mode: &ModeChoice,
+    cx: &mut App,
+) -> Result<ChatDisclosure, ControlError> {
+    in_lane_window(lane, cx, |ws, _, _| {
+        ws.control_pinned_chat_disclosure(agent, mode)
+            .ok_or(ControlError::AgentUnavailable)
+    })
+}
+
+/// The chat a start of `task` opens under `agent`, pinned as for
+/// [`in_project`]; `None` for a flow-backed task, whose nodes name their
+/// own agents and modes.
+pub(super) fn task_start(
+    task: &str,
+    agent: &str,
+    mode: &ModeChoice,
+    cx: &mut App,
+) -> Result<Option<ChatDisclosure>, ControlError> {
+    let record = cx
+        .global::<GlobalTasks>()
+        .get(task)
+        .ok_or(ControlError::TaskNotFound)?;
+    if record.spec.flow.is_some() {
+        return Ok(None);
+    }
+    in_task_window(task, cx, |ws, _, _| {
+        ws.control_pinned_chat_disclosure(agent, mode)
+            .map(Some)
+            .ok_or(ControlError::AgentUnavailable)
+    })
+}
+
+/// The new pane a reopen of `task`'s chat opens: now, or once the pane
+/// still showing it closes. `None` when no new pane could load its session.
+/// The run's agent is not pinned by a card; a removed one reads as its id.
+pub(super) fn task_open(
+    task: &str,
+    mode: &ModeChoice,
+    cx: &mut App,
+) -> Result<Option<ChatDisclosure>, ControlError> {
+    in_task_window(task, cx, |ws, _, cx| {
+        Ok(ws
+            .task_chat_new_pane_agent(task, cx)
+            .map(|agent| ws.control_chat_disclosure(&agent, mode)))
+    })
+}
 
 /// The markers a card or phone row quotes text with, in the reader's locale.
 struct Localized;

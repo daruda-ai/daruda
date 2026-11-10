@@ -333,11 +333,12 @@ async fn a_task_start_card_names_the_branch_the_agent_is_told(cx: &mut TestAppCo
     refuse(id, cx);
 }
 
-/// Reopening a task's chat in a new pane names the agent and the mode that
-/// pane asks for; bringing up the pane still open names neither, since it
-/// keeps its own.
+/// Reopening a task's chat names the agent and the mode a new pane asks
+/// for, even while a pane still shows it: that pane keeps its own mode, but
+/// may close before the answer. A mode changed while the card waits refuses
+/// the approval, and no pane opens.
 #[gpui::test]
-fn a_task_open_card_names_the_mode_only_for_a_new_pane(cx: &mut TestAppContext) {
+async fn a_task_open_card_names_the_mode_a_new_pane_would_take(cx: &mut TestAppContext) {
     let (fixture, _lane, claude) = host(cx);
     let (task, pane) = cx
         .update_window(fixture.window.into(), |_, window, cx| {
@@ -366,22 +367,124 @@ fn a_task_open_card_names_the_mode_only_for_a_new_pane(cx: &mut TestAppContext) 
         s::control::approval_quoted("Login evil"),
         s::control::approval_hidden_chars(1)
     );
+    let agent = s::control::approval_agent(&claude.name, BYPASS);
     let (id, _outcome, card) = ask(GatedCommand::TaskOpen { task: task.clone() }, cx);
-    assert_eq!(card, s::control::approval_task_open(&shown));
+    assert_eq!(
+        card,
+        s::control::approval_task_open_existing(&shown, &agent)
+    );
     refuse(id, cx);
 
     fixture.workspace.update(cx, |ws, _| {
         ws.active_runtime_mut().panes.retain(|p| p.id != pane);
     });
-    let (id, _outcome, card) = ask(GatedCommand::TaskOpen { task }, cx);
-    assert_eq!(
-        card,
-        s::control::approval_task_open_new(
-            &shown,
-            s::control::approval_agent(&claude.name, BYPASS)
-        )
-    );
+    let (id, _outcome, card) = ask(GatedCommand::TaskOpen { task: task.clone() }, cx);
+    assert_eq!(card, s::control::approval_task_open_new(&shown, &agent));
     refuse(id, cx);
+
+    let (id, outcome, _card) = ask(GatedCommand::TaskOpen { task }, cx);
+    let before = fixture.workspace.read_with(cx, |ws, _| ws.all_pane_ids());
+    change_delegated_mode(&fixture, &claude, cx);
+    cx.update(|cx| assert!(resolve_desktop(id.0, "approve", cx)));
+    cx.executor().allow_parking();
+    let refused = outcome.recv().await.unwrap().unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        refused,
+        Err(crate::control::result::ControlError::ApprovalStale)
+    );
+    assert_eq!(
+        fixture.workspace.read_with(cx, |ws, _| ws.all_pane_ids()),
+        before
+    );
+}
+
+/// Change Claude's delegated mode through the path a Settings edit takes,
+/// leaving its name as it was: a card that named the old mode is stale.
+fn change_delegated_mode(
+    fixture: &crate::test_support::ControlFixture,
+    claude: &AgentDefinition,
+    cx: &mut TestAppContext,
+) {
+    let changed = AgentDefinition {
+        delegated_mode: Some("plan".into()),
+        ..claude.clone()
+    };
+    let config = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::custom(changed)],
+        ..daruda_config::Config::default()
+    };
+    fixture.workspace.update(cx, |ws, cx| {
+        ws.reload_config(&config, cx);
+        let now =
+            ws.control_chat_disclosure(&claude.id, &daruda_config::ModeChoice::FollowDelegated);
+        assert_eq!(now.agent_name, claude.name);
+        assert_ne!(now.mode, BYPASS);
+    });
+}
+
+/// The agent's delegated mode changes while each card waits: approving
+/// refuses the stale card before anything is created — no worktree, no
+/// pane, and the task stays in Backlog.
+#[gpui::test]
+async fn an_approval_whose_mode_changed_is_refused_before_anything_is_created(
+    cx: &mut TestAppContext,
+) {
+    let (fixture, lane, claude) = host(cx);
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let created = fixture.workspace.update(cx, |ws, cx| {
+        ws.control_task_create(
+            lane.project,
+            crate::test_support::new_task("Login", "Fix the login", Some(lane)),
+            cx,
+        )
+        .unwrap()
+    });
+    cx.run_until_parked();
+    let task = created.await.unwrap();
+    cx.executor().allow_parking();
+    let commands = [
+        GatedCommand::ChatNew { lane, agent: None },
+        GatedCommand::LaneCreate {
+            workspace: lane.workspace,
+            project: lane.project,
+            name: "stale-mode".into(),
+            base_ref: None,
+            agent: None,
+            prompt: None,
+        },
+        GatedCommand::TaskStart { task: task.clone() },
+    ];
+    for command in commands {
+        fixture
+            .workspace
+            .update(cx, |ws, _| set_catalog(ws, &claude));
+        let (id, outcome, card) = ask(command, cx);
+        assert!(card.contains(BYPASS), "{card}");
+        let before = fixture
+            .workspace
+            .read_with(cx, |ws, _| (ws.all_pane_ids(), lane_count(ws)));
+        change_delegated_mode(&fixture, &claude, cx);
+        cx.update(|cx| assert!(resolve_desktop(id.0, "approve", cx)));
+        let refused = outcome.recv().await.unwrap().unwrap();
+        cx.run_until_parked();
+        assert_eq!(
+            refused,
+            Err(crate::control::result::ControlError::ApprovalStale)
+        );
+        let after = fixture
+            .workspace
+            .read_with(cx, |ws, _| (ws.all_pane_ids(), lane_count(ws)));
+        assert_eq!(after, before);
+    }
+    let lifecycle = cx.update(|cx| {
+        cx.global::<crate::runs::GlobalTasks>()
+            .get(&task)
+            .unwrap()
+            .lifecycle
+            .clone()
+    });
+    assert_eq!(lifecycle, daruda_store::tasks::Lifecycle::Backlog);
 }
 
 /// Creating a task starts nothing, so its card names no mode: a later start

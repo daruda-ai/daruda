@@ -32,6 +32,21 @@ impl Workspace {
         }
     }
 
+    /// [`Self::control_chat_disclosure`] for an agent a card pinned, or
+    /// `None` once the catalog no longer holds it: the work refuses that as
+    /// `agent_unavailable`, a cause more precise than a changed card.
+    pub(crate) fn control_pinned_chat_disclosure(
+        &self,
+        agent_id: &str,
+        mode: &ModeChoice,
+    ) -> Option<ChatDisclosure> {
+        self.mirrors
+            .agents
+            .iter()
+            .any(|a| a.id == agent_id)
+            .then(|| self.control_chat_disclosure(agent_id, mode))
+    }
+
     /// The display name of the first mode `preferences` asks for, as
     /// [`daruda_config::mode_display_name`] names it for `agent_id`'s adapter.
     /// The first candidate is the one requested; a connect falls through

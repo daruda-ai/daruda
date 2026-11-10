@@ -244,6 +244,7 @@ fn every_new_refusal_travels_as_its_code() {
         (ControlError::ApprovalUnavailable, "approval_unavailable"),
         (ControlError::ApprovalsPending, "approvals_pending"),
         (ControlError::AgentUnavailable, "agent_unavailable"),
+        (ControlError::ApprovalStale, "approval_stale"),
         (
             ControlError::AgentUnavailableWorktreeKept {
                 worktree: crate::control::result::LaneHandle {

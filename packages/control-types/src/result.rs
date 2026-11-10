@@ -765,6 +765,12 @@ pub enum ControlError {
     /// The agent an approval card named was removed before the work ran.
     /// Refused rather than opened under another agent the person never saw.
     AgentUnavailable,
+    /// The chat an approval card named would now open otherwise: its
+    /// agent's name or the permission mode it asks for changed in settings,
+    /// or its adapter renamed that mode, before the card was approved.
+    /// Refused before anything is created, since the person approved a
+    /// chat that no longer exists; asking again shows the current one.
+    ApprovalStale,
     /// [`Self::AgentUnavailable`], found after git had already made the
     /// worktree: `worktree` is registered with no chat in it. Its own code,
     /// because the recovery differs — a retry with the same name fails on
@@ -874,6 +880,10 @@ impl std::fmt::Display for ControlError {
             Self::AgentUnavailable => {
                 write!(f, "the agent the approval named is no longer configured")
             }
+            Self::ApprovalStale => write!(
+                f,
+                "the agent or permission mode the approval named changed before it was approved; nothing was created. Ask again"
+            ),
             Self::AgentUnavailableWorktreeKept { .. } => write!(
                 f,
                 "the agent the approval named is no longer configured; the worktree was created and kept with no chat in it"

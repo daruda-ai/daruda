@@ -350,6 +350,7 @@ pub(crate) fn render_error(error: &ControlError) -> String {
         ControlError::TaskNoSession => s::control::error_task_no_session(),
         ControlError::TaskAgentUnavailable => s::control::error_task_agent_unavailable(),
         ControlError::AgentUnavailable => s::control::error_agent_unavailable(),
+        ControlError::ApprovalStale => s::control::error_approval_stale(),
         ControlError::AgentUnavailableWorktreeKept { .. } => {
             s::control::error_agent_unavailable_worktree_kept()
         }

@@ -10,6 +10,7 @@ use crate::control::result::{ControlError, ControlOutcome, ControlResult, LaneHa
 use crate::control::spec::{GatedCommand, NewTask};
 use crate::remote_channel::bridge::PaneRef;
 use crate::runs::GlobalTasks;
+use crate::workspace::ChatDisclosure;
 
 use super::{Dispatch, Pending, in_lane_window, in_pane_window, in_project_window, in_task_window};
 
@@ -28,6 +29,8 @@ pub(crate) use tasks::{begin_task_start, open_task, task_flow_summary};
 /// execution by the time the user answers; no variant carries the handle.
 /// The same holds for the agent a chat opens with: the card may wait for
 /// minutes while the window's last agent changes, so it is a concrete id.
+/// `shown` is the chat the card names, agent and mode as read then; the
+/// approved work reads it again before anything is created (`still_shown`).
 enum Asked {
     LaneCreate {
         workspace: daruda_store::project::WorkspaceUuid,
@@ -36,33 +39,45 @@ enum Asked {
         base_ref: Option<String>,
         agent: String,
         prompt: Option<String>,
+        shown: ChatDisclosure,
     },
     ChatNew {
         lane: LaneHandle,
         agent: String,
+        shown: ChatDisclosure,
     },
     TaskCreate {
         workspace: daruda_store::project::WorkspaceUuid,
         project: daruda_store::project::ProjectId,
         task: NewTask,
     },
-    /// `agent` is unused by a flow-backed task, whose nodes name their own.
+    /// `agent` is unused by a flow-backed task, whose nodes name their own;
+    /// its `shown` is `None`.
     TaskStart {
         task: String,
         agent: String,
+        shown: Option<ChatDisclosure>,
     },
+    /// `shown` is the new pane a reopen opens, even while a pane still shows
+    /// the run: that one may close before the answer. `None` when no new
+    /// pane could load the run's session.
     TaskOpen {
         task: String,
+        shown: Option<ChatDisclosure>,
     },
     FlowResume(flow_resume::ResumeTarget),
 }
 
 impl Asked {
     /// Resolve a resume's run and the agent a chat opens with, in the window
-    /// that will open it; every other command is asked about as sent. Not
-    /// resumable, gone or held by another run: no answer changes that, so
-    /// the card is not shown.
-    fn resolve(cmd: GatedCommand, cx: &mut App) -> Result<Self, ControlError> {
+    /// that will open it, and how its card names that chat in `mode`; every
+    /// other command is asked about as sent. Not resumable, gone or held by
+    /// another run: no answer changes that, so the card is not shown.
+    fn resolve(
+        cmd: GatedCommand,
+        mode: &daruda_config::ModeChoice,
+        cx: &mut App,
+    ) -> Result<Self, ControlError> {
         Ok(match cmd {
             GatedCommand::LaneCreate {
                 workspace,
@@ -71,20 +86,29 @@ impl Asked {
                 base_ref,
                 agent,
                 prompt,
-            } => Self::LaneCreate {
-                workspace,
-                project,
-                name,
-                base_ref,
-                agent: in_project_window(workspace, project, cx, |ws, _, _| {
+            } => {
+                let agent = in_project_window(workspace, project, cx, |ws, _, _| {
                     Ok(ws.open_agent_id(agent.as_deref()))
-                })?,
-                prompt,
-            },
-            GatedCommand::ChatNew { lane, agent } => Self::ChatNew {
-                lane,
-                agent: in_lane_window(lane, cx, |ws, _, _| Ok(ws.open_agent_id(agent.as_deref())))?,
-            },
+                })?;
+                Self::LaneCreate {
+                    workspace,
+                    project,
+                    name,
+                    base_ref,
+                    shown: disclosure::in_project(workspace, project, &agent, mode, cx)?,
+                    agent,
+                    prompt,
+                }
+            }
+            GatedCommand::ChatNew { lane, agent } => {
+                let agent =
+                    in_lane_window(lane, cx, |ws, _, _| Ok(ws.open_agent_id(agent.as_deref())))?;
+                Self::ChatNew {
+                    lane,
+                    shown: disclosure::in_lane(lane, &agent, mode, cx)?,
+                    agent,
+                }
+            }
             GatedCommand::TaskCreate {
                 workspace,
                 project,
@@ -94,13 +118,53 @@ impl Asked {
                 project,
                 task,
             },
-            GatedCommand::TaskStart { task } => Self::TaskStart {
-                agent: in_task_window(&task, cx, |ws, _, _| Ok(ws.open_agent_id(None)))?,
+            GatedCommand::TaskStart { task } => {
+                let agent = in_task_window(&task, cx, |ws, _, _| Ok(ws.open_agent_id(None)))?;
+                Self::TaskStart {
+                    shown: disclosure::task_start(&task, &agent, mode, cx)?,
+                    agent,
+                    task,
+                }
+            }
+            GatedCommand::TaskOpen { task } => Self::TaskOpen {
+                shown: disclosure::task_open(&task, mode, cx)?,
                 task,
             },
-            GatedCommand::TaskOpen { task } => Self::TaskOpen { task },
             GatedCommand::FlowResume { run } => Self::FlowResume(flow_resume::target(&run, cx)?),
         })
+    }
+
+    /// Refuse an approval whose chat would no longer open as its card said:
+    /// the agent's name or its mode in `mode` changed in settings, or its
+    /// adapter renamed that mode, while the card waited. Read the same way
+    /// `resolve` read it, and before anything is created.
+    fn still_shown(
+        &self,
+        mode: &daruda_config::ModeChoice,
+        cx: &mut App,
+    ) -> Result<(), ControlError> {
+        let unchanged = match self {
+            Self::LaneCreate {
+                workspace,
+                project,
+                agent,
+                shown,
+                ..
+            } => disclosure::in_project(*workspace, *project, agent, mode, cx)? == *shown,
+            Self::ChatNew { lane, agent, shown } => {
+                disclosure::in_lane(*lane, agent, mode, cx)? == *shown
+            }
+            Self::TaskStart { task, agent, shown } => {
+                disclosure::task_start(task, agent, mode, cx)? == *shown
+            }
+            Self::TaskOpen { task, shown } => disclosure::task_open(task, mode, cx)? == *shown,
+            Self::TaskCreate { .. } | Self::FlowResume(_) => true,
+        };
+        if unchanged {
+            Ok(())
+        } else {
+            Err(ControlError::ApprovalStale)
+        }
     }
 }
 
@@ -131,17 +195,17 @@ fn run_gated_with(
     + 'static,
     cx: &mut App,
 ) -> Dispatch {
-    let asked = match Asked::resolve(cmd, cx) {
+    // The mode every chat this command opens takes, named on its card and
+    // handed to the work as it is, so the two cannot disagree.
+    let mode = crate::workspace::mode_for(origin.started_by());
+    let asked = match Asked::resolve(cmd, &mode, cx) {
         Ok(asked) => asked,
         Err(refusal) => return Dispatch::Ready(Err(refusal)),
     };
     if let Err(refusal) = guard_gated(&asked, cx) {
         return Dispatch::Ready(Err(refusal));
     }
-    // The mode every chat this command opens takes, named on its card and
-    // handed to the work as it is, so the two cannot disagree.
-    let mode = crate::workspace::mode_for(origin.started_by());
-    let summary = match approval_summary(&asked, &mode, cx) {
+    let summary = match approval_summary(&asked, cx) {
         Ok(summary) => summary,
         Err(refusal) => return Dispatch::Ready(Err(refusal)),
     };
@@ -182,7 +246,7 @@ fn run_gated_with(
             // Reserve before the first await so overlapping approvals cannot
             // promise the same remaining worktree.
             Ok(ApprovalOutcome::Approved) => {
-                Some(match cx.update(|cx| reserve_gated(&asked, cx)) {
+                Some(match cx.update(|cx| reserve_gated(&asked, &mode, cx)) {
                     Ok(permit) => {
                         let outcome = perform(asked, mode, caller, cx).await;
                         if let Some(permit) = permit {
@@ -213,16 +277,19 @@ fn run_gated_with(
     }
 }
 
-/// Validate again and claim a slot only for commands that create a worktree.
-/// A resume checks its run again as it resumes.
+/// Validate again, check the chat still opens as its card named it, and
+/// claim a slot only for commands that create a worktree. A resume checks
+/// its run again as it resumes.
 fn reserve_gated(
     asked: &Asked,
+    mode: &daruda_config::ModeChoice,
     cx: &mut App,
 ) -> Result<Option<crate::control::guards::CreationPermit>, ControlError> {
     if let Asked::FlowResume(_) = asked {
         return Ok(None);
     }
     guard_gated(asked, cx)?;
+    asked.still_shown(mode, cx)?;
     let creates_lane = match asked {
         Asked::LaneCreate { .. } => true,
         Asked::TaskStart { task, .. } => cx
@@ -279,7 +346,7 @@ fn guard_gated(asked: &Asked, cx: &mut App) -> Result<(), ControlError> {
             }
             Ok(())
         }
-        Asked::TaskOpen { task } => in_task_window(task, cx, |_ws, _window, _cx| Ok(())),
+        Asked::TaskOpen { task, .. } => in_task_window(task, cx, |_ws, _window, _cx| Ok(())),
         // Resolved before the card: the run's state is read then, and once
         // more by the resume itself.
         Asked::FlowResume(_) => Ok(()),
@@ -335,13 +402,13 @@ async fn perform_gated(
                 .await
                 .map(|task| ControlResult::TaskCreated { task });
         }
-        Asked::TaskStart { task, agent } => {
+        Asked::TaskStart { task, agent, .. } => {
             return start_task(task, pinned_chat(agent, mode), caller, cx).await;
         }
-        Asked::TaskOpen { task } => {
+        Asked::TaskOpen { task, .. } => {
             return cx.update(|cx| tasks::open_task_in(task, mode, caller, cx));
         }
-        Asked::ChatNew { lane, agent } => cx
+        Asked::ChatNew { lane, agent, .. } => cx
             .update(|cx| {
                 in_lane_window(lane, cx, |ws, window, cx| {
                     ws.control_chat_new(
@@ -360,6 +427,7 @@ async fn perform_gated(
             base_ref,
             agent,
             prompt,
+            ..
         } => create_lane(
             (workspace, project),
             name,
