@@ -17,25 +17,17 @@ fn parses_use_select_and_clear() {
 }
 
 #[test]
-fn say_keeps_the_rest_of_the_line_verbatim() {
-    assert_eq!(
-        parse(r#"/say 3 add tests too"#),
-        Ok(ControlCommand::Say {
-            target: Ordinal(3),
-            text: "add tests too".into(),
-        })
-    );
-}
-
-#[test]
-fn say_strips_one_layer_of_wrapping_quotes() {
-    assert_eq!(
-        parse(r#"/say 3 "add tests too""#),
-        Ok(ControlCommand::Say {
-            target: Ordinal(3),
-            text: "add tests too".into(),
-        })
-    );
+fn say_keeps_the_rest_of_the_line_less_one_layer_of_quotes() {
+    for input in [r#"/say 3 add tests too"#, r#"/say 3 "add tests too""#] {
+        assert_eq!(
+            parse(input),
+            Ok(ControlCommand::Say {
+                target: Ordinal(3),
+                text: "add tests too".into(),
+            }),
+            "{input}"
+        );
+    }
 }
 
 #[test]
@@ -49,12 +41,17 @@ fn flow_without_name_lists() {
     );
 }
 
-/// The rest of the line is a prompt, not a nested command surface.
+/// The rest of the line is a prompt, not a nested command surface. One
+/// layer of wrapping quotes is stripped; a prompt that merely opens and closes
+/// with a quote is not a quoted prompt — stripping there would hand on an
+/// unbalanced string.
 #[test]
 fn daruda_takes_the_rest_of_the_line_verbatim() {
     for (input, text) in [
         ("/daruda make me a pane", "make me a pane"),
         ("/daruda /list", "/list"),
+        (r#"/daruda "make me a pane""#, "make me a pane"),
+        (r#"/daruda "foo" is not "bar""#, r#""foo" is not "bar""#),
     ] {
         assert_eq!(
             parse(input),
@@ -65,45 +62,30 @@ fn daruda_takes_the_rest_of_the_line_verbatim() {
 }
 
 #[test]
-fn daruda_strips_one_layer_of_wrapping_quotes() {
-    assert_eq!(
-        parse(r#"/daruda "make me a pane""#),
-        Ok(ControlCommand::Ask {
-            text: "make me a pane".into()
-        })
-    );
-}
-
-/// A prompt that merely opens and closes with a quote is not a quoted
-/// prompt — stripping there would hand on an unbalanced string.
-#[test]
-fn daruda_keeps_quotes_that_are_part_of_the_prompt() {
-    assert_eq!(
-        parse(r#"/daruda "foo" is not "bar""#),
-        Ok(ControlCommand::Ask {
-            text: r#""foo" is not "bar""#.into()
-        })
-    );
-}
-
-#[test]
-fn daruda_without_text_reports_missing_argument() {
-    assert_eq!(
-        parse("/daruda"),
-        Err(ParseError::MissingArgument { command: "daruda" })
-    );
+fn missing_argument_names_the_command() {
+    for (input, command) in [("/daruda", "daruda"), ("/use", "use"), ("/say 2", "say")] {
+        assert_eq!(
+            parse(input),
+            Err(ParseError::MissingArgument { command }),
+            "{input}"
+        );
+    }
 }
 
 /// `daruda` is in the suggestion pool like every other name, so a typo
-/// points at it instead of at nothing.
+/// points at it instead of at nothing; a distant one suggests nothing.
 #[test]
 fn unknown_command_suggests_nearest() {
-    for (input, suggestion) in [("/darudo", "daruda"), ("/lst", "list")] {
+    for (input, suggestion) in [
+        ("/darudo", Some("daruda")),
+        ("/lst", Some("list")),
+        ("/deploy", None),
+    ] {
         assert_eq!(
             parse(input),
             Err(ParseError::Unknown {
                 input: input[1..].into(),
-                suggestion: Some(suggestion),
+                suggestion,
             })
         );
     }
@@ -128,29 +110,6 @@ fn a_command_survives_a_bot_suffix_and_a_capital() {
             target: Ordinal(2),
             text: "go on".into(),
         })
-    );
-}
-
-#[test]
-fn a_distant_typo_suggests_nothing() {
-    assert_eq!(
-        parse("/deploy"),
-        Err(ParseError::Unknown {
-            input: "deploy".into(),
-            suggestion: None,
-        })
-    );
-}
-
-#[test]
-fn missing_argument_names_the_command() {
-    assert_eq!(
-        parse("/use"),
-        Err(ParseError::MissingArgument { command: "use" })
-    );
-    assert_eq!(
-        parse("/say 2"),
-        Err(ParseError::MissingArgument { command: "say" })
     );
 }
 

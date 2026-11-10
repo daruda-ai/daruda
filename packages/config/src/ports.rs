@@ -36,13 +36,3 @@ impl PortsConfig {
         Duration::from_secs(self.poll_secs.max(Self::MIN_POLL_SECS))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_is_five_seconds() {
-        assert_eq!(PortsConfig::default().poll_secs, DEFAULT_POLL_SECS);
-    }
-}

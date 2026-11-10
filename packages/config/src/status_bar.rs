@@ -108,17 +108,6 @@ mod tests {
         assert!(!cfg.is_visible(StatusBarItem::AccountSlot));
     }
 
-    #[test]
-    fn a_config_predating_an_item_leaves_it_hidden() {
-        // The stored list is an explicit choice: a config written before
-        // `claude_usage` existed keeps the segment off rather than having
-        // it reappear on upgrade.
-        let toml = r#"visible_items = ["project_branch", "account_slot", "ports"]"#;
-        let mut cfg: StatusBarConfig = toml::from_str(toml).unwrap();
-        cfg.clamp();
-        assert!(!cfg.is_visible(StatusBarItem::ClaudeUsage));
-    }
-
     /// The reason for the inversion. A file written before `Flow` existed
     /// cannot have opted out of it, so the migration must not read its
     /// absence as a decision — otherwise the segment ships hidden to

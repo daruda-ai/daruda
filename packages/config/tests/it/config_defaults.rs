@@ -28,12 +28,6 @@ left_collapsed_by_default = true\n";
 }
 
 #[test]
-fn panels_grid_columns_default_is_five() {
-    let cfg = Config::default();
-    assert_eq!(cfg.panels.grid_columns, 5);
-}
-
-#[test]
 fn empty_toml_produces_defaults() {
     let cfg: Config = toml::from_str("").unwrap();
     assert_eq!(cfg.font.terminal.size, 13.0);
@@ -128,13 +122,6 @@ fn load_from_missing_path_normalizes_agents() {
             None
         )]
     );
-}
-
-#[test]
-fn font_inset_defaults_to_4_and_2() {
-    let cfg = Config::default();
-    assert_eq!(cfg.font.terminal.inset_x, 4.0);
-    assert_eq!(cfg.font.terminal.inset_y, 2.0);
 }
 
 #[test]
@@ -350,13 +337,6 @@ lines = 50000\n\
     assert_eq!(cfg.colors.bright.cyan, HexColor::new(0x33, 0xFF, 0xFF));
     // `[scrollback] lines` above is a retired key: it must still parse.
     assert_eq!(cfg.keybindings.bindings["cmd-t"], "new_tab");
-}
-
-#[test]
-fn theme_config_defaults_to_default_preset() {
-    let cfg = Config::default();
-    assert_eq!(cfg.theme.terminal_preset, "default");
-    assert_eq!(cfg.theme.ui_preset, "daruda_dark");
 }
 
 #[test]

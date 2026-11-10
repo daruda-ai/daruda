@@ -97,13 +97,3 @@ fn build_mode_menu(
         )
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn visible_label_is_only_the_current_mode_value() {
-        assert_eq!(visible_mode_label("Review Changes"), "Review Changes");
-    }
-}

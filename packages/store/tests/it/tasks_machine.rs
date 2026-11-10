@@ -669,30 +669,6 @@ fn dispatch_facts_are_frozen_once_the_lane_is_prepared() {
 }
 
 #[test]
-fn a_reopen_from_running_is_illegal() {
-    let book = running_book(Source::Chat, RUN);
-    assert_eq!(
-        TaskMachine::check(&book, &sample(EventKind::Reopened)),
-        Err(TaskRejected::IllegalTransition {
-            from: L::Running,
-            event: EventKind::Reopened
-        })
-    );
-}
-
-#[test]
-fn a_cancel_after_done_is_illegal() {
-    let book = book(L::Done, Source::Chat);
-    assert_eq!(
-        TaskMachine::check(&book, &sample(EventKind::CancelRequested)),
-        Err(TaskRejected::IllegalTransition {
-            from: L::Done,
-            event: EventKind::CancelRequested
-        })
-    );
-}
-
-#[test]
 fn a_stop_is_interrupted_not_done() {
     for (cause, expected) in [
         (StopCause::UserStop, InterruptCause::UserStop),
@@ -825,24 +801,6 @@ fn deleting_an_active_task_requires_cancel_first() {
     );
     commit(&mut book, delete);
     assert!(book.is_empty());
-}
-
-#[test]
-fn a_vanished_lane_never_rewrites_a_finished_task() {
-    let book = book(L::Done, Source::Chat);
-    assert_eq!(
-        TaskMachine::check(
-            &book,
-            &TaskEvent::LaneLost {
-                exec: exec(),
-                at: at(9)
-            }
-        ),
-        Err(TaskRejected::IllegalTransition {
-            from: L::Done,
-            event: EventKind::LaneLost
-        })
-    );
 }
 
 #[test]

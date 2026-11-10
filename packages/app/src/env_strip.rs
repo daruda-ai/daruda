@@ -181,16 +181,27 @@ mod tests {
     }
 
     #[test]
-    fn unsets_are_read_until_the_program() {
-        assert_eq!(
-            parsed(&["-u", "A", "-u", "B", "node", "x.js"]),
-            Some(request(&["A", "B"], "node", &["x.js"]))
-        );
-    }
-
-    #[test]
-    fn a_program_with_no_unsets_is_still_a_request() {
-        assert_eq!(parsed(&["node"]), Some(request(&[], "node", &[])));
+    fn unsets_are_read_until_the_program_and_the_rest_is_its_own() {
+        for (args, expected) in [
+            (
+                &["-u", "A", "-u", "B", "node", "x.js"][..],
+                Some(request(&["A", "B"], "node", &["x.js"])),
+            ),
+            (&["node"], Some(request(&[], "node", &[]))),
+            // The grammar's whole point: everything past the program is the
+            // program's, including a `-u` that looks like ours.
+            (
+                &["-u", "A", "node", "-u", "B"],
+                Some(request(&["A"], "node", &["-u", "B"])),
+            ),
+            // An unset without a name, or nothing to run, is refused.
+            (&["-u"], None),
+            (&["-u", "A", "-u"], None),
+            (&[], None),
+            (&["-u", "A"], None),
+        ] {
+            assert_eq!(parsed(args), expected, "{args:?}");
+        }
     }
 
     /// The shape a managed runtime actually emits. Reading the first
@@ -239,27 +250,5 @@ mod tests {
 
         assert!(parsed.set.is_empty());
         assert_eq!(parsed.program, OsString::from("=weird"));
-    }
-
-    /// The grammar's whole point: everything past the program is the
-    /// program's, including a `-u` that looks like ours.
-    #[test]
-    fn a_flag_after_the_program_belongs_to_the_program() {
-        assert_eq!(
-            parsed(&["-u", "A", "node", "-u", "B"]),
-            Some(request(&["A"], "node", &["-u", "B"]))
-        );
-    }
-
-    #[test]
-    fn an_unset_without_a_name_is_refused() {
-        assert_eq!(parsed(&["-u"]), None);
-        assert_eq!(parsed(&["-u", "A", "-u"]), None);
-    }
-
-    #[test]
-    fn nothing_to_run_is_refused() {
-        assert_eq!(parsed(&[]), None);
-        assert_eq!(parsed(&["-u", "A"]), None);
     }
 }

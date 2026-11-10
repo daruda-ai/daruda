@@ -199,11 +199,6 @@ mod tests {
     use super::*;
     use daruda_acp::DEFAULT_MODEL_CHOICE;
 
-    #[test]
-    fn visible_label_is_only_the_current_option_value() {
-        assert_eq!(visible_config_label("Sonnet 4"), "Sonnet 4");
-    }
-
     fn choice(value: &str, name: &str, description: Option<&str>) -> ConfigChoiceView {
         ConfigChoiceView {
             value: value.to_string(),

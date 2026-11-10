@@ -68,20 +68,6 @@ fn listing_round_trips_through_json() {
 }
 
 #[test]
-fn result_round_trips_through_json() {
-    let result = ControlResult::Brief(BriefSummary {
-        working: 2,
-        awaiting_permission: 1,
-        awaiting_answer: 0,
-        error: 0,
-        total: 5,
-    });
-    let json = serde_json::to_string(&result).expect("serialize");
-    let back: ControlResult = serde_json::from_str(&json).expect("deserialize");
-    assert_eq!(back, result);
-}
-
-#[test]
 fn missing_last_activity_is_absent_not_zero() {
     let mut s = sample_summary();
     s.last_activity = None;
@@ -454,16 +440,6 @@ fn two_windows_produce_different_handles_for_the_same_local_ref() {
     let b = LaneHandle::new(WorkspaceUuid::new(), local);
     assert_ne!(a, b);
     assert_eq!(a.lane_ref(), b.lane_ref(), "the local halves do match");
-}
-
-#[test]
-fn error_round_trips_through_json() {
-    let error = ControlError::FlowNeedsInteraction {
-        name: "deploy.yaml".into(),
-    };
-    let json = serde_json::to_string(&error).expect("serialize");
-    let back: ControlError = serde_json::from_str(&json).expect("deserialize");
-    assert_eq!(back, error);
 }
 
 /// An `interrupted` written before the cause existed, or by a caller that

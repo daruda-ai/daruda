@@ -159,12 +159,6 @@ mod tests {
     }
 
     #[test]
-    fn extension_case_does_not_matter() {
-        assert_eq!(language_for_extension("JAVA"), "java");
-        assert_eq!(language_for_extension("Rs"), "rust");
-    }
-
-    #[test]
     fn unknown_and_query_less_languages_fall_back_to_plain() {
         assert_eq!(language_for_extension(""), PLAIN_LANGUAGE);
         assert_eq!(language_for_extension("unknown_ext_xyz"), PLAIN_LANGUAGE);

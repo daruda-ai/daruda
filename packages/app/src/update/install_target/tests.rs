@@ -4,64 +4,51 @@ fn target(exe: &str, host: Host) -> InstallGate {
     InstallGate::for_host(Path::new(exe), Some(host))
 }
 
+/// Forward slashes in the Windows rows because `Path` splits on the *host's*
+/// separator — a backslash is an ordinary character here on macOS, and
+/// Windows takes either. Only the branch is under test.
 #[test]
-fn a_bundled_mac_build_is_replaced_as_its_bundle() {
-    assert_eq!(
-        target(
+fn an_executable_path_picks_what_an_update_replaces() {
+    let bundle = |p: &str| InstallGate::Target(InstallTarget::Bundle(PathBuf::from(p)));
+    let directory = |p: &str| InstallGate::Target(InstallTarget::Directory(PathBuf::from(p)));
+    for (exe, host, expected) in [
+        (
             "/Applications/daruda.app/Contents/MacOS/daruda",
-            Host::MacOs
+            Host::MacOs,
+            bundle("/Applications/daruda.app"),
         ),
-        InstallGate::Target(InstallTarget::Bundle(PathBuf::from(
-            "/Applications/daruda.app"
-        )))
-    );
-}
-
-#[test]
-fn a_mac_dev_build_is_not_an_install() {
-    assert_eq!(
-        target("/Users/dev/daruda/target/debug/daruda", Host::MacOs),
-        InstallGate::Unpackaged
-    );
-}
-
-/// A portable install has no marker in its path, so the directory holding
-/// the executable is the answer. Forward slashes because `Path` splits on
-/// the *host's* separator — a backslash is an ordinary character here on
-/// macOS, and Windows takes either. Only the branch is under test.
-#[test]
-fn a_windows_build_is_replaced_as_the_directory_it_sits_in() {
-    assert_eq!(
-        target(
+        (
+            "/Users/dev/daruda/target/debug/daruda",
+            Host::MacOs,
+            InstallGate::Unpackaged,
+        ),
+        // A portable install has no marker in its path, so the directory
+        // holding the executable is the answer.
+        (
             "C:/Users/me/daruda-0.3.0-windows-x86_64/daruda.exe",
-            Host::Windows
+            Host::Windows,
+            directory("C:/Users/me/daruda-0.3.0-windows-x86_64"),
         ),
-        InstallGate::Target(InstallTarget::Directory(PathBuf::from(
-            "C:/Users/me/daruda-0.3.0-windows-x86_64"
-        )))
-    );
-}
-
-#[test]
-fn a_windows_cargo_build_is_not_an_install() {
-    for exe in [
-        "C:/src/daruda/target/debug/daruda.exe",
-        "C:/src/daruda/target/release/daruda.exe",
+        (
+            "C:/src/daruda/target/debug/daruda.exe",
+            Host::Windows,
+            InstallGate::Unpackaged,
+        ),
+        (
+            "C:/src/daruda/target/release/daruda.exe",
+            Host::Windows,
+            InstallGate::Unpackaged,
+        ),
+        // The guard is narrow on purpose: a real install may well sit in a
+        // directory called `release`, just not one under `target`.
+        (
+            "C:/Users/me/release/daruda.exe",
+            Host::Windows,
+            directory("C:/Users/me/release"),
+        ),
     ] {
-        assert_eq!(target(exe, Host::Windows), InstallGate::Unpackaged, "{exe}");
+        assert_eq!(target(exe, host), expected, "{exe}");
     }
-}
-
-/// The guard is narrow on purpose: a real install may well sit in a
-/// directory called `release`, just not one under `target`.
-#[test]
-fn a_directory_named_release_outside_target_is_still_an_install() {
-    assert_eq!(
-        target("C:/Users/me/release/daruda.exe", Host::Windows),
-        InstallGate::Target(InstallTarget::Directory(PathBuf::from(
-            "C:/Users/me/release"
-        )))
-    );
 }
 
 #[test]

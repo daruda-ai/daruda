@@ -257,19 +257,3 @@ impl Workspace {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::super::pane_tree::{DropHalf, compute_drop_half};
-
-    // The Workspace methods above need GPUI test infra; the pure hover
-    // mapping they rely on is covered in `pane_tree.rs`. Re-assert one
-    // `compute_drop_half` quadrant here to anchor the dependency: this
-    // module stores whatever half the geometry returns into
-    // `pane_drop_hover`, so the geometry contract is load-bearing here.
-    #[test]
-    fn drop_half_west_quadrant_drives_hover_target() {
-        let (w, h) = (100.0, 100.0);
-        assert_eq!(compute_drop_half(5.0, 50.0, w, h), Some(DropHalf::West));
-    }
-}

@@ -139,11 +139,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn usage_url_matches_the_chatgpt_rate_limit_route() {
-        assert_eq!(USAGE_URL, "https://chatgpt.com/backend-api/wham/usage");
-    }
-
-    #[test]
     fn a_home_without_auth_json_is_signed_out() {
         let tmp = tempfile::tempdir().expect("tempdir");
         assert!(matches!(

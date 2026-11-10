@@ -258,11 +258,6 @@ fn patch_config_file_round_trips_preferred_editor() {
 }
 
 #[test]
-fn config_default_language_is_auto() {
-    assert_eq!(Config::default().general.language, "auto");
-}
-
-#[test]
 fn config_load_missing_general_defaults_to_auto() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");

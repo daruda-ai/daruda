@@ -4,11 +4,6 @@ use daruda_config::render::*;
 use std::time::Duration;
 
 #[test]
-fn default_is_thirty_fps() {
-    assert_eq!(RenderConfig::default().max_fps, 30);
-}
-
-#[test]
 fn interval_maps_fps_to_millis() {
     let mk = |fps| RenderConfig { max_fps: fps }.redraw_interval();
     assert_eq!(mk(30), Duration::from_millis(33));

@@ -3,11 +3,6 @@
 use daruda_config::editor::*;
 
 #[test]
-fn default_preferred_is_empty() {
-    assert_eq!(EditorConfig::default().preferred, "");
-}
-
-#[test]
 fn an_empty_or_unknown_name_has_no_preset() {
     for name in ["", "not-a-real-editor"] {
         assert!(preset(name).is_none(), "{name:?}");

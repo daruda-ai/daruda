@@ -230,32 +230,26 @@ mod tests {
     }
 
     #[test]
-    fn a_separate_argument_carries_the_path() {
-        assert_eq!(
-            parse_path_from(args(&["daruda", REPLAY_FLAG, "/logs/a.log"])),
-            Some(PathBuf::from("/logs/a.log"))
-        );
-    }
-
-    #[test]
-    fn an_inline_argument_carries_the_path() {
-        assert_eq!(
-            parse_path_from(args(&["daruda", "--replay-acp-log=/logs/b.log"])),
-            Some(PathBuf::from("/logs/b.log"))
-        );
-    }
-
-    #[test]
-    fn no_flag_means_no_replay() {
-        assert_eq!(
-            parse_path_from(args(&["daruda", "--screenshot", "/x.png"])),
-            None
-        );
-    }
-
-    #[test]
-    fn a_dangling_flag_is_not_a_path() {
-        assert_eq!(parse_path_from(args(&["daruda", REPLAY_FLAG])), None);
+    fn the_path_is_a_separate_or_inline_argument_of_the_flag() {
+        for (list, expected) in [
+            (
+                &["daruda", REPLAY_FLAG, "/logs/a.log"][..],
+                Some("/logs/a.log"),
+            ),
+            (
+                &["daruda", "--replay-acp-log=/logs/b.log"],
+                Some("/logs/b.log"),
+            ),
+            // No flag means no replay; a dangling flag is not a path.
+            (&["daruda", "--screenshot", "/x.png"], None),
+            (&["daruda", REPLAY_FLAG], None),
+        ] {
+            assert_eq!(
+                parse_path_from(args(list)),
+                expected.map(PathBuf::from),
+                "{list:?}"
+            );
+        }
     }
 
     #[test]

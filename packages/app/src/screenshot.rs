@@ -573,30 +573,19 @@ mod tests {
     }
 
     #[test]
-    fn space_separated_form() {
-        assert_eq!(
-            parse(&["daruda", "--screenshot", "/tmp/a.png"]),
-            Some(PathBuf::from("/tmp/a.png"))
-        );
-    }
-
-    #[test]
-    fn equals_form() {
-        assert_eq!(
-            parse(&["daruda", "--screenshot=/tmp/b.png"]),
-            Some(PathBuf::from("/tmp/b.png"))
-        );
-    }
-
-    #[test]
-    fn absent_or_unrelated() {
-        assert_eq!(parse(&["daruda"]), None);
-        assert_eq!(parse(&["daruda", "--other", "x"]), None);
-    }
-
-    #[test]
-    fn flag_without_value() {
-        assert_eq!(parse(&["daruda", "--screenshot"]), None);
+    fn the_path_is_read_in_either_form_and_needs_a_value() {
+        for (args, expected) in [
+            (
+                &["daruda", "--screenshot", "/tmp/a.png"][..],
+                Some("/tmp/a.png"),
+            ),
+            (&["daruda", "--screenshot=/tmp/b.png"], Some("/tmp/b.png")),
+            (&["daruda"], None),
+            (&["daruda", "--other", "x"], None),
+            (&["daruda", "--screenshot"], None),
+        ] {
+            assert_eq!(parse(args), expected.map(PathBuf::from), "{args:?}");
+        }
     }
 
     fn parse_scenario(args: &[&str]) -> Option<ScreenshotScenario> {
@@ -604,33 +593,22 @@ mod tests {
     }
 
     #[test]
-    fn scenario_space_separated_form() {
-        assert_eq!(
-            parse_scenario(&["daruda", "--screenshot-scenario", "command-palette"]),
-            Some(ScreenshotScenario::CommandPalette)
-        );
-    }
-
-    #[test]
-    fn scenario_equals_form() {
-        assert_eq!(
-            parse_scenario(&["daruda", "--screenshot-scenario=error-modal"]),
-            Some(ScreenshotScenario::ErrorModal)
-        );
-    }
-
-    #[test]
-    fn scenario_absent_or_unknown() {
-        assert_eq!(parse_scenario(&["daruda"]), None);
-        assert_eq!(
-            parse_scenario(&["daruda", "--screenshot-scenario", "bogus"]),
-            None
-        );
-    }
-
-    #[test]
-    fn scenario_flag_without_value() {
-        assert_eq!(parse_scenario(&["daruda", "--screenshot-scenario"]), None);
+    fn the_scenario_is_read_in_either_form_and_needs_a_known_value() {
+        for (args, expected) in [
+            (
+                &["daruda", "--screenshot-scenario", "command-palette"][..],
+                Some(ScreenshotScenario::CommandPalette),
+            ),
+            (
+                &["daruda", "--screenshot-scenario=error-modal"],
+                Some(ScreenshotScenario::ErrorModal),
+            ),
+            (&["daruda"], None),
+            (&["daruda", "--screenshot-scenario", "bogus"], None),
+            (&["daruda", "--screenshot-scenario"], None),
+        ] {
+            assert_eq!(parse_scenario(args), expected, "{args:?}");
+        }
     }
 
     fn parse_themes(args: &[&str]) -> Vec<ScreenshotTheme> {
@@ -638,42 +616,33 @@ mod tests {
     }
 
     #[test]
-    fn theme_space_and_equals_form() {
-        assert_eq!(
-            parse_themes(&["daruda", "--screenshot-theme", "light"]),
-            vec![ScreenshotTheme::Light]
-        );
-        assert_eq!(
-            parse_themes(&["daruda", "--screenshot-theme=dark"]),
-            vec![ScreenshotTheme::Dark]
-        );
+    fn themes_are_read_in_either_form_and_a_comma_list_is_a_batch() {
+        use ScreenshotTheme::{Dark, Light};
+        for (args, expected) in [
+            (&["daruda", "--screenshot-theme", "light"][..], &[Light][..]),
+            (&["daruda", "--screenshot-theme=dark"], &[Dark]),
+            (
+                &["daruda", "--screenshot-theme", "light,dark"],
+                &[Light, Dark],
+            ),
+            (&["daruda"], &[]),
+            (&["daruda", "--screenshot-theme", "blue"], &[]),
+            (&["daruda", "--screenshot-theme"], &[]),
+        ] {
+            assert_eq!(parse_themes(args), expected, "{args:?}");
+        }
     }
 
     #[test]
-    fn theme_comma_list_is_a_batch() {
-        assert_eq!(
-            parse_themes(&["daruda", "--screenshot-theme", "light,dark"]),
-            vec![ScreenshotTheme::Light, ScreenshotTheme::Dark]
-        );
-    }
-
-    #[test]
-    fn theme_absent_unknown_or_no_value_is_empty() {
-        assert!(parse_themes(&["daruda"]).is_empty());
-        assert!(parse_themes(&["daruda", "--screenshot-theme", "blue"]).is_empty());
-        assert!(parse_themes(&["daruda", "--screenshot-theme"]).is_empty());
-    }
-
-    #[test]
-    fn size_str_parses_wxh() {
-        assert_eq!(parse_size_str("1280x800"), Some(size(px(1280.), px(800.))));
-    }
-
-    #[test]
-    fn size_str_rejects_bad_or_nonpositive() {
-        assert_eq!(parse_size_str("nope"), None);
-        assert_eq!(parse_size_str("1280"), None);
-        assert_eq!(parse_size_str("0x800"), None);
+    fn size_str_parses_a_positive_wxh() {
+        for (text, expected) in [
+            ("1280x800", Some(size(px(1280.), px(800.)))),
+            ("nope", None),
+            ("1280", None),
+            ("0x800", None),
+        ] {
+            assert_eq!(parse_size_str(text), expected, "{text}");
+        }
     }
 
     fn parse_size(args: &[&str]) -> Option<Size<Pixels>> {

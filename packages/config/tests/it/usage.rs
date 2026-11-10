@@ -4,13 +4,6 @@ use daruda_config::{PollConfig, UsageConfig};
 use std::time::Duration;
 
 #[test]
-fn poll_defaults_are_five_minutes() {
-    let p = PollConfig::default();
-    assert_eq!(p.limits_secs, 300);
-    assert_eq!(p.status_secs, 300);
-}
-
-#[test]
 fn limits_interval_returns_none_when_zero() {
     let p = PollConfig {
         limits_secs: 0,

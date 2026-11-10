@@ -89,32 +89,9 @@ fn permission_request_prefers_raw_input_from_a_matching_existing_tool_call() {
     );
 }
 
-#[test]
-fn permission_request_falls_back_to_its_own_raw_input_without_a_matching_tool_call() {
-    // No matching ToolCall in items (e.g. Claude-style: permission
-    // arrives before any tool_call event for that id) — use the
-    // request's own raw_input, same as before this change.
-    let mut tool_fields = ToolCallUpdateFields::default();
-    tool_fields.raw_input = Some(serde_json::json!({"command": "npm install"}));
-    let request = RequestPermissionRequest::new(
-        "s1",
-        ToolCallUpdate::new("t1", tool_fields),
-        vec![PermissionOption::new(
-            "allow",
-            "Allow",
-            PermissionOptionKind::AllowOnce,
-        )],
-    );
-
-    let ChatItem::Permission(card) = permission_item(1, &request, &[]) else {
-        panic!("expected permission item");
-    };
-    assert_eq!(
-        card.raw_input_summary.as_deref(),
-        Some("command: npm install")
-    );
-}
-
+/// No matching ToolCall in items (e.g. Claude-style: permission arrives
+/// before any tool_call event for that id): the request's own raw_input is
+/// summarized.
 #[test]
 fn permission_request_summarizes_a_known_raw_input_field() {
     let mut tool_fields = ToolCallUpdateFields::default();
