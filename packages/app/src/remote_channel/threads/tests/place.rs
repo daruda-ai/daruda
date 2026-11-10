@@ -97,7 +97,7 @@ fn a_post_into_an_existing_thread_brings_its_root_up_to_date() {
     assert_eq!(
         threads.roots_ref().wanted("work", "1.1"),
         Some(RootFace {
-            title: claude.title.clone(),
+            name: claude.name.clone(),
             shown: ShownStatus::Ended(Ending::Completed),
         })
     );

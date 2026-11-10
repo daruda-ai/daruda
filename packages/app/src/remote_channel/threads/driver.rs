@@ -3,7 +3,7 @@
 
 use super::roots::RootLook;
 use super::status::ShownStatus;
-use super::{ConversationKey, PaneConversation, Scope, now};
+use super::{ConversationKey, PaneConversation, RootName, Scope, now};
 use crate::remote_channel::bridge::{MessageTail, PaneRef};
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
@@ -18,7 +18,7 @@ pub(crate) struct ThreadPlan {
     id: String,
     pane: PaneRef,
     key: ConversationKey,
-    title: String,
+    name: RootName,
     /// What a root started by this post shows.
     shown: Option<ShownStatus>,
     /// `None`: the pane has no thread yet, and the post starts one.
@@ -57,7 +57,7 @@ pub(crate) fn plan(
         id,
         pane,
         key: conversation.key,
-        title: conversation.title,
+        name: conversation.name,
         shown,
         root,
         divider,
@@ -102,7 +102,7 @@ pub(crate) fn deliver(
     let (root, started) = match &plan.root {
         Some(root) => (root.clone(), None),
         None => {
-            let look = RootLook::new(&plan.title, plan.shown, &plan.id);
+            let look = RootLook::new(&plan.name, plan.shown, &plan.id);
             match slack::threads::post_root(credentials, recipient, &look.view()) {
                 Ok(root) => (root.clone(), Some(root)),
                 Err(error) => {
@@ -178,7 +178,7 @@ pub(crate) fn record_root(plan: &ThreadPlan, root: String, cx: &mut App) {
         &plan.id,
         &root,
         plan.pane,
-        &plan.title,
+        &plan.name,
         plan.shown,
     );
     super::roots::flush(cx);

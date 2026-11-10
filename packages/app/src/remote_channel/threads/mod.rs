@@ -18,8 +18,15 @@ pub(crate) use daruda_store::remote_threads::ConversationKey;
 pub(crate) struct PaneConversation {
     pub key: ConversationKey,
     pub agent_name: String,
-    /// The root's text: the same header the pane's messages carry.
+    pub name: RootName,
+}
+
+/// What a pane's root calls it: the pane on one line, and what its
+/// conversation is about, as the pane's own activity bar says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RootName {
     pub title: String,
+    pub subject: Option<String>,
 }
 
 #[cfg(test)]

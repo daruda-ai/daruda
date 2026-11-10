@@ -2,7 +2,7 @@
 
 use crate::remote_channel::bridge::PaneRef;
 use crate::remote_channel::threads::status::{Ending, PaneActivity};
-use crate::remote_channel::threads::{ConversationKey, PaneConversation};
+use crate::remote_channel::threads::{ConversationKey, PaneConversation, RootName};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 use gpui::{App, Context};
@@ -22,8 +22,11 @@ impl Workspace {
                 session: view.session_id()?.to_owned(),
             },
             agent_name: view.agent_name().to_owned(),
-            // One line: a thread list shows a root's first line only.
-            title: self.remote_header(pane_id, cx).replace('\n', " · "),
+            name: RootName {
+                // One line: a thread list shows a root's first line only.
+                title: self.remote_header(pane_id, cx).replace('\n', " · "),
+                subject: view.activity_title().map(str::to_owned),
+            },
         })
     }
 
@@ -75,6 +78,15 @@ impl Workspace {
         ending: Ending,
         cx: &mut Context<Self>,
     ) {
+        // A turn's end is when the conversation's subject has most likely
+        // settled, so the root it updates carries it.
+        if let Some(conversation) = self.remote_conversation(pane_id, cx) {
+            let pane = PaneRef {
+                workspace: self.uuid(),
+                pane: pane_id,
+            };
+            crate::remote_channel::threads::roots::pane_named(pane, &conversation.name, cx);
+        }
         self.report_remote_activity(pane_id, PaneActivity::Ended(ending), cx);
     }
 

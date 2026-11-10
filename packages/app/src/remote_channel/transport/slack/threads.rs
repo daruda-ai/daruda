@@ -13,6 +13,8 @@ use serde_json::{Value, json};
 /// What a root shows: a status line, when one is known, over the pane's name.
 pub(crate) struct RootView<'a> {
     pub title: &'a str,
+    /// What the pane's conversation is about, under its name.
+    pub subject: Option<&'a str>,
     /// Slack emoji name and the status words.
     pub status: Option<(&'a str, &'a str)>,
     /// The stop button's label and value, while there is work to stop.
@@ -20,11 +22,15 @@ pub(crate) struct RootView<'a> {
 }
 
 impl RootView<'_> {
-    /// The pane's name in bold on its own line, its status below, so a
-    /// thread list tells panes apart before it tells their states.
+    /// The pane's name in bold on its own line, what it is working on below,
+    /// then its status, so a thread list tells panes apart before it tells
+    /// their states.
     fn blocks(&self) -> Vec<Value> {
         let mut elements =
             vec![json!({"type": "text", "text": self.title, "style": {"bold": true}})];
+        if let Some(subject) = self.subject {
+            elements.push(json!({"type": "text", "text": format!("\n{subject}")}));
+        }
         if let Some((emoji, label)) = self.status {
             elements.push(json!({"type": "text", "text": "\n"}));
             elements.push(json!({"type": "emoji", "name": emoji}));
@@ -41,12 +47,17 @@ impl RootView<'_> {
         blocks
     }
 
-    /// The notification and thread-list text: the pane first, then its state.
+    /// The notification text: the pane first, then its subject and state.
     fn fallback(&self) -> String {
-        match self.status {
-            Some((_, label)) => format!("{} — {label}", self.title),
-            None => self.title.to_owned(),
-        }
+        [
+            Some(self.title),
+            self.subject,
+            self.status.map(|(_, label)| label),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" — ")
     }
 }
 
@@ -163,6 +174,7 @@ mod tests {
     fn a_root_names_its_pane_first_and_its_status_below() {
         let titled = RootView {
             title: "my_project · Claude",
+            subject: None,
             status: None,
             stop: None,
         };
@@ -179,22 +191,25 @@ mod tests {
 
         let working = RootView {
             title: "my_project · Claude",
+            subject: Some("Fix the login bug"),
             status: Some(("hourglass_flowing_sand", "Working since 2:05 PM")),
             stop: Some(("Stop", "thr:abc")),
         };
         let payload = root_payload(&recipient(), &working);
         assert_eq!(
             payload["text"],
-            "my_project · Claude — Working since 2:05 PM"
+            "my_project · Claude — Fix the login bug — Working since 2:05 PM"
         );
         let elements = &payload["blocks"][0]["elements"][0]["elements"];
         assert_eq!(elements[0]["text"], "my_project · Claude");
-        assert_eq!(elements[1]["text"], "\n");
+        assert_eq!(elements[0]["style"]["bold"], true);
+        assert_eq!(elements[1]["text"], "\nFix the login bug");
+        assert_eq!(elements[2]["text"], "\n");
         assert_eq!(
-            elements[2],
+            elements[3],
             json!({"type": "emoji", "name": "hourglass_flowing_sand"})
         );
-        assert_eq!(elements[3]["text"], " Working since 2:05 PM");
+        assert_eq!(elements[4]["text"], " Working since 2:05 PM");
         let button = &payload["blocks"][1]["elements"][0];
         assert_eq!(button["value"], "thr:abc");
         assert_eq!(button["text"]["text"], "Stop");

@@ -4,7 +4,7 @@
 
 use super::roots::{RootFace, Roots};
 use super::status::{PaneActivity, ShownStatus};
-use super::{Book, ConversationKey, PaneConversation, Scope, now};
+use super::{Book, ConversationKey, PaneConversation, RootName, Scope, now};
 use crate::remote_channel::bridge::PaneRef;
 use crate::surface::strings as s;
 use daruda_store::remote_threads::RemoteThreadStore;
@@ -17,9 +17,9 @@ pub(crate) struct Threads {
     /// used. Memory only — after a restart a pane is found by the
     /// conversation it resumes.
     last: HashMap<(String, PaneRef), ConversationKey>,
-    /// The title each pane's root on each connection was last given. Memory
+    /// The name each pane's root on each connection was last given. Memory
     /// only, like `last`.
-    titles: HashMap<(String, PaneRef), String>,
+    names: HashMap<(String, PaneRef), RootName>,
     /// Each pane's latest status, for roots made later. A closed pane keeps
     /// `Closed` here so a root still being posted for it lands closed.
     activity: HashMap<PaneRef, ShownStatus>,
@@ -35,7 +35,7 @@ impl Threads {
         let mut threads = Self {
             book: Book::from_records(records.unwrap_or_default()),
             last: HashMap::new(),
-            titles: HashMap::new(),
+            names: HashMap::new(),
             activity: HashMap::new(),
             roots: Roots::default(),
             store,
@@ -99,8 +99,8 @@ impl Threads {
         root: Option<&str>,
         conversation: &PaneConversation,
     ) -> String {
-        self.titles
-            .insert((scope.connection.clone(), pane), conversation.title.clone());
+        self.names
+            .insert((scope.connection.clone(), pane), conversation.name.clone());
         let id = root
             .and_then(|root| self.book.for_root(scope, root))
             .map_or_else(
@@ -113,7 +113,7 @@ impl Threads {
                 &id,
                 root.to_owned(),
                 RootFace {
-                    title: conversation.title.clone(),
+                    name: conversation.name.clone(),
                     shown,
                 },
             );
@@ -143,11 +143,11 @@ impl Threads {
         id: &str,
         root: &str,
         pane: PaneRef,
-        title: &str,
+        name: &RootName,
         posted: Option<ShownStatus>,
     ) {
         let face = |shown| RootFace {
-            title: title.to_owned(),
+            name: name.clone(),
             shown,
         };
         if let Some(shown) = posted {
@@ -193,18 +193,26 @@ impl Threads {
             .filter(|((_, held), _)| *held == pane)
             .filter_map(|((connection, _), key)| {
                 let record = self.book.for_connection(connection, key)?;
-                let title = self.titles.get(&(connection.clone(), pane))?;
+                let name = self.names.get(&(connection.clone(), pane))?;
                 Some((
                     Scope::of(record),
                     record.id.clone(),
                     record.root.clone(),
-                    title.clone(),
+                    name.clone(),
                 ))
             })
             .collect();
-        for (scope, id, root, title) in wanted {
-            self.roots
-                .want(&scope, &id, root, RootFace { title, shown });
+        for (scope, id, root, name) in wanted {
+            self.roots.want(&scope, &id, root, RootFace { name, shown });
+        }
+    }
+
+    /// Give `pane`'s roots its latest name, for the next update they get. The
+    /// conversation's subject usually arrives mid-turn, after the post that
+    /// last named it.
+    pub(super) fn rename_pane(&mut self, pane: PaneRef, name: &RootName) {
+        for (_, held) in self.names.iter_mut().filter(|((_, held), _)| *held == pane) {
+            *held = name.clone();
         }
     }
 
@@ -212,7 +220,7 @@ impl Threads {
     /// root still being posted for it is closed as soon as it lands.
     pub(super) fn forget_pane(&mut self, pane: PaneRef) {
         self.last.retain(|(_, held), _| *held != pane);
-        self.titles.retain(|(_, held), _| *held != pane);
+        self.names.retain(|(_, held), _| *held != pane);
     }
 
     // --- Finding a thread's pane -------------------------------------------
@@ -273,7 +281,7 @@ impl Threads {
     #[cfg(test)]
     pub(super) fn knows_pane(&self, pane: PaneRef) -> bool {
         self.last.keys().any(|(_, held)| *held == pane)
-            || self.titles.keys().any(|(_, held)| *held == pane)
+            || self.names.keys().any(|(_, held)| *held == pane)
     }
 
     #[cfg(test)]

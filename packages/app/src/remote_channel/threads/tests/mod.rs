@@ -41,6 +41,9 @@ pub(super) fn conversation(agent: &str, session: &str) -> PaneConversation {
     PaneConversation {
         key: key(agent, session),
         agent_name: format!("{agent} name"),
-        title: "my_project\nClaude".into(),
+        name: RootName {
+            title: "my_project · Claude".into(),
+            subject: None,
+        },
     }
 }

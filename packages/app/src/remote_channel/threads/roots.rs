@@ -4,7 +4,7 @@
 //! retried on the remote channel's retry tick with the latest face.
 
 use super::status::{PaneActivity, ShownStatus};
-use super::{Scope, now};
+use super::{RootName, Scope, now};
 use crate::remote_channel::bridge::PaneRef;
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
@@ -20,7 +20,7 @@ type RootKey = (String, String);
 /// What a root shows: the pane's name and its status.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RootFace {
-    pub title: String,
+    pub name: RootName,
     pub shown: ShownStatus,
 }
 
@@ -29,14 +29,16 @@ pub(super) struct RootFace {
 /// for the root's first post and every later edit, so the two cannot drift.
 pub(super) struct RootLook {
     title: String,
+    subject: Option<String>,
     status: Option<(&'static str, String)>,
     stop: Option<(String, String)>,
 }
 
 impl RootLook {
-    pub(super) fn new(title: &str, shown: Option<ShownStatus>, id: &str) -> Self {
+    pub(super) fn new(name: &RootName, shown: Option<ShownStatus>, id: &str) -> Self {
         Self {
-            title: title.to_owned(),
+            title: name.title.clone(),
+            subject: name.subject.clone(),
             status: shown.map(ShownStatus::view),
             stop: shown.filter(|shown| shown.is_running()).map(|_| {
                 (
@@ -50,6 +52,7 @@ impl RootLook {
     pub(super) fn view(&self) -> slack::threads::RootView<'_> {
         slack::threads::RootView {
             title: &self.title,
+            subject: self.subject.as_deref(),
             status: self
                 .status
                 .as_ref()
@@ -209,6 +212,15 @@ pub(crate) fn pane_activity(pane: PaneRef, activity: PaneActivity, cx: &mut App)
     flush(cx);
 }
 
+/// Give `pane`'s roots its latest name; sent with their next update.
+pub(crate) fn pane_named(pane: PaneRef, name: &RootName, cx: &mut App) {
+    if cx.has_global::<RemoteChannels>() {
+        cx.global_mut::<RemoteChannels>()
+            .threads
+            .rename_pane(pane, name);
+    }
+}
+
 /// Send every root update that is due now.
 pub(crate) fn flush(cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {
@@ -271,7 +283,7 @@ fn replace(
     recipient: &RemoteRecipient,
     update: &RootUpdate,
 ) -> Result<(), RootFailure> {
-    let look = RootLook::new(&update.face.title, Some(update.face.shown), &update.id);
+    let look = RootLook::new(&update.face.name, Some(update.face.shown), &update.id);
     slack::threads::replace_root(&bot.credentials, recipient, &update.root, &look.view())
 }
 

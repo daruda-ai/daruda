@@ -78,7 +78,10 @@ fn every_status_names_a_slack_emoji() {
 
 fn face(title: &str, shown: ShownStatus) -> RootFace {
     RootFace {
-        title: title.into(),
+        name: RootName {
+            title: title.into(),
+            subject: None,
+        },
         shown,
     }
 }
@@ -184,7 +187,10 @@ fn only_a_pane_with_a_thread_updates_a_root() {
     threads.want_for_pane(pane, shown);
     assert_eq!(
         threads.roots_ref().wanted("work", "1.1"),
-        Some(face(&claude.title, shown))
+        Some(RootFace {
+            name: claude.name.clone(),
+            shown
+        })
     );
 }
 
@@ -227,4 +233,32 @@ fn reported_activity_reaches_the_panes_root_until_it_closes(cx: &mut gpui::TestA
         assert_eq!(threads.activity_of(pane), Some(ShownStatus::Closed));
         assert!(!threads.knows_pane(pane), "its place is forgotten");
     });
+}
+
+/// The subject a pane's conversation gets mid-turn reaches its root with the
+/// turn's end, the update that root gets next.
+#[test]
+fn a_renamed_pane_shows_its_new_subject_on_the_next_update() {
+    let mut threads = Threads::load();
+    let pane = pane(6);
+    let claude = conversation("claude", "s1");
+    threads.place(&work(), pane, &claude, NOW);
+    threads.want_root_after_place(&work(), pane, None, &claude);
+    threads.remember(&work(), "t1".into(), claude.key.clone(), "1.1".into(), NOW);
+    let named = RootName {
+        title: claude.name.title.clone(),
+        subject: Some("Fix the login bug".into()),
+    };
+    threads.rename_pane(pane, &named);
+    let ended = threads
+        .note_activity(pane, PaneActivity::Ended(Ending::Completed), NOW)
+        .unwrap();
+    threads.want_for_pane(pane, ended);
+    assert_eq!(
+        threads
+            .roots_ref()
+            .wanted("work", "1.1")
+            .map(|face| face.name),
+        Some(named)
+    );
 }
