@@ -115,6 +115,14 @@ pub enum Effect {
 }
 
 impl Effect {
+    /// A plain answer, with no buttons.
+    pub(crate) fn text(text: String) -> Self {
+        Self::Reply(RenderedReply {
+            text,
+            keyboard: None,
+        })
+    }
+
     /// The effect once any wait is over.
     pub async fn settled(self) -> Self {
         match self {
@@ -261,10 +269,7 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
             label: s::control::approval_already_answered(),
             edit: Edit::StaleCard,
         },
-        InboundAction::StaleQuestion => Effect::Reply(RenderedReply {
-            text: s::notification::remote_question_stale(),
-            keyboard: None,
-        }),
+        InboundAction::StaleQuestion => Effect::text(s::notification::remote_question_stale()),
         InboundAction::StaleListing => Effect::Feedback {
             label: s::control::listing_stale(),
             edit: Edit::KeepButtons,
@@ -301,10 +306,7 @@ fn question_effect(reply: &QuestionReply, outcome: BotQuestionOutcome) -> Effect
             | BotQuestionOutcome::Submitted
             | BotQuestionOutcome::Skipped,
         ) => Effect::None,
-        (QuestionReply::Text(_), _) => Effect::Reply(RenderedReply {
-            text: label,
-            keyboard: None,
-        }),
+        (QuestionReply::Text(_), _) => Effect::text(label),
     }
 }
 

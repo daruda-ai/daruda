@@ -122,6 +122,17 @@ impl Connection {
         changed
     }
 
+    /// The identity this connection's pane threads are made under when `bot`
+    /// serves it. `None` while it has no recipient.
+    pub(crate) fn thread_scope(&self, bot: &BotSession) -> Option<super::threads::Scope> {
+        let recipient = self.config.recipient.as_ref()?;
+        Some(super::threads::Scope::serving(
+            &self.config.id,
+            bot,
+            recipient,
+        ))
+    }
+
     /// The question card a reply to `reply_to` answers, if it names one.
     pub(crate) fn question_reply(
         &self,

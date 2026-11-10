@@ -84,10 +84,7 @@ impl Workspace {
         // A turn's end is when the conversation's subject has most likely
         // settled, so the root it updates carries it.
         if let Some(conversation) = self.remote_conversation(pane_id, cx) {
-            let pane = PaneRef {
-                workspace: self.uuid(),
-                pane: pane_id,
-            };
+            let pane = self.remote_pane(pane_id);
             crate::remote_channel::threads::roots::pane_named(pane, &conversation.name, cx);
         }
         self.report_remote_activity(pane_id, PaneActivity::Ended(ending), cx);
@@ -99,10 +96,15 @@ impl Workspace {
         activity: PaneActivity,
         cx: &mut Context<Self>,
     ) {
-        let pane = PaneRef {
+        let pane = self.remote_pane(pane_id);
+        crate::remote_channel::threads::roots::pane_activity(pane, activity, cx);
+    }
+
+    /// `pane_id` as remote channels name it: by window and pane.
+    fn remote_pane(&self, pane_id: PaneId) -> PaneRef {
+        PaneRef {
             workspace: self.uuid(),
             pane: pane_id,
-        };
-        crate::remote_channel::threads::roots::pane_activity(pane, activity, cx);
+        }
     }
 }

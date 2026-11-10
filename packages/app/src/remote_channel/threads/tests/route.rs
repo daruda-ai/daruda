@@ -22,10 +22,7 @@ fn a_pane_that_moved_to_a_new_conversation_still_answers_in_its_thread(
         let connection = &channels.connections["work"];
         let bot = connection.bot.clone().unwrap();
         let scope = Scope::serving("work", &bot, connection.config.recipient.as_ref().unwrap());
-        channels.threads.place(&scope, pane, &key, NOW);
-        channels
-            .threads
-            .remember(&scope, "t1".into(), key.key.clone(), "1.1".into(), NOW);
+        start_thread(&mut channels.threads, &scope, pane, &key, "1.1");
         bot
     });
     fixture

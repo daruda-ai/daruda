@@ -3,8 +3,8 @@
 //! ask [`crate::remote_channel::transport::pane_threads`] before using this.
 
 use super::{
-    API, Credentials, Message, Reply, Result, SentPart, TRANSIENT_REFUSALS, api, post,
-    post_payload, refusal,
+    API, Credentials, Message, Reply, Result, SentPart, UpdateVerdict, api, post, post_payload,
+    update_verdict,
 };
 use crate::remote_channel::transport::http;
 use daruda_config::remote::RemoteRecipient;
@@ -115,33 +115,15 @@ pub(crate) fn replace_root(
 fn root_result(
     response: std::result::Result<Value, http::Failure>,
 ) -> std::result::Result<(), RootFailure> {
-    let value = match response {
-        Ok(value) => value,
-        Err(failure) => {
-            let retryable = matches!(&failure, http::Failure::Transport(_))
-                || matches!(&failure, http::Failure::Status(status) if http::retryable_status(*status));
-            let reason =
-                crate::remote_channel::transport::TransportError::from(failure).to_string();
-            return Err(if retryable {
-                RootFailure::Transient(reason)
-            } else {
-                RootFailure::Refused(reason)
-            });
-        }
-    };
-    let Some(code) = refusal(&value) else {
-        return Ok(());
-    };
-    let reason = format!("Slack chat.update failed: {code}");
-    Err(
-        if !value["error"].is_string() || TRANSIENT_REFUSALS.contains(&code.as_str()) {
-            RootFailure::Transient(reason)
-        } else if MISSING.contains(&code.as_str()) {
-            RootFailure::Missing(reason)
-        } else {
-            RootFailure::Refused(reason)
-        },
-    )
+    match update_verdict(response) {
+        UpdateVerdict::Updated => Ok(()),
+        UpdateVerdict::Transient(reason) => Err(RootFailure::Transient(reason)),
+        UpdateVerdict::Refused {
+            code: Some(code),
+            reason,
+        } if MISSING.contains(&code.as_str()) => Err(RootFailure::Missing(reason)),
+        UpdateVerdict::Refused { reason, .. } => Err(RootFailure::Refused(reason)),
+    }
 }
 
 /// Post `message` as replies under `root`; with `broadcast`, also shown in

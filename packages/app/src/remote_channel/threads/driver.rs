@@ -1,33 +1,16 @@
 //! Places a pane's message in its thread: decides the thread on the main
 //! thread, posts off it, and records the root a post created.
 
-use super::roots::RootLook;
-use super::status::ShownStatus;
-use super::{ConversationKey, PaneConversation, RootName, Scope, now};
+use super::look::RootLook;
+use super::plan::Placement;
+pub(crate) use super::plan::ThreadPlan;
+use super::{PaneConversation, Scope, now};
 use crate::remote_channel::bridge::{MessageTail, PaneRef, PingWeight};
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::transport::{self, Credentials, Message, SentPart, slack};
 use daruda_config::remote::{ChannelKind, RemoteRecipient};
 use gpui::App;
-
-/// Where one pane message goes.
-pub(crate) struct ThreadPlan {
-    scope: Scope,
-    /// The thread's id: its record's, or the one a root started now takes.
-    id: String,
-    pane: PaneRef,
-    key: ConversationKey,
-    name: RootName,
-    /// What a root started by this post shows.
-    shown: Option<ShownStatus>,
-    /// `None`: the pane has no thread yet, and the post starts one.
-    root: Option<String>,
-    /// Said in the thread first: the pane moved to a new conversation.
-    divider: Option<String>,
-    /// Also shown in the conversation, where the root has scrolled away.
-    broadcast: bool,
-}
 
 /// Decide the thread for a message from `pane` on connection `id`, weighed
 /// by the code that sent it. `None` when the channel has no pane threads or
@@ -47,30 +30,13 @@ pub(crate) fn plan(
     }
     let conversation = conversation_of(pane, cx)?;
     let scope = Scope::serving(id, bot, recipient);
-    let threads = &mut cx.global_mut::<RemoteChannels>().threads;
-    let (root, divider) = threads.place(&scope, pane, &conversation, now());
-    let shown = threads.activity_of(pane);
-    let id = threads.want_root_after_place(&scope, pane, root.as_deref(), &conversation);
-    let broadcast = surfaces(root.is_some(), weight);
-    Some(ThreadPlan {
+    Some(cx.global_mut::<RemoteChannels>().threads.plan_post(
         scope,
-        id,
         pane,
-        key: conversation.key,
-        name: conversation.name,
-        shown,
-        root,
-        divider,
-        broadcast,
-    })
-}
-
-/// Whether a reply also shows in the conversation. A long-lived thread's
-/// root scrolls away, so an outcome — what the sender marked the person must
-/// see — surfaces there too; progress stays in the thread. A post that
-/// starts its thread is already at the bottom.
-pub(super) fn surfaces(existing_root: bool, weight: PingWeight) -> bool {
-    existing_root && weight == PingWeight::Outcome
+        conversation,
+        weight,
+        now(),
+    ))
 }
 
 pub(super) fn conversation_of(pane: PaneRef, cx: &mut App) -> Option<PaneConversation> {
@@ -99,12 +65,16 @@ pub(crate) fn deliver(
     mut message: Message,
     on_sent: impl FnMut(SentPart),
 ) -> Posted {
-    let (root, started) = match &plan.root {
-        Some(root) => (root.clone(), None),
-        None => {
+    let (root, divider, broadcast, started) = match &plan.placement {
+        Placement::Reply {
+            root,
+            divider,
+            broadcast,
+        } => (root.clone(), divider.as_ref(), *broadcast, None),
+        Placement::Start => {
             let look = RootLook::new(&plan.name, plan.shown, &plan.id);
             match slack::threads::post_root(credentials, recipient, &look.view()) {
-                Ok(root) => (root.clone(), Some(root)),
+                Ok(root) => (root.clone(), None, false, Some(root)),
                 Err(error) => {
                     crate::remote_channel::log_error(
                         "Remote pane thread failed to start",
@@ -121,7 +91,7 @@ pub(crate) fn deliver(
             }
         }
     };
-    if let Some(divider) = &plan.divider
+    if let Some(divider) = divider
         && let Err(error) = slack::threads::post_in_thread(
             credentials,
             recipient,
@@ -144,7 +114,7 @@ pub(crate) fn deliver(
             credentials,
             recipient,
             &root,
-            plan.broadcast,
+            broadcast,
             message,
             on_sent,
         ),
@@ -165,21 +135,8 @@ pub(super) fn drop_header_under_root(message: &mut Message) {
 /// Remember the thread a post started for the plan's conversation, and
 /// bring its root up to the pane's status if that moved while it was posting.
 pub(crate) fn record_root(plan: &ThreadPlan, root: String, cx: &mut App) {
-    let threads = &mut cx.global_mut::<RemoteChannels>().threads;
-    threads.remember(
-        &plan.scope,
-        plan.id.clone(),
-        plan.key.clone(),
-        root.clone(),
-        now(),
-    );
-    threads.root_posted(
-        &plan.scope,
-        &plan.id,
-        &root,
-        plan.pane,
-        &plan.name,
-        plan.shown,
-    );
+    cx.global_mut::<RemoteChannels>()
+        .threads
+        .root_started(plan, root, now());
     super::roots::flush(cx);
 }

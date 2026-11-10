@@ -1094,14 +1094,6 @@ fn a_root_stop_tap_reaches_the_threads_pane_and_answers_in_the_thread(cx: &mut T
             feedback_for(effect, callback_on_root(), Tap::Untracked),
             Feedback::Edit { .. }
         ));
-        assert!(!matches!(
-            feedback_for(
-                stop::tap_effect_for_test(Effect::None),
-                callback_on_root(),
-                Tap::Untracked
-            ),
-            Feedback::Edit { .. }
-        ));
         assert_eq!(thread.as_deref(), Some("100.1"), "answered in the thread");
         let (effect, _) = tap(stop::token("unknown"), cx);
         assert!(

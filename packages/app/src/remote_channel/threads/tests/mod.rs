@@ -1,8 +1,10 @@
 //! Pane thread tests, one file per part: the thread table, placing a post,
 //! the root's status, and routing replies.
 
+use super::plan::{Placement, ThreadPlan};
+use super::state::Threads;
 use super::*;
-use crate::remote_channel::bridge::PaneRef;
+use crate::remote_channel::bridge::{PaneRef, PingWeight};
 
 mod book;
 mod place;
@@ -46,4 +48,28 @@ pub(super) fn conversation(agent: &str, session: &str) -> PaneConversation {
             subject: None,
         },
     }
+}
+
+/// Plan a post by `pane` the way the outbound queue does.
+pub(super) fn plan(
+    threads: &mut Threads,
+    scope: &Scope,
+    pane: PaneRef,
+    conversation: &PaneConversation,
+    weight: PingWeight,
+) -> ThreadPlan {
+    threads.plan_post(scope.clone(), pane, conversation.clone(), weight, NOW)
+}
+
+/// A first post by `pane`: it starts a thread rooted at `root`.
+pub(super) fn start_thread(
+    threads: &mut Threads,
+    scope: &Scope,
+    pane: PaneRef,
+    conversation: &PaneConversation,
+    root: &str,
+) {
+    let first = plan(threads, scope, pane, conversation, PingWeight::Progress);
+    assert_eq!(first.placement, Placement::Start);
+    threads.root_started(&first, root.into(), NOW);
 }

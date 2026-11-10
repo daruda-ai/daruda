@@ -2,10 +2,12 @@
 //! knows of each pane, and the root updates owed. Fields are private; each
 //! transition that touches the table also saves it, in one method.
 
-use super::roots::{RootFace, Roots};
+use super::plan::{Placement, ThreadPlan};
+use super::root_queue::{Finished, RootFace, RootUpdate, Roots};
 use super::status::{PaneActivity, ShownStatus};
 use super::{Book, ConversationKey, PaneConversation, RootName, Scope, now};
-use crate::remote_channel::bridge::PaneRef;
+use crate::remote_channel::bridge::{PaneRef, PingWeight};
+use crate::remote_channel::transport::slack::threads::RootFailure;
 use crate::surface::strings as s;
 use daruda_store::remote_threads::RemoteThreadStore;
 use std::collections::HashMap;
@@ -54,22 +56,107 @@ impl Threads {
         threads
     }
 
-    pub(super) fn roots(&mut self) -> &mut Roots {
-        &mut self.roots
+    // --- Root updates ---------------------------------------------------
+
+    /// The root updates to send now; on the retry tick, also those waiting.
+    pub(super) fn due_updates(&mut self, retrying: bool) -> Vec<RootUpdate> {
+        self.roots.ready(retrying)
+    }
+
+    /// Record how `update`'s edit went; a root found gone takes its thread
+    /// record with it.
+    pub(super) fn settle_update(
+        &mut self,
+        update: &RootUpdate,
+        result: &Result<(), RootFailure>,
+    ) -> Finished {
+        let finished = self.roots.finish(update, result);
+        if finished == Finished::Missing {
+            self.forget_root(&update.scope, &update.root);
+        }
+        finished
+    }
+
+    /// Keep `update` for the retry tick: its connection cannot send now.
+    pub(super) fn hold_update(&mut self, update: &RootUpdate) {
+        self.roots.hold(update);
+    }
+
+    /// Drop updates for scopes no connection serves any more.
+    pub(super) fn keep_live_scopes(&mut self, alive: impl Fn(&Scope) -> bool) {
+        self.roots.keep_scopes(alive);
     }
 
     // --- Placing a post -------------------------------------------------
 
-    /// The thread `conversation` of `pane` speaks in, and the divider owed
-    /// when the pane carried its thread over from an earlier conversation.
-    /// `None` root: the pane has no thread on this connection yet.
-    pub(super) fn place(
+    /// Decide the post `conversation` of `pane` makes on `scope`'s
+    /// connection, weighed by its sender, and bring an existing root up to
+    /// date with it.
+    pub(super) fn plan_post(
+        &mut self,
+        scope: Scope,
+        pane: PaneRef,
+        conversation: PaneConversation,
+        weight: PingWeight,
+        now: i64,
+    ) -> ThreadPlan {
+        let thread = self.place(&scope, pane, &conversation, now);
+        let shown = self.activity_of(pane);
+        let root = thread.as_ref().map(|(root, _)| root.as_str());
+        let id = self.want_root_after_place(&scope, pane, root, &conversation);
+        let placement = match thread {
+            None => Placement::Start,
+            // A long-lived thread's root scrolls away, so an outcome — what
+            // the sender marked the person must see — surfaces in the
+            // conversation too; progress stays in the thread. A post that
+            // starts its thread is at the bottom already.
+            Some((root, divider)) => Placement::Reply {
+                root,
+                divider,
+                broadcast: weight == PingWeight::Outcome,
+            },
+        };
+        ThreadPlan {
+            scope,
+            id,
+            pane,
+            key: conversation.key,
+            name: conversation.name,
+            shown,
+            placement,
+        }
+    }
+
+    /// Record the root `plan`'s post started, and bring it up to the pane's
+    /// status and name if either moved on while it was posting.
+    pub(super) fn root_started(&mut self, plan: &ThreadPlan, root: String, now: i64) {
+        self.remember(
+            &plan.scope,
+            plan.id.clone(),
+            plan.key.clone(),
+            root.clone(),
+            now,
+        );
+        self.root_posted(
+            &plan.scope,
+            &plan.id,
+            &root,
+            plan.pane,
+            &plan.name,
+            plan.shown,
+        );
+    }
+
+    /// The thread `conversation` of `pane` speaks in, with the divider owed
+    /// when the pane carried it over from an earlier conversation. `None`:
+    /// the pane has no thread on this connection yet.
+    fn place(
         &mut self,
         scope: &Scope,
         pane: PaneRef,
         conversation: &PaneConversation,
         now: i64,
-    ) -> (Option<String>, Option<String>) {
+    ) -> Option<(String, Option<String>)> {
         // A pane that posts is open, whatever an earlier pane by its number
         // did.
         self.closed.remove(&pane);
@@ -81,21 +168,14 @@ impl Threads {
             if self.book.touch(scope, &root, now) {
                 self.save();
             }
-            return (Some(root), None);
+            return Some((root, None));
         }
-        let Some(previous) = previous else {
-            return (None, None);
-        };
-        match self
+        let previous = previous?;
+        let root = self
             .book
-            .continue_with(scope, &previous, conversation.key.clone(), now)
-        {
-            Some(root) => {
-                self.save();
-                (Some(root), Some(divider_text(&previous, conversation)))
-            }
-            None => (None, None),
-        }
+            .continue_with(scope, &previous, conversation.key.clone(), now)?;
+        self.save();
+        Some((root, Some(divider_text(&previous, conversation))))
     }
 
     /// After placing a post from `pane`: note the root's title on this
@@ -103,7 +183,7 @@ impl Threads {
     /// run does not know what the root shows; one edit settles it, and a root
     /// that already shows this face is not edited again. The thread's id —
     /// its record's, or a new one for the root this post starts.
-    pub(super) fn want_root_after_place(
+    fn want_root_after_place(
         &mut self,
         scope: &Scope,
         pane: PaneRef,
@@ -148,7 +228,7 @@ impl Threads {
 
     /// Note what a root just posted shows, and ask for the pane's current
     /// status if it moved on while the root was posting.
-    pub(super) fn root_posted(
+    fn root_posted(
         &mut self,
         scope: &Scope,
         id: &str,
@@ -304,7 +384,7 @@ impl Threads {
     }
 
     /// Forget the thread rooted at `root`: its message is gone.
-    pub(super) fn forget_root(&mut self, scope: &Scope, root: &str) {
+    fn forget_root(&mut self, scope: &Scope, root: &str) {
         if self.book.forget_root(scope, root) {
             self.save();
         }
@@ -329,9 +409,10 @@ impl Threads {
             || self.names.keys().any(|(_, held)| *held == pane)
     }
 
+    /// The face `root` on `connection` is waiting to show, sent or not.
     #[cfg(test)]
-    pub(super) fn roots_ref(&self) -> &Roots {
-        &self.roots
+    pub(super) fn wanted(&self, connection: &str, root: &str) -> Option<RootFace> {
+        self.roots.wanted(connection, root)
     }
 }
 

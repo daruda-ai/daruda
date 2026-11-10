@@ -4,13 +4,17 @@
 
 mod book;
 pub(crate) mod driver;
+mod look;
+mod plan;
+mod root_queue;
 pub(crate) mod roots;
 pub(crate) mod route;
 pub(crate) mod state;
 pub(crate) mod status;
 pub(crate) mod stop;
 
-pub(crate) use book::{Book, Scope};
+use book::Book;
+pub(crate) use book::Scope;
 pub(crate) use daruda_store::remote_threads::ConversationKey;
 
 /// What a pane's thread needs to know about the pane.

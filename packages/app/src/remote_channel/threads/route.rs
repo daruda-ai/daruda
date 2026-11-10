@@ -3,7 +3,6 @@
 
 use super::{ConversationKey, Scope};
 use crate::remote_channel::bridge::{PaneRef, Routed};
-use crate::remote_channel::command::RenderedReply;
 use crate::remote_channel::dispatch::{self, Effect};
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
@@ -48,8 +47,8 @@ pub(crate) fn route_message(
         ThreadReply::Closed | ThreadReply::Unknown if is_command(&text) && !is_bare_stop(&text) => {
             Ok(connection.core.route_text(text, None, None))
         }
-        ThreadReply::Closed => Err(refusal(s::remote_channel::thread_closed())),
-        ThreadReply::Unknown => Err(refusal(s::remote_channel::thread_unknown())),
+        ThreadReply::Closed => Err(Effect::text(s::remote_channel::thread_closed())),
+        ThreadReply::Unknown => Err(Effect::text(s::remote_channel::thread_unknown())),
     })
 }
 
@@ -68,13 +67,6 @@ fn is_bare_stop(text: &str) -> bool {
         crate::control::spec::parse(text),
         Ok(crate::control::spec::ControlCommand::Stop { target: None })
     )
-}
-
-fn refusal(text: String) -> Effect {
-    Effect::Reply(RenderedReply {
-        text,
-        keyboard: None,
-    })
 }
 
 /// Where a reply posted in a thread goes.
@@ -106,7 +98,7 @@ pub(crate) fn route_reply(
     let Some(connection) = channels.connections.get(id) else {
         return ThreadReply::Untracked;
     };
-    let Some(recipient) = &connection.config.recipient else {
+    let Some(scope) = connection.thread_scope(bot) else {
         return ThreadReply::Untracked;
     };
     if !transport::pane_threads(connection.config.kind)
@@ -114,7 +106,6 @@ pub(crate) fn route_reply(
     {
         return ThreadReply::Untracked;
     }
-    let scope = Scope::serving(id, bot, recipient);
     let Some(conversations) = channels.threads.sessions_of_root(&scope, thread) else {
         return ThreadReply::Unknown;
     };
@@ -132,8 +123,7 @@ pub(super) fn pane_of_thread(
     cx: &mut App,
 ) -> Option<PaneRef> {
     let channels = cx.global::<RemoteChannels>();
-    let recipient = channels.connections.get(id)?.config.recipient.as_ref()?;
-    let scope = Scope::serving(id, bot, recipient);
+    let scope = channels.connections.get(id)?.thread_scope(bot)?;
     let conversations = channels.threads.sessions_of_thread(&scope, thread)?;
     pane_holding(&scope, &conversations, cx)
 }

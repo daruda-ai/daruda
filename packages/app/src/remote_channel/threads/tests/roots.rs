@@ -1,4 +1,4 @@
-use super::super::roots::{Finished, RootFace, Roots};
+use super::super::root_queue::{Finished, RootFace, Roots};
 use super::super::state::Threads;
 use super::super::status::{Ending, PaneActivity, ShownStatus};
 use super::*;
@@ -188,7 +188,13 @@ fn a_reopened_pane_by_a_closed_ones_number_is_not_closed() {
     threads.note_activity(pane, PaneActivity::Working, NOW);
     threads.note_activity(pane, PaneActivity::Closed, NOW);
     assert_eq!(threads.activity_of(pane), Some(ShownStatus::Closed));
-    threads.place(&work(), pane, &conversation("claude", "s1"), NOW);
+    plan(
+        &mut threads,
+        &work(),
+        pane,
+        &conversation("claude", "s1"),
+        PingWeight::Progress,
+    );
     assert_eq!(threads.activity_of(pane), None, "it posts, so it is open");
 
     let other = super::pane(10);
@@ -204,19 +210,14 @@ fn a_new_subject_alone_updates_the_root() {
     let pane = pane(11);
     let claude = conversation("claude", "s1");
     threads.note_activity(pane, PaneActivity::Working, NOW);
-    threads.place(&work(), pane, &claude, NOW);
-    threads.want_root_after_place(&work(), pane, None, &claude);
-    threads.remember(&work(), "t1".into(), claude.key.clone(), "1.1".into(), NOW);
+    start_thread(&mut threads, &work(), pane, &claude, "1.1");
     let named = RootName {
         title: claude.name.title.clone(),
         subject: Some("Fix the login bug".into()),
     };
     threads.rename_pane(pane, &named);
     assert_eq!(
-        threads
-            .roots_ref()
-            .wanted("work", "1.1")
-            .map(|face| face.name),
+        threads.wanted("work", "1.1").map(|face| face.name),
         Some(named)
     );
 }
@@ -236,19 +237,13 @@ fn only_a_pane_with_a_thread_updates_a_root() {
         "unchanged"
     );
     threads.want_for_pane(pane, shown);
-    assert_eq!(
-        threads.roots_ref().wanted("work", "1.1"),
-        None,
-        "no thread yet"
-    );
+    assert_eq!(threads.wanted("work", "1.1"), None, "no thread yet");
 
     let claude = conversation("claude", "s1");
-    threads.place(&work(), pane, &claude, NOW);
-    threads.want_root_after_place(&work(), pane, None, &claude);
-    threads.remember(&work(), "t1".into(), claude.key.clone(), "1.1".into(), NOW);
+    start_thread(&mut threads, &work(), pane, &claude, "1.1");
     threads.want_for_pane(pane, shown);
     assert_eq!(
-        threads.roots_ref().wanted("work", "1.1"),
+        threads.wanted("work", "1.1"),
         Some(RootFace {
             name: claude.name.clone(),
             shown
@@ -273,9 +268,7 @@ fn reported_activity_reaches_the_panes_root_until_it_closes(cx: &mut gpui::TestA
         let pane = pane(4);
         let claude = conversation("claude", "s1");
         let threads = &mut channels.threads;
-        threads.place(&scope, pane, &claude, NOW);
-        threads.want_root_after_place(&scope, pane, None, &claude);
-        threads.remember(&scope, "t1".into(), claude.key.clone(), "1.1".into(), NOW);
+        start_thread(threads, &scope, pane, &claude, "1.1");
         // Not sending now does not lose the update; the retry tick sends it.
         channels.connections.get_mut("work").unwrap().bot = None;
 
@@ -283,7 +276,6 @@ fn reported_activity_reaches_the_panes_root_until_it_closes(cx: &mut gpui::TestA
         let wanted = |cx: &mut gpui::App| {
             cx.global::<RemoteChannels>()
                 .threads
-                .roots_ref()
                 .wanted("work", "1.1")
                 .map(|face: RootFace| face.shown)
         };
@@ -304,9 +296,7 @@ fn a_renamed_pane_shows_its_new_subject_on_the_next_update() {
     let mut threads = Threads::load();
     let pane = pane(6);
     let claude = conversation("claude", "s1");
-    threads.place(&work(), pane, &claude, NOW);
-    threads.want_root_after_place(&work(), pane, None, &claude);
-    threads.remember(&work(), "t1".into(), claude.key.clone(), "1.1".into(), NOW);
+    start_thread(&mut threads, &work(), pane, &claude, "1.1");
     let named = RootName {
         title: claude.name.title.clone(),
         subject: Some("Fix the login bug".into()),
@@ -317,10 +307,7 @@ fn a_renamed_pane_shows_its_new_subject_on_the_next_update() {
         .unwrap();
     threads.want_for_pane(pane, ended);
     assert_eq!(
-        threads
-            .roots_ref()
-            .wanted("work", "1.1")
-            .map(|face| face.name),
+        threads.wanted("work", "1.1").map(|face| face.name),
         Some(named)
     );
 }

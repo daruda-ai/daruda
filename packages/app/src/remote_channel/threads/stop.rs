@@ -28,10 +28,7 @@ pub(crate) fn tap(id: &str, bot: &BotSession, data: &str, cx: &mut App) -> Optio
     let thread = thread_of(data)?;
     let effect = match route::pane_of_thread(id, bot, thread, cx) {
         Some(pane) => dispatch::stop_pane(pane, &dispatch::Target::Remote(id.into()), cx),
-        None => Effect::Reply(crate::remote_channel::command::RenderedReply {
-            text: s::remote_channel::thread_closed(),
-            keyboard: None,
-        }),
+        None => Effect::text(s::remote_channel::thread_closed()),
     };
     Some(never_strip_root(effect))
 }
@@ -50,13 +47,21 @@ fn never_strip_root(effect: Effect) -> Effect {
 }
 
 #[cfg(test)]
-pub(crate) fn tap_effect_for_test(effect: Effect) -> Effect {
-    never_strip_root(effect)
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The tapped message is the thread's status root: a tap that came to
+    /// nothing is answered without the stale-card edit that would strip it.
+    #[test]
+    fn a_tap_that_comes_to_nothing_leaves_the_root_alone() {
+        assert!(matches!(
+            never_strip_root(Effect::None),
+            Effect::Feedback {
+                edit: dispatch::Edit::KeepButtons,
+                ..
+            }
+        ));
+    }
 
     /// No other button value can be read as a stop, nor a stop as another.
     #[test]

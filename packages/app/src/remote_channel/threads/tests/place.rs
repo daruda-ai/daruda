@@ -11,42 +11,35 @@ fn a_pane_keeps_its_thread_across_conversations() {
     let mut threads = Threads::load();
     let pane = pane(7);
     let claude = conversation("claude", "s1");
+    let reply = |divider: Option<String>| Placement::Reply {
+        root: "1.1".into(),
+        divider,
+        broadcast: false,
+    };
+    let placed = |threads: &mut Threads, scope: &Scope, conversation: &PaneConversation| {
+        plan(threads, scope, pane, conversation, PingWeight::Progress).placement
+    };
 
+    start_thread(&mut threads, &work(), pane, &claude, "1.1");
     assert_eq!(
-        threads.place(&work(), pane, &claude, NOW),
-        (None, None),
-        "no thread yet"
-    );
-    threads.remember(&work(), "t1".into(), claude.key.clone(), "1.1".into(), NOW);
-    assert_eq!(
-        threads.place(&work(), pane, &claude, NOW),
-        (Some("1.1".into()), None),
+        placed(&mut threads, &work(), &claude),
+        reply(None),
         "the same conversation reuses its thread"
     );
-
-    let cleared = conversation("claude", "s2");
     assert_eq!(
-        threads.place(&work(), pane, &cleared, NOW),
-        (
-            Some("1.1".into()),
-            Some(s::remote_channel::thread_new_conversation())
-        ),
+        placed(&mut threads, &work(), &conversation("claude", "s2")),
+        reply(Some(s::remote_channel::thread_new_conversation())),
         "a new conversation of the same agent continues the thread"
     );
-
     let switched = conversation("codex", "s3");
     assert_eq!(
-        threads.place(&work(), pane, &switched, NOW),
-        (
-            Some("1.1".into()),
-            Some(s::remote_channel::thread_switched_agent("codex name"))
-        ),
+        placed(&mut threads, &work(), &switched),
+        reply(Some(s::remote_channel::thread_switched_agent("codex name"))),
         "another agent continues the thread and is named"
     );
-
     assert_eq!(
-        threads.place(&scope("work", "other", "D1"), pane, &switched, NOW),
-        (None, None),
+        placed(&mut threads, &scope("work", "other", "D1"), &switched),
+        Placement::Start,
         "another bot starts its own thread"
     );
 }
@@ -77,7 +70,7 @@ fn a_reply_under_the_root_drops_the_header_unless_it_is_all_there_is() {
 /// again. A post into an existing thread now brings its root up to date.
 #[test]
 fn a_post_into_an_existing_thread_brings_its_root_up_to_date() {
-    use super::super::roots::RootFace;
+    use super::super::root_queue::RootFace;
     use super::super::status::{Ending, PaneActivity, ShownStatus};
     let mut threads = Threads::load();
     let claude = conversation("claude", "s1");
@@ -86,16 +79,11 @@ fn a_post_into_an_existing_thread_brings_its_root_up_to_date() {
     let pane = pane(5);
     let ended = PaneActivity::Ended(Ending::Completed);
     threads.note_activity(pane, ended, NOW).unwrap();
-    assert_eq!(
-        threads.roots_ref().wanted("work", "1.1"),
-        None,
-        "not posted yet"
-    );
+    assert_eq!(threads.wanted("work", "1.1"), None, "not posted yet");
 
-    let (root, _) = threads.place(&work(), pane, &claude, NOW);
-    threads.want_root_after_place(&work(), pane, root.as_deref(), &claude);
+    plan(&mut threads, &work(), pane, &claude, PingWeight::Progress);
     assert_eq!(
-        threads.roots_ref().wanted("work", "1.1"),
+        threads.wanted("work", "1.1"),
         Some(RootFace {
             name: claude.name.clone(),
             shown: ShownStatus::Ended(Ending::Completed),
@@ -108,19 +96,18 @@ fn a_post_into_an_existing_thread_brings_its_root_up_to_date() {
 /// already.
 #[test]
 fn only_an_outcome_surfaces_from_a_thread() {
-    use super::super::driver::surfaces;
-    use crate::remote_channel::bridge::PingWeight;
-    let cases = [
-        (
-            true,
-            PingWeight::Outcome,
-            true,
-            "an answer, an end, a question",
-        ),
-        (true, PingWeight::Progress, false, "progress"),
-        (false, PingWeight::Outcome, false, "starts its own thread"),
-    ];
-    for (existing_root, weight, want, label) in cases {
-        assert_eq!(surfaces(existing_root, weight), want, "{label}");
+    let mut threads = Threads::load();
+    let pane = pane(8);
+    let claude = conversation("claude", "s1");
+    start_thread(&mut threads, &work(), pane, &claude, "1.1");
+    for (weight, want, label) in [
+        (PingWeight::Outcome, true, "an answer, an end, a question"),
+        (PingWeight::Progress, false, "progress"),
+    ] {
+        let placement = plan(&mut threads, &work(), pane, &claude, weight).placement;
+        assert!(
+            matches!(placement, Placement::Reply { broadcast, .. } if broadcast == want),
+            "{label}"
+        );
     }
 }

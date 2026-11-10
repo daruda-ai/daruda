@@ -318,26 +318,63 @@ pub fn edit(
     ))
 }
 
+/// What a `chat.update` reply says of the edit. Shared by a card's
+/// settlement and a thread root's status, which differ only in what a
+/// refusal means to them.
+enum UpdateVerdict {
+    Updated,
+    /// May pass: rate limits, server trouble, a reply that names no code.
+    Transient(String),
+    /// Slack refused this edit; `code` when it named one.
+    Refused {
+        code: Option<String>,
+        reason: String,
+    },
+}
+
 /// Classify a `chat.update` reply. Slack refuses with HTTP 200 and an error
 /// code; an HTTP error status means the request never reached the method.
-fn update_result(
-    response: std::result::Result<Value, http::Failure>,
-) -> std::result::Result<(), EditFailure> {
+fn update_verdict(response: std::result::Result<Value, http::Failure>) -> UpdateVerdict {
     match response {
         Ok(value) => match refusal(&value) {
-            None => Ok(()),
+            None => UpdateVerdict::Updated,
             Some(code) => {
                 let reason = format!("Slack chat.update failed: {code}");
                 // A reply without a code says nothing about the request.
                 let named = value["error"].is_string();
                 if named && !TRANSIENT_REFUSALS.contains(&code.as_str()) {
-                    Err(EditFailure::Gone(reason))
+                    UpdateVerdict::Refused {
+                        code: Some(code),
+                        reason,
+                    }
                 } else {
-                    Err(EditFailure::Transient(reason))
+                    UpdateVerdict::Transient(reason)
                 }
             }
         },
-        Err(failure) => Err(http::edit_failure(failure)),
+        Err(failure) => {
+            let retryable = match &failure {
+                http::Failure::Status(status) => http::retryable_status(*status),
+                http::Failure::Transport(_) => true,
+            };
+            let reason = TransportError::from(failure).to_string();
+            if retryable {
+                UpdateVerdict::Transient(reason)
+            } else {
+                UpdateVerdict::Refused { code: None, reason }
+            }
+        }
+    }
+}
+
+/// A card edit: any refusal means the message cannot take it again.
+fn update_result(
+    response: std::result::Result<Value, http::Failure>,
+) -> std::result::Result<(), EditFailure> {
+    match update_verdict(response) {
+        UpdateVerdict::Updated => Ok(()),
+        UpdateVerdict::Transient(reason) => Err(EditFailure::Transient(reason)),
+        UpdateVerdict::Refused { reason, .. } => Err(EditFailure::Gone(reason)),
     }
 }
 
