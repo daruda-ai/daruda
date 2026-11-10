@@ -53,13 +53,14 @@ impl Workspace {
     /// The first candidate is the one requested; a connect falls through
     /// only when it is not advertised. An adapter advertises its own names,
     /// so one daruda's seed does not match is shown beside the mode's id:
-    /// an adapter cannot relabel `bypassPermissions` as "Ask". Each name is
-    /// an adapter's or a user's text, bounded by [`card_label`].
+    /// an adapter cannot relabel `bypassPermissions` as "Ask".
     pub(in crate::workspace) fn requested_mode_label(
         &self,
         agent_id: &str,
         preferences: &SessionPreferences,
     ) -> String {
+        // Every name below is an adapter's or a user's text, so each is
+        // bounded by `card_label`.
         let Some(mode) = preferences.modes.first() else {
             return crate::surface::strings::control::approval_mode_agent_default();
         };
