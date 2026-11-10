@@ -176,7 +176,7 @@ mod tests {
     use super::*;
     use daruda_control_types::agent_text::{
         PROMPT_EXCERPT_FLOOR_HEAD_CHARS, PROMPT_EXCERPT_FLOOR_TAIL_CHARS,
-        PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS,
+        PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS, isolate,
     };
 
     /// A prompt as a card of nothing else quotes it.
@@ -205,7 +205,7 @@ mod tests {
         }
         assert_eq!(
             prompt_phrase("fix\nit"),
-            Some(s::control::approval_quoted("fix it"))
+            Some(s::control::approval_quoted(isolate("fix it")))
         );
         assert_eq!(
             prompt_phrase("\u{200B}\u{202E}"),
@@ -227,7 +227,7 @@ mod tests {
             .collect();
         let counted = format!(
             "{}{}",
-            s::control::approval_quoted("fix"),
+            s::control::approval_quoted(isolate("fix")),
             s::control::approval_hidden_chars(9)
         );
         assert_eq!(prompt_phrase(&tagged), Some(counted.clone()));
@@ -237,7 +237,7 @@ mod tests {
         assert!(!quoted_title("Fix the login").contains(marker));
         assert_eq!(
             quoted_title("Fix the login"),
-            s::control::approval_quoted("Fix the login")
+            s::control::approval_quoted(isolate("Fix the login"))
         );
     }
 
@@ -271,9 +271,9 @@ mod tests {
             quoted_title(&format!("{head}{}{tail}", "m".repeat(50))),
             format!(
                 "{}{}{}",
-                s::control::approval_quoted(&head),
+                s::control::approval_quoted(isolate(&head)),
                 s::control::approval_prompt_elided(50),
-                s::control::approval_quoted(&tail)
+                s::control::approval_quoted(isolate(&tail))
             )
         );
     }
@@ -288,9 +288,9 @@ mod tests {
         let prompt = format!("{head}{}{tail}", "m".repeat(9));
         let whole = format!(
             "{}{}{}",
-            s::control::approval_quoted(&head),
+            s::control::approval_quoted(isolate(&head)),
             s::control::approval_prompt_elided(9),
-            s::control::approval_quoted(&tail)
+            s::control::approval_quoted(isolate(&tail))
         );
         assert_eq!(prompt_phrase(&prompt), Some(whole.clone()));
         assert_eq!(
@@ -324,11 +324,11 @@ mod tests {
         let card = with_prompt(&prompt, |p| format!("{filler}{p}")).expect("a prompt");
         let floor = format!(
             "{filler}{}{}{}",
-            s::control::approval_quoted("😀".repeat(PROMPT_EXCERPT_FLOOR_HEAD_CHARS)),
+            s::control::approval_quoted(isolate(&"😀".repeat(PROMPT_EXCERPT_FLOOR_HEAD_CHARS))),
             s::control::approval_prompt_elided(
                 4000 - PROMPT_EXCERPT_FLOOR_HEAD_CHARS - PROMPT_EXCERPT_FLOOR_TAIL_CHARS
             ),
-            s::control::approval_quoted("😀".repeat(PROMPT_EXCERPT_FLOOR_TAIL_CHARS)),
+            s::control::approval_quoted(isolate(&"😀".repeat(PROMPT_EXCERPT_FLOOR_TAIL_CHARS))),
         );
         assert_eq!(card, floor);
     }

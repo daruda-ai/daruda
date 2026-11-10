@@ -1,8 +1,8 @@
 use daruda_control_types::agent_text::{
-    PROMPT_EXCERPT_FLOOR_HEAD_CHARS, PROMPT_EXCERPT_FLOOR_TAIL_CHARS, PROMPT_EXCERPT_HEAD_CHARS,
-    PROMPT_EXCERPT_TAIL_CHARS, QuoteMarkers, TITLE_EXCERPT_HEAD_CHARS, TITLE_EXCERPT_TAIL_CHARS,
-    bound_agent_text, elide_middle, one_line, prompt_excerpt, prompt_excerpts, sanitize_title,
-    title_excerpt,
+    ISOLATE_END, ISOLATE_START, PROMPT_EXCERPT_FLOOR_HEAD_CHARS, PROMPT_EXCERPT_FLOOR_TAIL_CHARS,
+    PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS, QuoteMarkers, TITLE_EXCERPT_HEAD_CHARS,
+    TITLE_EXCERPT_TAIL_CHARS, bound_agent_text, elide_middle, one_line, prompt_excerpt,
+    prompt_excerpts, sanitize_title, title_excerpt,
 };
 
 /// Markers a test reads back: the counts, nothing localized.
@@ -122,7 +122,10 @@ fn a_short_title_is_untouched_and_a_blank_one_is_absent() {
 
 #[test]
 fn a_short_prompt_is_quoted_whole_on_one_line() {
-    assert_eq!(prompt("fix\n\tthe  login\r\nbug"), "<fix the login bug>");
+    assert_eq!(
+        prompt("fix\n\tthe  login\r\nbug"),
+        "<\u{2068}fix the login bug\u{2069}>"
+    );
 }
 
 /// A harmless opening cannot hide the instruction after it: past the bound
@@ -131,7 +134,7 @@ fn a_short_prompt_is_quoted_whole_on_one_line() {
 fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
     let budget = PROMPT_EXCERPT_HEAD_CHARS + PROMPT_EXCERPT_TAIL_CHARS;
     let exact = "a".repeat(budget);
-    assert_eq!(prompt(&exact), format!("<{exact}>"));
+    assert_eq!(prompt(&exact), format!("<\u{2068}{exact}\u{2069}>"));
 
     let long = format!(
         "{}{}{}",
@@ -142,7 +145,7 @@ fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
     assert_eq!(
         prompt(&long),
         format!(
-            "<{}>{}<{}>",
+            "<\u{2068}{}\u{2069}>{}<\u{2068}{}\u{2069}>",
             "가".repeat(PROMPT_EXCERPT_HEAD_CHARS),
             marker(7),
             "😀".repeat(PROMPT_EXCERPT_TAIL_CHARS)
@@ -153,7 +156,7 @@ fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
     assert_eq!(
         prompt(&spaced),
         format!(
-            "<{}>{}<{} b>",
+            "<\u{2068}{}\u{2069}>{}<\u{2068}{} b\u{2069}>",
             "a".repeat(PROMPT_EXCERPT_HEAD_CHARS),
             marker(2),
             "a".repeat(PROMPT_EXCERPT_TAIL_CHARS - 2)
@@ -174,7 +177,7 @@ fn narrower_excerpts_end_at_the_floor() {
         excerpts.last().map(String::as_str),
         Some(
             format!(
-                "<{}>{}<{}>",
+                "<\u{2068}{}\u{2069}>{}<\u{2068}{}\u{2069}>",
                 "p".repeat(PROMPT_EXCERPT_FLOOR_HEAD_CHARS),
                 marker(3000 - PROMPT_EXCERPT_FLOOR_HEAD_CHARS - PROMPT_EXCERPT_FLOOR_TAIL_CHARS),
                 "p".repeat(PROMPT_EXCERPT_FLOOR_TAIL_CHARS)
@@ -182,7 +185,7 @@ fn narrower_excerpts_end_at_the_floor() {
             .as_str()
         )
     );
-    assert!(prompt_excerpts("short", &Markers).all(|e| e == "<short>"));
+    assert!(prompt_excerpts("short", &Markers).all(|e| e == "<\u{2068}short\u{2069}>"));
 }
 
 /// A task title reaches the agent whole, so a long one is quoted by both
@@ -191,7 +194,7 @@ fn narrower_excerpts_end_at_the_floor() {
 fn a_long_title_keeps_its_start_and_end_around_the_hidden_count() {
     let budget = TITLE_EXCERPT_HEAD_CHARS + TITLE_EXCERPT_TAIL_CHARS;
     let whole = "t".repeat(budget);
-    assert_eq!(title(&whole), format!("<{whole}>"));
+    assert_eq!(title(&whole), format!("<\u{2068}{whole}\u{2069}>"));
     let long = format!(
         "{}{}{}",
         "h".repeat(TITLE_EXCERPT_HEAD_CHARS),
@@ -201,13 +204,13 @@ fn a_long_title_keeps_its_start_and_end_around_the_hidden_count() {
     assert_eq!(
         title(&long),
         format!(
-            "<{}>{}<{}>",
+            "<\u{2068}{}\u{2069}>{}<\u{2068}{}\u{2069}>",
             "h".repeat(TITLE_EXCERPT_HEAD_CHARS),
             marker(120),
             "z".repeat(TITLE_EXCERPT_TAIL_CHARS)
         )
     );
-    assert_eq!(title("Fix\nthe login"), "<Fix the login>");
+    assert_eq!(title("Fix\nthe login"), "<\u{2068}Fix the login\u{2069}>");
 }
 
 /// A right-to-left override would show `txt.exe` as `exe.txt`; zero-width
@@ -241,14 +244,17 @@ fn a_card_quote_counts_the_invisible_characters_it_dropped() {
                 .map(|c| char::from_u32(0xE0000 + c as u32).unwrap()),
         )
         .collect();
-    assert_eq!(prompt(&tagged), "<ok> [6 hidden]");
-    assert_eq!(title(&tagged), "<ok> [6 hidden]");
+    assert_eq!(prompt(&tagged), "<\u{2068}ok\u{2069}> [6 hidden]");
+    assert_eq!(title(&tagged), "<\u{2068}ok\u{2069}> [6 hidden]");
     // Nothing visible is still something sent.
     assert_eq!(prompt("\u{200B}\u{202E}"), "[2 hidden]");
-    assert_eq!(prompt("plain text"), "<plain text>");
-    assert_eq!(title("plain text"), "<plain text>");
+    assert_eq!(prompt("plain text"), "<\u{2068}plain text\u{2069}>");
+    assert_eq!(title("plain text"), "<\u{2068}plain text\u{2069}>");
     // A count the text spells is inside the quote; the card's is outside.
-    assert_eq!(prompt("a [3 hidden]\u{200B}"), "<a [3 hidden]> [1 hidden]");
+    assert_eq!(
+        prompt("a [3 hidden]\u{200B}"),
+        "<\u{2068}a [3 hidden]\u{2069}> [1 hidden]"
+    );
 }
 
 /// A quote mark inside quoted text could close the card's own quote and
@@ -258,11 +264,11 @@ fn a_card_quote_cannot_close_the_cards_quotes() {
     let spoof = "x\u{201D}. (requested permission mode: Ask) \u{201C}\"y\" \u{00AB}z\u{00BB}";
     assert_eq!(
         prompt(spoof),
-        "<x'. (requested permission mode: Ask) ''y' 'z'>"
+        "<\u{2068}x'. (requested permission mode: Ask) ''y' 'z'\u{2069}>"
     );
-    assert_eq!(title("say \"hi\""), "<say 'hi'>");
+    assert_eq!(title("say \"hi\""), "<\u{2068}say 'hi'\u{2069}>");
     // An apostrophe is left as it is.
-    assert_eq!(prompt("don't"), "<don't>");
+    assert_eq!(prompt("don't"), "<\u{2068}don't\u{2069}>");
 }
 
 /// Joiners shape Persian, Indic scripts and emoji sequences, and cannot
@@ -273,5 +279,34 @@ fn joiners_survive_so_scripts_and_emoji_keep_their_shape() {
     assert_eq!(one_line(family), family);
     let persian = "می\u{200C}خواهم";
     assert_eq!(one_line(persian), persian);
-    assert_eq!(prompt(family), format!("<{family}>"));
+    assert_eq!(prompt(family), format!("<\u{2068}{family}\u{2069}>"));
+}
+
+/// Right-to-left letters reorder the neutral marks beside them with no
+/// control character at all, so each quoted run is set in isolates the card
+/// adds itself; isolates the text carried are dropped and counted like any
+/// other bidi control, and the card's own are never counted.
+#[test]
+fn a_card_isolates_what_it_quotes_and_counts_only_the_texts_isolates() {
+    let rtl = "\u{05E9}\u{05DC}\u{05D5}\u{05DD} 3";
+    assert_eq!(prompt(rtl), format!("<{ISOLATE_START}{rtl}{ISOLATE_END}>"));
+    assert_eq!(
+        title("\u{2068}a\u{2069}"),
+        format!("<{ISOLATE_START}a{ISOLATE_END}> [2 hidden]")
+    );
+    assert_eq!(
+        prompt(&format!("{rtl}\u{2067}"))
+            .matches(ISOLATE_START)
+            .count(),
+        1
+    );
+    let long = format!(
+        "{}{}",
+        "\u{05D0}".repeat(TITLE_EXCERPT_HEAD_CHARS),
+        "z".repeat(50)
+    );
+    let quoted = title(&long);
+    assert_eq!(quoted.matches(ISOLATE_START).count(), 2, "{quoted}");
+    assert_eq!(quoted.matches(ISOLATE_END).count(), 2, "{quoted}");
+    assert!(!quoted.contains("hidden"), "{quoted}");
 }

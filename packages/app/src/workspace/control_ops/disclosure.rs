@@ -83,6 +83,7 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use crate::test_support::workspace_with_agent_chat;
+    use daruda_control_types::agent_text::isolate;
 
     /// The card names Claude's delegated default by the adapter's own label,
     /// even once the adapter advertised no modes; an id no vocabulary names
@@ -112,23 +113,23 @@ mod tests {
             ]
             .into();
             let disclosure = ws.control_chat_disclosure(&id, &delegated);
-            assert_eq!(disclosure.agent_name, claude.name);
-            assert_eq!(disclosure.mode, "Bypass Permissions");
+            assert_eq!(disclosure.agent_name, isolate(&claude.name));
+            assert_eq!(disclosure.mode, isolate("Bypass Permissions"));
             // The same agent opened for a person asks for its ordinary mode.
             assert_ne!(
                 ws.control_chat_disclosure(&id, &daruda_config::ModeChoice::FollowDefault)
                     .mode,
-                "Bypass Permissions"
+                isolate("Bypass Permissions")
             );
             let source = claude.launch.adapter_command().to_owned();
             ws.agent_vocabulary.record_modes(&id, &source, Vec::new());
             assert_eq!(
                 ws.control_chat_disclosure(&id, &delegated).mode,
-                "Bypass Permissions"
+                isolate("Bypass Permissions")
             );
             assert_eq!(
                 ws.control_chat_disclosure("custom", &delegated).mode,
-                "yolo"
+                isolate("yolo")
             );
             assert_eq!(
                 ws.control_chat_disclosure("plain", &delegated).mode,
@@ -161,15 +162,18 @@ mod tests {
                 .record_modes(&id, &source, vec![entry("Bypass Permissions")]);
             let hidden = crate::surface::strings::control::approval_hidden_chars(1);
             let disclosure = ws.control_chat_disclosure(&id, &delegated);
-            assert_eq!(disclosure.agent_name, format!("Claude Code{hidden}"));
-            assert_eq!(disclosure.mode, "Bypass Permissions");
+            assert_eq!(
+                disclosure.agent_name,
+                format!("{}{hidden}", isolate("Claude Code"))
+            );
+            assert_eq!(disclosure.mode, isolate("Bypass Permissions"));
             ws.agent_vocabulary
                 .record_modes(&id, &source, vec![entry("Ask\u{202E}\nfirst")]);
             assert_eq!(
                 ws.control_chat_disclosure(&id, &delegated).mode,
                 crate::surface::strings::control::approval_mode_adapter_named(
-                    format!("Ask first{hidden}"),
-                    "bypassPermissions"
+                    format!("{}{hidden}", isolate("Ask first")),
+                    isolate("bypassPermissions")
                 )
             );
         });
@@ -187,9 +191,9 @@ mod tests {
         let cut = |c: &str, n: usize| {
             format!(
                 "{}{}{}",
-                c.repeat(HEAD),
+                isolate(&c.repeat(HEAD)),
                 s::approval_prompt_elided(n - HEAD - TAIL),
-                c.repeat(TAIL)
+                isolate(&c.repeat(TAIL))
             )
         };
         let fixture = workspace_with_agent_chat(cx);

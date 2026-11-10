@@ -20,7 +20,9 @@
 //! The agent still receives them, so a card says how many it dropped. Which
 //! characters those are, and which invisible ones pass uncounted because they
 //! only modify the glyph beside them, is `daruda_core::text::hides_or_reorders`
-//! — the same predicate a branch name is checked against.
+//! — the same predicate a branch name is checked against. What a card then
+//! quotes it sets in Unicode isolates of its own, so right-to-left text
+//! cannot visually reorder the card's quote marks and counts around it.
 //!
 //! GPUI-free.
 
@@ -78,6 +80,15 @@ const FRAMING_QUOTES: &[char] = &[
     '\u{00BB}', '\u{301D}', '\u{301E}', '\u{301F}', '\u{FF02}',
 ];
 const NEUTRAL_QUOTE: char = '\'';
+
+/// FIRST STRONG ISOLATE and POP DIRECTIONAL ISOLATE: what a card puts around
+/// each text it quotes. Right-to-left letters need no control character to
+/// reorder the neutral marks beside them — a card's own quote marks and
+/// counts — so the quoted text is set apart as one unit, in its own
+/// direction. Added after flattening, which drops and counts any isolate the
+/// text itself carried, so the card's own are never counted as hidden.
+pub const ISOLATE_START: char = '\u{2068}';
+pub const ISOLATE_END: char = '\u{2069}';
 
 /// What a card adds to text it quotes, in its reader's language. Each marker
 /// stands outside the quotation marks, where quoted text cannot forge one:
@@ -153,17 +164,22 @@ fn card_quote(raw: &str, head: usize, tail: usize, markers: &impl QuoteMarkers) 
     let mut quoted = match split_ends(&line, head, tail) {
         Some((head, elided, tail)) => format!(
             "{}{}{}",
-            markers.quote(head),
+            markers.quote(&isolate(head)),
             markers.elided(elided),
-            markers.quote(tail)
+            markers.quote(&isolate(tail))
         ),
         None if line.is_empty() => String::new(),
-        None => markers.quote(&line),
+        None => markers.quote(&isolate(&line)),
     };
     if hidden > 0 {
         quoted.push_str(&markers.hidden(hidden));
     }
     quoted.trim().to_owned()
+}
+
+/// `text` between [`ISOLATE_START`] and [`ISOLATE_END`], as a card quotes it.
+pub fn isolate(text: &str) -> String {
+    format!("{ISOLATE_START}{text}{ISOLATE_END}")
 }
 
 /// Invisible characters are dropped, control characters become spaces, and

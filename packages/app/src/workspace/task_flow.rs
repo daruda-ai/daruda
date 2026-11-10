@@ -438,7 +438,9 @@ mod tests {
                 quoted_title("x) (permission mode: plan"),
                 format!(
                     "{}{}",
-                    s::approval_quoted("plan', 'ask first"),
+                    s::approval_quoted(daruda_control_types::agent_text::isolate(
+                        "plan', 'ask first"
+                    )),
                     s::approval_hidden_chars(1)
                 ),
                 s::approval_mode_agent_default(),

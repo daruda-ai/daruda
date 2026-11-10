@@ -143,14 +143,18 @@ async fn task_start_runs_the_task_the_listing_numbered(cx: &mut gpui::TestAppCon
     let listing = run(ControlCommand::Task(TaskCommand::List));
     let row = format!(
         "1. {}",
-        crate::surface::strings::control::approval_quoted("Here")
+        crate::surface::strings::control::approval_quoted(
+            daruda_control_types::agent_text::isolate("Here")
+        )
     );
     assert!(listing.contains(&row), "{listing}");
     let started = run(ControlCommand::Task(TaskCommand::Start(Ordinal(1))));
     assert_eq!(
         started,
         crate::surface::strings::control::task_starting(
-            crate::surface::strings::control::approval_quoted("Here")
+            crate::surface::strings::control::approval_quoted(
+                daruda_control_types::agent_text::isolate("Here")
+            )
         )
     );
     cx.run_until_parked();
@@ -270,13 +274,17 @@ async fn a_task_start_that_fails_later_is_told_as_a_notice(cx: &mut gpui::TestAp
     assert_eq!(
         reply,
         crate::surface::strings::control::task_starting(
-            crate::surface::strings::control::approval_quoted("Clash")
+            crate::surface::strings::control::approval_quoted(
+                daruda_control_types::agent_text::isolate("Clash")
+            )
         )
     );
     cx.run_until_parked();
 
     let expected = crate::surface::strings::control::task_start_failed(
-        crate::surface::strings::control::approval_quoted("Clash"),
+        crate::surface::strings::control::approval_quoted(
+            daruda_control_types::agent_text::isolate("Clash"),
+        ),
         crate::surface::strings::control::error_task_start_failed(),
     );
     let mut notices = Vec::new();

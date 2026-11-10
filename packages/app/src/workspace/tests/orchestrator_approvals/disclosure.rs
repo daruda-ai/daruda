@@ -12,11 +12,18 @@ use crate::control::{
 };
 use crate::workspace::Workspace;
 use daruda_config::AgentDefinition;
-use daruda_control_types::agent_text::{PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS};
+use daruda_control_types::agent_text::{
+    PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS, isolate,
+};
 use futures::{FutureExt as _, StreamExt as _};
 
 /// The display name of Claude's delegated default, as its adapter names it.
 const BYPASS: &str = "Bypass Permissions";
+
+/// Text as a card quotes it: set apart in the card's own isolates.
+fn quoted(text: impl AsRef<str>) -> String {
+    s::control::approval_quoted(isolate(text.as_ref()))
+}
 
 /// The orchestrator's host window, whose catalog holds Claude and a second
 /// agent; nothing has been used yet, so a chat opens Claude.
@@ -128,10 +135,13 @@ async fn a_task_start_card_names_agent_mode_and_prompt_and_opens_that_agent(
     let (id, outcome, card) = ask(GatedCommand::TaskStart { task }, cx);
     assert!(card.contains(&claude.name), "{card}");
     assert!(card.contains(BYPASS), "{card}");
-    assert!(card.contains("“Fix the login redirect. xxx"), "{card}");
+    assert!(
+        card.contains("“\u{2068}Fix the login redirect. xxx"),
+        "{card}"
+    );
     // A long prompt is cut in the middle: its end is quoted, with how much
     // of it the card leaves out.
-    assert!(card.contains("drop the users table”"), "{card}");
+    assert!(card.contains("drop the users table\u{2069}”"), "{card}");
     let hidden = prompt.chars().count() - 1 - PROMPT_EXCERPT_HEAD_CHARS - PROMPT_EXCERPT_TAIL_CHARS;
     assert!(
         card.contains(&s::control::approval_prompt_elided(hidden)),
@@ -182,7 +192,7 @@ async fn a_chat_new_card_names_agent_and_mode_and_its_announcement_the_requested
                     ws.control_project_name(lane.project),
                     ws.control_lane_name(lane.lane_ref()),
                 ))),
-            s::control::approval_agent(&claude.name, BYPASS),
+            s::control::approval_agent(isolate(&claude.name), isolate(BYPASS)),
         )
     );
     while outbound.next().now_or_never().flatten().is_some() {}
@@ -199,9 +209,14 @@ async fn a_chat_new_card_names_agent_and_mode_and_its_announcement_the_requested
         .map(|pending| format!("{:?}", pending.outbound))
         .collect();
     assert!(!announced.is_empty());
-    let expected = s::control::chat_announced_only(&claude.name, BYPASS);
+    // The outbound is read through `Debug`, which escapes the isolates.
+    let expected = format!(
+        "{:?}",
+        s::control::chat_announced_only(isolate(&claude.name), isolate(BYPASS))
+    );
+    let expected = expected.trim_matches('"');
     for message in announced {
-        assert!(message.contains(&expected), "{message}");
+        assert!(message.contains(expected), "{message}");
     }
 }
 
@@ -210,7 +225,7 @@ async fn a_chat_new_card_names_agent_and_mode_and_its_announcement_the_requested
 #[gpui::test]
 fn a_worktree_card_quotes_its_prompt_when_it_carries_one(cx: &mut TestAppContext) {
     let (_fixture, lane, claude) = host(cx);
-    let agent = s::control::approval_agent(&claude.name, BYPASS);
+    let agent = s::control::approval_agent(isolate(&claude.name), isolate(BYPASS));
     for prompt in [
         Some("Port the tax table\nto the new API"),
         None,
@@ -228,14 +243,14 @@ fn a_worktree_card_quotes_its_prompt_when_it_carries_one(cx: &mut TestAppContext
             },
             cx,
         );
-        let name = s::control::approval_quoted("disclosure");
+        let name = quoted("disclosure");
         let hidden = s::control::approval_hidden_chars(2);
         let expected = match prompt.map(str::trim) {
             Some("") | None => s::control::approval_lane_create(&name, &agent),
             Some(p) if p.starts_with("Port") => s::control::approval_lane_create_prompt(
                 &name,
                 &agent,
-                s::control::approval_quoted("Port the tax table to the new API"),
+                quoted("Port the tax table to the new API"),
             ),
             Some(_) => s::control::approval_lane_create_prompt(&name, &agent, hidden.trim()),
         };
@@ -250,18 +265,15 @@ fn a_worktree_card_quotes_its_prompt_when_it_carries_one(cx: &mut TestAppContext
 #[gpui::test]
 fn a_worktree_card_names_the_base_it_branches_from(cx: &mut TestAppContext) {
     let (_fixture, lane, claude) = host(cx);
-    let agent = s::control::approval_agent(&claude.name, BYPASS);
-    let name = s::control::approval_quoted("disclosure");
+    let agent = s::control::approval_agent(isolate(&claude.name), isolate(BYPASS));
+    let name = quoted("disclosure");
     for (base, shown) in [
-        (
-            Some("origin/main"),
-            Some(s::control::approval_quoted("origin/main")),
-        ),
+        (Some("origin/main"), Some(quoted("origin/main"))),
         (
             Some("main\u{202E}\nevil"),
             Some(format!(
                 "{}{}",
-                s::control::approval_quoted("main evil"),
+                quoted("main evil"),
                 s::control::approval_hidden_chars(1)
             )),
         ),
@@ -285,11 +297,7 @@ fn a_worktree_card_names_the_base_it_branches_from(cx: &mut TestAppContext) {
         };
         assert_eq!(
             card,
-            s::control::approval_lane_create_prompt(
-                worktree,
-                &agent,
-                s::control::approval_quoted("Go")
-            ),
+            s::control::approval_lane_create_prompt(worktree, &agent, quoted("Go")),
             "{base:?}"
         );
         refuse(id, cx);
@@ -346,7 +354,7 @@ async fn a_task_title_reads_plainly_and_an_empty_prompt_is_not_quoted(cx: &mut T
     );
     let shown = format!(
         "{}{}",
-        s::control::approval_quoted("Login evil"),
+        quoted("Login evil"),
         s::control::approval_hidden_chars(2)
     );
     assert!(card.contains(&shown), "{card}");
@@ -375,7 +383,7 @@ async fn a_task_title_reads_plainly_and_an_empty_prompt_is_not_quoted(cx: &mut T
         s::control::approval_task_start_no_prompt(
             &shown,
             &location,
-            s::control::approval_agent(&claude.name, BYPASS)
+            s::control::approval_agent(isolate(&claude.name), isolate(BYPASS))
         )
     );
     refuse(id, cx);
@@ -408,7 +416,7 @@ async fn a_task_start_card_names_the_branch_the_agent_is_told(cx: &mut TestAppCo
     let (id, _outcome, card) = ask(GatedCommand::TaskStart { task }, cx);
     let branch = format!(
         "{}{}",
-        s::control::approval_quoted("feat/login"),
+        quoted("feat/login"),
         s::control::approval_hidden_chars(1)
     );
     let location =
@@ -449,10 +457,10 @@ async fn a_task_open_card_names_the_mode_a_new_pane_would_take(cx: &mut TestAppC
         .unwrap();
     let shown = format!(
         "{}{}",
-        s::control::approval_quoted("Login evil"),
+        quoted("Login evil"),
         s::control::approval_hidden_chars(1)
     );
-    let agent = s::control::approval_agent(&claude.name, BYPASS);
+    let agent = s::control::approval_agent(isolate(&claude.name), isolate(BYPASS));
     let (id, _outcome, card) = ask(GatedCommand::TaskOpen { task: task.clone() }, cx);
     assert_eq!(
         card,
@@ -503,8 +511,8 @@ fn change_delegated_mode(
         ws.reload_config(&config, cx);
         let now =
             ws.control_chat_disclosure(&claude.id, &daruda_config::ModeChoice::FollowDelegated);
-        assert_eq!(now.agent_name, claude.name);
-        assert_ne!(now.mode, BYPASS);
+        assert_eq!(now.agent_name, isolate(&claude.name));
+        assert_ne!(now.mode, isolate(BYPASS));
     });
 }
 
@@ -603,7 +611,7 @@ fn a_task_create_card_quotes_the_prompt_it_will_send(cx: &mut TestAppContext) {
             )),
         )
     });
-    let title = s::control::approval_quoted("Login");
+    let title = quoted("Login");
     let surface = s::control::approval_task_as_chat();
     for (prompt, expected) in [
         (
@@ -613,7 +621,7 @@ fn a_task_create_card_quotes_the_prompt_it_will_send(cx: &mut TestAppContext) {
                 &project,
                 &location,
                 &surface,
-                s::control::approval_quoted("Fix the login and drop the users table"),
+                quoted("Fix the login and drop the users table"),
             ),
         ),
         (
