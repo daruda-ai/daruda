@@ -15,6 +15,7 @@ fn ping(header: &str, prompt: PingPrompt) -> BridgePing {
         header: header.into(),
         tail: MessageTail::Plain("waiting".into()),
         prompt: Some(prompt),
+        weight: crate::remote_channel::bridge::PingWeight::Progress,
     }
 }
 

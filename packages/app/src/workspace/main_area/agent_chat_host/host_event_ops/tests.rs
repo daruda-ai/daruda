@@ -48,6 +48,7 @@ fn send(
                     buttons: vec![("Allow".into(), PermissionDecision::Allow("allow".into()))],
                 },
             )),
+            weight: crate::remote_channel::bridge::PingWeight::Progress,
         },
         cx,
     );

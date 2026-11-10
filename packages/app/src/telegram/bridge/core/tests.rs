@@ -29,6 +29,7 @@ fn permission_ping(perm_id: u64, buttons: Vec<(String, PermissionDecision)>) -> 
                 buttons,
             },
         )),
+        weight: crate::remote_channel::bridge::PingWeight::Progress,
     }
 }
 
@@ -591,6 +592,7 @@ fn build_ping_plain_completion_has_no_keyboard() {
             header: "Turn finished".to_string(),
             tail: MessageTail::Plain(String::new()),
             prompt: None,
+            weight: crate::remote_channel::bridge::PingWeight::Progress,
         },
     ));
 

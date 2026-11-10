@@ -377,6 +377,19 @@ pub struct BridgePing {
     pub header: String,
     pub tail: MessageTail,
     pub prompt: Option<PingPrompt>,
+    pub weight: PingWeight,
+}
+
+/// What a ping is to the person, said by the code that sends it. A channel
+/// that gives a pane its own thread also shows an outcome in the
+/// conversation, where a long-lived thread's root has scrolled away; progress
+/// stays in the thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PingWeight {
+    /// Work under way: an acknowledgement, a queue notice.
+    Progress,
+    /// What the person must see: a turn's answer or end, or a question.
+    Outcome,
 }
 
 #[cfg(test)]

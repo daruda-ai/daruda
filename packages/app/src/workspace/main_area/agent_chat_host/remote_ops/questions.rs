@@ -126,8 +126,14 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let (header, tail, prompt) = self.question_ping_parts(pane_id, question, cx);
-        if self.relay_when_presence_allows(pane_id, header, tail, prompt, cx)
-            && let Some(view) = self.agent_chat_view(pane_id).cloned()
+        if self.relay_when_presence_allows(
+            pane_id,
+            header,
+            tail,
+            prompt,
+            crate::remote_channel::bridge::PingWeight::Outcome,
+            cx,
+        ) && let Some(view) = self.agent_chat_view(pane_id).cloned()
         {
             view.update(cx, |v, _| v.mark_question_told_to_phone(question.id));
         }
@@ -142,7 +148,14 @@ impl Workspace {
         cx: &Context<Self>,
     ) {
         let (header, tail, prompt) = self.question_ping_parts(pane_id, question, cx);
-        self.relay_to_remote(pane_id, header, tail, prompt, cx);
+        self.relay_to_remote(
+            pane_id,
+            header,
+            tail,
+            prompt,
+            crate::remote_channel::bridge::PingWeight::Outcome,
+            cx,
+        );
     }
 
     /// Offer each open question of `pane_id` the phone has not been sent.

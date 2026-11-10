@@ -6,6 +6,7 @@
 //! (permission wait) and `fire_activity_completion` (turn completion) tee points
 //! call into this file's `relay_*` methods; both are `impl Workspace` blocks.
 
+use crate::remote_channel::bridge::PingWeight;
 use std::time::Instant;
 
 use gpui::{App, Context};
@@ -342,9 +343,16 @@ impl Workspace {
             },
         ));
         let told = if is_phone_first_response {
-            self.relay_to_remote(pane_id, header, tail, permission, cx)
+            self.relay_to_remote(pane_id, header, tail, permission, PingWeight::Outcome, cx)
         } else {
-            self.relay_when_presence_allows(pane_id, header, tail, permission, cx)
+            self.relay_when_presence_allows(
+                pane_id,
+                header,
+                tail,
+                permission,
+                PingWeight::Outcome,
+                cx,
+            )
         };
         if told {
             self.mark_permission_told_to_phone(pane_id, prompt.id, cx);
@@ -429,6 +437,7 @@ impl Workspace {
         header: String,
         tail: MessageTail,
         prompt: Option<crate::remote_channel::bridge::PingPrompt>,
+        weight: PingWeight,
         cx: &mut Context<Self>,
     ) -> bool {
         // The ledger closes at the completion tee, after the completion relay
@@ -443,7 +452,8 @@ impl Workspace {
             trace::delivery("relay.solicited", || {
                 format!("pane={pane_id} text={}", trace::tail_digest(&tail))
             });
-            return self.relay_ping(pane_id, header, tail, prompt, delivery, cx);
+            let ping = self.pane_ping(pane_id, header, tail, prompt, weight);
+            return self.relay_ping(ping, delivery, cx);
         }
         // Asked unconditionally, so the trace records what presence actually
         // was even where a channel's opt-out decided — the alternative logs a
@@ -472,7 +482,8 @@ impl Workspace {
                 trace::tail_digest(&tail)
             )
         });
-        self.relay_ping(pane_id, header, tail, prompt, delivery, cx)
+        let ping = self.pane_ping(pane_id, header, tail, prompt, weight);
+        self.relay_ping(ping, delivery, cx)
     }
 
     /// Whether the pane's in-flight turn was started from the phone. Any
@@ -494,43 +505,46 @@ impl Workspace {
         header: String,
         tail: MessageTail,
         prompt: Option<crate::remote_channel::bridge::PingPrompt>,
+        weight: PingWeight,
         cx: &Context<Self>,
     ) -> bool {
-        self.relay_ping(
-            pane_id,
+        let ping = self.pane_ping(pane_id, header, tail, prompt, weight);
+        self.relay_ping(ping, crate::remote_channel::global::Delivery::Explicit, cx)
+    }
+
+    /// The ping `pane_id` sends: its header and tail, the decision it asks
+    /// for if any, and what it is to the person.
+    fn pane_ping(
+        &self,
+        pane_id: PaneId,
+        header: String,
+        tail: MessageTail,
+        prompt: Option<crate::remote_channel::bridge::PingPrompt>,
+        weight: PingWeight,
+    ) -> crate::remote_channel::bridge::BridgePing {
+        crate::remote_channel::bridge::BridgePing {
+            pane: crate::remote_channel::bridge::PaneRef {
+                workspace: self.uuid(),
+                pane: pane_id,
+            },
             header,
             tail,
             prompt,
-            crate::remote_channel::global::Delivery::Explicit,
-            cx,
-        )
+            weight,
+        }
     }
 
     /// Hand a pane's ping to the remote-channel facade, which applies each
     /// channel's own `only_when_away` and pairing. Whether any channel took it.
     fn relay_ping(
         &self,
-        pane_id: PaneId,
-        header: String,
-        tail: MessageTail,
-        prompt: Option<crate::remote_channel::bridge::PingPrompt>,
+        ping: crate::remote_channel::bridge::BridgePing,
         delivery: crate::remote_channel::global::Delivery,
         cx: &Context<Self>,
     ) -> bool {
-        let text = trace::is_on().then(|| trace::tail_digest(&tail));
-        let sent = crate::remote_channel::send_ping(
-            crate::remote_channel::bridge::BridgePing {
-                pane: crate::remote_channel::bridge::PaneRef {
-                    workspace: self.uuid(),
-                    pane: pane_id,
-                },
-                header,
-                tail,
-                prompt,
-            },
-            delivery,
-            cx,
-        );
+        let pane_id = ping.pane.pane;
+        let text = trace::is_on().then(|| trace::tail_digest(&ping.tail));
+        let sent = crate::remote_channel::send_ping(ping, delivery, cx);
         trace::delivery("relay.send", || {
             format!(
                 "pane={pane_id} delivery={delivery:?} sent={sent} {} text={}",
@@ -601,6 +615,7 @@ impl Workspace {
             header,
             MessageTail::Plain(s::notification::remote_reply_queued()),
             None,
+            PingWeight::Progress,
             cx,
         );
     }
@@ -615,6 +630,7 @@ impl Workspace {
             header,
             MessageTail::Plain(s::notification::remote_queue_full()),
             None,
+            PingWeight::Progress,
             cx,
         );
     }
@@ -632,16 +648,23 @@ impl Workspace {
         cx: &Context<Self>,
     ) {
         let header = self.remote_header(pane_id, cx);
-        let tail = match outcome {
-            FirstResponseOutcome::Text { text, .. } => MessageTail::Markdown(preview_for(
-                &text,
-                &s::notification::remote_truncated_marker(),
-            )),
-            FirstResponseOutcome::Tool { tool_title } => {
-                MessageTail::Plain(first_tool_ack_tail(tool_title.as_deref()))
-            }
+        // The agent's first words are often the whole answer: the turn's
+        // completion then sends nothing more, so they are the outcome. A tool
+        // note says work started.
+        let (tail, weight) = match outcome {
+            FirstResponseOutcome::Text { text, .. } => (
+                MessageTail::Markdown(preview_for(
+                    &text,
+                    &s::notification::remote_truncated_marker(),
+                )),
+                PingWeight::Outcome,
+            ),
+            FirstResponseOutcome::Tool { tool_title } => (
+                MessageTail::Plain(first_tool_ack_tail(tool_title.as_deref())),
+                PingWeight::Progress,
+            ),
         };
-        self.relay_to_remote(pane_id, header, tail, None, cx);
+        self.relay_to_remote(pane_id, header, tail, None, weight, cx);
     }
 
     /// Relay the fixed fallback ack for a phone-triggered turn that went 60s
@@ -660,6 +683,7 @@ impl Workspace {
             header,
             MessageTail::Plain(s::notification::remote_reply_ack()),
             None,
+            PingWeight::Progress,
             cx,
         );
     }

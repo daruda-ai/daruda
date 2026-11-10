@@ -103,22 +103,24 @@ fn a_post_into_an_existing_thread_brings_its_root_up_to_date() {
     );
 }
 
-/// Results and questions surface in the conversation; progress stays in the
-/// thread, and a post that starts its thread is at the bottom already.
+/// What its sender marked an outcome surfaces in the conversation; progress
+/// stays in the thread, and a post that starts its thread is at the bottom
+/// already.
 #[test]
-fn only_what_the_person_must_see_surfaces_from_a_thread() {
+fn only_an_outcome_surfaces_from_a_thread() {
     use super::super::driver::surfaces;
-    use super::super::status::{Ending, ShownStatus};
-    let ended = Some(ShownStatus::Ended(Ending::Completed));
-    let working = Some(ShownStatus::Working { since: NOW });
+    use crate::remote_channel::bridge::PingWeight;
     let cases = [
-        (true, false, ended, true, "a turn's result"),
-        (true, true, working, true, "a question with buttons"),
-        (true, false, working, false, "progress"),
-        (true, false, None, false, "nothing known yet"),
-        (false, true, ended, false, "starts its own thread"),
+        (
+            true,
+            PingWeight::Outcome,
+            true,
+            "an answer, an end, a question",
+        ),
+        (true, PingWeight::Progress, false, "progress"),
+        (false, PingWeight::Outcome, false, "starts its own thread"),
     ];
-    for (existing_root, carded, shown, want, label) in cases {
-        assert_eq!(surfaces(existing_root, carded, shown), want, "{label}");
+    for (existing_root, weight, want, label) in cases {
+        assert_eq!(surfaces(existing_root, weight), want, "{label}");
     }
 }

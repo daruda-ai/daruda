@@ -33,6 +33,7 @@ fn permission(tokens: &mut CardTokens<String>, request: u64) -> Vec<String> {
             perm_id: request,
             buttons: vec![("Allow".into(), PermissionDecision::Allow("once".into()))],
         })),
+        weight: crate::remote_channel::bridge::PingWeight::Progress,
     }))
 }
 
@@ -175,6 +176,7 @@ fn question(tokens: &mut CardTokens<String>, step: u64) -> (QuestionPromptRef, V
                 vec![("Skip".into(), QuestionButton::Skip)],
             ],
         })),
+        weight: crate::remote_channel::bridge::PingWeight::Progress,
     });
     (question, tokens_of(message))
 }

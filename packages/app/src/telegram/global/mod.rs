@@ -112,6 +112,7 @@ impl TelegramBridge {
                 header,
                 tail: MessageTail::Plain(tail),
                 prompt: None,
+                weight: crate::remote_channel::bridge::PingWeight::Progress,
             },
             cx,
         )
@@ -578,6 +579,7 @@ mod tests {
                     header: "daruda/main".into(),
                     tail: MessageTail::Plain("done".into()),
                     prompt: None,
+                    weight: crate::remote_channel::bridge::PingWeight::Progress,
                 },
                 cx,
             );

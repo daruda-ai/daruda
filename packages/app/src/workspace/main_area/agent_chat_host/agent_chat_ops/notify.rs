@@ -203,12 +203,26 @@ impl Workspace {
             if relay_completion
                 && let Some((header, tail)) = self.remote_completion_parts(pane_id, cx)
             {
-                self.relay_when_presence_allows(pane_id, header, tail, None, cx);
+                self.relay_when_presence_allows(
+                    pane_id,
+                    header,
+                    tail,
+                    None,
+                    crate::remote_channel::bridge::PingWeight::Outcome,
+                    cx,
+                );
             }
         }
         if relay_completion && matches!(outcome, TurnOutcome::Errored) {
             let (header, tail) = self.remote_failure_parts(pane_id, cx);
-            self.relay_when_presence_allows(pane_id, header, tail, None, cx);
+            self.relay_when_presence_allows(
+                pane_id,
+                header,
+                tail,
+                None,
+                crate::remote_channel::bridge::PingWeight::Outcome,
+                cx,
+            );
         }
         // Every outcome, not just `Completed`: a turn that errored or was
         // stopped has had its phone conversation ended too, and a ledger left

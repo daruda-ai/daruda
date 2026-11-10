@@ -53,7 +53,14 @@ impl Workspace {
         self.mark_lane_unread_for_pane(pane_id, cx);
         if phone_owed {
             let header = self.remote_header(pane_id, cx);
-            self.relay_to_remote(pane_id, header, MessageTail::Plain(text), None, cx);
+            self.relay_to_remote(
+                pane_id,
+                header,
+                MessageTail::Plain(text),
+                None,
+                crate::remote_channel::bridge::PingWeight::Outcome,
+                cx,
+            );
         }
     }
 }

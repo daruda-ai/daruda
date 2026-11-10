@@ -4,7 +4,7 @@
 use super::roots::RootLook;
 use super::status::ShownStatus;
 use super::{ConversationKey, PaneConversation, RootName, Scope, now};
-use crate::remote_channel::bridge::{MessageTail, PaneRef};
+use crate::remote_channel::bridge::{MessageTail, PaneRef, PingWeight};
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::transport::{self, Credentials, Message, SentPart, slack};
@@ -29,17 +29,17 @@ pub(crate) struct ThreadPlan {
     broadcast: bool,
 }
 
-/// Decide the thread for a message from `pane` on connection `id`; `carded`
-/// when it asks the person something with buttons. `None` when the channel
-/// has no pane threads or the pane has no conversation yet; the message then
-/// goes out at the top as before.
+/// Decide the thread for a message from `pane` on connection `id`, weighed
+/// by the code that sent it. `None` when the channel has no pane threads or
+/// the pane has no conversation yet; the message then goes out at the top as
+/// before.
 pub(crate) fn plan(
     id: &str,
     kind: ChannelKind,
     bot: &BotSession,
     recipient: &RemoteRecipient,
     pane: PaneRef,
-    carded: bool,
+    weight: PingWeight,
     cx: &mut App,
 ) -> Option<ThreadPlan> {
     if !transport::pane_threads(kind) {
@@ -51,7 +51,7 @@ pub(crate) fn plan(
     let (root, divider) = threads.place(&scope, pane, &conversation, now());
     let shown = threads.activity_of(pane);
     let id = threads.want_root_after_place(&scope, pane, root.as_deref(), &conversation);
-    let broadcast = surfaces(root.is_some(), carded, shown);
+    let broadcast = surfaces(root.is_some(), weight);
     Some(ThreadPlan {
         scope,
         id,
@@ -66,11 +66,11 @@ pub(crate) fn plan(
 }
 
 /// Whether a reply also shows in the conversation. A long-lived thread's
-/// root scrolls away, so what the person must see — a turn's result, or a
-/// question with buttons — surfaces there too; progress stays in the
-/// thread. A post that starts its thread is already at the bottom.
-pub(super) fn surfaces(existing_root: bool, carded: bool, shown: Option<ShownStatus>) -> bool {
-    existing_root && (carded || matches!(shown, Some(ShownStatus::Ended(_))))
+/// root scrolls away, so an outcome — what the sender marked the person must
+/// see — surfaces there too; progress stays in the thread. A post that
+/// starts its thread is already at the bottom.
+pub(super) fn surfaces(existing_root: bool, weight: PingWeight) -> bool {
+    existing_root && weight == PingWeight::Outcome
 }
 
 pub(super) fn conversation_of(pane: PaneRef, cx: &mut App) -> Option<PaneConversation> {

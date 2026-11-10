@@ -136,6 +136,7 @@ fn permission_ping(request: u64) -> (CardId, Outbound) {
                 ("Reject".into(), PermissionDecision::Reject("no".into())),
             ],
         })),
+        weight: crate::remote_channel::bridge::PingWeight::Progress,
     };
     let outbound = Outbound::Ping(ping);
     (outbound.card_id().unwrap(), outbound)
@@ -160,6 +161,7 @@ fn question_ping(step: u64) -> (CardId, Outbound) {
                 vec![("Skip".into(), QuestionButton::Skip)],
             ],
         })),
+        weight: crate::remote_channel::bridge::PingWeight::Progress,
     });
     (outbound.card_id().unwrap(), outbound)
 }

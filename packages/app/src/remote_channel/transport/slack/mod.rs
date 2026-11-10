@@ -254,11 +254,16 @@ fn post(
         } else {
             text.clone()
         };
-        // A broadcast surfaces the message once: its last part, which
-        // carries the buttons when it has any.
-        let last = index + 1 == parts.len();
+        // A broadcast surfaces the message once: a card's last part, which
+        // carries its buttons, or else the first, so the conversation shows
+        // how the message begins rather than a tail without its start.
+        let surfaced = if message.keyboard.is_some() {
+            parts.len() - 1
+        } else {
+            0
+        };
         let reply = reply.map(|reply| Reply {
-            broadcast: reply.broadcast && last,
+            broadcast: reply.broadcast && index == surfaced,
             ..reply
         });
         let payload = post_payload(recipient, &fallback, message_blocks, reply);

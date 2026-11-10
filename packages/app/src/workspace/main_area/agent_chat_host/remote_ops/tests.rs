@@ -66,6 +66,7 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
             "chat".into(),
             crate::remote_channel::bridge::MessageTail::Markdown("while present".into()),
             None,
+            crate::remote_channel::bridge::PingWeight::Outcome,
             cx,
         );
         assert!(outbound.next().now_or_never().is_none());
@@ -83,6 +84,7 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
             "chat".into(),
             crate::remote_channel::bridge::MessageTail::Markdown("while blurred but busy".into()),
             None,
+            crate::remote_channel::bridge::PingWeight::Outcome,
             cx,
         );
         assert!(outbound.next().now_or_never().is_none());
@@ -100,6 +102,7 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
             "chat".into(),
             crate::remote_channel::bridge::MessageTail::Markdown("while reading".into()),
             None,
+            crate::remote_channel::bridge::PingWeight::Outcome,
             cx,
         );
         assert!(outbound.next().now_or_never().is_none());
@@ -116,6 +119,7 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
             "chat".into(),
             crate::remote_channel::bridge::MessageTail::Markdown("while away".into()),
             None,
+            crate::remote_channel::bridge::PingWeight::Outcome,
             cx,
         );
         assert_eq!(
@@ -140,6 +144,7 @@ async fn a_ping_that_fires_while_the_user_is_present_is_dropped_not_held(
                 "away from a frontmost daruda".into(),
             ),
             None,
+            crate::remote_channel::bridge::PingWeight::Outcome,
             cx,
         );
         assert_eq!(
@@ -193,6 +198,7 @@ async fn a_phone_turn_relays_while_the_user_is_present(cx: &mut gpui::TestAppCon
                 "h".into(),
                 crate::remote_channel::bridge::MessageTail::Plain("in turn".into()),
                 None,
+                crate::remote_channel::bridge::PingWeight::Outcome,
                 cx,
             ),
             "an open ledger reports the ping as sent"
@@ -211,6 +217,7 @@ async fn a_phone_turn_relays_while_the_user_is_present(cx: &mut gpui::TestAppCon
                 "h".into(),
                 crate::remote_channel::bridge::MessageTail::Plain("after".into()),
                 None,
+                crate::remote_channel::bridge::PingWeight::Outcome,
                 cx,
             ),
             "a closed ledger is back under presence"
@@ -278,6 +285,7 @@ async fn a_permission_wait_keeps_the_phone_turn_open(cx: &mut gpui::TestAppConte
                 "h".into(),
                 crate::remote_channel::bridge::MessageTail::Plain("after the card".into()),
                 None,
+                crate::remote_channel::bridge::PingWeight::Outcome,
                 cx,
             ),
             "a later relay in the same turn is still the phone's"
@@ -326,6 +334,7 @@ async fn opting_out_of_the_presence_gate_sends_while_the_user_is_present(
             "chat".into(),
             crate::remote_channel::bridge::MessageTail::Markdown("sent regardless".into()),
             None,
+            crate::remote_channel::bridge::PingWeight::Outcome,
             cx,
         );
         assert_eq!(
@@ -1290,4 +1299,65 @@ async fn permission_levels_reach_task_results_with_phone_disabled(cx: &mut gpui:
             }
         ));
     });
+}
+
+/// The defect this guards: whether a reply surfaced from a Slack pane thread
+/// was guessed from the pane's status, so a phone turn whose first words were
+/// its whole answer never surfaced. Each relay now says what its ping is.
+#[gpui::test]
+async fn each_relay_says_whether_its_ping_is_an_outcome(cx: &mut gpui::TestAppContext) {
+    use super::FirstResponseOutcome;
+    use crate::remote_channel::bridge::PingWeight;
+    use crate::workspace::Workspace;
+    type Relay = Box<dyn Fn(&Workspace, &gpui::Context<Workspace>)>;
+
+    let mut outbound =
+        cx.update(|cx| crate::telegram::global::install_for_test(true, Some(42), cx));
+    let mut config = daruda_config::Config::default();
+    config.telegram.enabled = true;
+    config.telegram.authorized_chat_id = Some(42);
+    let (handle, workspace) = make_window(cx, &config);
+    let pane = handle
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let first_words = FirstResponseOutcome::Text {
+        text: "All 245 tests pass.".into(),
+        message_id: None,
+    };
+    let cases: [(&str, PingWeight, Relay); 4] = [
+        (
+            "the agent's first words",
+            PingWeight::Outcome,
+            Box::new(move |ws, cx| {
+                ws.relay_first_response_to_remote(pane, first_words.clone(), cx)
+            }),
+        ),
+        (
+            "a tool note",
+            PingWeight::Progress,
+            Box::new(move |ws, cx| {
+                let tool = FirstResponseOutcome::Tool { tool_title: None };
+                ws.relay_first_response_to_remote(pane, tool, cx)
+            }),
+        ),
+        (
+            "the fallback acknowledgement",
+            PingWeight::Progress,
+            Box::new(move |ws, cx| ws.relay_first_response_fallback_to_remote(pane, cx)),
+        ),
+        (
+            "a queue notice",
+            PingWeight::Progress,
+            Box::new(move |ws, cx| ws.relay_queued_notice_to_remote(pane, cx)),
+        ),
+    ];
+    for (label, want, relay) in cases {
+        workspace.update(cx, |ws, cx| relay(ws, cx));
+        let ping = expect_ping(outbound.next().now_or_never().flatten().expect("a ping"));
+        assert_eq!(ping.weight, want, "{label}");
+    }
 }

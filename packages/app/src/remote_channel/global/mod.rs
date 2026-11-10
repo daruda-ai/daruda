@@ -249,6 +249,7 @@ impl RemoteChannels {
                 header,
                 tail: MessageTail::Plain(tail),
                 prompt: None,
+                weight: crate::remote_channel::bridge::PingWeight::Progress,
             },
             delivery,
             cx,

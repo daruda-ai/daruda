@@ -108,7 +108,11 @@ pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
             None,
         ),
     };
-    let carded = message.keyboard.is_some();
+    // A card asks the person something whatever its sender said.
+    let weight = match &pending.outbound {
+        Outbound::Ping(ping) if message.keyboard.is_none() => ping.weight,
+        _ => crate::remote_channel::bridge::PingWeight::Outcome,
+    };
     let thread = pane.and_then(|pane| {
         driver::plan(
             &pending.id,
@@ -116,7 +120,7 @@ pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
             &pending.bot,
             &pending.recipient,
             pane,
-            carded,
+            weight,
             cx,
         )
     });

@@ -1233,6 +1233,7 @@ fn a_thread_reply_answers_the_panes_live_question(cx: &mut TestAppContext) {
                     step: 1,
                     rows: vec![vec![("Blue".into(), QuestionButton::Option(0))]],
                 })),
+                weight: crate::remote_channel::bridge::PingWeight::Progress,
             },
             super::super::Delivery::Explicit,
             cx,

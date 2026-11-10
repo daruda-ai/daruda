@@ -71,6 +71,7 @@ fn ping() -> BridgePing {
         header: "project".into(),
         tail: super::super::bridge::MessageTail::Plain("done".into()),
         prompt: None,
+        weight: crate::remote_channel::bridge::PingWeight::Progress,
     }
 }
 
