@@ -218,6 +218,60 @@ async fn a_flow_task_runs_in_a_new_worktree_of_its_own(cx: &mut TestAppContext) 
     });
 }
 
+/// The flow is checked where it was found, then run from the new branch's
+/// own copy; a copy that will not run is refused after git made the
+/// worktree, which stays registered and is named in the refusal.
+#[gpui::test]
+async fn a_flow_refused_in_its_new_worktree_names_the_worktree_kept(cx: &mut TestAppContext) {
+    use crate::workspace::right_dock::task_start::{KeptWorktree, TaskStartError};
+    cx.executor().allow_parking();
+    let fx = GitFixture::open(cx, &daruda_config::Config::default(), |repo| repo);
+    let (fake, repo) = (&fx.fake, &fx.root);
+    let flows = crate::workspace::flow_paths::flows_dir(repo);
+    std::fs::create_dir_all(&flows).unwrap();
+    std::fs::write(flows.join("ship.yaml"), FLOW).unwrap();
+    let (wh, ws) = registered(cx, (fx.window, fx.ws.clone()));
+    let (id, checkout) = ws.update(cx, |ws, cx| {
+        let mut spec = crate::runs::seed::spec(ws.projects[0].uuid, "Review");
+        spec.prompt = "77".into();
+        spec.flow = Some(TaskFlow {
+            name: "ship.yaml".into(),
+            profile: None,
+            input: Some("pr".into()),
+        });
+        let checkout = crate::workspace::lane_ops::lane_checkout_path(repo, &spec.branch_name);
+        fake_lane(fake, &checkout, &spec.branch_name);
+        let copy = crate::workspace::flow_paths::flows_dir(&checkout);
+        std::fs::create_dir_all(&copy).unwrap();
+        std::fs::write(
+            copy.join("ship.yaml"),
+            "version: 1\ninputs:\n  pr: { required: true }\nnodes:\n  - id: a\n    kind: command\n    deps: [gone]\n    run: \"exit 0\"\n",
+        )
+        .unwrap();
+        (crate::runs::seed::task(spec, None, cx), checkout)
+    });
+    let answer = start(&ws, wh, &id, cx);
+    assert!(
+        wait_for_run(cx, |cx| kind(&id, cx) == LifecycleKind::Error).await,
+        "{:?}",
+        kind(&id, cx)
+    );
+    let refused = answer.try_recv().expect("answered");
+    assert_eq!(crate::test_support::added_lane(fake).new_path, checkout);
+    let lane = ws.read_with(cx, |ws, _| {
+        ws.lane_ref_at(&checkout).expect("lane registered")
+    });
+    assert!(
+        matches!(
+            &refused,
+            Err(TaskStartError::WorktreeKept { at: KeptWorktree::Lane(kept), cause })
+                if *kept == lane && matches!(**cause, TaskStartError::FlowRefused { .. })
+        ),
+        "{refused:?}"
+    );
+    assert!(!run_is_held(cx, &checkout));
+}
+
 /// A flow that fails its own static checks is refused before the start is
 /// recorded: the task stays in Backlog and nothing runs.
 #[gpui::test]

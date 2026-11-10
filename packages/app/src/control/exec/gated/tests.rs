@@ -302,3 +302,17 @@ async fn a_task_start_failing_after_git_spends_its_budget_slot(cx: &mut TestAppC
     )
     .await;
 }
+
+/// A worktree git made but no lane registered is on disk all the same, so it
+/// spends the slot too.
+#[gpui::test]
+async fn an_unregistered_worktree_spends_its_budget_slot(cx: &mut TestAppContext) {
+    spends_the_slot(
+        |_| ControlError::WorktreeUnregistered {
+            path: "/repo/.worktrees/orphan".into(),
+            detail: "its project closed before daruda registered it".into(),
+        },
+        cx,
+    )
+    .await;
+}

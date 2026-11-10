@@ -30,6 +30,7 @@ mod git_discard;
 mod git_fixture;
 mod git_remote;
 mod keep_awake;
+mod kept_worktree;
 mod lane_unread;
 mod left_dock_pulse;
 mod lifecycle;

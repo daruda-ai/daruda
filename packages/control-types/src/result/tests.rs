@@ -330,6 +330,10 @@ fn every_error_variant_round_trips_through_json() {
             },
             detail: "the prompt never reached the pane".into(),
         },
+        ControlError::WorktreeUnregistered {
+            path: "/repo/.worktrees/feat".into(),
+            detail: "the project closed before the worktree was registered".into(),
+        },
         ControlError::TaskNotRecorded {
             detail: "the task log is read-only".into(),
         },

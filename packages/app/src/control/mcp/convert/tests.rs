@@ -265,6 +265,13 @@ fn every_new_refusal_travels_as_its_code() {
             },
             "task_start_failed_worktree_kept",
         ),
+        (
+            ControlError::WorktreeUnregistered {
+                path: "/repo/.worktrees/feat".into(),
+                detail: "the project closed before the worktree was registered".into(),
+            },
+            "worktree_unregistered",
+        ),
     ] {
         let v = to_tool_result(&Err(error));
         assert_eq!(v["isError"], true);
@@ -289,6 +296,21 @@ fn a_kept_worktree_travels_with_its_handle() {
     assert_eq!(inner["code"], "agent_unavailable_worktree_kept");
     assert_eq!(inner["worktree"]["project"], 3);
     assert_eq!(inner["worktree"]["worktree"], 7);
+}
+
+/// A worktree git made but daruda never registered has no handle to give,
+/// so its path travels instead: the caller has to remove it before a retry.
+#[test]
+fn an_unregistered_worktree_travels_with_its_path() {
+    let path = std::path::PathBuf::from("/repo/.worktrees/feat");
+    let v = to_tool_result(&Err(ControlError::WorktreeUnregistered {
+        path: path.clone(),
+        detail: "the window closed before the worktree was registered".into(),
+    }));
+    assert_eq!(v["isError"], true);
+    let inner = payload(&v);
+    assert_eq!(inner["code"], "worktree_unregistered");
+    assert_eq!(inner["path"], path.to_str().unwrap());
 }
 
 /// The model's most common failure has to be the most branchable one:
