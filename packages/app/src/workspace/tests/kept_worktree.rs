@@ -205,7 +205,8 @@ async fn a_prompt_the_new_chat_never_took_names_the_worktree_kept(cx: &mut TestA
             refused,
             Err(ControlError::TaskStartFailedWorktreeKept {
                 worktree: LaneHandle::new(ws.uuid(), lane),
-                detail: crate::surface::strings::task::error_prompt_undelivered(),
+                // Fixed English, whatever the person's language.
+                detail: "the prompt could not reach the pane, which closed".into(),
             })
         );
     });

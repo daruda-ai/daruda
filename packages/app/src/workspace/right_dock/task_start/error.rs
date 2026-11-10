@@ -28,10 +28,9 @@ pub(crate) enum TaskStartError {
         detail: String,
     },
     /// The pane opened but the prompt never reached it. The task is now
-    /// `Error`; `detail` says why, for the control surface.
-    PromptUndelivered {
-        detail: String,
-    },
+    /// `Error`, and its row says why in the person's words; the control
+    /// surface says it in fixed English.
+    PromptUndelivered,
     /// The window went away while the worktree was being created.
     WindowClosed,
     /// The task log did not record the start; nothing was spawned.
@@ -113,7 +112,7 @@ impl TaskStartError {
             Self::LaneMissing { .. } => StartFailure::LaneMissing,
             Self::PaneUnavailable => StartFailure::PaneUnavailable,
             Self::GitAddFailed { .. } => StartFailure::GitAddFailed,
-            Self::PromptUndelivered { .. } => StartFailure::PromptUndelivered,
+            Self::PromptUndelivered => StartFailure::PromptUndelivered,
             Self::WindowClosed => StartFailure::WindowClosed,
             Self::FlowMissing => StartFailure::FlowMissing,
             Self::FlowRefused { .. } => StartFailure::FlowRefused,
@@ -145,7 +144,7 @@ impl TaskStartError {
             | Self::NotBacklog
             | Self::AgentUnavailable
             | Self::PaneUnavailable
-            | Self::PromptUndelivered { .. }
+            | Self::PromptUndelivered
             | Self::WindowClosed => return None,
             Self::NotRecorded { detail } => {
                 return Some(

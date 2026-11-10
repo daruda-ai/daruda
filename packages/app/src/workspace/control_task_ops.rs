@@ -294,6 +294,10 @@ fn control_commit_error(e: TaskCommitError) -> ControlError {
     }
 }
 
+/// Why a started task's prompt is missing, for the model reading the answer;
+/// the task's row says it in the person's language.
+const PROMPT_UNDELIVERED: &str = "the prompt could not reach the pane, which closed";
+
 /// A start failure in the control vocabulary. The detail strings are for
 /// the model reading the result, not for a person, so they stay English.
 /// `workspace` qualifies a worktree the failure left behind.
@@ -318,9 +322,10 @@ fn control_start_error(
         TaskStartError::PaneUnavailable => ControlError::TaskStartFailed {
             detail: "no pane could be opened in the worktree".into(),
         },
-        TaskStartError::GitAddFailed { detail } | TaskStartError::PromptUndelivered { detail } => {
-            ControlError::TaskStartFailed { detail }
-        }
+        TaskStartError::PromptUndelivered => ControlError::TaskStartFailed {
+            detail: PROMPT_UNDELIVERED.into(),
+        },
+        TaskStartError::GitAddFailed { detail } => ControlError::TaskStartFailed { detail },
         TaskStartError::NotRecorded { detail } => ControlError::TaskNotRecorded { detail },
         TaskStartError::FlowMissing => ControlError::TaskStartFailed {
             detail: crate::workspace::task_flow::TaskFlowProblem::NotFound.to_string(),
@@ -413,12 +418,10 @@ mod tests {
             ControlError::AgentUnavailableWorktreeKept { worktree }
         );
         assert_eq!(
-            kept(TaskStartError::PromptUndelivered {
-                detail: "the pane closed".into()
-            }),
+            kept(TaskStartError::PromptUndelivered),
             ControlError::TaskStartFailedWorktreeKept {
                 worktree,
-                detail: "the pane closed".into()
+                detail: PROMPT_UNDELIVERED.into()
             }
         );
         assert_eq!(

@@ -558,9 +558,7 @@ impl Workspace {
                 ),
                 cx,
             );
-            return Err(TaskStartError::PromptUndelivered {
-                detail: crate::surface::strings::task::error_prompt_undelivered(),
-            });
+            return Err(TaskStartError::PromptUndelivered);
         }
         cx.notify();
         Ok(())
