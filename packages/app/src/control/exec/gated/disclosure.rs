@@ -108,6 +108,31 @@ pub(crate) fn quoted_title(title: &str) -> String {
     title_excerpt(title, &Localized)
 }
 
+/// [`Localized`], without the quotation marks: for a name the card states
+/// as its own words, such as an agent's or a mode's.
+struct Unquoted;
+
+impl QuoteMarkers for Unquoted {
+    fn quote(&self, text: &str) -> String {
+        text.to_owned()
+    }
+
+    fn elided(&self, n: usize) -> String {
+        Localized.elided(n)
+    }
+
+    fn hidden(&self, n: usize) -> String {
+        Localized.hidden(n)
+    }
+}
+
+/// A name the card states rather than quotes — an agent's display name, an
+/// adapter's name for a mode, a user-set mode id — bounded as a title is:
+/// one line, both ends of a long one, and a count of what it dropped.
+pub(crate) fn card_label(label: &str) -> String {
+    title_excerpt(label, &Unquoted)
+}
+
 /// "Claude Code (requested permission mode: Bypass Permissions)".
 pub(super) fn agent_phrase(disclosure: &ChatDisclosure) -> String {
     s::control::approval_agent(&disclosure.agent_name, &disclosure.mode)

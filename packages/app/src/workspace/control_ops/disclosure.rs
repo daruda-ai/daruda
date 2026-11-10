@@ -2,8 +2,8 @@
 //! agent, pinned before the approval card so the card names the agent that
 //! opens, and the permission mode the chat asks its adapter for.
 
+use crate::control::exec::card_label;
 use daruda_config::{ModeChoice, SessionPreferences};
-use daruda_control_types::agent_text::one_line;
 
 use crate::workspace::Workspace;
 
@@ -17,8 +17,9 @@ pub(crate) struct ChatDisclosure {
 impl Workspace {
     /// How a card names a chat of `agent_id` whose mode comes from `mode`:
     /// its display name and the mode the pane will ask for, by the same rule
-    /// its connect uses. The name is user-set text, flattened so it cannot
-    /// reorder or break the card's sentence.
+    /// its connect uses. The name is user-set text, bounded by
+    /// [`card_label`] so it cannot reorder, break or swamp the card's
+    /// sentence.
     pub(crate) fn control_chat_disclosure(
         &self,
         agent_id: &str,
@@ -27,7 +28,7 @@ impl Workspace {
         let agent = self.mirrors.agents.iter().find(|a| a.id == agent_id);
         let preferences = SessionPreferences::resolve(agent, None, mode);
         ChatDisclosure {
-            agent_name: one_line(agent.map_or(agent_id, |a| a.name.as_str())),
+            agent_name: card_label(agent.map_or(agent_id, |a| a.name.as_str())),
             mode: self.requested_mode_label(agent_id, &preferences),
         }
     }
@@ -52,7 +53,8 @@ impl Workspace {
     /// The first candidate is the one requested; a connect falls through
     /// only when it is not advertised. An adapter advertises its own names,
     /// so one daruda's seed does not match is shown beside the mode's id:
-    /// an adapter cannot relabel `bypassPermissions` as "Ask".
+    /// an adapter cannot relabel `bypassPermissions` as "Ask". Each name is
+    /// an adapter's or a user's text, bounded by [`card_label`].
     pub(in crate::workspace) fn requested_mode_label(
         &self,
         agent_id: &str,
@@ -62,18 +64,18 @@ impl Workspace {
             return crate::surface::strings::control::approval_mode_agent_default();
         };
         let Some(agent) = self.mirrors.agents.iter().find(|a| a.id == agent_id) else {
-            return one_line(mode);
+            return card_label(mode);
         };
         let source = agent.launch.adapter_command().trim();
         let known = self.agent_vocabulary.known_modes_for(agent_id, source);
         let named = daruda_config::mode_display_name(known, source, mode);
         // The seed's name, or the id itself where the seed has none.
         if named == daruda_config::mode_display_name(None, source, mode) {
-            return one_line(&named);
+            return card_label(&named);
         }
         crate::surface::strings::control::approval_mode_adapter_named(
-            one_line(&named),
-            one_line(mode),
+            card_label(&named),
+            card_label(mode),
         )
     }
 }
@@ -157,17 +159,65 @@ mod tests {
             };
             ws.agent_vocabulary
                 .record_modes(&id, &source, vec![entry("Bypass Permissions")]);
+            let hidden = crate::surface::strings::control::approval_hidden_chars(1);
             let disclosure = ws.control_chat_disclosure(&id, &delegated);
-            assert_eq!(disclosure.agent_name, "Claude Code");
+            assert_eq!(disclosure.agent_name, format!("Claude Code{hidden}"));
             assert_eq!(disclosure.mode, "Bypass Permissions");
             ws.agent_vocabulary
                 .record_modes(&id, &source, vec![entry("Ask\u{202E}\nfirst")]);
             assert_eq!(
                 ws.control_chat_disclosure(&id, &delegated).mode,
                 crate::surface::strings::control::approval_mode_adapter_named(
-                    "Ask first",
+                    format!("Ask first{hidden}"),
                     "bypassPermissions"
                 )
+            );
+        });
+    }
+
+    /// An agent name, an adapter's mode name and a user-set mode id are
+    /// bounded as a title is, so none can swamp the card: both ends of a
+    /// long one around how much was left out.
+    #[gpui::test]
+    fn long_agent_and_mode_names_are_cut_as_titles(cx: &mut gpui::TestAppContext) {
+        use crate::surface::strings::control as s;
+        use daruda_control_types::agent_text::{
+            TITLE_EXCERPT_HEAD_CHARS as HEAD, TITLE_EXCERPT_TAIL_CHARS as TAIL,
+        };
+        let cut = |c: &str, n: usize| {
+            format!(
+                "{}{}{}",
+                c.repeat(HEAD),
+                s::approval_prompt_elided(n - HEAD - TAIL),
+                c.repeat(TAIL)
+            )
+        };
+        let fixture = workspace_with_agent_chat(cx);
+        fixture.workspace.update(cx, |ws, _| {
+            let delegated = daruda_config::ModeChoice::FollowDelegated;
+            let claude = daruda_config::AgentDefinition {
+                name: "n".repeat(300),
+                delegated_mode: Some("i".repeat(300)),
+                ..daruda_config::AgentDefinition::claude_default()
+            };
+            let id = claude.id.clone();
+            let source = claude.launch.adapter_command().to_owned();
+            ws.mirrors.agents = vec![claude].into();
+            let disclosure = ws.control_chat_disclosure(&id, &delegated);
+            assert_eq!(disclosure.agent_name, cut("n", 300));
+            assert_eq!(disclosure.mode, cut("i", 300));
+            ws.agent_vocabulary.record_modes(
+                &id,
+                &source,
+                vec![daruda_store::agent_vocabulary::VocabEntry {
+                    id: "i".repeat(300),
+                    name: "a".repeat(400),
+                    description: None,
+                }],
+            );
+            assert_eq!(
+                ws.control_chat_disclosure(&id, &delegated).mode,
+                s::approval_mode_adapter_named(cut("a", 400), cut("i", 300))
             );
         });
     }

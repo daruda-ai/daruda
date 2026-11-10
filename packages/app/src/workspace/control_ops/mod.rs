@@ -112,7 +112,7 @@ impl Workspace {
                 one_line(&self.control_lane_name(lane)),
             ),
             agent: view.agent_id().to_owned(),
-            agent_name: one_line(view.agent_name()),
+            agent_name: crate::control::exec::card_label(view.agent_name()),
             mode: self.requested_mode_label(view.agent_id(), &preferences),
         })
     }

@@ -20,7 +20,7 @@ mod flow_resume;
 mod tasks;
 
 use card::{CardText, approval_summary};
-pub(crate) use disclosure::quoted_title;
+pub(crate) use disclosure::{card_label, quoted_title};
 use tasks::start_task;
 pub(crate) use tasks::{begin_task_start, open_task, task_flow_summary};
 

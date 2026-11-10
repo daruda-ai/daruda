@@ -27,7 +27,9 @@ mod gated;
 mod listing;
 mod origin;
 
-pub(crate) use gated::{begin_task_start, open_task, quoted_title, run_gated, task_flow_summary};
+pub(crate) use gated::{
+    begin_task_start, card_label, open_task, quoted_title, run_gated, task_flow_summary,
+};
 pub(crate) use listing::{brief, listing};
 pub(crate) use origin::{Caller, CommandOrigin};
 
