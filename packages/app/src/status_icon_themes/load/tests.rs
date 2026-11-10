@@ -57,7 +57,7 @@ fn invalid_state_timing_paths_and_colors_are_rejected() {
 fn svg_edits_invalidate_the_renderer_cache_and_external_content_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let path = seed(dir.path(), manifest());
-    let before = package(&path, "user").unwrap().states[&State::Working].frames[0]
+    let before = package(&path, "user").unwrap().states[&State::Working].frames[0].layers[0]
         .key
         .clone();
     let svg = dir.path().join("dot.svg");
@@ -65,7 +65,7 @@ fn svg_edits_invalidate_the_renderer_cache_and_external_content_is_rejected() {
         .unwrap()
         .replace("r=\"3\"", "r=\"4\"");
     std::fs::write(&svg, bytes).unwrap();
-    let after = package(&path, "user").unwrap().states[&State::Working].frames[0]
+    let after = package(&path, "user").unwrap().states[&State::Working].frames[0].layers[0]
         .key
         .clone();
     assert_ne!(before, after);
@@ -105,4 +105,91 @@ fn catalog_limit_stops_every_later_provider_with_one_error() {
     ]);
     assert_eq!(catalog.themes.len(), MAX_THEMES);
     assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn layered_frames_keep_fixed_colors_and_invalidate_only_the_edited_mask() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut spec = manifest();
+    let frame = serde_json::json!({"layers":[
+        {"svg":"dot.svg"}, {"svg":"eyes.svg","color":"#f7f8f8"}
+    ]});
+    spec["states"]["working"]["frames"] = serde_json::json!([frame, frame]);
+    let path = seed(dir.path(), spec);
+    let eyes = dir.path().join("eyes.svg");
+    std::fs::copy(dir.path().join("dot.svg"), &eyes).unwrap();
+    let before = package(&path, "user").unwrap();
+    let art = &before.states[&State::Working];
+    assert_eq!(art.frames[0].layers[0].color, LayerColor::Theme);
+    assert_eq!(art.frames[0].layers[1].color, LayerColor::Fixed(0xf7f8f8));
+    assert!(std::ptr::eq(art.frame(0).unwrap(), art.frame(1).unwrap()));
+    assert!(!std::ptr::eq(art.frame(1).unwrap(), art.frame(2).unwrap()));
+    let changed = std::fs::read_to_string(&eyes)
+        .unwrap()
+        .replace("r=\"3\"", "r=\"2\"");
+    std::fs::write(&eyes, changed).unwrap();
+    let after = package(&path, "user").unwrap();
+    let layers = &after.states[&State::Working].frames[0].layers;
+    assert_eq!(art.frames[0].layers[0].key, layers[0].key);
+    assert_ne!(art.frames[0].layers[1].key, layers[1].key);
+}
+
+#[test]
+fn layered_frames_reject_unbounded_layers_invalid_colors_and_escaping_paths() {
+    for frame in [
+        serde_json::json!({"layers":[]}),
+        serde_json::json!({"layers":vec![serde_json::json!({"svg":"dot.svg"}); MAX_LAYERS+1]}),
+        serde_json::json!({"layers":[{"svg":"dot.svg","color":"white"}]}),
+        serde_json::json!({"layers":[{"svg":"../dot.svg"}]}),
+        serde_json::json!({"layers":[{"svg":"dot.svg","script":"bad"}]}),
+        serde_json::json!({"layers":[{"svg":"dot.svg"}],"unknown":true}),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut spec = manifest();
+        spec["states"]["working"]["frames"] = serde_json::json!([frame]);
+        assert!(package(&seed(dir.path(), spec), "user").is_err());
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut spec = manifest();
+    spec["states"]["working"]["frames"] = serde_json::json!([{"layers":[
+        {"svg":"dot.svg"}, {"svg":"dot.svg","color":"#ffffff"}
+    ]}]);
+    let path = seed(dir.path(), spec);
+    let svg = std::fs::read_to_string(dir.path().join("dot.svg")).unwrap();
+    std::fs::write(dir.path().join("dot.svg"), svg + &" ".repeat(40 * 1024)).unwrap();
+    let error = package(&path, "user").unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("combined frame SVGs exceed size limit")
+    );
+}
+
+#[test]
+fn animal_examples_load_all_states_and_opaque_facial_layers() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/status-icon-themes");
+    for name in ["cats", "dogs", "rabbits"] {
+        let theme = package(&examples.join(name).join("theme.json"), "user").unwrap();
+        assert_eq!(theme.id, format!("user/{name}"));
+        assert_eq!(theme.states.len(), 9);
+        let working = &theme.states[&State::Working];
+        assert_eq!(working.colors, Some((0x3d7fc7, 0x326797)));
+        for (state, artwork) in &theme.states {
+            for frame in &artwork.frames {
+                assert!(!frame.layers.is_empty());
+                if *state != State::Disconnected {
+                    assert!(
+                        frame
+                            .layers
+                            .iter()
+                            .any(|layer| layer.color == LayerColor::Fixed(0xf7f8f8))
+                    );
+                }
+            }
+        }
+        if name == "cats" {
+            assert_eq!(working.frames.len(), 8);
+            assert_eq!(theme.states[&State::NeedsAttention].frames.len(), 16);
+        }
+    }
 }

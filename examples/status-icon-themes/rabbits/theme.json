@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "id": "rabbits",
+  "name": "Rabbits",
+  "extends": "icons",
+  "states": {
+    "disconnected": {
+      "frames": [
+        "disconnected-0.svg"
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#8a8f98",
+        "light": "#5b626f"
+      }
+    },
+    "connecting": {
+      "frames": [
+        {
+          "layers": [
+            {
+              "svg": "connecting-0.svg"
+            },
+            {
+              "svg": "connecting-0-white.svg",
+              "color": "#f7f8f8"
+            }
+          ]
+        }
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#a1a6b0",
+        "light": "#626977"
+      }
+    },
+    "working": {
+      "frames": [
+        {
+          "layers": [
+            {
+              "svg": "working-0.svg"
+            },
+            {
+              "svg": "working-0-white.svg",
+              "color": "#f7f8f8"
+            }
+          ]
+        }
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#3d7fc7",
+        "light": "#326797"
+      }
+    },
+    "executing_tool": {
+      "frames": [
+        {
+          "layers": [
+            {
+              "svg": "executing_tool-0.svg"
+            },
+            {
+              "svg": "executing_tool-0-white.svg",
+              "color": "#f7f8f8"
+            }
+          ]
+        }
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#81cfe6",
+        "light": "#256780"
+      }
+    },
+    "needs_attention": {
+      "frames": [
+        {
+          "layers": [
+            {
+              "svg": "needs_attention-0.svg"
+            },
+            {
+              "svg": "needs_attention-0-white.svg",
+              "color": "#f7f8f8"
+            }
+          ]
+        }
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#e0bb66",
+        "light": "#866114"
+      }
+    },
+    "idle": {
+      "frames": [
+        {
+          "layers": [
+            {
+              "svg": "idle-0.svg"
+            },
+            {
+              "svg": "idle-0-white.svg",
+              "color": "#f7f8f8"
+            }
+          ]
+        }
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#8a8f98",
+        "light": "#5b626f"
+      }
+    },
+    "completed": {
+      "frames": [
+        {
+          "layers": [
+            {
+              "svg": "completed-0.svg"
+            },
+            {
+              "svg": "completed-0-white.svg",
+              "color": "#f7f8f8"
+            }
+          ]
+        }
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#4aaf78",
+        "light": "#287b4c"
+      }
+    },
+    "errored": {
+      "frames": [
+        {
+          "layers": [
+            {
+              "svg": "errored-0.svg"
+            },
+            {
+              "svg": "errored-0-white.svg",
+              "color": "#f7f8f8"
+            }
+          ]
+        }
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#e06060",
+        "light": "#b23d43"
+      }
+    },
+    "failed": {
+      "frames": [
+        {
+          "layers": [
+            {
+              "svg": "failed-0.svg"
+            },
+            {
+              "svg": "failed-0-white.svg",
+              "color": "#f7f8f8"
+            }
+          ]
+        }
+      ],
+      "ticks_per_frame": 1,
+      "colors": {
+        "dark": "#e06060",
+        "light": "#b23d43"
+      }
+    }
+  }
+}

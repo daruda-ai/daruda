@@ -1,29 +1,35 @@
 //! Paint immutable SVG bytes; discovery and file I/O never run during rendering.
-use super::Frame;
+use super::{Frame, model::LayerColor};
 use gpui::{Hsla, IntoElement, Pixels, Styled, canvas};
 
 pub(crate) fn frame(frame: Frame, size: Pixels, color: Hsla) -> gpui::AnyElement {
     canvas(
         |_, _, _| (),
         move |bounds, _, window, cx| {
-            if let Err(error) = window.paint_svg(
-                bounds,
-                frame.key.clone().into(),
-                Some(&frame.svg),
-                Default::default(),
-                color,
-                cx,
-            ) {
-                use daruda_store::observability::{
-                    error_report::ErrorReport, log_writer::LogWriter,
+            for layer in frame.layers.iter() {
+                let color = match layer.color {
+                    LayerColor::Theme => color,
+                    LayerColor::Fixed(value) => gpui::rgb(value).into(),
                 };
-                LogWriter::log(
-                    ErrorReport::new("Status icon could not be painted")
-                        .message(error.to_string())
-                        .at(file!(), line!())
-                        .dedup(frame.key.clone())
-                        .build(),
-                );
+                if let Err(error) = window.paint_svg(
+                    bounds,
+                    layer.key.clone().into(),
+                    Some(&layer.svg),
+                    Default::default(),
+                    color,
+                    cx,
+                ) {
+                    use daruda_store::observability::{
+                        error_report::ErrorReport, log_writer::LogWriter,
+                    };
+                    LogWriter::log(
+                        ErrorReport::new("Status icon could not be painted")
+                            .message(error.to_string())
+                            .at(file!(), line!())
+                            .dedup(layer.key.clone())
+                            .build(),
+                    );
+                }
             }
         },
     )

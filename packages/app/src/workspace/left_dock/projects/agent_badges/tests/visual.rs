@@ -242,6 +242,10 @@ fn capture_status_icon_themes_and_live_switch() {
         .unwrap();
     let view = window.root(&mut app).unwrap();
     let output = tempfile::tempdir().unwrap().keep();
+    println!(
+        "status themes (16px above, 12px below): {}",
+        output.display()
+    );
     for appearance in ["daruda_dark", "daruda_light"] {
         app.update(|cx| assert!(theme::apply_ui_theme(appearance, cx)));
         let mut captures = Vec::new();
@@ -251,6 +255,18 @@ fn capture_status_icon_themes_and_live_switch() {
             (
                 "custom",
                 daruda_config::StatusIconTheme::Custom("user/soft-ice".into()),
+            ),
+            (
+                "cats",
+                daruda_config::StatusIconTheme::Custom("user/cats".into()),
+            ),
+            (
+                "dogs",
+                daruda_config::StatusIconTheme::Custom("user/dogs".into()),
+            ),
+            (
+                "rabbits",
+                daruda_config::StatusIconTheme::Custom("user/rabbits".into()),
             ),
             ("restored", daruda_config::StatusIconTheme::Dots),
         ] {
@@ -270,14 +286,48 @@ fn capture_status_icon_themes_and_live_switch() {
             frame
                 .save(output.join(format!("{appearance}-{name}.png")))
                 .unwrap();
+            if matches!(name, "cats" | "dogs" | "rabbits") {
+                let original = app.update(|cx| {
+                    use gpui::BorrowAppContext as _;
+                    cx.update_global::<crate::status_icon_themes::StatusIconThemes, _>(
+                        |catalog, _| {
+                            let theme = catalog.0.themes.get_mut(&format!("user/{name}")).unwrap();
+                            let original = theme.clone();
+                            for artwork in theme.states.values_mut() {
+                                for frame in &mut artwork.frames {
+                                    frame.layers = Arc::from(&frame.layers[..1]);
+                                }
+                            }
+                            original
+                        },
+                    )
+                });
+                view.update(&mut app, |_, cx| cx.notify());
+                app.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
+                    .unwrap();
+                let body_only = app.capture_screenshot(window.into()).unwrap();
+                app.update(|cx| {
+                    use gpui::BorrowAppContext as _;
+                    cx.update_global::<crate::status_icon_themes::StatusIconThemes, _>(
+                        |catalog, _| {
+                            catalog.0.themes.insert(original.id.clone(), original);
+                        },
+                    );
+                });
+                assert!(
+                    frame
+                        .pixels()
+                        .zip(body_only.pixels())
+                        .any(|(with_eyes, body)| with_eyes[0] > body[0]
+                            && with_eyes[1] > body[1]
+                            && with_eyes[2] > body[2]),
+                    "{appearance}-{name} must retain opaque facial whites"
+                );
+            }
             captures.push(frame);
         }
         assert_ne!(captures[0].as_raw(), captures[1].as_raw());
         assert_ne!(captures[1].as_raw(), captures[2].as_raw());
-        assert_eq!(captures[0].as_raw(), captures[3].as_raw());
+        assert_eq!(captures[0].as_raw(), captures[6].as_raw());
     }
-    println!(
-        "status themes (16px above, 12px below): {}",
-        output.display()
-    );
 }

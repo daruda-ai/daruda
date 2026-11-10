@@ -11,6 +11,7 @@ use std::{
 const MAX_MANIFEST_BYTES: u64 = 128 * 1024;
 const MAX_SVG_BYTES: u64 = 64 * 1024;
 const MAX_FRAMES: usize = 32;
+const MAX_LAYERS: usize = 4;
 const MAX_THEMES: usize = 128;
 const MAX_HOLD_TICKS: u64 = 40;
 
@@ -50,7 +51,7 @@ fn color(value: &str) -> Result<u32, &'static str> {
     }
     u32::from_str_radix(&value[1..], 16).map_err(|_| "colors must be #rrggbb")
 }
-fn load_svg(path: &Path) -> Result<Frame, LoadError> {
+fn load_svg(path: &Path, color: LayerColor) -> Result<Layer, LoadError> {
     let bytes = read(path, MAX_SVG_BYTES)?;
     let text = std::str::from_utf8(&bytes).map_err(|e| error(path, e))?;
     let doc = usvg::roxmltree::Document::parse(text).map_err(|e| error(path, e))?;
@@ -94,9 +95,54 @@ fn load_svg(path: &Path) -> Result<Frame, LoadError> {
     }
     let mut hash = DefaultHasher::new();
     bytes.hash(&mut hash);
-    Ok(Frame {
+    Ok(Layer {
         key: format!("status-theme/{:016x}", hash.finish()),
         svg: Arc::from(bytes),
+        color,
+    })
+}
+
+fn load_frame(root: &Path, canonical: &Path, spec: FrameSpec) -> Result<Frame, LoadError> {
+    let specs = match spec {
+        FrameSpec::Svg(svg) => vec![LayerSpec { svg, color: None }],
+        FrameSpec::Layered(spec) => spec.layers,
+    };
+    if specs.is_empty() || specs.len() > MAX_LAYERS {
+        return Err(error(root, "a frame must contain 1–4 SVG layers"));
+    }
+    let mut layers = Vec::with_capacity(specs.len());
+    let mut bytes = 0;
+    for spec in specs {
+        let relative = Path::new(&spec.svg);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|c| !matches!(c, std::path::Component::Normal(_)))
+            || relative.extension().and_then(|s| s.to_str()) != Some("svg")
+        {
+            return Err(error(
+                root,
+                "frame must be a relative SVG path inside the package",
+            ));
+        }
+        let file =
+            daruda_core::path::canonicalize(root.join(relative)).map_err(|e| error(root, e))?;
+        if !daruda_core::path::is_within(&file, canonical) {
+            return Err(error(root, "frame escapes package directory"));
+        }
+        let color = match spec.color {
+            Some(value) => LayerColor::Fixed(color(&value).map_err(|e| error(root, e))?),
+            None => LayerColor::Theme,
+        };
+        let layer = load_svg(&file, color)?;
+        bytes += layer.svg.len();
+        if bytes > MAX_SVG_BYTES as usize {
+            return Err(error(root, "combined frame SVGs exceed size limit"));
+        }
+        layers.push(layer);
+    }
+    Ok(Frame {
+        layers: layers.into(),
     })
 }
 
@@ -142,25 +188,8 @@ pub(super) fn package(manifest_path: &Path, namespace: &str) -> Result<Theme, Lo
             ));
         }
         let mut frames = Vec::new();
-        for relative in spec.frames {
-            let relative = Path::new(&relative);
-            if relative.is_absolute()
-                || relative
-                    .components()
-                    .any(|c| !matches!(c, std::path::Component::Normal(_)))
-                || relative.extension().and_then(|s| s.to_str()) != Some("svg")
-            {
-                return Err(error(
-                    manifest_path,
-                    "frame must be a relative SVG path inside the package",
-                ));
-            }
-            let file = daruda_core::path::canonicalize(root.join(relative))
-                .map_err(|e| error(manifest_path, e))?;
-            if !daruda_core::path::is_within(&file, &canonical) {
-                return Err(error(manifest_path, "frame escapes package directory"));
-            }
-            frames.push(load_svg(&file)?);
+        for spec in spec.frames {
+            frames.push(load_frame(root, &canonical, spec)?);
         }
         let colors = spec
             .colors

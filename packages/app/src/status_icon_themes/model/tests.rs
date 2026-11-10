@@ -24,8 +24,12 @@ fn missing_providers_fall_back_to_dots_without_animating_settled_states() {
 #[test]
 fn custom_frames_drive_pulses_and_color_only_overrides_inherit_them() {
     let frame = Frame {
-        key: "test".into(),
-        svg: Arc::from(&b"test"[..]),
+        layers: vec![Layer {
+            key: "test".into(),
+            svg: Arc::from(&b"test"[..]),
+            color: LayerColor::Theme,
+        }]
+        .into(),
     };
     let id = daruda_config::StatusIconTheme::Custom("user/example".into());
     let mut theme = Theme {

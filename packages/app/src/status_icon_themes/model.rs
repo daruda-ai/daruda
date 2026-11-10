@@ -48,7 +48,7 @@ pub(super) struct Manifest {
 #[serde(deny_unknown_fields)]
 pub(super) struct StateSpec {
     #[serde(default)]
-    pub frames: Vec<String>,
+    pub frames: Vec<FrameSpec>,
     #[serde(default = "one")]
     pub ticks_per_frame: u64,
     pub colors: Option<Colors>,
@@ -64,10 +64,43 @@ pub(super) struct Colors {
     pub light: String,
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(super) enum FrameSpec {
+    Svg(String),
+    Layered(LayeredFrameSpec),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LayeredFrameSpec {
+    pub layers: Vec<LayerSpec>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LayerSpec {
+    pub svg: String,
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Frame {
+    pub layers: Arc<[Layer]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LayerColor {
+    Theme,
+    Fixed(u32),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Layer {
     pub key: String,
     pub svg: Arc<[u8]>,
+    pub color: LayerColor,
 }
 
 #[derive(Clone, Debug)]

@@ -11,8 +11,10 @@ time and completion decisions remain owned by the sessions.
 
 - [Soft Ice](soft-ice/theme.json) inherits Icons and overrides tool execution
   with two animated frames.
-- [Cats](cats/README.md) replaces all nine states with kitten artwork, including
-  an empty house for Disconnected and a raised front paw for Needs attention.
+- [Cats](cats/README.md) replaces all nine states with animated kitten artwork.
+- [Dogs](dogs/README.md) and [Rabbits](rabbits/README.md) provide nine static poses.
+  All three use opaque facial layers, an empty home for Disconnected, and a
+  raised front paw for Needs attention.
 
 ## Create a user theme
 
@@ -54,8 +56,25 @@ status-icon-themes/
 `extends` is `dots` (default) or `icons`. Missing states, frames and colors
 inherit the selected base. A colors-only override preserves the base animation.
 A single frame makes that state static. Colors must provide both dark and light
-`#rrggbb` values; SVG artwork is monochrome and tinted with the selected color.
-Use opacity inside SVG for dimmer elements.
+`#rrggbb` values. Each SVG is a monochrome mask tinted with the selected color.
+Use opacity inside SVG for dimmer elements. A frame can combine masks in order
+with fixed-color details, such as white eyes that remain white in dark mode:
+
+```json
+{
+  "layers": [
+    { "svg": "working-0.svg" },
+    { "svg": "working-0-white.svg", "color": "#f7f8f8" }
+  ]
+}
+```
+
+Place this object in the state's `frames` array instead of a filename. A layer
+without `color` inherits the state's dark/light tint; a fixed `#rrggbb` color
+applies in both appearances. All layers share the 16 × 16 view box and advance
+together on the existing frame clock. SVG fill colors do not select layer colors.
+Layered frames require an app build with layer support; older builds accept only
+filename frames.
 
 | State key | Meaning | Multiple frames allowed |
 |---|---|---|
@@ -83,8 +102,9 @@ references and `url(...)` references are rejected. Frame paths must be relative
 validates SVG before publishing a theme and caches loaded bytes; rendering does
 not read files. File edits change the renderer cache key.
 
-Limits: 128 KiB per manifest, 64 KiB per SVG, 32 frames per state and 128 installed
-themes. IDs contain 1–80 ASCII letters, digits, hyphens or underscores. Names
+Limits: 128 KiB per manifest, 64 KiB of SVG data per frame (combined across
+1–4 layers), 32 frames per state and 128 installed themes. IDs contain
+1–80 ASCII letters, digits, hyphens or underscores. Names
 contain 1–80 characters. Unknown manifest fields and state keys are rejected.
 
 ## Distribute a plugin theme

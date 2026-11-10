@@ -8,7 +8,7 @@ Its stable selection ID is `user/cats`.
 1. In Settings → Workspace → Sidebar → Status icon theme, choose
    **Open theme folder**.
 2. Copy this entire `cats` directory into that folder, preserving `theme.json`
-   and all 37 SVG files beside it.
+   and all SVG files beside it.
 3. Select **Cats · user/cats**. Daruda discovers the package automatically and
    remembers the selection across restarts.
 
@@ -36,9 +36,13 @@ a gap between the arm and cheek keeps the raised paw visible in silhouette.
 Working, Needs attention, Completed and Errored face left.
 
 The package uses daruda's shared 250ms clock. Repeated frame references hold
-poses without extra files. All artwork uses a 16 × 16 view box and monochrome
-paths, with transparent facial cutouts. State colors provide both dark and light
-variants for the application's tinted SVG renderer at 16px and 12px.
+poses without extra files. Every pose combines a tinted body mask with opaque
+white facial details, so eye whites retain their color in both appearances.
+Almond-shaped eyes and vertical pupils distinguish the cat from the puppy and
+rabbit. The existing stretch and attention blink keep their closed eyelids.
+
+All masks share a 16 × 16 view box. State colors provide dark and light variants
+at 16px and 12px; Working uses a deeper blue in dark appearance.
 
 The character and animation sheets were created with AI image generation and
 converted to self-contained SVG paths. The empty house is a vector shape.
