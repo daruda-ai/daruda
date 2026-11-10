@@ -5,7 +5,7 @@
 //! through `agent_text`, with this card's localized markers.
 
 use daruda_config::ModeChoice;
-use daruda_control_types::agent_text::{QuoteMarkers, prompt_excerpt, title_excerpt};
+use daruda_control_types::agent_text::{QuoteMarkers, prompt_excerpts, title_excerpt};
 use gpui::App;
 
 use crate::control::exec::{in_lane_window, in_project_window, in_task_window};
@@ -113,18 +113,51 @@ pub(super) fn agent_phrase(disclosure: &ChatDisclosure) -> String {
     s::control::approval_agent(&disclosure.agent_name, &disclosure.mode)
 }
 
-/// A prompt as a card quotes it: one quoted line, its start and end around
-/// how much was left out. `None` when the prompt carries nothing, so the card
-/// says it sends no prompt rather than quoting an empty one.
-pub(super) fn prompt_phrase(prompt: &str) -> Option<String> {
-    let excerpt = prompt_excerpt(prompt, &Localized);
-    (!excerpt.is_empty()).then_some(excerpt)
+/// The most a card's sentence may hold, in UTF-16 code units: Telegram's
+/// `sendMessage` takes 4096 characters and sends the card as one message,
+/// where Slack and Discord split what exceeds their limits. UTF-16 is the
+/// stricter unit, as in `remote_channel::transport::chunks`. The rest is
+/// room for the outcome a settled card is edited to append.
+pub(super) const CARD_MAX_UTF16: usize = 3900;
+
+/// Whether a card's sentence fits one phone message.
+pub(super) fn fits_one_message(card: &str) -> bool {
+    card.encode_utf16().count() <= CARD_MAX_UTF16
+}
+
+/// The card `sentence` makes of `prompt`: one quoted line, its start and end
+/// around how much was left out, at the widest bound that keeps the card in
+/// one phone message; the floor bound when none does, which the other
+/// fields' own bounds leave room for. `None` when the prompt carries
+/// nothing, so the card says it sends no prompt rather than quoting an
+/// empty one.
+pub(super) fn with_prompt(prompt: &str, sentence: impl Fn(&str) -> String) -> Option<String> {
+    let mut narrowest = None;
+    for excerpt in prompt_excerpts(prompt, &Localized) {
+        if excerpt.is_empty() {
+            return None;
+        }
+        let card = sentence(&excerpt);
+        if fits_one_message(&card) {
+            return Some(card);
+        }
+        narrowest = Some(card);
+    }
+    narrowest
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daruda_control_types::agent_text::{PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS};
+    use daruda_control_types::agent_text::{
+        PROMPT_EXCERPT_FLOOR_HEAD_CHARS, PROMPT_EXCERPT_FLOOR_TAIL_CHARS,
+        PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS,
+    };
+
+    /// A prompt as a card of nothing else quotes it.
+    fn prompt_phrase(prompt: &str) -> Option<String> {
+        with_prompt(prompt, str::to_owned)
+    }
 
     #[test]
     fn the_agent_phrase_names_the_agent_and_its_requested_mode() {
@@ -221,20 +254,57 @@ mod tests {
     }
 
     /// The end of a long prompt is quoted too, with the localized count of
-    /// what lies between.
+    /// what lies between: the first 1000 and last 500 characters while the
+    /// card fits one phone message.
     #[test]
     fn a_long_prompt_quotes_its_end_and_the_hidden_count() {
         let head = "a".repeat(PROMPT_EXCERPT_HEAD_CHARS);
         let tail = "z".repeat(PROMPT_EXCERPT_TAIL_CHARS);
         let prompt = format!("{head}{}{tail}", "m".repeat(9));
+        let whole = format!(
+            "{}{}{}",
+            s::control::approval_quoted(&head),
+            s::control::approval_prompt_elided(9),
+            s::control::approval_quoted(&tail)
+        );
+        assert_eq!(prompt_phrase(&prompt), Some(whole.clone()));
         assert_eq!(
-            prompt_phrase(&prompt),
-            Some(format!(
-                "{}{}{}",
-                s::control::approval_quoted(&head),
-                s::control::approval_prompt_elided(9),
-                s::control::approval_quoted(&tail)
+            with_prompt(&prompt, |p| s::control::approval_lane_create_prompt(
+                "“w”",
+                "Claude Code",
+                p
+            )),
+            Some(s::control::approval_lane_create_prompt(
+                "“w”",
+                "Claude Code",
+                whole
             ))
         );
+    }
+
+    /// A prompt whose widest excerpt would push the card past one phone
+    /// message is quoted narrower, down to the floor, never over the limit
+    /// while the floor fits.
+    #[test]
+    fn a_card_too_long_for_one_message_quotes_less_of_its_prompt() {
+        // Astral characters are two UTF-16 units each: 1500 of them beside
+        // a long sentence exceed the limit, and the next bound is taken.
+        let prompt = "😀".repeat(4000);
+        let sentence = "x".repeat(1000);
+        let card = with_prompt(&prompt, |p| format!("{sentence}{p}")).expect("a prompt");
+        assert!(fits_one_message(&card), "{}", card.encode_utf16().count());
+        assert_eq!(card.chars().filter(|c| *c == '😀').count(), 750);
+        // A sentence long enough to leave room only for the floor gets it.
+        let filler = "x".repeat(CARD_MAX_UTF16 - 600);
+        let card = with_prompt(&prompt, |p| format!("{filler}{p}")).expect("a prompt");
+        let floor = format!(
+            "{filler}{}{}{}",
+            s::control::approval_quoted("😀".repeat(PROMPT_EXCERPT_FLOOR_HEAD_CHARS)),
+            s::control::approval_prompt_elided(
+                4000 - PROMPT_EXCERPT_FLOOR_HEAD_CHARS - PROMPT_EXCERPT_FLOOR_TAIL_CHARS
+            ),
+            s::control::approval_quoted("😀".repeat(PROMPT_EXCERPT_FLOOR_TAIL_CHARS)),
+        );
+        assert_eq!(card, floor);
     }
 }

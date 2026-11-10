@@ -1,7 +1,8 @@
 use daruda_control_types::agent_text::{
-    PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS, QuoteMarkers, TITLE_EXCERPT_HEAD_CHARS,
-    TITLE_EXCERPT_TAIL_CHARS, bound_agent_text, elide_middle, one_line, prompt_excerpt,
-    sanitize_title, title_excerpt,
+    PROMPT_EXCERPT_FLOOR_HEAD_CHARS, PROMPT_EXCERPT_FLOOR_TAIL_CHARS, PROMPT_EXCERPT_HEAD_CHARS,
+    PROMPT_EXCERPT_TAIL_CHARS, QuoteMarkers, TITLE_EXCERPT_HEAD_CHARS, TITLE_EXCERPT_TAIL_CHARS,
+    bound_agent_text, elide_middle, one_line, prompt_excerpt, prompt_excerpts, sanitize_title,
+    title_excerpt,
 };
 
 /// Markers a test reads back: the counts, nothing localized.
@@ -158,6 +159,30 @@ fn a_long_prompt_keeps_its_start_and_end_around_the_hidden_count() {
             "a".repeat(PROMPT_EXCERPT_TAIL_CHARS - 2)
         )
     );
+}
+
+/// A card short of room takes a narrower excerpt: widest first, each
+/// keeping both ends, down to the floor; a short prompt is whole at each.
+#[test]
+fn narrower_excerpts_end_at_the_floor() {
+    let long = "p".repeat(3000);
+    let excerpts: Vec<String> = prompt_excerpts(&long, &Markers).collect();
+    assert_eq!(excerpts.first(), Some(&prompt(&long)));
+    let lengths: Vec<usize> = excerpts.iter().map(|e| e.chars().count()).collect();
+    assert!(lengths.windows(2).all(|w| w[0] > w[1]), "{lengths:?}");
+    assert_eq!(
+        excerpts.last().map(String::as_str),
+        Some(
+            format!(
+                "<{}>{}<{}>",
+                "p".repeat(PROMPT_EXCERPT_FLOOR_HEAD_CHARS),
+                marker(3000 - PROMPT_EXCERPT_FLOOR_HEAD_CHARS - PROMPT_EXCERPT_FLOOR_TAIL_CHARS),
+                "p".repeat(PROMPT_EXCERPT_FLOOR_TAIL_CHARS)
+            )
+            .as_str()
+        )
+    );
+    assert!(prompt_excerpts("short", &Markers).all(|e| e == "<short>"));
 }
 
 /// A task title reaches the agent whole, so a long one is quoted by both

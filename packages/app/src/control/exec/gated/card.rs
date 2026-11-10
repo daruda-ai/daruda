@@ -25,7 +25,7 @@ pub(super) enum CardText {
 /// and mode `Asked` carries as `shown`; others' titles and prompts pass
 /// through `agent_text` first.
 pub(super) fn approval_summary(asked: &Asked, cx: &mut App) -> Result<CardText, ControlError> {
-    use disclosure::{agent_phrase, prompt_phrase};
+    use disclosure::{agent_phrase, with_prompt};
     Ok(CardText::Now(match asked {
         Asked::LaneCreate {
             name,
@@ -37,10 +37,14 @@ pub(super) fn approval_summary(asked: &Asked, cx: &mut App) -> Result<CardText, 
             // The guard already refused a name that hides or reorders text;
             // quoting it as well keeps the card safe if that rule changes.
             let name = quoted_title(name);
-            match prompt.as_deref().and_then(prompt_phrase) {
-                Some(prompt) => s::control::approval_lane_create_prompt(&name, agent, prompt),
-                None => s::control::approval_lane_create(&name, agent),
-            }
+            prompt
+                .as_deref()
+                .and_then(|prompt| {
+                    with_prompt(prompt, |prompt| {
+                        s::control::approval_lane_create_prompt(&name, &agent, prompt)
+                    })
+                })
+                .unwrap_or_else(|| s::control::approval_lane_create(&name, &agent))
         }
         Asked::ChatNew { lane, shown, .. } => {
             let path = in_lane_window(*lane, cx, |ws, _window, _cx| {
@@ -94,28 +98,37 @@ pub(super) fn approval_summary(asked: &Asked, cx: &mut App) -> Result<CardText, 
                 None => (s::control::approval_task_as_chat(), true),
             };
             let title = quoted_title(&task.title);
-            match takes_prompt.then(|| prompt_phrase(&task.prompt)).flatten() {
-                Some(prompt) => s::control::approval_task_create_prompt(
-                    title, &name, &location, &surface, prompt,
-                ),
-                None => s::control::approval_task_create(title, &name, &location, &surface),
-            }
+            takes_prompt
+                .then(|| {
+                    with_prompt(&task.prompt, |prompt| {
+                        s::control::approval_task_create_prompt(
+                            &title, &name, &location, &surface, prompt,
+                        )
+                    })
+                })
+                .flatten()
+                .unwrap_or_else(|| {
+                    s::control::approval_task_create(&title, &name, &location, &surface)
+                })
         }
         // A flow given the prompt hands it to its agents, so its card quotes
         // it as a chat's does.
         Asked::TaskStart { task, shown, .. } => match shown {
             None => {
                 let flow = task_flow_summary(task, cx).ok_or(ControlError::TaskNotFound)?;
-                match flow.takes_prompt.then(|| task_prompt(task, cx)).flatten() {
-                    Some(prompt) => s::control::approval_task_start_flow_prompt(
-                        task_title(task, cx),
-                        &flow.summary,
-                        prompt,
-                    ),
-                    None => {
-                        s::control::approval_task_start_flow(task_title(task, cx), &flow.summary)
-                    }
-                }
+                let title = task_title(task, cx);
+                flow.takes_prompt
+                    .then(|| {
+                        with_prompt(&task_prompt(task, cx), |prompt| {
+                            s::control::approval_task_start_flow_prompt(
+                                &title,
+                                &flow.summary,
+                                prompt,
+                            )
+                        })
+                    })
+                    .flatten()
+                    .unwrap_or_else(|| s::control::approval_task_start_flow(&title, &flow.summary))
             }
             Some(shown) => {
                 let prompt = task_prompt(task, cx);
@@ -127,12 +140,12 @@ pub(super) fn approval_summary(asked: &Asked, cx: &mut App) -> Result<CardText, 
                 })?;
                 let agent = agent_phrase(shown);
                 let title = task_title(task, cx);
-                match prompt {
-                    Some(prompt) => {
-                        s::control::approval_task_start(title, &location, agent, prompt)
-                    }
-                    None => s::control::approval_task_start_no_prompt(title, &location, agent),
-                }
+                with_prompt(&prompt, |prompt| {
+                    s::control::approval_task_start(&title, &location, &agent, prompt)
+                })
+                .unwrap_or_else(|| {
+                    s::control::approval_task_start_no_prompt(&title, &location, &agent)
+                })
             }
         },
         // A chat already open keeps its own mode, but may close before the
@@ -151,9 +164,11 @@ pub(super) fn approval_summary(asked: &Asked, cx: &mut App) -> Result<CardText, 
     }))
 }
 
-/// `task`'s prompt as its start card quotes it; see `prompt_phrase`.
-fn task_prompt(task: &str, cx: &App) -> Option<String> {
+/// `task`'s prompt, which its start card quotes through `with_prompt`;
+/// empty for a task that is gone, which quotes as no prompt.
+fn task_prompt(task: &str, cx: &App) -> String {
     cx.global::<GlobalTasks>()
         .get(task)
-        .and_then(|t| disclosure::prompt_phrase(&t.spec.prompt))
+        .map(|t| t.spec.prompt.clone())
+        .unwrap_or_default()
 }

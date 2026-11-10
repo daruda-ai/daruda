@@ -112,7 +112,7 @@ async fn a_task_start_card_names_agent_mode_and_prompt_and_opens_that_agent(
     let _connections = cx.update(Workspace::fake_agent_connections_for_test);
     let prompt = format!(
         "Fix the login\nredirect.  {} and finally drop the users table",
-        "x".repeat(400)
+        "x".repeat(2000)
     );
     let created = fixture.workspace.update(cx, |ws, cx| {
         ws.control_task_create(

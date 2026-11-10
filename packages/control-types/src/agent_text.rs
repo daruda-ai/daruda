@@ -35,11 +35,30 @@ const TITLE_MAX_CHARS: usize = 80;
 const ORCHESTRATOR_HEAD_CHARS: usize = 2000;
 const ORCHESTRATOR_TAIL_CHARS: usize = 2000;
 
-/// How much of a prompt's start and end an approval card quotes. Enough to
-/// recognize the request on a phone screen, and the end too, so an
-/// instruction cannot hide behind a harmless opening. The card is one line.
-pub const PROMPT_EXCERPT_HEAD_CHARS: usize = 80;
-pub const PROMPT_EXCERPT_TAIL_CHARS: usize = 40;
+/// How much of a prompt's start and end an approval card quotes at most:
+/// about 1500 characters, enough to read a typical delegated prompt whole on
+/// a phone, and the end too, so an instruction cannot hide behind a harmless
+/// opening. The head is the larger share because it carries the request;
+/// the tail is where an appended instruction would sit. The card is one line.
+pub const PROMPT_EXCERPT_HEAD_CHARS: usize = 1000;
+pub const PROMPT_EXCERPT_TAIL_CHARS: usize = 500;
+
+/// The narrowest bound [`prompt_excerpts`] offers: what a card still quotes
+/// when its other fields leave little room in one phone message.
+pub const PROMPT_EXCERPT_FLOOR_HEAD_CHARS: usize = 80;
+pub const PROMPT_EXCERPT_FLOOR_TAIL_CHARS: usize = 40;
+
+/// Every bound [`prompt_excerpts`] tries, widest first, each keeping the
+/// head's larger share.
+const PROMPT_EXCERPT_BOUNDS: [(usize, usize); 4] = [
+    (PROMPT_EXCERPT_HEAD_CHARS, PROMPT_EXCERPT_TAIL_CHARS),
+    (500, 250),
+    (240, 120),
+    (
+        PROMPT_EXCERPT_FLOOR_HEAD_CHARS,
+        PROMPT_EXCERPT_FLOOR_TAIL_CHARS,
+    ),
+];
 
 /// The same for a task title, which the agent receives whole: one up to
 /// `head + tail` characters is quoted whole, a longer one by both ends.
@@ -93,6 +112,18 @@ pub fn prompt_excerpt(raw: &str, markers: &impl QuoteMarkers) -> String {
         PROMPT_EXCERPT_TAIL_CHARS,
         markers,
     )
+}
+
+/// [`prompt_excerpt`] at each bound a card may need, widest first, down to
+/// the floor. A card that must fit one message takes the first that does:
+/// its other fields are bounded too, so the floor always fits.
+pub fn prompt_excerpts<'a, M: QuoteMarkers>(
+    raw: &'a str,
+    markers: &'a M,
+) -> impl Iterator<Item = String> + 'a {
+    PROMPT_EXCERPT_BOUNDS
+        .into_iter()
+        .map(move |(head, tail)| card_quote(raw, head, tail, markers))
 }
 
 /// A title someone else wrote, as a card or a phone row quotes it: the same
