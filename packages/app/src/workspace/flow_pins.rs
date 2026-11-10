@@ -318,24 +318,20 @@ nodes:
         assert_eq!(resolved.unavailable, vec![NodeId::from("design")]);
     }
 
-    /// Passed and yet the file is gone — a swept or hand-deleted run
-    /// directory. The journal alone is not enough to promise a copy.
+    /// A pin with no file to copy in can only ever be reported back.
     #[test]
-    fn a_missing_file_is_not_sent_even_when_the_journal_says_it_passed() {
-        let dir = run_dir(TWO, &["design"], &[]);
-        let resolved = resolve_in(&["design".into()], TWO, None, Some(dir.path()));
-        assert!(resolved.reuse.is_empty());
-        assert_eq!(resolved.unavailable, vec![NodeId::from("design")]);
-    }
-
-    /// A gate declares no output, so there is no file to copy in — pinning one
-    /// can only ever be reported back.
-    #[test]
-    fn a_command_node_has_no_output_to_reuse() {
-        let dir = run_dir(TWO, &["gate"], &[]);
-        let resolved = resolve_in(&["gate".into()], TWO, None, Some(dir.path()));
-        assert!(resolved.reuse.is_empty());
-        assert_eq!(resolved.unavailable, vec![NodeId::from("gate")]);
+    fn a_pin_with_no_output_file_is_unavailable() {
+        for node in [
+            // Passed and yet the file is gone — a swept or hand-deleted run
+            // directory. The journal alone is not enough to promise a copy.
+            "design", // A gate declares no output, so there is no file at all.
+            "gate",
+        ] {
+            let dir = run_dir(TWO, &[node], &[]);
+            let resolved = resolve_in(&[node.into()], TWO, None, Some(dir.path()));
+            assert!(resolved.reuse.is_empty(), "{node}");
+            assert_eq!(resolved.unavailable, vec![NodeId::from(node)]);
+        }
     }
 
     /// A lane that has never run this flow has nothing to reuse, and says so

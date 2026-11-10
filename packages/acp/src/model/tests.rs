@@ -198,26 +198,6 @@ fn slash_command_from_unstructured_input() {
 }
 
 #[test]
-fn slash_command_free_text_preserves_name_description_and_hint() {
-    // Verifies that a FreeText command round-trips all three fields
-    // (name, description, hint) together — not covered by the NoInput
-    // or unstructured-input tests which check fields in isolation.
-    use agent_client_protocol::v1::schema::AvailableCommandInput;
-    let cmd = AvailableCommand::new("explain", "Explain selected code").input(
-        AvailableCommandInput::Unstructured(UnstructuredCommandInput::new("what to explain")),
-    );
-    let view = SlashCommand::from(&cmd);
-    assert_eq!(view.name, "explain");
-    assert_eq!(view.description, "Explain selected code");
-    assert_eq!(
-        view.input,
-        SlashCommandInput::FreeText {
-            hint: "what to explain".to_string()
-        }
-    );
-}
-
-#[test]
 fn mode_state_view_from_session_mode_state_maps_fields() {
     let protocol_state = SessionModeState::new(
         "acceptEdits",

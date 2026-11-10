@@ -170,6 +170,13 @@ jobs:
         shell: bash
         run: bash ./scripts/ci-cargo.sh test
 
+      # The vendored suites can only change with `vendor/`, the manifests, or
+      # the toolchain, which is what the dependency selector watches.
+      - name: Test vendored crates
+        if: needs.dependency-changes.outputs.packaging == 'true'
+        shell: bash
+        run: bash ./scripts/ci-cargo.sh vendor-test
+
       - name: Build and verify the macOS bundle
         if: needs.dependency-changes.outputs.packaging == 'true'
         timeout-minutes: 10
@@ -232,6 +239,11 @@ jobs:
       - name: Test
         shell: bash
         run: bash ./scripts/ci-cargo.sh test --no-fail-fast
+
+      - name: Test vendored crates
+        if: needs.dependency-changes.outputs.packaging == 'true'
+        shell: bash
+        run: bash ./scripts/ci-cargo.sh vendor-test --no-fail-fast
 
       # Built once here so the two timed runs below only have to start it.
       - name: Build the desktop binary
@@ -321,6 +333,11 @@ jobs:
       - name: Test
         shell: bash
         run: bash ./scripts/ci-cargo.sh test --no-fail-fast
+
+      - name: Test vendored crates
+        if: needs.dependency-changes.outputs.packaging == 'true'
+        shell: bash
+        run: bash ./scripts/ci-cargo.sh vendor-test --no-fail-fast
 
       - name: Build native application
         run: ./scripts/build-windows.ps1

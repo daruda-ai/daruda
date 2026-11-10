@@ -385,8 +385,9 @@ cargo fmt --all -- --check
 bash scripts/ci-cargo.sh clippy
 bash scripts/ci-cargo.sh app-features
 bash scripts/ci-cargo.sh test
+bash scripts/ci-cargo.sh vendor-test      # when check-packaging-changes.sh selects the diff
 bash scripts/ci-cargo.sh doc
-cargo test -p daruda --features screenshot
+bash scripts/ci-cargo.sh screenshot-test
 cargo run -p gen_acp_presets -- --check
 bash scripts/check-dependencies.sh
 bash scripts/rust-version.sh
@@ -459,10 +460,16 @@ The Lint job runs format and selected lint scripts. Apply the scope-based
 local checks above, including relevant checks not yet wired into CI.
 
 [scripts/ci-cargo.sh](scripts/ci-cargo.sh) owns the shared package coverage
-for `clippy`, `app-features`, `test`, and `doc`; extra Cargo options follow
-the gate name. Update coverage there. The `test` gate includes the
-`gpui-base` and `gpui-component` suites with their daruda-authored patch
-tests. The doc-link gate covers its explicit crate subset, not every workspace
+for `clippy`, `app-features`, `test`, `vendor-test`, `screenshot-test`, and
+`doc`; extra Cargo options follow the gate name. Update coverage there.
+`vendor-test` runs the vendored `gpui-base`, `gpui-component`, and
+`ferrum_flow` suites, including daruda-authored patch tests. They depend only
+on `vendor/`, the manifests, and the toolchain, so CI runs them when
+[check-packaging-changes.sh](scripts/check-packaging-changes.sh) selects the
+diff. `screenshot-test` runs only the app tests the `screenshot` feature adds,
+found by diffing the two `--list` outputs; a change to feature-gated
+non-test code also warrants a full `cargo test -p daruda --features screenshot`.
+The doc-link gate covers its explicit crate subset, not every workspace
 crate; Clippy does not validate intra-doc links. All app features are off by default, so the `app-features`
 gate checks feature-only code on every OS.
 

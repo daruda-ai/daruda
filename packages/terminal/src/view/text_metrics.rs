@@ -392,18 +392,19 @@ mod tests {
     }
 
     #[test]
-    fn grid_right_x_basic() {
-        assert_eq!(grid_right_x(px(0.0), 8.0, 80), px(640.0));
-    }
-
-    #[test]
-    fn grid_right_x_offsets_origin() {
-        assert_eq!(grid_right_x(px(10.0), 8.0, 80), px(650.0));
-    }
-
-    #[test]
-    fn grid_right_x_zero_cols_returns_origin() {
-        assert_eq!(grid_right_x(px(50.0), 8.0, 0), px(50.0));
+    fn grid_right_x_adds_the_grid_width_to_the_origin() {
+        for (origin, cols, expected) in [
+            (0.0, 80, 640.0),
+            (10.0, 80, 650.0),
+            // No columns: the right edge is the origin itself.
+            (50.0, 0, 50.0),
+        ] {
+            assert_eq!(
+                grid_right_x(px(origin), 8.0, cols),
+                px(expected),
+                "{origin} + {cols} cols"
+            );
+        }
     }
 
     #[test]

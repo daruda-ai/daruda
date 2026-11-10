@@ -98,14 +98,20 @@ fn adapter_for_known_and_unknown_ids_extract_parent_id() {
 
 #[test]
 fn command_exit_reads_codex_raw_output_exit_code() {
-    let raw = json!({"formatted_output": "ok", "exit_code": 1});
-    assert_eq!(
-        DefaultAdapter.command_exit(&Some(raw), &None),
-        Some(CommandExit {
-            code: Some(1),
-            signal: None
-        })
-    );
+    // A zero stays `Some`: display judgment belongs to the renderer, so the
+    // model carries a reported zero exit code as-is, not as an absence.
+    for (raw, code) in [
+        (json!({"formatted_output": "ok", "exit_code": 1}), 1),
+        (json!({"formatted_output": "", "exit_code": 0}), 0),
+    ] {
+        assert_eq!(
+            DefaultAdapter.command_exit(&Some(raw), &None),
+            Some(CommandExit {
+                code: Some(code),
+                signal: None
+            })
+        );
+    }
 }
 
 #[test]
@@ -139,20 +145,6 @@ fn command_exit_is_none_when_both_channels_absent() {
     let raw = json!({"formatted_output": "ok"});
     let m = meta(json!({"claudeCode": {"toolName": "Bash"}}));
     assert_eq!(DefaultAdapter.command_exit(&Some(raw), &m), None);
-}
-
-#[test]
-fn command_exit_zero_is_reported_as_some() {
-    // Display judgment belongs to the renderer — the model carries a
-    // reported zero exit code as-is, not as an absence.
-    let raw = json!({"formatted_output": "", "exit_code": 0});
-    assert_eq!(
-        DefaultAdapter.command_exit(&Some(raw), &None),
-        Some(CommandExit {
-            code: Some(0),
-            signal: None
-        })
-    );
 }
 
 #[test]
@@ -270,14 +262,24 @@ mod selection_tests {
         );
     }
 
-    /// The failure this selection exists to close: a user who registers
-    /// codex-acp under a catalog id of their own still gets the codex strategy.
     #[test]
-    fn a_catalog_id_of_the_users_own_still_reaches_the_right_strategy() {
-        assert_eq!(
-            adapter_id_for(Some("@agentclientprotocol/codex-acp"), "my-codex"),
-            AdapterId::Codex
-        );
+    fn a_codex_program_or_catalog_id_reaches_the_codex_strategy() {
+        for (program, catalog_id) in [
+            // The failure this selection exists to close: a user who registers
+            // codex-acp under a catalog id of their own still gets the codex strategy.
+            ("@agentclientprotocol/codex-acp", "my-codex"),
+            // The scope is a publishing detail, so an unscoped report resolves the same.
+            ("codex-acp", "custom"),
+            // An unrecognised program is not evidence against the catalog id — a fork
+            // or wrapper reporting its own name still honours how it was registered.
+            ("@someone/my-codex-wrapper", "codex-acp"),
+        ] {
+            assert_eq!(
+                adapter_id_for(Some(program), catalog_id),
+                AdapterId::Codex,
+                "{program} as {catalog_id}"
+            );
+        }
     }
 
     /// `agent_info` is optional in the protocol, so the catalog id remains the
@@ -299,25 +301,6 @@ mod selection_tests {
         assert_eq!(
             adapter_id_for(Some("@agentclientprotocol/claude-agent-acp"), "codex-acp"),
             AdapterId::Default
-        );
-    }
-
-    /// The scope is a publishing detail, so an unscoped report resolves the same.
-    #[test]
-    fn the_package_scope_is_not_part_of_the_identity() {
-        assert_eq!(
-            adapter_id_for(Some("codex-acp"), "custom"),
-            AdapterId::Codex
-        );
-    }
-
-    /// An unrecognised program is not evidence against the catalog id — a fork
-    /// or wrapper reporting its own name still honours how it was registered.
-    #[test]
-    fn an_unrecognised_program_leaves_the_catalog_id_to_decide() {
-        assert_eq!(
-            adapter_id_for(Some("@someone/my-codex-wrapper"), "codex-acp"),
-            AdapterId::Codex
         );
     }
 }

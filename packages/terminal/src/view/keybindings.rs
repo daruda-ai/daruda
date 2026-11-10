@@ -58,38 +58,28 @@ mod tests {
     }
 
     #[test]
-    fn cmd_left_moves_to_line_start() {
-        assert_eq!(map("left", CMD), Some(&b"\x01"[..]));
-    }
-
-    #[test]
-    fn cmd_right_moves_to_line_end() {
-        assert_eq!(map("right", CMD), Some(&b"\x05"[..]));
-    }
-
-    #[test]
-    fn cmd_backspace_kills_to_line_start() {
-        assert_eq!(map("backspace", CMD), Some(&b"\x15"[..]));
-    }
-
-    #[test]
-    fn opt_left_moves_word_back() {
-        assert_eq!(map("left", OPT), Some(&b"\x1bb"[..]));
-    }
-
-    #[test]
-    fn opt_right_moves_word_forward() {
-        assert_eq!(map("right", OPT), Some(&b"\x1bf"[..]));
-    }
-
-    #[test]
-    fn opt_backspace_deletes_word_back() {
-        assert_eq!(map("backspace", OPT), Some(&b"\x1b\x7f"[..]));
-    }
-
-    #[test]
-    fn opt_delete_deletes_word_forward() {
-        assert_eq!(map("delete", OPT), Some(&b"\x1bd"[..]));
+    fn cmd_and_opt_chords_map_to_readline_bytes() {
+        for (key, mods, expected, what) in [
+            ("left", CMD, &b"\x01"[..], "cmd-left: line start"),
+            ("right", CMD, b"\x05", "cmd-right: line end"),
+            (
+                "backspace",
+                CMD,
+                b"\x15",
+                "cmd-backspace: kill to line start",
+            ),
+            ("left", OPT, b"\x1bb", "opt-left: word back"),
+            ("right", OPT, b"\x1bf", "opt-right: word forward"),
+            (
+                "backspace",
+                OPT,
+                b"\x1b\x7f",
+                "opt-backspace: delete word back",
+            ),
+            ("delete", OPT, b"\x1bd", "opt-delete: delete word forward"),
+        ] {
+            assert_eq!(map(key, mods), Some(expected), "{what}");
+        }
     }
 
     #[test]

@@ -4,10 +4,14 @@ use super::*;
 
 #[test]
 fn parses_osc133_prompt_start() {
-    assert_eq!(
-        parse_osc133_payload(b"A"),
-        Some((PromptMarkKind::PromptStart, None))
-    );
+    // Some callers may not strip the `133;` prefix.
+    for payload in [&b"A"[..], b"133;A"] {
+        assert_eq!(
+            parse_osc133_payload(payload),
+            Some((PromptMarkKind::PromptStart, None)),
+            "{payload:?}"
+        );
+    }
 }
 
 #[test]
@@ -84,15 +88,6 @@ fn parses_osc133_command_finished_with_exit_code() {
     assert_eq!(
         parse_osc133_payload(b"D;127"),
         Some((PromptMarkKind::CommandFinished, Some(127)))
-    );
-}
-
-#[test]
-fn parses_osc133_accepts_payload_with_prefix() {
-    // Some callers may not strip the `133;` prefix.
-    assert_eq!(
-        parse_osc133_payload(b"133;A"),
-        Some((PromptMarkKind::PromptStart, None))
     );
 }
 

@@ -512,16 +512,13 @@ mod tests {
 
     #[test]
     fn test_compute_grid_size() {
-        let (cols, rows) = compute_grid_size(800.0, 600.0, 8.0, 16.0);
-        assert_eq!(cols, 100);
-        assert_eq!(rows, 37);
-    }
-
-    #[test]
-    fn test_compute_grid_size_minimum() {
-        let (cols, rows) = compute_grid_size(1.0, 1.0, 100.0, 100.0);
-        assert_eq!(cols, 1);
-        assert_eq!(rows, 1);
+        for (width, height, cell_w, cell_h, expected) in [
+            (800.0, 600.0, 8.0, 16.0, (100, 37)),
+            // A cell larger than the area still yields one cell.
+            (1.0, 1.0, 100.0, 100.0, (1, 1)),
+        ] {
+            assert_eq!(compute_grid_size(width, height, cell_w, cell_h), expected);
+        }
     }
 
     #[test]

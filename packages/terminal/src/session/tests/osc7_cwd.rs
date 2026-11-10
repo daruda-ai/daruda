@@ -60,25 +60,16 @@ fn rejects_non_file_scheme() {
 }
 
 #[test]
-fn feed_sets_cwd_via_osc7_bel() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let (url_path, dir) = this_host_dir();
-    session
-        .feed(format!("\x1b]7;file://localhost{url_path}\x07").as_bytes())
-        .unwrap();
-    assert_eq!(session.cwd(), Some(dir));
-}
-
-#[test]
-fn feed_sets_cwd_via_osc7_st() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let (url_path, dir) = this_host_dir();
-    session
-        .feed(format!("\x1b]7;file://localhost{url_path}\x1b\\").as_bytes())
-        .unwrap();
-    assert_eq!(session.cwd(), Some(dir));
+fn feed_sets_cwd_via_osc7_with_either_terminator() {
+    for terminator in ["\x07", "\x1b\\"] {
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+        let (url_path, dir) = this_host_dir();
+        session
+            .feed(format!("\x1b]7;file://localhost{url_path}{terminator}").as_bytes())
+            .unwrap();
+        assert_eq!(session.cwd(), Some(dir), "{terminator:?}");
+    }
 }
 
 /// What a shell really sends: its own `gethostname`, not `localhost`.

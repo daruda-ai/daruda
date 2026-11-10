@@ -312,17 +312,12 @@ mod tests {
     }
 
     #[test]
-    fn equal_release_returns_none() {
-        let current = semver::Version::parse("0.3.0").unwrap();
-        let result = parse_release_with_suffix(RELEASE_JSON, &current, ".dmg").unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn older_current_returns_none() {
-        let current = semver::Version::parse("0.4.0").unwrap();
-        let result = parse_release_with_suffix(RELEASE_JSON, &current, ".dmg").unwrap();
-        assert!(result.is_none());
+    fn an_equal_or_older_release_returns_none() {
+        for current in ["0.3.0", "0.4.0"] {
+            let current = semver::Version::parse(current).unwrap();
+            let result = parse_release_with_suffix(RELEASE_JSON, &current, ".dmg").unwrap();
+            assert!(result.is_none(), "current {current}");
+        }
     }
 
     #[test]

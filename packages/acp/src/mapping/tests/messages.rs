@@ -243,20 +243,27 @@ fn distinct_user_message_chunk_is_kept() {
 }
 
 #[test]
-fn user_message_chunk_appends_when_no_trailing_user_text() {
-    // No preceding echo (e.g. the trailing item is agent text): the chunk is
-    // a genuine user message and is pushed.
-    let mut items = vec![ChatItem::AssistantText {
-        text: "hi".to_string(),
-        streaming: false,
-        message_id: None,
-        phase: Default::default(),
-    }];
-    apply_update(
-        &mut items,
-        &SessionUpdate::UserMessageChunk(text_chunk("a real prompt")),
-    );
-    assert_eq!(items.len(), 2);
+fn user_message_chunk_appends_a_genuine_user_message() {
+    for text in [
+        // No preceding echo (the trailing item is agent text): the chunk is
+        // a genuine user message and is pushed.
+        "a real prompt",
+        // Only a chunk that *is* the wrapper (after leading whitespace) is
+        // dropped; genuine prose that happens to reference the tag survives.
+        "what does <task-notification> mean?",
+    ] {
+        let mut items = vec![ChatItem::AssistantText {
+            text: "hi".to_string(),
+            streaming: false,
+            message_id: None,
+            phase: Default::default(),
+        }];
+        apply_update(
+            &mut items,
+            &SessionUpdate::UserMessageChunk(text_chunk(text)),
+        );
+        assert_eq!(items.len(), 2, "{text:?}");
+    }
 }
 
 #[test]
@@ -281,23 +288,6 @@ fn user_message_chunk_drops_a_replayed_task_notification() {
         )),
     );
     assert_eq!(items.len(), 1, "the task-notification blob is dropped");
-}
-
-#[test]
-fn user_message_chunk_keeps_text_that_merely_mentions_task_notification() {
-    // Only a chunk that *is* the wrapper (after leading whitespace) is
-    // dropped; genuine prose that happens to reference the tag survives.
-    let mut items = vec![ChatItem::AssistantText {
-        text: "hi".to_string(),
-        streaming: false,
-        message_id: None,
-        phase: Default::default(),
-    }];
-    apply_update(
-        &mut items,
-        &SessionUpdate::UserMessageChunk(text_chunk("what does <task-notification> mean?")),
-    );
-    assert_eq!(items.len(), 2);
 }
 
 #[test]

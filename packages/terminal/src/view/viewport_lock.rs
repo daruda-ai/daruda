@@ -88,29 +88,25 @@ mod tests {
     }
 
     #[test]
-    fn at_live_edge_exact_bottom_follows() {
-        // Last visible row is the last content row (offset + rows == total).
-        assert!(at_live_edge(10, 24, 34, 0));
-        assert!(at_live_edge(10, 24, 34, 1));
-    }
-
-    #[test]
-    fn at_live_edge_slack_keeps_one_row_up_live() {
-        // One row above the bottom: pinned with slack 0, still live with slack 1.
-        assert!(!at_live_edge(9, 24, 34, 0));
-        assert!(at_live_edge(9, 24, 34, 1));
-    }
-
-    #[test]
-    fn at_live_edge_two_rows_up_pins_even_with_slack_one() {
-        assert!(!at_live_edge(8, 24, 34, 1));
-    }
-
-    #[test]
-    fn at_live_edge_no_scrollback_never_underflows() {
-        // total < slack must not panic and must read as live (everything fits).
-        assert!(at_live_edge(0, 24, 2, 1));
-        assert!(at_live_edge(0, 24, 0, 1));
+    fn at_live_edge_follows_the_bottom_within_slack() {
+        for (offset, rows, total, slack, live) in [
+            // Last visible row is the last content row (offset + rows == total).
+            (10, 24, 34, 0, true),
+            (10, 24, 34, 1, true),
+            // One row above the bottom: pinned with slack 0, live with slack 1.
+            (9, 24, 34, 0, false),
+            (9, 24, 34, 1, true),
+            (8, 24, 34, 1, false),
+            // total < slack must not underflow and reads as live (everything fits).
+            (0, 24, 2, 1, true),
+            (0, 24, 0, 1, true),
+        ] {
+            assert_eq!(
+                at_live_edge(offset, rows, total, slack),
+                live,
+                "offset {offset}, rows {rows}, total {total}, slack {slack}"
+            );
+        }
     }
 
     #[test]

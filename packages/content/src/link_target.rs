@@ -313,35 +313,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn strips_absolute_line_suffix() {
+    fn strips_a_line_or_line_and_column_suffix() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("diff.rs");
         std::fs::write(&path, "fn main() {}\n").unwrap();
 
-        let link = format!("{}:75", path.display());
-        assert_eq!(
-            local_path(&link, None),
-            Some(LocalPath {
-                path,
-                line: Some(75)
-            })
-        );
-    }
-
-    #[test]
-    fn strips_line_and_column_suffix() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("diff.rs");
-        std::fs::write(&path, "fn main() {}\n").unwrap();
-
-        let link = format!("{}:75:9", path.display());
-        assert_eq!(
-            local_path(&link, None),
-            Some(LocalPath {
-                path,
-                line: Some(75)
-            })
-        );
+        for suffix in [":75", ":75:9"] {
+            let link = format!("{}{suffix}", path.display());
+            assert_eq!(
+                local_path(&link, None),
+                Some(LocalPath {
+                    path: path.clone(),
+                    line: Some(75)
+                }),
+                "{suffix}"
+            );
+        }
     }
 
     #[test]

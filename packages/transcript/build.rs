@@ -3,7 +3,8 @@
 use std::path::Path;
 
 const EN: &str = "locales/en.yml";
-/// Read by `rust_i18n::i18n!`, which tracks no file it embeds.
+/// Checked against `en.yml` here, and read by `rust_i18n::i18n!`, which
+/// tracks no file it embeds.
 const KO: &str = "locales/ko.yml";
 /// No section of this crate needs a hand-written string today.
 const CUSTOM_DIR: &str = "src/strings/custom";
@@ -12,6 +13,8 @@ fn main() {
     println!("cargo:rerun-if-changed={EN}");
     println!("cargo:rerun-if-changed={KO}");
     let en = std::fs::read_to_string(EN).expect("read locales/en.yml");
+    let ko = std::fs::read_to_string(KO).expect("read locales/ko.yml");
+    strings_gen::check_parity(&en, &ko).unwrap_or_else(|e| panic!("{KO}: {e}"));
     let out =
         strings_gen::generate(&en, Path::new(CUSTOM_DIR)).unwrap_or_else(|e| panic!("{EN}: {e}"));
     let dest = Path::new(&std::env::var("OUT_DIR").expect("OUT_DIR")).join("strings.rs");

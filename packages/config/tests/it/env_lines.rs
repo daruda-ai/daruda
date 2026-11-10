@@ -13,15 +13,14 @@ fn parse_env_lines_skips_comments_and_blank_lines() {
 }
 
 #[test]
-fn parse_env_lines_trims_value_padding() {
-    let env = parse_env_lines("KEY=  padded  ").unwrap();
-    assert_eq!(env.get("KEY").unwrap(), "padded");
-}
-
-#[test]
-fn parse_env_lines_preserves_embedded_whitespace() {
-    let env = parse_env_lines("MSG=hello world\n").unwrap();
-    assert_eq!(env.get("MSG").unwrap(), "hello world");
+fn parse_env_lines_trims_padding_but_keeps_embedded_whitespace() {
+    for (input, key, expected) in [
+        ("KEY=  padded  ", "KEY", "padded"),
+        ("MSG=hello world\n", "MSG", "hello world"),
+    ] {
+        let env = parse_env_lines(input).unwrap();
+        assert_eq!(env.get(key).unwrap(), expected, "{input:?}");
+    }
 }
 
 #[test]

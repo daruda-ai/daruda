@@ -276,6 +276,13 @@ pub fn check_placeholder_parity(en: &str, ko: &str) -> Result<(), String> {
     ))
 }
 
+/// Both parity checks, for a crate's build script: a drifted translation
+/// fails the build of the crate that ships it rather than a later test run.
+pub fn check_parity(en: &str, ko: &str) -> Result<(), String> {
+    check_key_parity(en, ko)?;
+    check_placeholder_parity(en, ko)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,5 +437,8 @@ mod tests {
         let ko = "a:\n  x: \"%{count}개\"\n";
         let err = check_placeholder_parity(en, ko).expect_err("drift");
         assert!(err.contains("a.x"), "{err}");
+        // Keys match here, so only the placeholder half can fail the build.
+        let err = check_parity(en, ko).expect_err("drift");
+        assert!(err.contains("placeholder"), "{err}");
     }
 }

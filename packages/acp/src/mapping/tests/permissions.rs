@@ -162,19 +162,13 @@ fn summarize_raw_input_truncates_an_overlong_value() {
 }
 
 #[test]
-fn summarize_raw_input_is_none_without_a_known_key() {
-    assert_eq!(
-        summarize_raw_input(Some(&serde_json::json!({"subagent_type": "reviewer"}))),
-        None
-    );
-}
-
-#[test]
-fn summarize_raw_input_is_none_for_an_empty_matched_value() {
-    assert_eq!(
-        summarize_raw_input(Some(&serde_json::json!({"command": ""}))),
-        None
-    );
+fn summarize_raw_input_is_none_without_a_non_empty_known_key() {
+    for raw in [
+        serde_json::json!({"subagent_type": "reviewer"}),
+        serde_json::json!({"command": ""}),
+    ] {
+        assert_eq!(summarize_raw_input(Some(&raw)), None, "{raw}");
+    }
 }
 
 #[test]

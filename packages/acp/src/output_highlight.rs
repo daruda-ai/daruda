@@ -284,46 +284,33 @@ mod tests {
     }
 
     #[test]
-    fn a_fenced_line_numbered_read_loses_both_the_fence_and_the_numbers() {
-        assert_eq!(
-            body_of("```\n1\tfn main() {}\n2\t// end\n```", None),
-            "fn main() {}\n// end"
-        );
-    }
-
-    #[test]
-    fn an_unfenced_line_numbered_read_still_loses_its_numbers() {
-        // The measured shape an adapter that does not markdown-escape sends —
-        // and the one whose `cat -n` gutter used to survive to the render.
-        assert_eq!(
-            body_of("   1\tfn main() {}\n   2\tlet x = 1;", None),
-            "fn main() {}\nlet x = 1;"
-        );
-    }
-
-    #[test]
-    fn an_unfenced_read_is_kept_verbatim() {
-        assert_eq!(
-            body_of("fn main() {}\nlet x = 1;", None),
-            "fn main() {}\nlet x = 1;"
-        );
-    }
-
-    #[test]
-    fn arrow_line_numbers_are_stripped_too() {
-        assert_eq!(
-            body_of("  12\u{2192}let x = 1;\n  13\u{2192}let y = 2;", None),
-            "let x = 1;\nlet y = 2;"
-        );
-    }
-
-    #[test]
-    fn a_partly_numbered_body_is_kept_verbatim() {
-        // One line lacks a prefix → strip nothing rather than mangle the rest.
-        assert_eq!(
-            body_of("```\n1\tnumbered\nplain line\n```", None),
-            "1\tnumbered\nplain line"
-        );
+    fn line_number_gutters_are_stripped_only_when_every_line_has_one() {
+        for (raw, expected) in [
+            // A fenced, line-numbered read loses both the fence and the numbers.
+            (
+                "```\n1\tfn main() {}\n2\t// end\n```",
+                "fn main() {}\n// end",
+            ),
+            // The measured shape an adapter that does not markdown-escape sends —
+            // and the one whose `cat -n` gutter used to survive to the render.
+            (
+                "   1\tfn main() {}\n   2\tlet x = 1;",
+                "fn main() {}\nlet x = 1;",
+            ),
+            ("fn main() {}\nlet x = 1;", "fn main() {}\nlet x = 1;"),
+            // Arrow-style gutters are stripped too.
+            (
+                "  12\u{2192}let x = 1;\n  13\u{2192}let y = 2;",
+                "let x = 1;\nlet y = 2;",
+            ),
+            // One line lacks a prefix → strip nothing rather than mangle the rest.
+            (
+                "```\n1\tnumbered\nplain line\n```",
+                "1\tnumbered\nplain line",
+            ),
+        ] {
+            assert_eq!(body_of(raw, None), expected, "{raw:?}");
+        }
     }
 
     #[test]

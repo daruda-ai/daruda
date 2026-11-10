@@ -25,44 +25,23 @@ fn file_aged(state: SessionStatus, age: Duration) -> StatusFile {
 }
 
 #[test]
-fn classify_fresh_loads() {
-    let now = SystemTime::now();
-    let modified = now - Duration::from_secs(60);
-    assert_eq!(classify(modified, now, &policy()), ColdRestoreAction::Load);
-}
-
-#[test]
-fn classify_stale_resets() {
-    let now = SystemTime::now();
-    let modified = now - Duration::from_secs(600); // 10 min
-    assert_eq!(classify(modified, now, &policy()), ColdRestoreAction::Reset);
-}
-
-#[test]
-fn classify_old_deletes() {
-    let now = SystemTime::now();
-    let modified = now - Duration::from_secs(8 * 24 * 60 * 60); // 8 days
-    assert_eq!(
-        classify(modified, now, &policy()),
-        ColdRestoreAction::Delete
-    );
-}
-
-#[test]
-fn classify_boundary_at_threshold_resets() {
-    let now = SystemTime::now();
-    let modified = now - Duration::from_secs(300);
-    assert_eq!(classify(modified, now, &policy()), ColdRestoreAction::Reset);
-}
-
-#[test]
-fn classify_boundary_at_ttl_deletes() {
-    let now = SystemTime::now();
-    let modified = now - Duration::from_secs(7 * 24 * 60 * 60);
-    assert_eq!(
-        classify(modified, now, &policy()),
-        ColdRestoreAction::Delete
-    );
+fn classify_by_age_loads_resets_or_deletes() {
+    const DAY: u64 = 24 * 60 * 60;
+    for (age_secs, expected) in [
+        (60, ColdRestoreAction::Load),
+        (600, ColdRestoreAction::Reset), // 10 min
+        (300, ColdRestoreAction::Reset), // at the threshold
+        (8 * DAY, ColdRestoreAction::Delete),
+        (7 * DAY, ColdRestoreAction::Delete), // at the TTL
+    ] {
+        let now = SystemTime::now();
+        let modified = now - Duration::from_secs(age_secs);
+        assert_eq!(
+            classify(modified, now, &policy()),
+            expected,
+            "{age_secs}s old"
+        );
+    }
 }
 
 #[test]

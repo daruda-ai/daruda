@@ -260,13 +260,12 @@ fn incomplete_tail_is_retried_when_size_and_timestamp_are_unchanged() {
 }
 
 #[test]
-fn same_size_rewrite_with_an_incomplete_tail_rebuilds_the_prefix() {
-    assert_partial_tail_rewrite_rebuilds(1);
-}
-
-#[test]
-fn shrink_above_consumed_offset_rebuilds_the_prefix() {
-    assert_partial_tail_rewrite_rebuilds(3);
+fn a_rewrite_under_the_consumed_offset_rebuilds_the_prefix() {
+    // 1: a same-size rewrite with an incomplete tail; 3: a shrink above the
+    // consumed offset.
+    for initial_tail_lines in [1, 3] {
+        assert_partial_tail_rewrite_rebuilds(initial_tail_lines);
+    }
 }
 
 fn assert_partial_tail_rewrite_rebuilds(initial_tail_lines: usize) {

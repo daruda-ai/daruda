@@ -296,27 +296,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn submit_appends_single_cr() {
-        assert_eq!(to_terminal_bytes("claude", true), b"claude\r");
-    }
-
-    #[test]
-    fn submit_does_not_double_trailing_cr() {
-        assert_eq!(to_terminal_bytes("claude\r", true), b"claude\r");
-    }
-
-    #[test]
-    fn no_submit_sends_body_verbatim() {
-        assert_eq!(to_terminal_bytes("git checkout ", false), b"git checkout ");
-    }
-
-    #[test]
-    fn interior_newline_becomes_cr() {
-        assert_eq!(to_terminal_bytes("a\nb", false), b"a\rb");
-    }
-
-    #[test]
-    fn submit_with_interior_newline_normalizes_and_appends_cr() {
-        assert_eq!(to_terminal_bytes("line1\nline2", true), b"line1\rline2\r");
+    fn newlines_become_cr_and_submit_appends_exactly_one() {
+        for (text, submit, expected) in [
+            ("claude", true, &b"claude\r"[..]),
+            // A trailing CR is not doubled.
+            ("claude\r", true, b"claude\r"),
+            ("git checkout ", false, b"git checkout "),
+            ("a\nb", false, b"a\rb"),
+            ("line1\nline2", true, b"line1\rline2\r"),
+        ] {
+            assert_eq!(
+                to_terminal_bytes(text, submit),
+                expected,
+                "{text:?}, submit {submit}"
+            );
+        }
     }
 }

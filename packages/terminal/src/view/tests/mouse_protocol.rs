@@ -3,21 +3,21 @@
 // ============================================================================
 
 #[test]
-fn normal_mouse_sequence_press_single_byte_coords() {
+fn normal_mouse_sequence_single_byte_coords() {
     use super::super::mouse::normal_mouse_sequence;
-    // Left press (button=0), col=1, row=1, no utf8
-    // Expected: ESC [ M (32+0) (32+1) (32+1) = ESC [ M ' ' '!' '!'
-    let seq = normal_mouse_sequence(0, 1, 1, false);
-    assert_eq!(seq, b"\x1b[M !!");
-}
-
-#[test]
-fn normal_mouse_sequence_release_uses_button3() {
-    use super::super::mouse::normal_mouse_sequence;
-    // Release in Normal mode should be sent as button 3 by the caller.
-    // button=3, col=1, row=1 → 32+3=35='#', coords 33='!'
-    let seq = normal_mouse_sequence(3, 1, 1, false);
-    assert_eq!(seq, b"\x1b[M#!!");
+    // ESC [ M (32+button) (32+col) (32+row); col=1, row=1 → '!' '!'.
+    for (button, expected) in [
+        // Left press (button=0) → ' '.
+        (0, &b"\x1b[M !!"[..]),
+        // The caller sends a Normal-mode release as button 3 → '#'.
+        (3, b"\x1b[M#!!"),
+    ] {
+        assert_eq!(
+            normal_mouse_sequence(button, 1, 1, false),
+            expected,
+            "button {button}"
+        );
+    }
 }
 
 #[test]

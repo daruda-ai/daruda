@@ -83,10 +83,9 @@ Do **not** add domain-prefixed duplicates like `ui.file_viewer_loading`.
    a section is preferred but not required.
 
 2. **Add the matching key to `ko.yml`** in the same position. Missing keys fall
-   back to English at runtime (rust-i18n `fallback = "en"`);
-   `locale_en_ko_key_parity` and `locale_en_ko_placeholder_parity` in
-   `surface/strings/tests.rs` (checks from `tools/strings_gen`) fail when the
-   two drift.
+   back to English at runtime (rust-i18n `fallback = "en"`), so
+   `packages/app/build.rs` runs `strings_gen::check_parity` and fails the
+   build when the two files differ in keys or placeholders.
 
 3. **There is no step 3.** `packages/app/build.rs` (via `tools/strings_gen`) turns every `en.yml` key into
    a function — `section.key` is `crate::surface::strings::section::key()`, and

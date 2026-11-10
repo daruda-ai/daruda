@@ -105,9 +105,9 @@ fn legacy_leaf_without_file_field_loads_as_terminal() {
 }
 
 #[test]
-fn file_leaf_skips_serialization_when_terminal() {
-    // Terminal leaves (`file: None`) emit no `file` key in JSON so
-    // saved state stays small for the common case.
+fn a_terminal_leaf_writes_no_file_or_agent_chat_key() {
+    // Absent optional keys keep saved state small for the common case and
+    // existing terminal/file state files byte-compatible.
     let leaf = SerializedLayout::Leaf {
         pane_id: 1,
         content: SerializedPaneContent::Terminal {
@@ -116,10 +116,12 @@ fn file_leaf_skips_serialization_when_terminal() {
         },
     };
     let json = serde_json::to_string(&leaf).unwrap();
-    assert!(
-        !json.contains("\"file\""),
-        "terminal leaves must not write a `file` key, got: {json}"
-    );
+    for key in ["\"file\"", "\"agent_chat\""] {
+        assert!(
+            !json.contains(key),
+            "terminal leaves must not write {key}, got: {json}"
+        );
+    }
 }
 
 #[test]
@@ -873,24 +875,6 @@ fn pane_cwd_as_local_and_into_local_gate_remote() {
 }
 
 #[test]
-fn agent_chat_leaf_skips_serialization_when_absent() {
-    // A non-AgentChat leaf (`agent_chat: None`) emits no `agent_chat`
-    // key so existing terminal/file state files stay byte-compatible.
-    let leaf = SerializedLayout::Leaf {
-        pane_id: 1,
-        content: SerializedPaneContent::Terminal {
-            cwd: Some(PathBuf::from("/tmp")),
-            account_id: None,
-        },
-    };
-    let json = serde_json::to_string(&leaf).unwrap();
-    assert!(
-        !json.contains("\"agent_chat\""),
-        "non-agent-chat leaves must not write an `agent_chat` key, got: {json}"
-    );
-}
-
-#[test]
 fn legacy_leaf_without_agent_chat_field_loads_as_none() {
     // Forward-compat: state files written before AgentChat panes
     // existed omit the `agent_chat` key entirely — they must
@@ -930,14 +914,26 @@ fn rect(x: f32, y: f32, width: f32, height: f32) -> WindowState {
     }
 }
 
-/// A window already on the display is left where it was.
+/// A window already on the display is left where it was; one larger than
+/// the display shrinks to it first.
 #[test]
-fn a_window_on_the_display_keeps_its_place() {
-    let fitted = rect(100.0, 80.0, 800.0, 600.0).fit_within(0.0, 0.0, 1920.0, 1080.0);
-    assert_eq!(
-        (fitted.x, fitted.y, fitted.width, fitted.height),
-        (100.0, 80.0, 800.0, 600.0)
-    );
+fn a_window_on_or_larger_than_the_display_fits_it() {
+    for (window, display, expected) in [
+        (
+            (100.0, 80.0, 800.0, 600.0),
+            (1920.0, 1080.0),
+            (100.0, 80.0, 800.0, 600.0),
+        ),
+        (
+            (0.0, 0.0, 3000.0, 2000.0),
+            (1440.0, 900.0),
+            (0.0, 0.0, 1440.0, 900.0),
+        ),
+    ] {
+        let fitted =
+            rect(window.0, window.1, window.2, window.3).fit_within(0.0, 0.0, display.0, display.1);
+        assert_eq!((fitted.x, fitted.y, fitted.width, fitted.height), expected);
+    }
 }
 
 /// One that hangs off an edge — a monitor since unplugged, a smaller one —
@@ -948,16 +944,6 @@ fn a_window_off_the_display_slides_back_onto_it() {
     assert_eq!((fitted.x, fitted.y), (1120.0, 0.0));
     let fitted = rect(1500.0, 900.0, 800.0, 600.0).fit_within(0.0, 0.0, 1920.0, 1080.0);
     assert_eq!((fitted.x, fitted.y), (1120.0, 480.0));
-}
-
-/// One larger than the display shrinks to it first.
-#[test]
-fn a_window_larger_than_the_display_shrinks_to_it() {
-    let fitted = rect(0.0, 0.0, 3000.0, 2000.0).fit_within(0.0, 0.0, 1440.0, 900.0);
-    assert_eq!(
-        (fitted.x, fitted.y, fitted.width, fitted.height),
-        (0.0, 0.0, 1440.0, 900.0)
-    );
 }
 
 /// The display's own origin counts: a display left of the primary has a

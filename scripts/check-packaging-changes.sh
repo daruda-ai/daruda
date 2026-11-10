@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Read changed paths from stdin and select dependency/native-package checks.
+# Read changed paths from stdin and select dependency/native-package checks,
+# including the vendored test suites (`ci-cargo.sh vendor-test`).
 set -euo pipefail
 
 select_changes() {
@@ -11,7 +12,7 @@ select_changes() {
             scripts/build-app.sh | scripts/build-dmg.sh | scripts/package-* | \
             scripts/bootstrap-zig.* | scripts/build-windows*.ps1 | scripts/windows/* | \
             scripts/linux/* | scripts/Info.plist.tmpl | scripts/rust-version.sh | \
-            scripts/check-packaging-changes.sh | .github/actions/setup-build/* | \
+            rust-toolchain.toml | scripts/ci-cargo.sh | scripts/check-packaging-changes.sh | .github/actions/setup-build/* | \
             .github/workflows/ci.yml | .github/workflows/release.yml | \
             assets/icon.* | LICENSE | LICENSES/*) selected=true ;;
         esac
@@ -21,7 +22,9 @@ select_changes() {
 
 if [ "${1:-}" = "--self-test" ]; then
     for path in Cargo.lock packages/acp/Cargo.toml packages/ghostty/build.rs \
-        vendor/zed/UPSTREAM patches/gpui-window.patch scripts/package-linux.sh \
+        vendor/zed/UPSTREAM vendor/gpui-kit/crates/base/src/root.rs \
+        vendor/ferrum-flow/ferrum_flow/src/lib.rs rust-toolchain.toml scripts/ci-cargo.sh \
+        patches/gpui-window.patch scripts/package-linux.sh \
         scripts/build-app.sh scripts/linux/build-deps.txt .gitmodules \
         scripts/bootstrap-zig.ps1 scripts/build-windows-installer.ps1 scripts/windows/installer.nsi \
         .github/actions/setup-build/action.yml .github/workflows/ci.yml \

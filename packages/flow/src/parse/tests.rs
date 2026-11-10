@@ -360,15 +360,12 @@ fn a_missing_version_is_a_parse_error_not_a_default() {
     );
 }
 
-/// A plain YAML scalar may not contain `": "`, which a `grep` for
-/// `VERDICT: PASS` does. Quoting is the flow author's job, and the
-/// parser must say so clearly rather than silently mis-read the node.
-/// A typo in an override key must not silently disarm it — `moed`
-/// parsing as `Ok` with `mode: None` would be indistinguishable from an
-/// intentional omission.
 #[test]
-fn an_unknown_field_in_an_agent_override_is_a_parse_error() {
-    let err = crate::load(
+fn malformed_node_fields_are_parse_errors() {
+    for yaml in [
+        // A typo in an override key must not silently disarm it — `moed`
+        // parsing as `Ok` with `mode: None` would be indistinguishable from an
+        // intentional omission.
         "\
 version: 1
 nodes:
@@ -378,10 +375,20 @@ nodes:
     output: a.md
     prompt: write
 ",
-        None,
-    )
-    .expect_err("moed is not a known AgentOverride field");
-    assert!(matches!(err, FlowError::Parse(_)));
+        // A plain YAML scalar may not contain `": "`, which a `grep` for
+        // `VERDICT: PASS` does. Quoting is the flow author's job, and the
+        // parser must say so clearly rather than silently mis-read the node.
+        "\
+version: 1
+nodes:
+  - id: gate
+    kind: command
+    run: grep -q '^VERDICT: PASS' out.md
+",
+    ] {
+        let err = crate::load(yaml, None).expect_err(yaml);
+        assert!(matches!(err, FlowError::Parse(_)), "{yaml}");
+    }
 }
 
 /// `on_fail: halt` is a bare string, unlike `retry`/`repair`'s mapping
@@ -417,20 +424,4 @@ nodes:
         }
         other => panic!("expected a command node, got {other:?}"),
     }
-}
-
-#[test]
-fn an_unquoted_colon_in_a_command_is_a_parse_error() {
-    let err = crate::load(
-        "\
-version: 1
-nodes:
-  - id: gate
-    kind: command
-    run: grep -q '^VERDICT: PASS' out.md
-",
-        None,
-    )
-    .expect_err("a plain scalar cannot hold \": \"");
-    assert!(matches!(err, FlowError::Parse(_)));
 }

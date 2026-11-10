@@ -88,29 +88,20 @@ fn ffi_handler_scroll_down_cs_t_shifts_content() {
 }
 
 #[test]
-fn ffi_handler_insert_blanks_cs_at() {
-    // ICH (CSI @) — insert N blank cells at cursor, shifting right.
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-
-    session.feed(b"abcdef").unwrap();
-    place_cursor_at(&mut session, 1, 2); // cursor on 'b'
-    session.feed(b"\x1b[2@").unwrap();
-
-    assert_eq!(row_text(&session, 0), "a  bcdef", "ICH inserted 2 blanks");
-}
-
-#[test]
-fn ffi_handler_delete_chars_cs_p() {
-    // DCH (CSI P) — delete N cells at cursor, shifting left.
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-
-    session.feed(b"abcdef").unwrap();
-    place_cursor_at(&mut session, 1, 2); // cursor on 'b'
-    session.feed(b"\x1b[2P").unwrap();
-
-    assert_eq!(row_text(&session, 0), "adef", "DCH removed 2 chars");
+fn ffi_handler_insert_and_delete_chars_at_cursor() {
+    for (csi, expected, what) in [
+        // ICH (CSI @) — insert N blank cells at cursor, shifting right.
+        (&b"\x1b[2@"[..], "a  bcdef", "ICH inserted 2 blanks"),
+        // DCH (CSI P) — delete N cells at cursor, shifting left.
+        (b"\x1b[2P", "adef", "DCH removed 2 chars"),
+    ] {
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+        session.feed(b"abcdef").unwrap();
+        place_cursor_at(&mut session, 1, 2); // cursor on 'b'
+        session.feed(csi).unwrap();
+        assert_eq!(row_text(&session, 0), expected, "{what}");
+    }
 }
 
 #[test]

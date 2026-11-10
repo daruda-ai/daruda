@@ -341,6 +341,25 @@ behavior. See [Local Checks](CONTRIBUTING.md#local-checks) for check selection;
 review mode retains its execution restriction. Cargo gates delegate package
 coverage to `scripts/ci-cargo.sh`; do not copy package lists.
 
+#### Running Tests
+
+| When | Command |
+|---|---|
+| Iterating on one crate | `cargo test --locked -p <cargo package> [name filter]` (package names differ from `packages/` directory names) |
+| First-party suite, before a commit | `bash scripts/ci-cargo.sh test` |
+| `vendor/`, a Cargo manifest or lockfile, or `rust-toolchain.toml` changed | `bash scripts/ci-cargo.sh vendor-test` |
+
+`test` excludes the vendored `gpui-base`, `gpui-component`, and `ferrum_flow`
+suites: they depend on nothing outside `vendor/`, the manifests, and the
+toolchain, and CI runs `vendor-test` only when
+`scripts/check-packaging-changes.sh` selects the diff. Locale key and
+placeholder parity is a build-script check, not a test.
+
+When cases differ only in their inputs, write one table-driven test whose rows
+carry the per-case comment and a failure label, not a test per literal. Keep
+separate tests for distinct behaviors, cases needing their own GPUI context,
+and cases behind a platform `#[cfg]`.
+
 The full checklist includes source lints and their listed self-tests, default
 Clippy/tests, all-feature app Clippy, doc links, the offline ACP preset drift
 gate, and screenshot-feature tests. CI runs a subset of local source checks;
@@ -350,6 +369,6 @@ When workspace behavior is affected or the full suite is required, skipping
 
 Do not clean up vendored upstream code as part of a general lint/refactor pass.
 Explicit vendor checks still apply, including mouse-button guards,
-`gpui_component` patch tests, and `ferrum_flow`'s MSRV check. GPUI's vendored
-tree is regenerated through `tools/vendor_gpui`; its patch workflow is in
-[patches/README.md](patches/README.md).
+`gpui_component` patch tests (`vendor-test` after a vendor change), and
+`ferrum_flow`'s MSRV check. GPUI's vendored tree is regenerated through
+`tools/vendor_gpui`; its patch workflow is in [patches/README.md](patches/README.md).

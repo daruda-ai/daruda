@@ -5,6 +5,3 @@
 mod custom;
 
 include!(concat!(env!("OUT_DIR"), "/strings.rs"));
-
-#[cfg(test)]
-mod tests;

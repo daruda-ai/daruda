@@ -1,59 +1,21 @@
 use super::*;
 
 #[test]
-fn primary_da_responds_to_esc_bracket_c() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let resp = collect_responses(&mut session, b"\x1b[c");
-    assert_eq!(resp, ansi::PRIMARY_DA);
-}
-
-#[test]
-fn primary_da_responds_to_esc_bracket_0c() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let resp = collect_responses(&mut session, b"\x1b[0c");
-    assert_eq!(resp, ansi::PRIMARY_DA);
-}
-
-#[test]
-fn secondary_da_responds_to_esc_bracket_gt_c() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let resp = collect_responses(&mut session, b"\x1b[>c");
-    assert_eq!(resp, ansi::SECONDARY_DA);
-}
-
-#[test]
-fn secondary_da_responds_to_esc_bracket_gt_0c() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let resp = collect_responses(&mut session, b"\x1b[>0c");
-    assert_eq!(resp, ansi::SECONDARY_DA);
-}
-
-#[test]
-fn tertiary_da_responds_to_esc_bracket_eq_c() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let resp = collect_responses(&mut session, b"\x1b[=c");
-    assert_eq!(resp, ansi::TERTIARY_DA);
-}
-
-#[test]
-fn xtversion_responds_to_esc_bracket_gt_0q() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let resp = collect_responses(&mut session, b"\x1b[>0q");
-    assert_eq!(resp, ansi::XTVERSION);
-}
-
-#[test]
-fn xtversion_responds_to_esc_bracket_gt_q() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let resp = collect_responses(&mut session, b"\x1b[>q");
-    assert_eq!(resp, ansi::XTVERSION);
+fn identity_queries_answer_with_their_reply() {
+    for (query, expected) in [
+        (&b"\x1b[c"[..], ansi::PRIMARY_DA),
+        (b"\x1b[0c", ansi::PRIMARY_DA),
+        (b"\x1b[>c", ansi::SECONDARY_DA),
+        (b"\x1b[>0c", ansi::SECONDARY_DA),
+        (b"\x1b[=c", ansi::TERTIARY_DA),
+        (b"\x1b[>0q", ansi::XTVERSION),
+        (b"\x1b[>q", ansi::XTVERSION),
+    ] {
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+        let resp = collect_responses(&mut session, query);
+        assert_eq!(resp, expected, "{query:?}");
+    }
 }
 
 #[test]
@@ -74,20 +36,17 @@ fn decrqm_returns_set_for_active_bracketed_paste() {
 }
 
 #[test]
-fn decrqm_returns_reset_for_inactive_mode() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    // SGR mouse is off by default
-    let resp = collect_responses(&mut session, b"\x1b[?1006$p");
-    assert_eq!(resp, b"\x1b[?1006;2$y");
-}
-
-#[test]
-fn decrqm_returns_not_recognised_for_unknown_mode() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let resp = collect_responses(&mut session, b"\x1b[?9999$p");
-    assert_eq!(resp, b"\x1b[?9999;0$y");
+fn decrqm_reports_reset_or_unrecognised_modes() {
+    for (query, expected) in [
+        // SGR mouse is off by default.
+        (&b"\x1b[?1006$p"[..], &b"\x1b[?1006;2$y"[..]),
+        (b"\x1b[?9999$p", b"\x1b[?9999;0$y"),
+    ] {
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+        let resp = collect_responses(&mut session, query);
+        assert_eq!(resp, expected, "{query:?}");
+    }
 }
 
 #[test]
@@ -163,21 +122,14 @@ fn xtgettcap_multiple_caps_in_one_query() {
 }
 
 #[test]
-fn primary_da_does_not_fire_on_nonzero_param() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    // ESC[3c is not a Primary DA query (Ps≠0 undefined)
-    let resp = collect_responses(&mut session, b"\x1b[3c");
-    assert!(resp.is_empty(), "no response for ESC[3c: {resp:?}");
-}
-
-#[test]
-fn secondary_da_does_not_fire_on_nonzero_gt_param() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    // ESC[>1c is not a Secondary DA query
-    let resp = collect_responses(&mut session, b"\x1b[>1c");
-    assert!(resp.is_empty(), "no response for ESC[>1c: {resp:?}");
+fn da_queries_with_a_nonzero_param_stay_silent() {
+    // Ps != 0 is undefined for Primary and Secondary DA.
+    for query in [&b"\x1b[3c"[..], b"\x1b[>1c"] {
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+        let resp = collect_responses(&mut session, query);
+        assert!(resp.is_empty(), "no response for {query:?}: {resp:?}");
+    }
 }
 
 #[test]

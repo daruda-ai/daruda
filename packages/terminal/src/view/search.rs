@@ -321,21 +321,39 @@ mod tests {
     }
 
     #[test]
-    fn empty_pattern_returns_no_matches() {
-        assert!(find_literal_matches(&line("anything"), "", Case::Sensitive).is_empty());
+    fn nothing_to_find_returns_no_matches() {
+        let empty: Vec<String> = Vec::new();
+        for (lines, needle) in [(line("anything"), ""), (line("hello"), "xyz"), (empty, "x")] {
+            assert!(
+                find_literal_matches(&lines, needle, Case::Sensitive).is_empty(),
+                "{needle:?} in {lines:?}"
+            );
+        }
     }
 
     #[test]
-    fn finds_single_occurrence_case_sensitive() {
-        let out = find_literal_matches(&line("Hello World"), "World", Case::Sensitive);
-        assert_eq!(
-            out,
-            vec![MatchRange {
-                row: 0,
-                start_col: 7,
-                end_col: 11
-            }]
-        );
+    fn single_line_matches_report_display_columns() {
+        for (text, needle, expected) in [
+            ("Hello World", "World", &[(7, 11)][..]),
+            ("ab", "b", &[(2, 2)][..]),
+            // Non-overlapping: 'aa' in 'aaa' matches at col 1, then advances
+            // to col 3 leaving no room.
+            ("aaa", "aa", &[(1, 2)][..]),
+            // Korean chars are display width 2: "한글" occupies cols 1-4, so
+            // the needle "글" is at cols 3-4.
+            ("한글 테스트", "글", &[(3, 4)][..]),
+        ] {
+            let out = find_literal_matches(&line(text), needle, Case::Sensitive);
+            let expected: Vec<MatchRange> = expected
+                .iter()
+                .map(|&(start_col, end_col)| MatchRange {
+                    row: 0,
+                    start_col,
+                    end_col,
+                })
+                .collect();
+            assert_eq!(out, expected, "{needle:?} in {text:?}");
+        }
     }
 
     #[test]
@@ -382,61 +400,16 @@ mod tests {
         assert_eq!(rows, vec![0, 1, 2, 2]);
     }
 
-    #[test]
-    fn overlapping_aa_in_aaa_advances_past_each_hit() {
-        // 'aa' in 'aaa' — the non-overlapping strategy finds exactly one
-        // match at col 1, then advances to col 3 leaving no room.
-        let out = find_literal_matches(&line("aaa"), "aa", Case::Sensitive);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].start_col, 1);
-        assert_eq!(out[0].end_col, 2);
-    }
-
-    #[test]
-    fn handles_cjk_width_correctly() {
-        // Korean chars are display width 2. "한글" starts at col 1,
-        // occupies cols 1-4 (2 chars × width 2). The needle "글" is at
-        // col 3-4.
-        let out = find_literal_matches(&line("한글 테스트"), "글", Case::Sensitive);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].start_col, 3);
-        assert_eq!(out[0].end_col, 4);
-    }
-
-    #[test]
-    fn empty_viewport_returns_no_matches() {
-        let empty: Vec<String> = Vec::new();
-        assert!(find_literal_matches(&empty, "x", Case::Sensitive).is_empty());
-    }
-
-    #[test]
-    fn no_match_returns_empty() {
-        assert!(find_literal_matches(&line("hello"), "xyz", Case::Sensitive).is_empty());
-    }
-
-    #[test]
-    fn match_at_end_of_line_end_col_is_correct() {
-        let out = find_literal_matches(&line("ab"), "b", Case::Sensitive);
-        assert_eq!(
-            out,
-            vec![MatchRange {
-                row: 0,
-                start_col: 2,
-                end_col: 2
-            }]
-        );
-    }
-
     // Regex search ----------------------------------------------------
 
     #[test]
-    fn compile_regex_rejects_empty_pattern() {
-        assert!(compile_regex("", Case::Sensitive).is_none());
-    }
-
-    #[test]
-    fn compile_regex_rejects_invalid_pattern() {
-        assert!(compile_regex("(unclosed", Case::Sensitive).is_none());
+    fn compile_regex_rejects_empty_and_invalid_patterns() {
+        for pattern in ["", "(unclosed"] {
+            assert!(
+                compile_regex(pattern, Case::Sensitive).is_none(),
+                "{pattern:?}"
+            );
+        }
     }
 
     #[test]

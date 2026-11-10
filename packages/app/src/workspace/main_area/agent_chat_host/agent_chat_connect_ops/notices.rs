@@ -95,25 +95,25 @@ mod tests {
         );
     }
 
-    /// The case a pane-only key would break: a connect can report that history
-    /// could not be restored *and* that the configured mode would not apply.
-    /// Both matter, and dedup only ever matches a toast still on screen — so a
-    /// shared key would silently swallow the second one.
     #[test]
-    fn two_different_advisories_from_one_pane_do_not_collapse() {
-        assert_ne!(
-            notice_dedup_key(7, "could not restore this conversation"),
-            notice_dedup_key(7, "the configured mode was refused")
-        );
-    }
-
-    /// Two panes reporting the same thing are two separate facts about two
-    /// separate sessions.
-    #[test]
-    fn the_same_advisory_from_two_panes_does_not_collapse() {
-        assert_ne!(
-            notice_dedup_key(7, "the configured mode was refused"),
-            notice_dedup_key(8, "the configured mode was refused")
-        );
+    fn advisories_collapse_only_for_the_same_pane_and_text() {
+        for (a, b) in [
+            // The case a pane-only key would break: a connect can report that
+            // history could not be restored *and* that the configured mode would
+            // not apply. Both matter, and dedup only ever matches a toast still on
+            // screen — so a shared key would silently swallow the second one.
+            (
+                (7, "could not restore this conversation"),
+                (7, "the configured mode was refused"),
+            ),
+            // Two panes reporting the same thing are two separate facts about two
+            // separate sessions.
+            (
+                (7, "the configured mode was refused"),
+                (8, "the configured mode was refused"),
+            ),
+        ] {
+            assert_ne!(notice_dedup_key(a.0, a.1), notice_dedup_key(b.0, b.1));
+        }
     }
 }

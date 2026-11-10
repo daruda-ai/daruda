@@ -87,19 +87,17 @@ fn the_prose_signed_out_form_is_a_reading_too() {
 }
 
 /// A form this build has never seen still has to survive — the set is the
-/// provider's to grow.
+/// provider's to grow — and the line is found among whatever else the CLI
+/// printed.
 #[test]
-fn an_unfamiliar_prose_form_survives_verbatim() {
-    let status = parse_prose_auth_status("Logged in using Something New").expect("parses");
-    assert_eq!(status.auth_method.as_deref(), Some("Something New"));
-}
-
-/// The line is found among whatever else the CLI printed.
-#[test]
-fn the_prose_line_is_found_among_other_output() {
-    let status =
-        parse_prose_auth_status("checking...\n  Logged in using ChatGPT\ndone").expect("parses");
-    assert_eq!(status.auth_method.as_deref(), Some("ChatGPT"));
+fn the_prose_auth_method_survives_verbatim() {
+    for (output, method) in [
+        ("Logged in using Something New", "Something New"),
+        ("checking...\n  Logged in using ChatGPT\ndone", "ChatGPT"),
+    ] {
+        let status = parse_prose_auth_status(output).expect("parses");
+        assert_eq!(status.auth_method.as_deref(), Some(method), "{output:?}");
+    }
 }
 
 #[test]

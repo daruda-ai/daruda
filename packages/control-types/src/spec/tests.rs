@@ -49,14 +49,19 @@ fn flow_without_name_lists() {
     );
 }
 
+/// The rest of the line is a prompt, not a nested command surface.
 #[test]
 fn daruda_takes_the_rest_of_the_line_verbatim() {
-    assert_eq!(
-        parse("/daruda make me a pane"),
-        Ok(ControlCommand::Ask {
-            text: "make me a pane".into()
-        })
-    );
+    for (input, text) in [
+        ("/daruda make me a pane", "make me a pane"),
+        ("/daruda /list", "/list"),
+    ] {
+        assert_eq!(
+            parse(input),
+            Ok(ControlCommand::Ask { text: text.into() }),
+            "{input}"
+        );
+    }
 }
 
 #[test]
@@ -89,45 +94,25 @@ fn daruda_without_text_reports_missing_argument() {
     );
 }
 
-/// The rest of the line is a prompt, not a nested command surface.
+/// `daruda` is in the suggestion pool like every other name, so a typo
+/// points at it instead of at nothing.
 #[test]
-fn daruda_does_not_parse_its_payload_as_a_command() {
-    assert_eq!(
-        parse("/daruda /list"),
-        Ok(ControlCommand::Ask {
-            text: "/list".into()
-        })
-    );
-}
-
-/// It is in the suggestion pool like every other name, so a typo points
-/// at it instead of at nothing.
-#[test]
-fn a_typo_of_daruda_suggests_it() {
-    assert_eq!(
-        parse("/darudo"),
-        Err(ParseError::Unknown {
-            input: "darudo".into(),
-            suggestion: Some("daruda"),
-        })
-    );
+fn unknown_command_suggests_nearest() {
+    for (input, suggestion) in [("/darudo", "daruda"), ("/lst", "list")] {
+        assert_eq!(
+            parse(input),
+            Err(ParseError::Unknown {
+                input: input[1..].into(),
+                suggestion: Some(suggestion),
+            })
+        );
+    }
 }
 
 #[test]
 fn non_command_text_is_not_a_command() {
     assert_eq!(parse("hello"), Err(ParseError::NotACommand));
     assert_eq!(parse(""), Err(ParseError::NotACommand));
-}
-
-#[test]
-fn unknown_command_suggests_nearest() {
-    assert_eq!(
-        parse("/lst"),
-        Err(ParseError::Unknown {
-            input: "lst".into(),
-            suggestion: Some("list"),
-        })
-    );
 }
 
 /// Telegram's own command menu sends `/list@thebot` in a group chat, and a

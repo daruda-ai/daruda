@@ -262,63 +262,47 @@ mod tests {
     }
 
     #[test]
-    fn empty_cho_jung_jong_composes_syllable() {
-        // ㅇ(U+3147) + ㅏ(U+314F) + ㄴ(U+3134) → "안" (U+C548)
-        assert_eq!(drive("ㅇㅏㄴ"), vec!["안"]);
-    }
-
-    #[test]
-    fn cho_only_flushes_on_nonjamo() {
-        // ㄱ a → standalone ㄱ then a
-        assert_eq!(drive("ㄱa"), vec!["ㄱ", "a"]);
-    }
-
-    #[test]
-    fn lv_flushes_on_nonjamo() {
-        // 가(ㄱㅏ) then ASCII 'x' → "가", "x"
-        assert_eq!(drive("ㄱㅏx"), vec!["가", "x"]);
-    }
-
-    #[test]
-    fn jung_migration_reuses_prev_jong() {
-        // ㅇㅏㄴㅏ → 안 in flight, next ㅏ migrates ㄴ to new syllable:
-        // flush "아" (LV without jong) + in-flight "나" (ChoJung) that
-        // flush() releases at the end. Matches Korean IME behaviour.
-        assert_eq!(drive("ㅇㅏㄴㅏ"), vec!["아", "나"]);
-    }
-
-    #[test]
-    fn choseong_overlap_flushes() {
-        // ㄱㄴ → ㄱ then in-flight ㄴ (Cho state) flushed at end.
-        assert_eq!(drive("ㄱㄴ"), vec!["ㄱ", "ㄴ"]);
-    }
-
-    #[test]
-    fn non_korean_passes_through() {
-        // abc → emitted 1:1 with no state change.
-        assert_eq!(drive("abc"), vec!["a", "b", "c"]);
-    }
-
-    #[test]
-    fn ascii_mixed_with_hangul() {
-        // ASCII around a composed syllable — each boundary forces a
-        // flush, keeping emit order stable.
-        assert_eq!(drive("aㅇㅏㄴb"), vec!["a", "안", "b"]);
-    }
-
-    #[test]
-    fn precomposed_syllable_passes_through() {
-        // A fully-formed syllable from macOS IME (not a compat jamo)
-        // must pass through unchanged — the composer is jamo-only.
-        assert_eq!(drive("안"), vec!["안"]);
-    }
-
-    #[test]
-    fn multiple_syllables_compose_independently() {
-        // ㅇㅏㄴㄴㅕㅇ → 안 + 녕. The ㄴ between syllables migrates
-        // from the first syllable's jong to the second's cho when ㅕ
-        // arrives.
-        assert_eq!(drive("ㅇㅏㄴㄴㅕㅇ"), vec!["안", "녕"]);
+    fn drive_emits_composed_syllables_and_passthrough() {
+        for (input, expected) in [
+            // ㅇ(U+3147) + ㅏ(U+314F) + ㄴ(U+3134) → "안" (U+C548)
+            ("ㅇㅏㄴ", &["안"][..]),
+            // ㄱ a → standalone ㄱ then a
+            ("ㄱa", &["ㄱ", "a"][..]),
+            // 가(ㄱㅏ) then ASCII 'x' → "가", "x"
+            ("ㄱㅏx", &["가", "x"][..]),
+            // ㅇㅏㄴㅏ → 안 in flight, next ㅏ migrates ㄴ to new syllable:
+            // flush "아" (LV without jong) + in-flight "나" (ChoJung) that
+            // flush() releases at the end. Matches Korean IME behaviour.
+            ("ㅇㅏㄴㅏ", &["아", "나"][..]),
+            // ㄱㄴ → ㄱ then in-flight ㄴ (Cho state) flushed at end.
+            ("ㄱㄴ", &["ㄱ", "ㄴ"][..]),
+            // abc → emitted 1:1 with no state change.
+            ("abc", &["a", "b", "c"][..]),
+            // ASCII around a composed syllable — each boundary forces a
+            // flush, keeping emit order stable.
+            ("aㅇㅏㄴb", &["a", "안", "b"][..]),
+            // A fully-formed syllable from macOS IME (not a compat jamo)
+            // must pass through unchanged — the composer is jamo-only.
+            ("안", &["안"][..]),
+            // ㅇㅏㄴㄴㅕㅇ → 안 + 녕. The ㄴ between syllables migrates
+            // from the first syllable's jong to the second's cho when ㅕ
+            // arrives.
+            ("ㅇㅏㄴㄴㅕㅇ", &["안", "녕"][..]),
+            // ㄱㅏㅏ: first ㅏ closes the LV to 가; second ㅏ cannot start
+            // a new syllable, so it falls through as a standalone jamo.
+            ("ㄱㅏㅏ", &["가", "ㅏ"][..]),
+            // ㄱ + ㄳ (pure-cluster jongseong, not a choseong): flush ㄱ
+            // and pass the cluster through as a standalone jamo.
+            // ㄳ = U+3133
+            ("ㄱㄳ", &["ㄱ", "ㄳ"][..]),
+            // 안 in flight, ㅁ starts a new syllable (it's a choseong,
+            // not a jung/jong add) → flush 안, start Cho(ㅁ).
+            ("ㅇㅏㄴㅁ", &["안", "ㅁ"][..]),
+            // Empty + jung → no syllable to anchor, emit the jamo.
+            ("ㅏ", &["ㅏ"][..]),
+        ] {
+            assert_eq!(drive(input), expected, "{input}");
+        }
     }
 
     #[test]
@@ -366,28 +350,6 @@ mod tests {
     }
 
     #[test]
-    fn double_vowel_flushes_lv_and_emits_standalone() {
-        // ㄱㅏㅏ: first ㅏ closes the LV to 가; second ㅏ cannot start
-        // a new syllable, so it falls through as a standalone jamo.
-        assert_eq!(drive("ㄱㅏㅏ"), vec!["가", "ㅏ"]);
-    }
-
-    #[test]
-    fn cho_followed_by_non_jong_cluster() {
-        // ㄱ + ㄳ (pure-cluster jongseong, not a choseong): flush ㄱ
-        // and pass the cluster through as a standalone jamo.
-        // ㄳ = U+3133
-        assert_eq!(drive("ㄱㄳ"), vec!["ㄱ", "ㄳ"]);
-    }
-
-    #[test]
-    fn lvt_followed_by_new_cho_flushes() {
-        // 안 in flight, ㅁ starts a new syllable (it's a choseong,
-        // not a jung/jong add) → flush 안, start Cho(ㅁ).
-        assert_eq!(drive("ㅇㅏㄴㅁ"), vec!["안", "ㅁ"]);
-    }
-
-    #[test]
     fn lvt_with_cluster_jong_flushes_on_vowel() {
         // Manually seed a ChoJungJong where the jong is a cluster
         // (ㄳ is jong-valid but not a choseong). A following vowel
@@ -404,12 +366,6 @@ mod tests {
         // ㅏ lands as a standalone jamo.
         assert_eq!(out, vec!["갃", "ㅏ"]);
         assert!(c.flush().is_none());
-    }
-
-    #[test]
-    fn standalone_vowel_at_start_emits_as_jamo() {
-        // Empty + jung → no syllable to anchor, emit the jamo.
-        assert_eq!(drive("ㅏ"), vec!["ㅏ"]);
     }
 
     #[test]

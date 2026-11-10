@@ -8,13 +8,10 @@ fn default_preferred_is_empty() {
 }
 
 #[test]
-fn empty_name_has_no_preset() {
-    assert!(preset("").is_none());
-}
-
-#[test]
-fn unknown_name_has_no_preset() {
-    assert!(preset("not-a-real-editor").is_none());
+fn an_empty_or_unknown_name_has_no_preset() {
+    for name in ["", "not-a-real-editor"] {
+        assert!(preset(name).is_none(), "{name:?}");
+    }
 }
 
 #[test]

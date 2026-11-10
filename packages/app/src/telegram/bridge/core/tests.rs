@@ -509,19 +509,14 @@ fn callback_with_known_token_responds_and_consumes_it() {
 }
 
 #[test]
-fn callback_with_unknown_token_is_ignored_but_still_acked() {
-    let mut bridge = BridgeCore::new(true, Some(1), 0);
-    let result = bridge.route(callback(1, 1, "cbq-x", "never-registered"));
-    assert_eq!(result.action.ready(), InboundAction::Ignore);
-    assert_eq!(result.answer_callback_id, Some("cbq-x".to_string()));
-}
-
-#[test]
-fn callback_from_unauthorized_chat_is_ignored_but_still_acked() {
-    let mut bridge = BridgeCore::new(true, Some(1), 0);
-    let result = bridge.route(callback(1, 2, "cbq-y", "irrelevant"));
-    assert_eq!(result.action.ready(), InboundAction::Ignore);
-    assert_eq!(result.answer_callback_id, Some("cbq-y".to_string()));
+fn an_unknown_or_unauthorized_callback_is_ignored_but_still_acked() {
+    // An unregistered token, then a callback from another chat.
+    for (chat, id, token) in [(1, "cbq-x", "never-registered"), (2, "cbq-y", "irrelevant")] {
+        let mut bridge = BridgeCore::new(true, Some(1), 0);
+        let result = bridge.route(callback(1, chat, id, token));
+        assert_eq!(result.action.ready(), InboundAction::Ignore, "{id}");
+        assert_eq!(result.answer_callback_id, Some(id.to_string()));
+    }
 }
 
 #[test]

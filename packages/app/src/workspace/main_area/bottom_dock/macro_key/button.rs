@@ -216,14 +216,10 @@ mod tests {
     }
 
     #[test]
-    fn tooltip_includes_shortcut_when_set() {
-        let btn = make_btn("Claude", Some("cmd-shift-1"));
-        assert_eq!(build_tooltip(&btn), "Claude  (cmd-shift-1)");
-    }
-
-    #[test]
-    fn tooltip_treats_empty_shortcut_as_none() {
-        let btn = make_btn("Claude", Some(""));
-        assert_eq!(build_tooltip(&btn), "Claude");
+    fn tooltip_includes_a_non_empty_shortcut() {
+        for (shortcut, expected) in [("cmd-shift-1", "Claude  (cmd-shift-1)"), ("", "Claude")] {
+            let btn = make_btn("Claude", Some(shortcut));
+            assert_eq!(build_tooltip(&btn), expected, "{shortcut:?}");
+        }
     }
 }

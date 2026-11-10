@@ -335,15 +335,24 @@ mod tests {
     use super::fallback_split;
 
     #[test]
-    fn a_diff_under_the_cap_is_shown_whole() {
-        let split = fallback_split(3, 4, 12);
-        assert_eq!((split.old_shown, split.new_shown, split.hidden), (3, 4, 0));
-    }
-
-    #[test]
-    fn the_added_side_gets_what_the_removed_side_left() {
-        let split = fallback_split(5, 40, 12);
-        assert_eq!((split.old_shown, split.new_shown, split.hidden), (5, 7, 33));
+    fn fallback_split_shares_the_cap_between_the_sides() {
+        for (old, new, expected, what) in [
+            (3, 4, (3, 4, 0), "under the cap: shown whole"),
+            (
+                5,
+                40,
+                (5, 7, 33),
+                "the added side gets what the removed side left",
+            ),
+            (0, 0, (0, 0, 0), "an empty diff hides nothing"),
+        ] {
+            let split = fallback_split(old, new, 12);
+            assert_eq!(
+                (split.old_shown, split.new_shown, split.hidden),
+                expected,
+                "{what}"
+            );
+        }
     }
 
     /// Starving the added side is acceptable: the cut is reported either way,
@@ -356,11 +365,5 @@ mod tests {
             (split.old_shown, split.new_shown, split.hidden),
             (12, 0, 48)
         );
-    }
-
-    #[test]
-    fn an_empty_diff_hides_nothing() {
-        let split = fallback_split(0, 0, 12);
-        assert_eq!((split.old_shown, split.new_shown, split.hidden), (0, 0, 0));
     }
 }

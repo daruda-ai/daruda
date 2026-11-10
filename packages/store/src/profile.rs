@@ -65,12 +65,9 @@ mod tests {
     }
 
     #[test]
-    fn env_override_wins() {
-        assert_eq!(resolve_profile_from(Some("staging")), "staging");
-    }
-
-    #[test]
-    fn env_override_trims_whitespace() {
-        assert_eq!(resolve_profile_from(Some("  preview  ")), "preview");
+    fn env_override_wins_trimmed() {
+        for (value, expected) in [("staging", "staging"), ("  preview  ", "preview")] {
+            assert_eq!(resolve_profile_from(Some(value)), expected);
+        }
     }
 }

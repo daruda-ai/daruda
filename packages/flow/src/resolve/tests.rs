@@ -38,22 +38,31 @@ nodes:
     );
 }
 
-/// Naming the mode is the whole of the fix.
 #[test]
-fn asking_with_a_mode_resolves() {
-    load(
-        "\
+fn a_flow_resolves_when_it_names_a_mode_or_never_asks() {
+    for defaults in [
+        // Naming the mode is the whole of the fix.
+        "{ agent: { id: claude, mode: default, permission: ask } }",
+        // A flow that never asks is unaffected — the rule must not become a
+        // reason every flow has to pin a mode.
+        "{ agent: { id: claude } }",
+    ] {
+        load(
+            &format!(
+                "\
 version: 1
-defaults: { agent: { id: claude, mode: default, permission: ask } }
+defaults: {defaults}
 nodes:
   - id: a
     kind: agent
     output: a.md
     prompt: write
-",
-        None,
-    )
-    .expect("naming the mode is all it takes");
+"
+            ),
+            None,
+        )
+        .unwrap_or_else(|e| panic!("{defaults}: {e}"));
+    }
 }
 
 /// A repair's `fix` runs as `defaults.agent` and inherits its policy,
@@ -88,24 +97,6 @@ nodes:
     );
 }
 
-/// A flow that never asks is unaffected — the rule must not become a
-/// reason every flow has to pin a mode.
-#[test]
-fn a_flow_that_never_asks_needs_no_mode() {
-    load(
-        "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: a
-    kind: agent
-    output: a.md
-    prompt: write
-",
-        None,
-    )
-    .expect("a flow with no `ask` keeps its freedom to omit the mode");
-}
 use super::*;
 use crate::error::ValidationKind;
 use crate::model::{NodeKind, PermissionPolicy};

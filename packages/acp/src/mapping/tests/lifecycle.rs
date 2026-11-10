@@ -266,30 +266,30 @@ fn touched_tool_id_extracts_only_tool_call_events() {
 }
 
 #[test]
-fn a_fenced_read_becomes_source_text_in_the_extension_s_language() {
-    // The adapter delivers the file as a language-less, line-numbered fence.
-    assert_eq!(
-        read_output_blocks("src/main.rs", "```\n1\tfn main() {}\n2\t// end\n```"),
-        vec![ToolOutputBlock::SourceText {
-            text: "fn main() {}\n// end".to_string(),
-            language: Some("rust".to_string()),
-            truncated_from: None,
-        }]
-    );
-}
-
-#[test]
-fn an_unfenced_read_becomes_source_text_too() {
-    // An adapter that does not markdown-escape: no fence to hang the
-    // language off, and the `cat -n` gutter used to survive to the render.
-    assert_eq!(
-        read_output_blocks("src/main.rs", "   1\tfn main() {}\n   2\tlet x = 1;"),
-        vec![ToolOutputBlock::SourceText {
-            text: "fn main() {}\nlet x = 1;".to_string(),
-            language: Some("rust".to_string()),
-            truncated_from: None,
-        }]
-    );
+fn a_read_becomes_source_text_in_the_extension_s_language() {
+    for (raw, text) in [
+        // The adapter delivers the file as a language-less, line-numbered fence.
+        (
+            "```\n1\tfn main() {}\n2\t// end\n```",
+            "fn main() {}\n// end",
+        ),
+        // An adapter that does not markdown-escape: no fence to hang the
+        // language off, and the `cat -n` gutter used to survive to the render.
+        (
+            "   1\tfn main() {}\n   2\tlet x = 1;",
+            "fn main() {}\nlet x = 1;",
+        ),
+    ] {
+        assert_eq!(
+            read_output_blocks("src/main.rs", raw),
+            vec![ToolOutputBlock::SourceText {
+                text: text.to_string(),
+                language: Some("rust".to_string()),
+                truncated_from: None,
+            }],
+            "{raw:?}"
+        );
+    }
 }
 
 #[test]

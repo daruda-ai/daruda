@@ -367,27 +367,18 @@ mod tests {
     }
 
     #[test]
-    fn west_half_targets_this_cell() {
-        assert_eq!(
-            cell_drag_action(5.0, 10.0, W, H, ROW, 2),
-            CellDragAction::Insert(2)
-        );
-    }
-
-    #[test]
-    fn east_half_targets_next_cell() {
-        assert_eq!(
-            cell_drag_action(60.0, 10.0, W, H, ROW, 2),
-            CellDragAction::Insert(3)
-        );
-    }
-
-    #[test]
-    fn exact_midpoint_rounds_to_east() {
-        assert_eq!(
-            cell_drag_action(50.0, 10.0, W, H, ROW, 0),
-            CellDragAction::Insert(1)
-        );
+    fn the_half_under_the_pointer_picks_the_insert_slot() {
+        for (x, cell, expected, what) in [
+            (5.0, 2, 2, "west half targets this cell"),
+            (60.0, 2, 3, "east half targets the next cell"),
+            (50.0, 0, 1, "the exact midpoint rounds east"),
+        ] {
+            assert_eq!(
+                cell_drag_action(x, 10.0, W, H, ROW, cell),
+                CellDragAction::Insert(expected),
+                "{what}"
+            );
+        }
     }
 
     /// Still on the tab row, just not over this cell — the cursor is over a

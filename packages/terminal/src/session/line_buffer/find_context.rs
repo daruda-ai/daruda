@@ -340,19 +340,13 @@ mod tests {
     }
 
     #[test]
-    fn returns_none_for_no_match() {
-        let mut b = LineBuffer::new(1024);
-        b.append("alpha", &[], EolKind::Hard);
-        let mut ctx = FindContext::new("missing", FindOptions::default());
-        assert!(ctx.next_match(&b).is_none());
-    }
-
-    #[test]
-    fn empty_needle_returns_none() {
-        let mut b = LineBuffer::new(1024);
-        b.append("alpha", &[], EolKind::Hard);
-        let mut ctx = FindContext::new("", FindOptions::default());
-        assert!(ctx.next_match(&b).is_none());
+    fn a_missing_or_empty_needle_returns_none() {
+        for needle in ["missing", ""] {
+            let mut b = LineBuffer::new(1024);
+            b.append("alpha", &[], EolKind::Hard);
+            let mut ctx = FindContext::new(needle, FindOptions::default());
+            assert!(ctx.next_match(&b).is_none(), "{needle:?}");
+        }
     }
 
     #[test]

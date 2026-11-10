@@ -17,6 +17,3 @@ pub mod tool_category;
 mod strings {
     include!(concat!(env!("OUT_DIR"), "/strings.rs"));
 }
-
-#[cfg(test)]
-mod locale_tests;

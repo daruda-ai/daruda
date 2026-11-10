@@ -59,7 +59,7 @@ try {
             'daruda_config', 'daruda_store', 'daruda_agent', 'daruda_update',
             'daruda_acp', 'daruda_core', 'daruda_flow', 'daruda_project',
             'daruda_ui', 'daruda_control_types', 'daruda_content', 'daruda_flow_edit', 'daruda_transcript', 'daruda_chat', 'daruda_settings', 'daruda_runlog',
-            'ferrum_flow', 'gpui_component', 'strings_gen', 'vendor_gpui', 'test_process'
+            'strings_gen', 'vendor_gpui', 'test_process'
         )) { $testArgs += @('-p', $package) }
     }
     $testExit = Invoke-HiddenConsoleCommand -FilePath cargo.exe -ArgumentList $testArgs

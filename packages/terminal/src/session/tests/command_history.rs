@@ -136,16 +136,19 @@ fn slice_chars_normal_ranges() {
 }
 
 #[test]
-fn slice_chars_past_end_returns_empty() {
+fn slice_chars_counts_chars_and_clamps_past_the_end() {
     use super::slice_chars;
-    assert_eq!(slice_chars("hi", 5, 7), "");
-    assert_eq!(slice_chars("", 0, 0), "");
-}
-
-#[test]
-fn slice_chars_handles_multibyte() {
-    use super::slice_chars;
-    // Hangul syllables — 3 bytes each, one char per `nth` step.
-    assert_eq!(slice_chars("가나다라", 1, 3), "나다");
-    assert_eq!(slice_chars("가나다라", 0, 1), "가");
+    for (text, start, end, expected) in [
+        ("hi", 5, 7, ""),
+        ("", 0, 0, ""),
+        // Hangul syllables — 3 bytes each, one char per `nth` step.
+        ("가나다라", 1, 3, "나다"),
+        ("가나다라", 0, 1, "가"),
+    ] {
+        assert_eq!(
+            slice_chars(text, start, end),
+            expected,
+            "{text:?}[{start}..{end}]"
+        );
+    }
 }

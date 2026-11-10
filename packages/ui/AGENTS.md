@@ -163,7 +163,7 @@ exclude upstream code from unrelated Clippy/lint/comment-cleanup passes.
 
 Existing explicit gates still apply: the raw-mouse lint scans both trees,
 the `gpui-base` and `gpui-component` suites (including daruda-authored patch
-tests) run in CI, and `ferrum_flow` declares `rust-version` with
+tests) run through `ci-cargo.sh vendor-test` whenever a vendor change reaches CI, and `ferrum_flow` declares `rust-version` with
 `clippy::incompatible_msrv` armed.
 The app accesses both through its UI facade; sibling widget packages use
 `daruda_ui`, never `gpui_component` or `gpui_base`.

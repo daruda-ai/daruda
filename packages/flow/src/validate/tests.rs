@@ -282,36 +282,42 @@ nodes:
     );
 }
 
-/// `./out.md` and `out.md` name the same file once `.` components are
-/// stripped — the collision must fire even though the strings differ.
-/// macOS ships a case-insensitive filesystem by default, so these are
-/// one file: the second node overwrites the first, and whatever reads
-/// `{{node.first.output}}` downstream gets work it did not ask for
-/// with nothing saying so. Verified against a real APFS volume, not
-/// assumed.
+/// Two outputs that are one file on disk collide even though the strings
+/// differ: whatever reads `{{node.first.output}}` downstream would get work
+/// it did not ask for with nothing saying so.
 #[test]
-fn output_paths_differing_only_in_case_are_rejected() {
-    let issues = issues_for(
-        "\
+fn output_paths_naming_the_same_file_are_rejected() {
+    for (second, deps) in [
+        // macOS ships a case-insensitive filesystem by default, so these are
+        // one file: the second node overwrites the first. Verified against a
+        // real APFS volume, not assumed.
+        ("Out.md", ""),
+        // `./out.md` and `out.md` name the same file once `.` components are
+        // stripped.
+        ("./out.md", "\n    deps: [a]"),
+    ] {
+        let issues = issues_for(&format!(
+            "\
 version: 1
-defaults: { agent: { id: claude } }
+defaults: {{ agent: {{ id: claude }} }}
 nodes:
   - id: a
     kind: agent
     output: out.md
     prompt: write
   - id: b
-    kind: agent
-    output: Out.md
+    kind: agent{deps}
+    output: {second}
     prompt: write
-",
-    );
-    assert!(
-        issues
-            .iter()
-            .any(|i| matches!(i.kind, ValidationKind::DuplicateOutput)),
-        "{issues:?}"
-    );
+"
+        ));
+        assert!(
+            issues
+                .iter()
+                .any(|i| matches!(i.kind, ValidationKind::DuplicateOutput)),
+            "{second}: {issues:?}"
+        );
+    }
 }
 
 /// Same filesystem, same reasoning: `LOGS/` reaches the directory the
@@ -372,32 +378,6 @@ nodes:
             "`{composed}` and `{decomposed}` are one file: {issues:?}"
         );
     }
-}
-
-#[test]
-fn duplicate_output_paths_with_a_leading_cur_dir_are_rejected() {
-    let issues = issues_for(
-        "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: a
-    kind: agent
-    output: out.md
-    prompt: write
-  - id: b
-    kind: agent
-    deps: [a]
-    output: ./out.md
-    prompt: write
-",
-    );
-    assert!(
-        issues
-            .iter()
-            .any(|i| matches!(i.kind, ValidationKind::DuplicateOutput)),
-        "./out.md and out.md are the same path: {issues:?}"
-    );
 }
 
 #[test]
@@ -525,8 +505,9 @@ nodes:
 }
 
 #[test]
-fn an_ordinary_id_is_accepted() {
-    let issues = issues_for(
+fn valid_flows_are_accepted() {
+    for yaml in [
+        // An ordinary id.
         "\
 version: 1
 defaults: { agent: { id: claude } }
@@ -536,8 +517,45 @@ nodes:
     output: out.md
     prompt: write
 ",
-    );
-    assert!(issues.is_empty(), "{issues:?}");
+        // A field with no `enum` takes any value, so there is nothing to check
+        // against — the continue_until rule must not refuse that.
+        "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: work
+    kind: agent
+    output: out.json
+    prompt: write
+    continue_until: { field: state, equals: anything }
+    output_schema:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string }
+",
+        // The continue_until shape that works, so those rules are not
+        // refusing everything.
+        "\
+version: 1
+defaults: { agent: { id: claude } }
+nodes:
+  - id: work
+    kind: agent
+    output: out.json
+    prompt: write
+    continue_until: { field: state, equals: done }
+    max_turns: 5
+    output_schema:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string, enum: [in_progress, done] }
+",
+    ] {
+        let issues = issues_for(yaml);
+        assert!(issues.is_empty(), "{yaml}\n{issues:?}");
+    }
 }
 
 /// `logs/` holds the archived evidence, named from node id and attempt.
@@ -674,54 +692,6 @@ nodes:
             .any(|i| matches!(i.kind, ValidationKind::ContinueUntilValueNotAllowed { .. })),
         "{issues:?}"
     );
-}
-
-/// A field with no `enum` takes any value, so there is nothing to check
-/// against — the rule must not refuse that.
-#[test]
-fn a_continue_until_on_a_field_with_no_enum_is_accepted() {
-    let issues = issues_for(
-        "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: work
-    kind: agent
-    output: out.json
-    prompt: write
-    continue_until: { field: state, equals: anything }
-    output_schema:
-      type: object
-      required: [state]
-      properties:
-        state: { type: string }
-",
-    );
-    assert!(issues.is_empty(), "{issues:?}");
-}
-
-/// The shape that works, so the rules above are not refusing everything.
-#[test]
-fn a_continue_until_the_agent_is_told_to_write_is_accepted() {
-    let issues = issues_for(
-        "\
-version: 1
-defaults: { agent: { id: claude } }
-nodes:
-  - id: work
-    kind: agent
-    output: out.json
-    prompt: write
-    continue_until: { field: state, equals: done }
-    max_turns: 5
-    output_schema:
-      type: object
-      required: [state]
-      properties:
-        state: { type: string, enum: [in_progress, done] }
-",
-    );
-    assert!(issues.is_empty(), "{issues:?}");
 }
 
 /// An attempt that may send no prompt cannot run at all.

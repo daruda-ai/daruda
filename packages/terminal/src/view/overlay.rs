@@ -101,17 +101,20 @@ mod tests {
 
     #[test]
     fn grid_row_offsets_by_scrollback_height() {
-        // 3-row grid with 5 rows of scrollback (total = 8): grid row 1 lands
-        // at absolute row 5, grid row 3 at 7.
-        assert_eq!(grid_row_to_screen_row(1, 8, 3), Some(5));
-        assert_eq!(grid_row_to_screen_row(3, 8, 3), Some(7));
-    }
-
-    #[test]
-    fn grid_row_with_no_scrollback_starts_at_zero() {
-        // total_rows == viewport_rows: the grid is the whole frame.
-        assert_eq!(grid_row_to_screen_row(1, 3, 3), Some(0));
-        assert_eq!(grid_row_to_screen_row(3, 3, 3), Some(2));
+        for (grid_row, total, rows, expected) in [
+            // 3-row grid under 5 rows of scrollback (total = 8).
+            (1, 8, 3, 5),
+            (3, 8, 3, 7),
+            // total_rows == viewport_rows: the grid is the whole frame.
+            (1, 3, 3, 0),
+            (3, 3, 3, 2),
+        ] {
+            assert_eq!(
+                grid_row_to_screen_row(grid_row, total, rows),
+                Some(expected),
+                "grid row {grid_row} of {rows} in {total}"
+            );
+        }
     }
 
     #[test]

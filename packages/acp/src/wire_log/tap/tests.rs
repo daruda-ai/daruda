@@ -49,26 +49,25 @@ fn no_elision_means_no_sidecar() {
 
 #[test]
 fn wire_log_path_splices_agent_id_before_the_extension() {
-    assert_eq!(
-        wire_log_path_for(Path::new("/logs/acp-wire.log"), "claude"),
-        PathBuf::from("/logs/acp-wire-claude.log")
-    );
-}
-
-#[test]
-fn wire_log_path_handles_no_extension() {
-    assert_eq!(
-        wire_log_path_for(Path::new("/logs/acp-wire"), "codex"),
-        PathBuf::from("/logs/acp-wire-codex")
-    );
-}
-
-#[test]
-fn wire_log_path_leaves_base_untouched_when_agent_id_is_empty() {
-    assert_eq!(
-        wire_log_path_for(Path::new("/logs/acp-wire.log"), ""),
-        PathBuf::from("/logs/acp-wire.log")
-    );
+    for (base, agent_id, expected) in [
+        ("/logs/acp-wire.log", "claude", "/logs/acp-wire-claude.log"),
+        ("/logs/acp-wire", "codex", "/logs/acp-wire-codex"),
+        ("/logs/acp-wire.log", "", "/logs/acp-wire.log"),
+        // A user-editable catalog id must never let a path separator escape the
+        // configured log directory.
+        (
+            "/logs/acp-wire.log",
+            "../evil",
+            "/logs/acp-wire-___evil.log",
+        ),
+        ("acp-wire.log", "claude", "acp-wire-claude.log"),
+    ] {
+        assert_eq!(
+            wire_log_path_for(Path::new(base), agent_id),
+            PathBuf::from(expected),
+            "{base} + {agent_id:?}"
+        );
+    }
 }
 
 #[test]
@@ -183,24 +182,6 @@ fn first_open_is_once_per_path_per_process() {
     assert!(!first_open(&path_a), "second open appends");
     assert!(!first_open(&path_a), "third open still appends");
     assert!(first_open(&path_b), "a different path truncates once");
-}
-
-#[test]
-fn wire_log_path_sanitizes_unsafe_agent_id_characters() {
-    // A user-editable catalog id must never let a path separator escape the
-    // configured log directory.
-    assert_eq!(
-        wire_log_path_for(Path::new("/logs/acp-wire.log"), "../evil"),
-        PathBuf::from("/logs/acp-wire-___evil.log")
-    );
-}
-
-#[test]
-fn wire_log_path_handles_a_bare_file_name_with_no_directory() {
-    assert_eq!(
-        wire_log_path_for(Path::new("acp-wire.log"), "claude"),
-        PathBuf::from("acp-wire-claude.log")
-    );
 }
 
 #[test]

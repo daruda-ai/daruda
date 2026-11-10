@@ -68,11 +68,13 @@ mod tests {
     }
 
     #[test]
-    fn extract_path_reads_between_sentinels() {
-        assert_eq!(
-            extract_path(&wrap("/opt/homebrew/bin:/usr/bin")).as_deref(),
-            Some("/opt/homebrew/bin:/usr/bin"),
-        );
+    fn extract_path_reads_between_sentinels_keeping_inner_spaces() {
+        for path in [
+            "/opt/homebrew/bin:/usr/bin",
+            "/Applications/My App/bin:/usr/bin",
+        ] {
+            assert_eq!(extract_path(&wrap(path)).as_deref(), Some(path));
+        }
     }
 
     #[test]
@@ -86,14 +88,6 @@ mod tests {
         assert_eq!(
             extract_path(&noisy).as_deref(),
             Some("/Users/x/.nvm/versions/node/v22.19.0/bin:/usr/bin"),
-        );
-    }
-
-    #[test]
-    fn extract_path_preserves_inner_spaces() {
-        assert_eq!(
-            extract_path(&wrap("/Applications/My App/bin:/usr/bin")).as_deref(),
-            Some("/Applications/My App/bin:/usr/bin"),
         );
     }
 

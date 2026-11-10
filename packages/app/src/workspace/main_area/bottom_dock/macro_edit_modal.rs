@@ -623,23 +623,17 @@ mod tests {
     }
 
     #[test]
-    fn format_keystroke_simple_letter() {
-        let ks = Keystroke::parse("cmd-shift-1").unwrap();
-        assert_eq!(format_keystroke_for_keymap(&ks), "cmd-shift-1");
-    }
-
-    #[test]
-    fn format_keystroke_canonical_modifier_order() {
-        // Even if the parser accepts any order, our formatter outputs
-        // a canonical sequence: cmd → ctrl → alt → shift → key.
-        let ks = Keystroke::parse("shift-ctrl-cmd-alt-a").unwrap();
-        assert_eq!(format_keystroke_for_keymap(&ks), "cmd-ctrl-alt-shift-a");
-    }
-
-    #[test]
-    fn format_keystroke_no_modifier() {
-        let ks = Keystroke::parse("f5").unwrap();
-        assert_eq!(format_keystroke_for_keymap(&ks), "f5");
+    fn format_keystroke_uses_canonical_modifier_order() {
+        for (input, expected) in [
+            ("cmd-shift-1", "cmd-shift-1"),
+            // Even if the parser accepts any order, our formatter outputs
+            // a canonical sequence: cmd → ctrl → alt → shift → key.
+            ("shift-ctrl-cmd-alt-a", "cmd-ctrl-alt-shift-a"),
+            ("f5", "f5"),
+        ] {
+            let ks = Keystroke::parse(input).unwrap();
+            assert_eq!(format_keystroke_for_keymap(&ks), expected);
+        }
     }
 
     #[test]

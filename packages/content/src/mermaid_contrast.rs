@@ -175,76 +175,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opaque_rect_rgb_is_capped_to_translucent() {
-        let source = "sequenceDiagram\n  rect rgb(212, 248, 212)\n  A->>B: Hi\n  end\n";
-        assert_eq!(
-            ensure_text_contrast(source),
-            "sequenceDiagram\n  rect rgba(212, 248, 212, 0.12)\n  A->>B: Hi\n  end\n"
-        );
+    fn opaque_backgrounds_are_capped_to_translucent() {
+        for (source, expected) in [
+            (
+                "sequenceDiagram\n  rect rgb(212, 248, 212)\n  A->>B: Hi\n  end\n",
+                "sequenceDiagram\n  rect rgba(212, 248, 212, 0.12)\n  A->>B: Hi\n  end\n",
+            ),
+            (
+                "sequenceDiagram\n  rect #d4f8d4\n  A->>B: Hi\n  end\n",
+                "sequenceDiagram\n  rect rgba(212, 248, 212, 0.12)\n  A->>B: Hi\n  end\n",
+            ),
+            // A box's trailing participant-group name is preserved.
+            (
+                "sequenceDiagram\n  box rgb(212, 248, 212) Team1\n  participant A\n  end\n",
+                "sequenceDiagram\n  box rgba(212, 248, 212, 0.12) Team1\n  participant A\n  end\n",
+            ),
+        ] {
+            assert_eq!(ensure_text_contrast(source), expected);
+        }
     }
 
     #[test]
-    fn rect_hex_is_capped_to_translucent() {
-        let source = "sequenceDiagram\n  rect #d4f8d4\n  A->>B: Hi\n  end\n";
-        assert_eq!(
-            ensure_text_contrast(source),
-            "sequenceDiagram\n  rect rgba(212, 248, 212, 0.12)\n  A->>B: Hi\n  end\n"
-        );
-    }
-
-    #[test]
-    fn rect_already_translucent_is_untouched() {
-        let source = "sequenceDiagram\n  rect rgba(212, 248, 212, 0.1)\n  A->>B: Hi\n  end\n";
-        assert!(matches!(
-            ensure_text_contrast(source),
-            Cow::Borrowed(s) if s == source
-        ));
-    }
-
-    #[test]
-    fn rect_alpha_is_never_raised() {
-        // An author who deliberately chose a very faint 2% tint keeps it —
-        // this pass only ever lowers an over-opaque alpha, never raises one.
-        let source = "sequenceDiagram\n  rect rgba(212, 248, 212, 0.02)\n  end\n";
-        assert!(matches!(
-            ensure_text_contrast(source),
-            Cow::Borrowed(s) if s == source
-        ));
-    }
-
-    #[test]
-    fn rect_named_color_is_left_alone() {
-        let source = "sequenceDiagram\n  rect Aqua\n  A->>B: Hi\n  end\n";
-        assert!(matches!(
-            ensure_text_contrast(source),
-            Cow::Borrowed(s) if s == source
-        ));
-    }
-
-    #[test]
-    fn box_trailing_participant_group_name_is_preserved() {
-        let source = "sequenceDiagram\n  box rgb(212, 248, 212) Team1\n  participant A\n  end\n";
-        assert_eq!(
-            ensure_text_contrast(source),
-            "sequenceDiagram\n  box rgba(212, 248, 212, 0.12) Team1\n  participant A\n  end\n"
-        );
-    }
-
-    #[test]
-    fn box_named_color_with_trailing_name_is_left_alone() {
-        let source = "sequenceDiagram\n  box Aqua Team1\n  end\n";
-        assert!(matches!(
-            ensure_text_contrast(source),
-            Cow::Borrowed(s) if s == source
-        ));
-    }
-
-    #[test]
-    fn unrelated_lines_pass_through_untouched() {
-        let source = "flowchart TD\n  A --> B\n  B --> C\n  classDef hl fill:#d4f8d4\n";
-        assert!(matches!(
-            ensure_text_contrast(source),
-            Cow::Borrowed(s) if s == source
-        ));
+    fn sources_needing_no_cap_are_borrowed_untouched() {
+        for source in [
+            "sequenceDiagram\n  rect rgba(212, 248, 212, 0.1)\n  A->>B: Hi\n  end\n",
+            // An author who deliberately chose a very faint 2% tint keeps it —
+            // this pass only ever lowers an over-opaque alpha, never raises one.
+            "sequenceDiagram\n  rect rgba(212, 248, 212, 0.02)\n  end\n",
+            "sequenceDiagram\n  rect Aqua\n  A->>B: Hi\n  end\n",
+            "sequenceDiagram\n  box Aqua Team1\n  end\n",
+            "flowchart TD\n  A --> B\n  B --> C\n  classDef hl fill:#d4f8d4\n",
+        ] {
+            assert!(
+                matches!(ensure_text_contrast(source), Cow::Borrowed(s) if s == source),
+                "{source:?}"
+            );
+        }
     }
 }

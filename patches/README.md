@@ -190,8 +190,9 @@ skips packages named `gpui-*`, so the crates declare no Rust floor.
 `LICENSE-APACHE`, `README.md`, `examples/fixtures/test.md`, and
 `themes/aurora.json` stay at the tree root because vendored tests read them.
 
-`scripts/ci-cargo.sh test` runs `-p gpui-base -p gpui-component`, so the
-daruda-authored patch tests and the upstream suites run in CI.
+`scripts/ci-cargo.sh vendor-test` runs `-p gpui-base -p gpui-component`, so the
+daruda-authored patch tests and the upstream suites run in CI whenever
+`vendor/`, a manifest, or the toolchain changes.
 Keep `gpui-base`'s Linux/Windows `gpui_platform` dev-dependency: its native
 shaping tests borrow the platform text system without opening a window
 (Linux headless; Windows non-headless because headless uses no-op fonts).

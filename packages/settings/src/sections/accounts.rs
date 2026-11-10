@@ -613,18 +613,14 @@ mod tests {
 
     #[test]
     fn remove_confirm_counts_referencing_panes() {
-        assert_eq!(
-            remove_confirm_body(3, AccountRecipeId::Claude),
-            "3 pane(s) using this account will revert to the system default (~/.claude)."
-        );
-    }
-
-    #[test]
-    fn remove_confirm_body_zero_panes() {
-        assert_eq!(
-            remove_confirm_body(0, AccountRecipeId::Claude),
-            "0 pane(s) using this account will revert to the system default (~/.claude)."
-        );
+        for panes in [3, 0] {
+            assert_eq!(
+                remove_confirm_body(panes, AccountRecipeId::Claude),
+                format!(
+                    "{panes} pane(s) using this account will revert to the system default (~/.claude)."
+                )
+            );
+        }
     }
 
     #[test]

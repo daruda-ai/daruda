@@ -409,19 +409,19 @@ mod rule_tests {
         assert!(!already_linked(&chain(), &"build", &"design"));
     }
 
-    /// The case that previewed green: two cards already joined, dragged the
-    /// other way. `build` runs after `design`, so `design` running after
-    /// `build` closes the loop.
     #[test]
-    fn dragging_back_between_two_connected_cards_would_loop() {
-        assert!(would_cycle(&chain(), "build", "design"));
-    }
-
-    /// And through others, not only directly: `ship` runs after `design` by way
-    /// of `build`.
-    #[test]
-    fn a_loop_through_a_third_card_is_still_a_loop() {
-        assert!(would_cycle(&chain(), "ship", "design"));
+    fn a_drag_back_upstream_would_loop() {
+        for (from, to) in [
+            // The case that previewed green: two cards already joined, dragged the
+            // other way. `build` runs after `design`, so `design` running after
+            // `build` closes the loop.
+            ("build", "design"),
+            // And through others, not only directly: `ship` runs after `design` by
+            // way of `build`.
+            ("ship", "design"),
+        ] {
+            assert!(would_cycle(&chain(), from, to), "{from} -> {to}");
+        }
     }
 
     #[test]

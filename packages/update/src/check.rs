@@ -194,65 +194,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepts_github_release_download_url() {
-        assert!(is_trusted_host(
-            "https://github.com/daruda-ai/daruda/releases/download/v0.3.0/x.dmg"
-        ));
+    fn accepts_github_release_hosts() {
+        for url in [
+            "https://github.com/daruda-ai/daruda/releases/download/v0.3.0/x.dmg",
+            "https://objects.githubusercontent.com/github-production-release-asset/x.dmg",
+            // The host a release-asset download actually 302-redirects to today.
+            "https://release-assets.githubusercontent.com/github-production-release-asset/1/2?sig=x",
+            "https://github.com:443/x.dmg",
+            // Userinfo is stripped; the host is github.com.
+            "https://evil.com@github.com/x.dmg",
+            "https://GitHub.com/x.dmg",
+        ] {
+            assert!(is_trusted_host(url), "{url}");
+        }
     }
 
     #[test]
-    fn accepts_github_objects_host() {
-        assert!(is_trusted_host(
-            "https://objects.githubusercontent.com/github-production-release-asset/x.dmg"
-        ));
-    }
-
-    #[test]
-    fn accepts_github_release_assets_host() {
-        // The host a release-asset download actually 302-redirects to today.
-        assert!(is_trusted_host(
-            "https://release-assets.githubusercontent.com/github-production-release-asset/1/2?sig=x"
-        ));
-    }
-
-    #[test]
-    fn accepts_github_com_with_explicit_port() {
-        assert!(is_trusted_host("https://github.com:443/x.dmg"));
-    }
-
-    #[test]
-    fn accepts_github_com_after_stripping_userinfo() {
-        assert!(is_trusted_host("https://evil.com@github.com/x.dmg"));
-    }
-
-    #[test]
-    fn rejects_subdomain_lookalike() {
-        assert!(!is_trusted_host("https://github.com.evil.com/x.dmg"));
-    }
-
-    #[test]
-    fn rejects_asset_domain_lookalikes() {
-        // Suffix appended after the trusted domain.
-        assert!(!is_trusted_host(
-            "https://githubusercontent.com.evil.com/x.dmg"
-        ));
-        // Trusted domain glued to a longer label without a dot boundary.
-        assert!(!is_trusted_host("https://evilgithubusercontent.com/x.dmg"));
-    }
-
-    #[test]
-    fn rejects_unrelated_host() {
-        assert!(!is_trusted_host("https://notgithub.com/x.dmg"));
-    }
-
-    #[test]
-    fn rejects_non_https_scheme() {
-        assert!(!is_trusted_host("http://github.com/x.dmg"));
-    }
-
-    #[test]
-    fn accepts_case_insensitive_host() {
-        assert!(is_trusted_host("https://GitHub.com/x.dmg"));
+    fn rejects_lookalike_unrelated_and_non_https_hosts() {
+        for url in [
+            "https://github.com.evil.com/x.dmg",
+            // Suffix appended after the trusted domain.
+            "https://githubusercontent.com.evil.com/x.dmg",
+            // Trusted domain glued to a longer label without a dot boundary.
+            "https://evilgithubusercontent.com/x.dmg",
+            "https://notgithub.com/x.dmg",
+            "http://github.com/x.dmg",
+        ] {
+            assert!(!is_trusted_host(url), "{url}");
+        }
     }
 
     #[test]
@@ -285,15 +254,14 @@ mod tests {
     }
 
     #[test]
-    fn redirect_target_rejects_non_https_location() {
-        let result = redirect_target(302, Some("http://evil.example/x.dmg"));
-        assert!(matches!(result, Err(UpdateError::UntrustedHost(_))));
-    }
-
-    #[test]
-    fn redirect_target_rejects_relative_location() {
-        let result = redirect_target(302, Some("/download/x.dmg"));
-        assert!(matches!(result, Err(UpdateError::UntrustedHost(_))));
+    fn redirect_target_rejects_non_https_and_relative_locations() {
+        for location in ["http://evil.example/x.dmg", "/download/x.dmg"] {
+            let result = redirect_target(302, Some(location));
+            assert!(
+                matches!(result, Err(UpdateError::UntrustedHost(_))),
+                "{location}"
+            );
+        }
     }
 
     #[test]

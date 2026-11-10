@@ -416,27 +416,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn delete_body_zero_widgets() {
-        assert_eq!(
-            format_delete_body("AI", 0),
-            "Delete tab \u{201c}AI\u{201d}?"
-        );
-    }
-
-    #[test]
-    fn delete_body_one_widget() {
-        assert_eq!(
-            format_delete_body("Build", 1),
-            "Delete tab \u{201c}Build\u{201d}? 1 widget will be removed."
-        );
-    }
-
-    #[test]
-    fn delete_body_many_widgets() {
-        assert_eq!(
-            format_delete_body("AI", 7),
-            "Delete tab \u{201c}AI\u{201d}? 7 widgets will be removed."
-        );
+    fn delete_body_counts_widgets() {
+        for (name, widgets, expected) in [
+            ("AI", 0, "Delete tab \u{201c}AI\u{201d}?"),
+            (
+                "Build",
+                1,
+                "Delete tab \u{201c}Build\u{201d}? 1 widget will be removed.",
+            ),
+            (
+                "AI",
+                7,
+                "Delete tab \u{201c}AI\u{201d}? 7 widgets will be removed.",
+            ),
+        ] {
+            assert_eq!(format_delete_body(name, widgets), expected);
+        }
     }
 
     #[test]

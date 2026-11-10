@@ -111,17 +111,12 @@ fn assert_schema_eight_book(book: &TasksBook) {
 }
 
 #[test]
-fn a_schema_eight_event_log_still_replays() {
-    let dir = copied_log("task_log_schema8");
-    let store = TaskStore::in_directory(dir.path(), None, BUILD, no_hook()).unwrap();
-    assert_schema_eight_book(&book_of(&store));
-}
-
-#[test]
-fn a_schema_eight_snapshot_still_opens() {
-    let dir = copied_log("task_snapshot_schema8");
-    let store = TaskStore::in_directory(dir.path(), None, BUILD, no_hook()).unwrap();
-    assert_schema_eight_book(&book_of(&store));
+fn a_schema_eight_event_log_or_snapshot_still_opens() {
+    for fixture in ["task_log_schema8", "task_snapshot_schema8"] {
+        let dir = copied_log(fixture);
+        let store = TaskStore::in_directory(dir.path(), None, BUILD, no_hook()).unwrap();
+        assert_schema_eight_book(&book_of(&store));
+    }
 }
 
 #[test]

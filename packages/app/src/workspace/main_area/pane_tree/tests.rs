@@ -247,21 +247,18 @@ fn rearrange_pane_absent_target_is_noop() {
 }
 
 #[test]
-fn rearrange_pane_absent_dragged_is_noop() {
-    // target id 1 is present but dragged id 99 is not in the layout:
-    // returns false and leaves the layout untouched.
-    let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
-    let before_ids = layout.pane_ids();
-    assert!(!rearrange_pane(&mut layout, 99, 1, DropHalf::West));
-    assert_eq!(layout.pane_ids(), before_ids);
-}
-
-#[test]
-fn rearrange_pane_noop_same_id() {
-    let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
-    let before_ids = layout.pane_ids();
-    assert!(!rearrange_pane(&mut layout, 1, 1, DropHalf::West));
-    assert_eq!(layout.pane_ids(), before_ids);
+fn rearrange_pane_with_an_absent_or_same_dragged_id_is_noop() {
+    // Dragged id 99 is not in the layout; dragging 1 onto itself moves nothing.
+    // Either way: returns false and leaves the layout untouched.
+    for dragged in [99, 1] {
+        let mut layout = PaneLayout::new_split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+        let before_ids = layout.pane_ids();
+        assert!(
+            !rearrange_pane(&mut layout, dragged, 1, DropHalf::West),
+            "{dragged}"
+        );
+        assert_eq!(layout.pane_ids(), before_ids);
+    }
 }
 
 #[test]

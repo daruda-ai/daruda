@@ -194,77 +194,28 @@ fn tracks_osc_52_clipboard_across_chunk_boundaries() {
 }
 
 #[test]
-fn responds_to_csi_6n_cursor_position_request() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let mut response = Vec::new();
-
-    session
-        .feed_with_pty_responses(b"hi\x1b[6n", |bytes| {
-            response.extend_from_slice(bytes);
-        })
-        .unwrap();
-
-    assert_eq!(response, b"\x1b[1;3R");
-}
-
-#[test]
-fn responds_to_csi_6n_across_chunk_boundaries() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let mut response = Vec::new();
-
-    session
-        .feed_with_pty_responses(b"hi\x1b[", |bytes| {
-            response.extend_from_slice(bytes);
-        })
-        .unwrap();
-    assert!(response.is_empty());
-
-    session
-        .feed_with_pty_responses(b"6n", |bytes| {
-            response.extend_from_slice(bytes);
-        })
-        .unwrap();
-
-    assert_eq!(response, b"\x1b[1;3R");
-}
-
-#[test]
-fn responds_to_csi_5n_device_status_request() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let mut response = Vec::new();
-
-    session
-        .feed_with_pty_responses(b"\x1b[5n", |bytes| {
-            response.extend_from_slice(bytes);
-        })
-        .unwrap();
-
-    assert_eq!(response, b"\x1b[0n");
-}
-
-#[test]
-fn responds_to_csi_5n_across_chunk_boundaries() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let mut response = Vec::new();
-
-    session
-        .feed_with_pty_responses(b"\x1b[", |bytes| {
-            response.extend_from_slice(bytes);
-        })
-        .unwrap();
-    assert!(response.is_empty());
-
-    session
-        .feed_with_pty_responses(b"5n", |bytes| {
-            response.extend_from_slice(bytes);
-        })
-        .unwrap();
-
-    assert_eq!(response, b"\x1b[0n");
+fn responds_to_csi_status_requests_whole_or_split_across_chunks() {
+    for (chunks, expected) in [
+        (&[&b"hi\x1b[6n"[..]][..], &b"\x1b[1;3R"[..]),
+        (&[b"hi\x1b[", b"6n"], b"\x1b[1;3R"),
+        (&[b"\x1b[5n"], b"\x1b[0n"),
+        (&[b"\x1b[", b"5n"], b"\x1b[0n"),
+    ] {
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+        let mut response = Vec::new();
+        let (last, leading) = chunks.split_last().unwrap();
+        for chunk in leading {
+            session
+                .feed_with_pty_responses(chunk, |bytes| response.extend_from_slice(bytes))
+                .unwrap();
+            assert!(response.is_empty(), "no reply before the query completes");
+        }
+        session
+            .feed_with_pty_responses(last, |bytes| response.extend_from_slice(bytes))
+            .unwrap();
+        assert_eq!(response, expected, "{chunks:?}");
+    }
 }
 
 #[test]
@@ -284,19 +235,17 @@ fn responds_to_osc_10_default_foreground_color_query() {
 }
 
 #[test]
-fn responds_to_osc_11_default_background_color_query() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let mut response = Vec::new();
-
-    session
-        .feed_with_pty_responses(b"\x1b]11;?\x1b\\", |bytes| {
-            response.extend_from_slice(bytes);
-        })
-        .unwrap();
-
-    let expected = osc_color_response(11, (0x00, 0x00, 0x00));
-    assert_eq!(response, expected.as_bytes());
+fn responds_to_osc_11_background_query_with_either_terminator() {
+    for query in [&b"\x1b]11;?\x1b\\"[..], b"\x1b]11;?\x07"] {
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+        let mut response = Vec::new();
+        session
+            .feed_with_pty_responses(query, |bytes| response.extend_from_slice(bytes))
+            .unwrap();
+        let expected = osc_color_response(11, (0x00, 0x00, 0x00));
+        assert_eq!(response, expected.as_bytes(), "{query:?}");
+    }
 }
 
 #[test]
@@ -346,22 +295,6 @@ fn responds_to_osc_11_across_chunk_boundaries() {
 
     session
         .feed_with_pty_responses(b"\\", |bytes| {
-            response.extend_from_slice(bytes);
-        })
-        .unwrap();
-
-    let expected = osc_color_response(11, (0x00, 0x00, 0x00));
-    assert_eq!(response, expected.as_bytes());
-}
-
-#[test]
-fn responds_to_osc_11_query_terminated_by_bel() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    let mut response = Vec::new();
-
-    session
-        .feed_with_pty_responses(b"\x1b]11;?\x07", |bytes| {
             response.extend_from_slice(bytes);
         })
         .unwrap();

@@ -674,24 +674,24 @@ nodes:
         ids.iter().map(|s| NodeId::from(*s)).collect()
     }
 
-    /// Two nodes in unrelated branches: each leaves its own dependent behind, so
-    /// the answer is two. Summing per-node and subtracting the selection size
-    /// said one.
     #[test]
-    fn two_unrelated_removals_leave_two_dependents() {
-        assert_eq!(dependents_outside(&file(FORK), &going(&["n2", "n5"])), 2);
-    }
-
-    /// A node that depends on *two* of the selection is one loser, not two.
-    #[test]
-    fn a_node_depending_on_two_of_them_is_counted_once() {
-        assert_eq!(dependents_outside(&file(FORK), &going(&["n1", "n2"])), 2);
-    }
-
-    /// A dependent that is going too is not a change left behind.
-    #[test]
-    fn a_dependent_inside_the_selection_does_not_count() {
-        assert_eq!(dependents_outside(&file(FORK), &going(&["n5", "n6"])), 0);
+    fn dependents_outside_counts_each_loser_once() {
+        for (going_ids, expected) in [
+            // Two nodes in unrelated branches: each leaves its own dependent
+            // behind, so the answer is two. Summing per-node and subtracting the
+            // selection size said one.
+            (&["n2", "n5"], 2),
+            // A node that depends on *two* of the selection is one loser, not two.
+            (&["n1", "n2"], 2),
+            // A dependent that is going too is not a change left behind.
+            (&["n5", "n6"], 0),
+        ] {
+            assert_eq!(
+                dependents_outside(&file(FORK), &going(going_ids)),
+                expected,
+                "{going_ids:?}"
+            );
+        }
     }
 
     #[test]

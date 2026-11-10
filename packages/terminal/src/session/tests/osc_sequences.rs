@@ -138,59 +138,50 @@ fn osc9_emits_notification_with_body_only() {
     );
 }
 
-// Empty OSC 9 payload is dropped (no-op notification is just noise).
 #[test]
-fn osc9_empty_body_is_ignored() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    session.feed(b"\x1b]9;\x07").unwrap();
-    assert_eq!(session.take_notification_request(), None);
+fn empty_or_unknown_notification_oscs_are_ignored() {
+    for payload in [
+        // Empty OSC 9 payload is dropped (no-op notification is just noise).
+        &b"\x1b]9;\x07"[..],
+        // Subcommand `preexec` and any other unknown sub-OSC fall through.
+        b"\x1b]777;preexec\x07",
+    ] {
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+        session.feed(payload).unwrap();
+        assert_eq!(session.take_notification_request(), None, "{payload:?}");
+    }
 }
 
 // OSC 777 ; notify ; <title> ; <body>
 #[test]
 fn osc777_notify_emits_title_and_body() {
     use crate::vt_codes::NotificationRequest;
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    session
-        .feed(b"\x1b]777;notify;Build;all green\x07")
-        .unwrap();
-    assert_eq!(
-        session.take_notification_request(),
-        Some(NotificationRequest::Osc777 {
-            title: "Build".into(),
-            body: "all green".into(),
-        })
-    );
-}
-
-// Body containing semicolons is preserved (splitn(3) leaves the rest
-// intact). Real-world payloads include URLs, JSON snippets, etc.
-#[test]
-fn osc777_notify_preserves_semicolons_in_body() {
-    use crate::vt_codes::NotificationRequest;
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    session
-        .feed(b"\x1b]777;notify;deploy;ok; staged; verified\x07")
-        .unwrap();
-    assert_eq!(
-        session.take_notification_request(),
-        Some(NotificationRequest::Osc777 {
-            title: "deploy".into(),
-            body: "ok; staged; verified".into(),
-        })
-    );
-}
-
-// Subcommand `preexec` and any other unknown sub-OSC fall through.
-#[test]
-fn osc777_unknown_subcommand_is_ignored() {
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    session.feed(b"\x1b]777;preexec\x07").unwrap();
-    assert_eq!(session.take_notification_request(), None);
+    for (payload, title, body) in [
+        (
+            &b"\x1b]777;notify;Build;all green\x07"[..],
+            "Build",
+            "all green",
+        ),
+        // Semicolons in the body survive (splitn(3) leaves the rest intact):
+        // real payloads include URLs, JSON snippets, etc.
+        (
+            b"\x1b]777;notify;deploy;ok; staged; verified\x07",
+            "deploy",
+            "ok; staged; verified",
+        ),
+    ] {
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+        session.feed(payload).unwrap();
+        assert_eq!(
+            session.take_notification_request(),
+            Some(NotificationRequest::Osc777 {
+                title: title.into(),
+                body: body.into(),
+            })
+        );
+    }
 }
 
 // FTCS B → CommandFinished elapsed is captured. The actual duration
@@ -278,34 +269,15 @@ fn osc1337_clear_scrollback_is_case_insensitive() {
 #[test]
 fn osc1337_copy_decodes_base64_to_clipboard() {
     use base64::Engine as _;
-    let body = "from iterm2";
-    let encoded = base64::engine::general_purpose::STANDARD.encode(body.as_bytes());
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"\x1b]1337;Copy=:");
-    bytes.extend_from_slice(encoded.as_bytes());
-    bytes.extend_from_slice(b"\x07");
-
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    session.feed(&bytes).unwrap();
-    assert_eq!(session.take_clipboard_write().as_deref(), Some(body));
-}
-
-#[test]
-fn osc1337_copy_with_selection_prefix_still_writes_clipboard() {
-    use base64::Engine as _;
-    let body = "with selection";
-    let encoded = base64::engine::general_purpose::STANDARD.encode(body.as_bytes());
-    let mut bytes = Vec::new();
-    // selection char `c` (system clipboard) — OSC 52 syntax.
-    bytes.extend_from_slice(b"\x1b]1337;Copy=c:");
-    bytes.extend_from_slice(encoded.as_bytes());
-    bytes.extend_from_slice(b"\x07");
-
-    let mut session =
-        TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
-    session.feed(&bytes).unwrap();
-    assert_eq!(session.take_clipboard_write().as_deref(), Some(body));
+    // An empty selection, then `c` (system clipboard) in OSC 52 syntax.
+    for (selection, body) in [("", "from iterm2"), ("c", "with selection")] {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(body.as_bytes());
+        let bytes = format!("\x1b]1337;Copy={selection}:{encoded}\x07");
+        let mut session =
+            TerminalSession::new(TerminalDims::default(), TerminalConfig::default()).unwrap();
+        session.feed(bytes.as_bytes()).unwrap();
+        assert_eq!(session.take_clipboard_write().as_deref(), Some(body));
+    }
 }
 
 // A 100 KiB Copy= payload — exceeds the generic PARSE_TAIL_LIMIT

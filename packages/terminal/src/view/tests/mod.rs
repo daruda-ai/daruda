@@ -142,55 +142,32 @@ fn focus_row_survives_eviction_across_steps() {
 }
 
 #[test]
-fn mouse_position_to_local_accounts_for_bounds_origin() {
+fn mouse_position_to_local_subtracts_origin_and_inset() {
     let bounds = Some(gpui::Bounds::new(
         gpui::point(gpui::px(100.0), gpui::px(20.0)),
         gpui::size(gpui::px(200.0), gpui::px(80.0)),
     ));
-
-    let local = window_position_to_local(
-        bounds,
-        gpui::point(gpui::px(110.0), gpui::px(30.0)),
-        0.0,
-        0.0,
-    );
-    assert_eq!(local, gpui::point(gpui::px(10.0), gpui::px(10.0)));
-}
-
-#[test]
-fn mouse_position_to_local_subtracts_inset() {
-    let bounds = Some(gpui::Bounds::new(
-        gpui::point(gpui::px(100.0), gpui::px(20.0)),
-        gpui::size(gpui::px(200.0), gpui::px(80.0)),
-    ));
-
-    // (110 - 100 - 4, 30 - 20 - 2) = (6, 8)
-    let local = window_position_to_local(
-        bounds,
-        gpui::point(gpui::px(110.0), gpui::px(30.0)),
-        4.0,
-        2.0,
-    );
-    assert_eq!(local, gpui::point(gpui::px(6.0), gpui::px(8.0)));
-}
-
-#[test]
-fn mouse_position_to_local_clamps_clicks_inside_inset_to_zero() {
-    let bounds = Some(gpui::Bounds::new(
-        gpui::point(gpui::px(100.0), gpui::px(20.0)),
-        gpui::size(gpui::px(200.0), gpui::px(80.0)),
-    ));
-
-    // x=102 sits inside the 4px left inset (100..104); y=21 inside the 2px
-    // top inset (20..22). Without the clamp these would go negative and
-    // underflow the grid column/row.
-    let local = window_position_to_local(
-        bounds,
-        gpui::point(gpui::px(102.0), gpui::px(21.0)),
-        4.0,
-        2.0,
-    );
-    assert_eq!(local, gpui::point(gpui::px(0.0), gpui::px(0.0)));
+    for ((x, y), (inset_x, inset_y), expected) in [
+        ((110.0, 30.0), (0.0, 0.0), (10.0, 10.0)),
+        // (110 - 100 - 4, 30 - 20 - 2) = (6, 8)
+        ((110.0, 30.0), (4.0, 2.0), (6.0, 8.0)),
+        // x=102 sits inside the 4px left inset (100..104); y=21 inside the 2px
+        // top inset (20..22). Without the clamp these would go negative and
+        // underflow the grid column/row.
+        ((102.0, 21.0), (4.0, 2.0), (0.0, 0.0)),
+    ] {
+        let local = window_position_to_local(
+            bounds,
+            gpui::point(gpui::px(x), gpui::px(y)),
+            inset_x,
+            inset_y,
+        );
+        assert_eq!(
+            local,
+            gpui::point(gpui::px(expected.0), gpui::px(expected.1)),
+            "({x}, {y}) with inset ({inset_x}, {inset_y})"
+        );
+    }
 }
 
 #[test]
@@ -631,9 +608,15 @@ fn cell_side_past_half_returns_right() {
 }
 
 #[test]
-fn pixel_to_cell_anchor_first_cell_left_edge() {
-    let a = pixel_to_cell_anchor(0.0, 0.0, 8.0, 20.0, 80, 24);
-    assert_eq!((a.col, a.row, a.side), (1, 1, Side::Left));
+fn pixel_to_cell_anchor_falls_back_to_the_first_cell() {
+    for (x, y, cols, rows, what) in [
+        (0.0, 0.0, 80, 24, "first cell, left edge"),
+        (-5.0, -5.0, 80, 24, "negative coords snap to origin"),
+        (50.0, 50.0, 0, 0, "empty grid is a safe fallback"),
+    ] {
+        let a = pixel_to_cell_anchor(x, y, 8.0, 20.0, cols, rows);
+        assert_eq!((a.col, a.row, a.side), (1, 1, Side::Left), "{what}");
+    }
 }
 
 #[test]
@@ -652,18 +635,6 @@ fn pixel_to_cell_anchor_clamps_past_grid_edge() {
     let a = pixel_to_cell_anchor(10_000.0, 10_000.0, 8.0, 20.0, 80, 24);
     assert_eq!((a.col, a.row), (80, 24));
     assert_eq!(a.side, Side::Right);
-}
-
-#[test]
-fn pixel_to_cell_anchor_negative_coords_snap_to_origin() {
-    let a = pixel_to_cell_anchor(-5.0, -5.0, 8.0, 20.0, 80, 24);
-    assert_eq!((a.col, a.row, a.side), (1, 1, Side::Left));
-}
-
-#[test]
-fn pixel_to_cell_anchor_empty_grid_is_safe_fallback() {
-    let a = pixel_to_cell_anchor(50.0, 50.0, 8.0, 20.0, 0, 0);
-    assert_eq!((a.col, a.row, a.side), (1, 1, Side::Left));
 }
 
 #[test]

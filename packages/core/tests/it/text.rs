@@ -46,12 +46,22 @@ fn word_boundary_ascii() {
 }
 
 #[test]
-fn word_boundary_underscore() {
-    let s = "foo_bar baz";
-    assert_eq!(word(s, 0), Some("foo_bar".into()));
-    assert_eq!(word(s, 6), Some("foo_bar".into()));
-    assert_eq!(word(s, 7), Some(" ".into()));
-    assert_eq!(word(s, 8), Some("baz".into()));
+fn word_boundary_keeps_underscores_and_hangul_runs_together() {
+    for (s, cases) in [
+        (
+            "foo_bar baz",
+            &[(0, "foo_bar"), (6, "foo_bar"), (7, " "), (8, "baz")][..],
+        ),
+        // Hangul is 3 bytes/char; a run is one word, stopping at the space.
+        (
+            "한글 테스트",
+            &[(0, "한글"), (3, "한글"), (6, " "), (7, "테스트")][..],
+        ),
+    ] {
+        for &(at, expected) in cases {
+            assert_eq!(word(s, at), Some(expected.into()), "{s:?} at {at}");
+        }
+    }
 }
 
 #[test]
@@ -87,16 +97,6 @@ fn word_boundary_multibyte() {
     let s = "中文";
     assert_eq!(word(s, 0), Some("中文".into()));
     assert_eq!(word(s, 3), Some("中文".into()));
-}
-
-#[test]
-fn word_boundary_hangul() {
-    // Hangul is 3 bytes/char; a run is one word, stopping at the space.
-    let s = "한글 테스트";
-    assert_eq!(word(s, 0), Some("한글".into()));
-    assert_eq!(word(s, 3), Some("한글".into())); // second syllable, same word
-    assert_eq!(word(s, 6), Some(" ".into()));
-    assert_eq!(word(s, 7), Some("테스트".into()));
 }
 
 #[test]
