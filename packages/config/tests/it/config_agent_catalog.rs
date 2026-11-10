@@ -618,6 +618,44 @@ fn delegated_mode_round_trips_on_preset_and_custom_entries() {
     assert_eq!(resolved[1].delegated_mode.as_deref(), Some("acceptEdits"));
 }
 
+/// A blank `delegated_mode` is a stated opt-out of the policy default, so
+/// the writer keeps it on both entry shapes rather than dropping the key.
+#[test]
+fn a_blank_delegated_mode_round_trips_on_preset_and_custom_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let blank = AgentDefinition {
+        delegated_mode: Some(String::new()),
+        ..AgentDefinition::claude_default()
+    };
+    let cfg = Config {
+        agents: vec![
+            AgentEntry::for_definition(blank.clone(), None),
+            AgentEntry::custom(AgentDefinition {
+                id: "custom".to_string(),
+                launch: AgentLaunch::Raw("custom --acp".to_string()),
+                ..blank
+            }),
+        ],
+        ..Config::default()
+    };
+    assert!(cfg.agents[0].preset_id().is_some());
+    patch_config_file_to(&cfg, &path).unwrap();
+
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        on_disk.matches("delegated_mode = \"\"").count(),
+        2,
+        "{on_disk}"
+    );
+    let reloaded = Config::load_from(&path);
+    assert_eq!(reloaded.agents, cfg.agents);
+    for agent in reloaded.resolved_agents() {
+        assert_eq!(agent.delegated_mode.as_deref(), Some(""), "{}", agent.id);
+        assert_eq!(effective_delegated_mode(&agent), None, "{}", agent.id);
+    }
+}
+
 #[test]
 fn a_catalog_written_before_delegated_mode_loads_with_it_unset() {
     let dir = tempfile::tempdir().unwrap();

@@ -59,8 +59,9 @@ impl SettingsView {
         let default_mode = SharedString::from(definition.default_mode.clone().unwrap_or_default());
         let default_model =
             SharedString::from(definition.default_model.clone().unwrap_or_default());
-        let delegated_mode =
-            SharedString::from(definition.delegated_mode.clone().unwrap_or_default());
+        let delegated_mode = sections::agent_vocabulary::delegated_picker_value(
+            definition.delegated_mode.as_deref(),
+        );
         let delegated_options = sections::agent_vocabulary::agent_row_delegated_options(
             vocabulary,
             &id,

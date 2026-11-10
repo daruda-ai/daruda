@@ -530,6 +530,63 @@ fn a_delegated_mode_pick_persists_apart_from_the_session_mode(cx: &mut TestAppCo
     });
 }
 
+/// "Same as session mode" is a stated `delegated_mode = ""`: a row loaded
+/// from one shows it selected, saving another field keeps it, the Default
+/// entry still removes the key, and picking it again writes the blank back.
+#[gpui::test]
+fn same_as_session_mode_keeps_a_blank_delegated_mode(cx: &mut TestAppContext) {
+    let follows = crate::sections::agent_vocabulary::DELEGATED_FOLLOWS_SESSION;
+    let config = daruda_config::Config {
+        agents: vec![daruda_config::AgentEntry::for_definition(
+            daruda_config::AgentDefinition {
+                delegated_mode: Some(String::new()),
+                ..daruda_config::AgentDefinition::claude_default()
+            },
+            None,
+        )],
+        ..daruda_config::Config::default()
+    };
+    let (wh, win) = build_window_with_config(cx, config);
+    set_agent_vocabulary(
+        &wh,
+        &win,
+        cx,
+        daruda_store::agent_vocabulary::AgentVocabularyCache::default(),
+    );
+    let stored = |cx: &mut TestAppContext| {
+        win.read_with(cx, |_w, cx| {
+            let agents = &crate::store::SettingsStore::global(cx).user().agents;
+            agents[0].resolve().expect("claude resolves").delegated_mode
+        })
+    };
+    win.read_with(cx, |w, cx| {
+        let row = w.agent_editable_row(0).unwrap();
+        assert_eq!(
+            row.delegated_mode_select
+                .read(cx)
+                .selected_value()
+                .map(|v| v.as_ref()),
+            Some(follows)
+        );
+        assert_eq!(row.delegated_mode(cx).as_deref(), Some(""));
+    });
+
+    let mode = |r: &AgentCatalogRow| r.default_mode_select.clone();
+    confirm_agent_row_select(&wh, &win, cx, 0, mode, "plan");
+    assert_eq!(
+        stored(cx).as_deref(),
+        Some(""),
+        "another field's save keeps it"
+    );
+
+    let delegated = |r: &AgentCatalogRow| r.delegated_mode_select.clone();
+    confirm_agent_row_select(&wh, &win, cx, 0, delegated, "");
+    assert_eq!(stored(cx), None, "Default removes the key");
+
+    confirm_agent_row_select(&wh, &win, cx, 0, delegated, follows);
+    assert_eq!(stored(cx).as_deref(), Some(""));
+}
+
 /// The cached vocabulary is keyed on the row's **id**, which stays editable
 /// after the row was built — retyping it has to re-source both pickers. The
 /// two axes are sourced independently: a cache that only knows this agent's

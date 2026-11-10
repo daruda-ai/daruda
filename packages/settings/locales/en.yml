@@ -364,7 +364,8 @@ settings:
   agent_delegated_mode_description: "Chats and tasks requested from your phone or opened by the orchestrator start in this mode. For Claude and Codex the default skips permission prompts; other agents use Session mode. Chats you open on the desktop use Session mode."
   # The "no override" entry of that picker, naming the mode it then uses.
   agent_delegated_mode_default_named: "Default — %{name}"
-  # Same entry for an adapter daruda knows no no-prompt mode for.
+  # The entry that opts out of that default and starts these sessions in the
+  # agent's Session mode (config `delegated_mode = ""`).
   agent_delegated_mode_follows_session_mode: "Same as session mode"
   agent_field_question_timeout: "Question timeout (s)"
   agent_question_timeout_placeholder: "Follows the Chat setting"

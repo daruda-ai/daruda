@@ -70,10 +70,15 @@ impl AgentCatalogRow {
         selected_override(&self.default_mode_select, cx)
     }
 
-    /// The mode for phone- and orchestrator-opened sessions, same sentinel as
-    /// [`Self::default_mode`]; `None` follows the policy default.
+    /// The mode for phone- and orchestrator-opened sessions as the config
+    /// stores it: `None` follows the policy default, `Some("")` follows the
+    /// session mode, anything else pins that mode.
     pub(crate) fn delegated_mode(&self, cx: &gpui::App) -> Option<String> {
-        selected_override(&self.delegated_mode_select, cx)
+        let value = selected_value(&self.delegated_mode_select, cx);
+        match value.as_ref() {
+            DELEGATED_FOLLOWS_SESSION => Some(String::new()),
+            _ => selected_override(&self.delegated_mode_select, cx),
+        }
     }
 
     /// The pinned model, same sentinel as [`Self::default_mode`].
@@ -142,9 +147,27 @@ pub(crate) fn agent_row_vocabulary_options(
     )
 }
 
-/// The delegated-mode picker's options: the row's mode vocabulary, led by a
-/// "no override" entry naming what [`daruda_config::delegated_default`] picks,
-/// by the name an approval card gives it.
+/// The delegated picker's value for "Same as session mode", stored as
+/// `delegated_mode = ""`. It cannot be `""` itself: that is every picker's
+/// "no override" entry, which removes the key and so follows the policy
+/// default instead. No adapter names a mode with a control character.
+pub(crate) const DELEGATED_FOLLOWS_SESSION: &str = "\u{1}follows-session-mode";
+
+/// The delegated picker's value for a stored `delegated_mode`: `""` for an
+/// unset key, [`DELEGATED_FOLLOWS_SESSION`] for a blank one (as
+/// [`daruda_config::effective_delegated_mode`] reads it), else the mode.
+pub(crate) fn delegated_picker_value(stored: Option<&str>) -> SharedString {
+    match stored.map(str::trim) {
+        None => SharedString::default(),
+        Some("") => SharedString::new_static(DELEGATED_FOLLOWS_SESSION),
+        Some(mode) => SharedString::from(mode.to_string()),
+    }
+}
+
+/// The delegated-mode picker's options: a "no override" entry naming what
+/// [`daruda_config::delegated_default`] picks, by the name an approval card
+/// gives it; then "Same as session mode", the stated opt-out of that default;
+/// then the row's mode vocabulary.
 pub(crate) fn agent_row_delegated_options(
     vocabulary: &AgentVocabularyCache,
     agent_id: &str,
@@ -155,13 +178,29 @@ pub(crate) fn agent_row_delegated_options(
     let seed_modes = seed.as_ref().map_or(&[][..], |seed| seed.modes.as_slice());
     let known = vocabulary.known_modes_for(agent_id, command);
     let entries = known_axis(known, seed_modes);
-    let sentinel = match daruda_config::delegated_default_for_command(command) {
-        Some(id) => s::settings::agent_delegated_mode_default_named(
-            daruda_config::mode_display_name(known, command, id),
-        ),
-        None => s::settings::agent_delegated_mode_follows_session_mode(),
+    let default_named = match daruda_config::delegated_default_for_command(command) {
+        Some(id) => daruda_config::mode_display_name(known, command, id),
+        None => s::settings::agent_field_default_mode(),
     };
-    options_with_sentinel(entries, sentinel, saved, mode_label)
+    let saved = if saved == DELEGATED_FOLLOWS_SESSION {
+        ""
+    } else {
+        saved
+    };
+    let mut options = options_with_sentinel(
+        entries,
+        s::settings::agent_delegated_mode_default_named(default_named),
+        saved,
+        mode_label,
+    );
+    options.insert(
+        1,
+        SelectOption::new(
+            DELEGATED_FOLLOWS_SESSION,
+            s::settings::agent_delegated_mode_follows_session_mode(),
+        ),
+    );
+    options
 }
 
 /// `(model, mode)` as a collapsed catalog card names them: the picked value,
@@ -403,9 +442,39 @@ mod tests {
         let other = agent_row_delegated_options(&vocabulary, "other", "other --acp", "legacy");
         assert_eq!(
             other[0].label.as_ref(),
-            crate::strings::settings::agent_delegated_mode_follows_session_mode()
+            crate::strings::settings::agent_delegated_mode_default_named(
+                crate::strings::settings::agent_field_default_mode()
+            )
         );
-        assert_eq!(values(&other), vec!["", "legacy"]);
+        assert_eq!(values(&other), vec!["", FOLLOWS, "legacy"]);
+    }
+
+    const FOLLOWS: &str = super::DELEGATED_FOLLOWS_SESSION;
+
+    /// "Same as session mode" sits right after the policy default on every
+    /// adapter, and a stored blank selects it rather than the default or an
+    /// appended blank entry.
+    #[test]
+    fn the_delegated_picker_offers_same_as_session_mode_for_a_blank_value() {
+        let vocabulary = AgentVocabularyCache::default();
+        for command in [CLAUDE, "npx codex-acp", "other --acp"] {
+            let options = agent_row_delegated_options(&vocabulary, "a", command, FOLLOWS);
+            assert_eq!(options[1].value.as_ref(), FOLLOWS, "{command}");
+            assert_eq!(
+                options[1].label.as_ref(),
+                crate::strings::settings::agent_delegated_mode_follows_session_mode()
+            );
+            assert_eq!(
+                values(&options).iter().filter(|v| *v == FOLLOWS).count(),
+                1,
+                "{command}"
+            );
+        }
+        assert_eq!(super::delegated_picker_value(None).as_ref(), "");
+        for blank in ["", "  "] {
+            assert_eq!(super::delegated_picker_value(Some(blank)).as_ref(), FOLLOWS);
+        }
+        assert_eq!(super::delegated_picker_value(Some("plan")).as_ref(), "plan");
     }
 
     /// A value pinned before the agent ever advertised anything has to stay

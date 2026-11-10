@@ -40,7 +40,8 @@ pub fn delegated_default_for_command(adapter_command: &str) -> Option<&'static s
 /// policy default, so the session follows `default_mode` as a desktop one
 /// does — `None` here. Treating it as unset would hand a person who wrote
 /// `delegated_mode = ""` to keep prompts the no-prompt mode instead. The
-/// Settings picker never writes one: its default entry removes the key.
+/// Settings picker writes one for "Same as session mode"; its default entry
+/// removes the key.
 pub fn effective_delegated_mode(agent: &AgentDefinition) -> Option<String> {
     match agent.delegated_mode.as_deref().map(str::trim) {
         Some("") => None,
