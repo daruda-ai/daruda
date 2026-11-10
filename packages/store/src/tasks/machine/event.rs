@@ -63,7 +63,9 @@ pub enum TaskEvent {
         subtask_id: String,
         at: DateTime<Utc>,
     },
-    /// A `TodoWrite` payload from one of the task's sessions.
+    /// A `TodoWrite` payload from one of the task's sessions. Replay-only:
+    /// nothing writes it since tasks run only as agent chats, but logs
+    /// before SCHEMA 9 hold it, so keep it for them to replay.
     TodoMerged {
         id: TaskId,
         session_id: String,
@@ -82,6 +84,8 @@ pub enum TaskEvent {
     },
     /// The pane the run uses exists; its identity completes the run.
     LanePrepared {
+        /// Replay-only: set by CLI runs in logs before SCHEMA 9; every
+        /// start since writes `None`.
         #[serde(default)]
         terminal_id: Option<String>,
         exec: ExecutionRef,
@@ -145,6 +149,8 @@ pub enum TaskEvent {
         outcome: SettleOutcome,
         at: DateTime<Utc>,
     },
+    /// Replay-only: written by CLI runs in logs before SCHEMA 9; kept so
+    /// those logs replay.
     ToolFailuresEscalated {
         exec: ExecutionRef,
         at: DateTime<Utc>,

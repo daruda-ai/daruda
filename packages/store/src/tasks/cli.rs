@@ -11,6 +11,8 @@ use std::path::PathBuf;
 pub enum TaskExecutionSource {
     #[default]
     AgentChat,
+    /// No new start records it since tasks run only as agent chats; kept
+    /// so a CLI run already in the log replays and its tracking finishes.
     ClaudeCli {
         transcript_path: Option<PathBuf>,
         process: CliProcessState,
