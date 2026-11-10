@@ -22,6 +22,15 @@ pub(crate) struct Scope {
 }
 
 impl Scope {
+    /// The identity `record` was made under.
+    pub(crate) fn of(record: &ThreadRecord) -> Self {
+        Self {
+            connection: record.connection.clone(),
+            bot: record.bot.clone(),
+            conversation: record.conversation.clone(),
+        }
+    }
+
     fn holds(&self, record: &ThreadRecord) -> bool {
         record.connection == self.connection
             && record.bot == self.bot
@@ -52,6 +61,19 @@ impl Book {
         self.threads
             .iter()
             .find(|record| scope.holds(record) && record.sessions.contains(key))
+    }
+
+    /// The newest thread on `connection` holding `key`, under whichever
+    /// identity made it: the roots a pane's status reaches.
+    pub(crate) fn for_connection(
+        &self,
+        connection: &str,
+        key: &ConversationKey,
+    ) -> Option<&ThreadRecord> {
+        self.threads
+            .iter()
+            .filter(|record| record.connection == connection && record.sessions.contains(key))
+            .max_by_key(|record| record.last_used)
     }
 
     /// The thread named `id`, as its stop button names it.

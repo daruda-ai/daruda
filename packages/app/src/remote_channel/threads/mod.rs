@@ -5,6 +5,7 @@
 mod book;
 pub(crate) mod driver;
 pub(crate) mod roots;
+pub(crate) mod route;
 pub(crate) mod status;
 pub(crate) mod stop;
 

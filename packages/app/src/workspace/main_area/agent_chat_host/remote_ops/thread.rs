@@ -26,6 +26,11 @@ impl Workspace {
         })
     }
 
+    /// Whether `pane_id` is an open agent-chat pane.
+    pub(crate) fn has_agent_chat(&self, pane_id: PaneId) -> bool {
+        self.agent_chat_view(pane_id).is_some()
+    }
+
     /// The open pane holding one of `conversations`: where a reply in that
     /// conversation's thread goes.
     pub(crate) fn pane_with_conversation(
@@ -45,22 +50,19 @@ impl Workspace {
             .map(|(pane, _)| pane)
     }
 
-    /// Tell the pane's remote threads what it is doing now. Called on each
-    /// pulse tick of a busy pane; an unchanged status costs one lookup.
+    /// Tell the pane's remote threads what it is doing, for a pane the
+    /// pulse tick just found busy. Asks only whether the person is needed:
+    /// `activity_state` would rescan the transcript for busyness the tick
+    /// already measured.
     pub(in crate::workspace) fn report_remote_busy(&self, pane_id: PaneId, cx: &mut Context<Self>) {
         let Some(view) = self.agent_chat_view(pane_id) else {
             return;
         };
         let view = view.read(cx);
-        if !view.last_reconciled_busy() {
-            return;
-        }
-        let activity = match view.activity_state() {
-            daruda_chat::view::ActivityState::AwaitingPermission
-            | daruda_chat::view::ActivityState::AwaitingAnswer => PaneActivity::AwaitingYou,
-            daruda_chat::view::ActivityState::Working | daruda_chat::view::ActivityState::Idle => {
-                PaneActivity::Working
-            }
+        let activity = if view.has_pending_permission() || view.has_pending_question() {
+            PaneActivity::AwaitingYou
+        } else {
+            PaneActivity::Working
         };
         self.report_remote_activity(pane_id, activity, cx);
     }

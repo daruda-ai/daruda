@@ -2,8 +2,10 @@
 //! replies under it. Other transports have no thread concept here; callers
 //! ask [`crate::remote_channel::transport::pane_threads`] before using this.
 
-use super::{API, Credentials, Message, Result, SentPart, api, post, post_payload, update_result};
-use crate::remote_channel::cards::EditFailure;
+use super::{
+    API, Credentials, Message, Result, SentPart, TRANSIENT_REFUSALS, api, post, post_payload,
+    refusal,
+};
 use crate::remote_channel::transport::http;
 use daruda_config::remote::RemoteRecipient;
 use serde_json::{Value, json};
@@ -65,20 +67,67 @@ fn root_payload(recipient: &RemoteRecipient, view: &RootView<'_>) -> Value {
     post_payload(recipient, &view.fallback(), view.blocks(), None)
 }
 
+/// Why a root could not be updated.
+#[derive(Debug)]
+pub(crate) enum RootFailure {
+    /// The message or its conversation no longer exists.
+    Missing(String),
+    /// Slack refused this update: credentials, scopes, or the payload.
+    Refused(String),
+    /// Rate limits, timeouts, server trouble: may pass.
+    Transient(String),
+}
+
+/// Codes that mean the root itself is gone, as opposed to this edit being
+/// refused. Only these let a thread's record go.
+const MISSING: &[&str] = &["message_not_found", "channel_not_found"];
+
 /// Show `view` on the root `root` in place.
 pub(crate) fn replace_root(
     credentials: &Credentials,
     recipient: &RemoteRecipient,
     root: &str,
     view: &RootView<'_>,
-) -> std::result::Result<(), EditFailure> {
-    update_result(http::request_with_status(
+) -> std::result::Result<(), RootFailure> {
+    root_result(http::request_with_status(
         "POST",
         &format!("{API}/chat.update"),
         Some(&format!("Bearer {}", credentials.bot)),
         &json!({"channel": recipient.conversation_id, "ts": root, "text": view.fallback(),
             "parse": "none", "blocks": view.blocks()}),
     ))
+}
+
+fn root_result(
+    response: std::result::Result<Value, http::Failure>,
+) -> std::result::Result<(), RootFailure> {
+    let value = match response {
+        Ok(value) => value,
+        Err(failure) => {
+            let retryable = matches!(&failure, http::Failure::Transport(_))
+                || matches!(&failure, http::Failure::Status(status) if http::retryable_status(*status));
+            let reason =
+                crate::remote_channel::transport::TransportError::from(failure).to_string();
+            return Err(if retryable {
+                RootFailure::Transient(reason)
+            } else {
+                RootFailure::Refused(reason)
+            });
+        }
+    };
+    let Some(code) = refusal(&value) else {
+        return Ok(());
+    };
+    let reason = format!("Slack chat.update failed: {code}");
+    Err(
+        if !value["error"].is_string() || TRANSIENT_REFUSALS.contains(&code.as_str()) {
+            RootFailure::Transient(reason)
+        } else if MISSING.contains(&code.as_str()) {
+            RootFailure::Missing(reason)
+        } else {
+            RootFailure::Refused(reason)
+        },
+    )
 }
 
 /// Post `message` as replies under `root`.
@@ -147,6 +196,36 @@ mod tests {
             1,
             "no button without work to stop"
         );
+    }
+
+    /// Only a missing message lets a thread go; a refusal of the edit keeps
+    /// the thread routable, and passing trouble is retried.
+    #[test]
+    fn a_root_update_failure_is_classified_by_what_it_says_of_the_root() {
+        use super::super::http::Failure;
+        let error = |code: &str| Ok(json!({"ok": false, "error": code}));
+        let cases = [
+            (Ok(json!({"ok": true})), "ok"),
+            (error("message_not_found"), "missing"),
+            (error("channel_not_found"), "missing"),
+            (error("invalid_auth"), "refused"),
+            (error("missing_scope"), "refused"),
+            (error("invalid_blocks"), "refused"),
+            (error("ratelimited"), "transient"),
+            (Ok(json!({"ok": false})), "transient"),
+            (Err(Failure::Status(503)), "transient"),
+            (Err(Failure::Status(403)), "refused"),
+        ];
+        for (response, want) in cases {
+            let shown = format!("{response:?}");
+            let got = match root_result(response) {
+                Ok(()) => "ok",
+                Err(RootFailure::Missing(_)) => "missing",
+                Err(RootFailure::Refused(_)) => "refused",
+                Err(RootFailure::Transient(_)) => "transient",
+            };
+            assert_eq!(got, want, "{shown}");
+        }
     }
 
     #[test]

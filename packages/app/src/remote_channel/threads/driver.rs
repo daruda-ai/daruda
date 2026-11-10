@@ -1,13 +1,13 @@
 //! Places a pane's message in its thread: decides the thread on the main
 //! thread, posts off it, and records the root a post created.
 
-use super::roots::Roots;
+use super::roots::{RootFace, Roots};
 use super::status::ShownStatus;
 use super::{Book, ConversationKey, PaneConversation, Scope};
 use crate::remote_channel::bridge::{MessageTail, PaneRef};
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
-use crate::remote_channel::transport::{self, Credentials, IncomingKind, Message, SentPart, slack};
+use crate::remote_channel::transport::{self, Credentials, Message, SentPart, slack};
 use crate::surface::strings as s;
 use daruda_config::remote::{ChannelKind, RemoteRecipient};
 use daruda_store::remote_threads::RemoteThreadStore;
@@ -22,9 +22,11 @@ pub(crate) struct Threads {
     /// used. Memory only — after a restart a pane is found by the
     /// conversation it resumes.
     pub(super) last: HashMap<(String, PaneRef), ConversationKey>,
-    /// Each pane's latest root title and status, for roots made or retitled
-    /// later. Memory only, like `last`.
-    pub(super) titles: HashMap<PaneRef, String>,
+    /// The title each pane's root on each connection was last given. Memory
+    /// only, like `last`.
+    pub(super) titles: HashMap<(String, PaneRef), String>,
+    /// Each pane's latest status, for roots made later. A closed pane keeps
+    /// `Closed` here so a root still being posted for it lands closed.
     pub(super) activity: HashMap<PaneRef, ShownStatus>,
     pub(super) roots: Roots,
     store: Option<RemoteThreadStore>,
@@ -82,6 +84,40 @@ impl Threads {
             }
             None => (None, None),
         }
+    }
+
+    /// After placing a post from `pane`: note the root's title on this
+    /// connection, and bring an existing root up to date. After a restart this
+    /// run does not know what the root shows; one edit settles it, and a root
+    /// that already shows this face is not edited again. The thread's id —
+    /// its record's, or a new one for the root this post starts.
+    pub(super) fn want_root_after_place(
+        &mut self,
+        scope: &Scope,
+        pane: PaneRef,
+        root: Option<&str>,
+        conversation: &PaneConversation,
+    ) -> String {
+        self.titles
+            .insert((scope.connection.clone(), pane), conversation.title.clone());
+        let id = root
+            .and_then(|root| self.book.for_root(scope, root))
+            .map_or_else(
+                || uuid::Uuid::new_v4().simple().to_string(),
+                |record| record.id.clone(),
+            );
+        if let (Some(root), Some(&shown)) = (root, self.activity.get(&pane)) {
+            self.roots.want(
+                scope,
+                &id,
+                root.to_owned(),
+                RootFace {
+                    title: conversation.title.clone(),
+                    shown,
+                },
+            );
+        }
+        id
     }
 
     /// Record the thread `id` a post started for `key`.
@@ -146,22 +182,7 @@ pub(crate) fn plan(
     let threads = &mut cx.global_mut::<RemoteChannels>().threads;
     let (root, divider) = threads.place(&scope, pane, &conversation, now());
     let shown = threads.activity.get(&pane).copied();
-    let retitled = threads
-        .titles
-        .insert(pane, conversation.title.clone())
-        .is_some_and(|old| old != conversation.title);
-    let id = root
-        .as_deref()
-        .and_then(|root| threads.book.for_root(&scope, root))
-        .map_or_else(
-            || uuid::Uuid::new_v4().simple().to_string(),
-            |record| record.id.clone(),
-        );
-    if let (Some(root), Some(shown), true) = (&root, shown, retitled) {
-        threads
-            .roots
-            .want(&scope, &id, root.clone(), conversation.title.clone(), shown);
-    }
+    let id = threads.want_root_after_place(&scope, pane, root.as_deref(), &conversation);
     Some(ThreadPlan {
         scope,
         id,
@@ -191,7 +212,7 @@ fn divider_text(previous: &ConversationKey, now: &PaneConversation) -> String {
     }
 }
 
-fn conversation_of(pane: PaneRef, cx: &mut App) -> Option<PaneConversation> {
+pub(super) fn conversation_of(pane: PaneRef, cx: &mut App) -> Option<PaneConversation> {
     let mut found = None;
     crate::remote_channel::dispatch::target::dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
         if found.is_none() {
@@ -296,134 +317,21 @@ pub(crate) fn record_root(plan: &ThreadPlan, root: String, cx: &mut App) {
         root.clone(),
         now(),
     );
+    let face = |shown| RootFace {
+        title: plan.title.clone(),
+        shown,
+    };
     if let Some(shown) = plan.shown {
-        threads.roots.shown(&plan.scope, &root, shown);
+        threads.roots.shown(&plan.scope, &root, face(shown));
     }
     if let Some(&current) = threads.activity.get(&plan.pane)
         && plan.shown != Some(current)
     {
         threads
             .roots
-            .want(&plan.scope, &plan.id, root, plan.title.clone(), current);
+            .want(&plan.scope, &plan.id, root, face(current));
     }
     super::roots::flush(cx);
-}
-
-/// Where a reply posted in a thread goes.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum ThreadReply {
-    /// Not a pane thread on this channel: routed as before threads.
-    Untracked,
-    /// The open pane the thread speaks for.
-    Pane(PaneRef),
-    /// A pane thread whose conversation is open in no window.
-    Closed,
-    /// A thread no pane started and no message here answers.
-    Unknown,
-}
-
-/// Route a reply posted under `thread` on connection `id`. A message sent
-/// before threads keeps its old routing; a thread this app cannot place is
-/// refused rather than guessed, since a guess delivers to the wrong agent.
-pub(crate) fn route_reply(
-    id: &str,
-    bot: &BotSession,
-    thread: Option<&str>,
-    cx: &mut App,
-) -> ThreadReply {
-    let Some(thread) = thread else {
-        return ThreadReply::Untracked;
-    };
-    let channels = cx.global::<RemoteChannels>();
-    let Some(connection) = channels.connections.get(id) else {
-        return ThreadReply::Untracked;
-    };
-    let Some(recipient) = &connection.config.recipient else {
-        return ThreadReply::Untracked;
-    };
-    if !transport::pane_threads(connection.config.kind)
-        || connection.core.sent_pings.contains_key(thread)
-    {
-        return ThreadReply::Untracked;
-    }
-    let scope = scope(id, bot, recipient);
-    let Some(record) = channels.threads.book.for_root(&scope, thread) else {
-        return ThreadReply::Unknown;
-    };
-    let conversations = record.sessions.clone();
-    match open_pane_with(&conversations, cx) {
-        Some(pane) => ThreadReply::Pane(pane),
-        None => ThreadReply::Closed,
-    }
-}
-
-/// The open pane the thread `thread` speaks for, on connection `id`.
-pub(super) fn pane_of_thread(
-    id: &str,
-    bot: &BotSession,
-    thread: &str,
-    cx: &mut App,
-) -> Option<PaneRef> {
-    let channels = cx.global::<RemoteChannels>();
-    let recipient = channels.connections.get(id)?.config.recipient.as_ref()?;
-    let scope = scope(id, bot, recipient);
-    let conversations = channels
-        .threads
-        .book
-        .by_id(&scope, thread)?
-        .sessions
-        .clone();
-    open_pane_with(&conversations, cx)
-}
-
-fn open_pane_with(conversations: &[ConversationKey], cx: &mut App) -> Option<PaneRef> {
-    let mut found = None;
-    crate::window_registry::WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-        if found.is_none()
-            && let Some(pane) = ws.pane_with_conversation(conversations, cx)
-        {
-            found = Some(PaneRef {
-                workspace: ws.uuid(),
-                pane,
-            });
-        }
-    });
-    found
-}
-
-/// The thread a reply to `incoming` belongs in: the one it was posted in,
-/// or the one whose root holds the tapped stop button.
-pub(crate) fn reply_thread(kind: ChannelKind, incoming: &IncomingKind) -> Option<String> {
-    if !transport::pane_threads(kind) {
-        return None;
-    }
-    match incoming {
-        IncomingKind::Message {
-            reply_to: Some(thread),
-            ..
-        } => Some(thread.clone()),
-        IncomingKind::Callback {
-            data, message_id, ..
-        } if super::stop::thread_of(data).is_some() => Some(message_id.clone()),
-        IncomingKind::Message { .. } | IncomingKind::Callback { .. } => None,
-    }
-}
-
-/// Send a reply in `thread`, or at the top when there is none. Blocking.
-pub(crate) fn send_reply(
-    kind: ChannelKind,
-    credentials: &Credentials,
-    recipient: &RemoteRecipient,
-    thread: Option<&str>,
-    message: Message,
-) -> transport::Result<()> {
-    match thread {
-        Some(thread) => {
-            slack::threads::post_in_thread(credentials, recipient, thread, message, |_| {})
-        }
-        None => transport::send(kind, credentials, recipient, message),
-    }
-    .map(drop)
 }
 
 pub(super) fn now() -> i64 {

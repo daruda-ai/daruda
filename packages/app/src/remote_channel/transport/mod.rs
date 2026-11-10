@@ -122,6 +122,10 @@ pub fn edit(
 
 /// Split on scalar boundaries while measuring UTF-16, the stricter platform unit.
 pub(crate) fn feedback(original: &str, label: &str, limit: usize) -> String {
+    // A part that carried only buttons has no text to keep above the label.
+    if original.is_empty() {
+        return chunks(label, limit).into_iter().next().unwrap_or_default();
+    }
     let suffix = format!("\n\n{label}");
     let reserve = suffix.encode_utf16().count();
     let prefix = chunks(original, limit.saturating_sub(reserve).max(2))
@@ -157,6 +161,11 @@ mod tests {
         assert!(body.ends_with("Allowed"));
         assert!(body.encode_utf16().count() <= 2000);
     }
+    #[test]
+    fn a_buttons_only_part_becomes_just_its_decision() {
+        assert_eq!(super::feedback("", "Allowed", 2000), "Allowed");
+    }
+
     #[test]
     fn unicode_messages_are_lossless_and_bounded() {
         let text = "A\u{1f600}\u{d55c}".repeat(1000);

@@ -226,6 +226,18 @@ fn run_worker(id: &str, cx: &mut App) {
 }
 
 fn install_connection(id: &str, bot: Arc<BotSession>, cx: &mut App) -> uuid::Uuid {
+    install_connection_with_queue(id, bot, cx).0
+}
+
+/// [`install_connection`], keeping the outgoing queue so a test can send.
+fn install_connection_with_queue(
+    id: &str,
+    bot: Arc<BotSession>,
+    cx: &mut App,
+) -> (
+    uuid::Uuid,
+    futures::channel::mpsc::UnboundedReceiver<super::super::Pending>,
+) {
     SettingsStore::init(cx);
     let mut config = daruda_config::Config::default();
     let mut channel = ChannelConfig::new(id.into(), ChannelKind::Slack);
@@ -239,7 +251,7 @@ fn install_connection(id: &str, bot: Arc<BotSession>, cx: &mut App) -> uuid::Uui
     cx.global_mut::<SettingsStore>()
         .set_user_for_testing(config);
     let (events, _) = futures::channel::mpsc::unbounded();
-    let (outbound, _) = futures::channel::mpsc::unbounded();
+    let (outbound, queue) = futures::channel::mpsc::unbounded();
     cx.set_global(RemoteChannels {
         connections: Default::default(),
         events,
@@ -255,7 +267,7 @@ fn install_connection(id: &str, bot: Arc<BotSession>, cx: &mut App) -> uuid::Uui
         .unwrap();
     connection.publish_bot(bot);
     connection.status = crate::remote_channel::runtime::Status::Connected;
-    connection.generation
+    (connection.generation, queue)
 }
 
 #[gpui::test]
@@ -962,7 +974,7 @@ fn a_thread_reply_reaches_its_pane_and_an_unplaceable_thread_is_refused(cx: &mut
         ];
         for (thread, want, label) in cases {
             assert_eq!(
-                driver::route_reply("work", &bot, thread, cx),
+                route::route_reply("work", &bot, thread, cx),
                 want,
                 "{label}"
             );
@@ -972,7 +984,7 @@ fn a_thread_reply_reaches_its_pane_and_an_unplaceable_thread_is_refused(cx: &mut
     set_session("s2", cx);
     cx.update(|cx| {
         assert_eq!(
-            driver::route_reply("work", &bot, Some("100.1"), cx),
+            route::route_reply("work", &bot, Some("100.1"), cx),
             ThreadReply::Closed,
             "the thread's conversation is no longer open"
         );
@@ -1052,23 +1064,206 @@ fn a_root_stop_tap_reaches_the_threads_pane_and_answers_in_the_thread(cx: &mut T
                     original: String::new(),
                 },
             };
-            let thread = driver::reply_thread(ChannelKind::Slack, &incoming.kind);
+            let thread = route::reply_thread(ChannelKind::Slack, &incoming.kind);
             (
                 dispatch_claimed("work", generation, &bot, &incoming, cx),
                 thread,
             )
         };
         let closed = s::remote_channel::thread_closed();
+        fixture.workspace.update(cx, |ws, cx| {
+            ws.set_pane_working_for_test(fixture.pane(), cx)
+        });
         let (effect, thread) = tap(stop::token("t1"), cx);
+        let effect = effect.unwrap();
         assert!(
-            !matches!(&effect, Some(Effect::Reply(RenderedReply { text, .. })) if *text == closed),
-            "the open pane is stopped"
+            !matches!(&effect, Effect::Reply(RenderedReply { text, .. }) if *text == closed),
+            "the open pane is found"
         );
+        assert_eq!(
+            fixture
+                .workspace
+                .update(cx, |ws, cx| ws.control_stop(fixture.pane(), cx)),
+            Ok(crate::control::result::StopDisposition::AlreadyIdle),
+            "the tap stopped the working pane"
+        );
+        // The tapped message is the thread's status root: the answer is never
+        // an edit of it, whatever the stop came to.
+        assert!(!matches!(
+            feedback_for(effect, callback_on_root(), Tap::Untracked),
+            Feedback::Edit { .. }
+        ));
+        assert!(!matches!(
+            feedback_for(
+                stop::tap_effect_for_test(Effect::None),
+                callback_on_root(),
+                Tap::Untracked
+            ),
+            Feedback::Edit { .. }
+        ));
         assert_eq!(thread.as_deref(), Some("100.1"), "answered in the thread");
         let (effect, _) = tap(stop::token("unknown"), cx);
         assert!(
             matches!(&effect, Some(Effect::Reply(RenderedReply { text, .. })) if *text == closed),
             "a thread no open pane holds"
+        );
+    });
+}
+
+fn callback_on_root() -> IncomingKind {
+    IncomingKind::Callback {
+        data: crate::remote_channel::threads::stop::token("t1"),
+        message_id: "100.1".into(),
+        original: String::new(),
+    }
+}
+
+/// A pane with a thread on connection "work": the fixture, the bot, the
+/// thread root "100.1" holding the pane's conversation, and the queue.
+struct ThreadedPane {
+    fixture: crate::test_support::ControlFixture,
+    bot: Arc<BotSession>,
+    generation: uuid::Uuid,
+    queue: futures::channel::mpsc::UnboundedReceiver<super::super::Pending>,
+    _root: tempfile::TempDir,
+}
+
+fn threaded_pane(cx: &mut TestAppContext) -> ThreadedPane {
+    use crate::remote_channel::threads::Scope;
+    let fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let root = tempfile::tempdir().unwrap();
+    let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
+    let key = fixture.workspace.update(cx, |ws, cx| {
+        ws.set_pane_session_for_test(fixture.pane(), "s1", cx);
+        ws.remote_conversation(fixture.pane(), cx).unwrap().key
+    });
+    let (generation, queue) = cx.update(|cx| {
+        let installed = install_connection_with_queue("work", bot.clone(), cx);
+        let scope = Scope {
+            connection: "work".into(),
+            bot: lock::digest_of("shared-bot"),
+            conversation: "room".into(),
+        };
+        cx.global_mut::<RemoteChannels>().threads.remember(
+            &scope,
+            "t1".into(),
+            key,
+            "100.1".into(),
+            1,
+        );
+        installed
+    });
+    ThreadedPane {
+        fixture,
+        bot,
+        generation,
+        queue,
+        _root: root,
+    }
+}
+
+fn thread_reply(text: &str) -> transport::Incoming {
+    transport::Incoming {
+        event_id: format!("reply-{text}"),
+        sender: RemoteRecipient {
+            user_id: "user".into(),
+            conversation_id: "room".into(),
+            scope_id: "scope".into(),
+        },
+        kind: IncomingKind::Message {
+            text: text.into(),
+            reply_to: Some("100.1".into()),
+        },
+    }
+}
+
+/// The defect this guards: a bare `/stop` in a pane's thread stopped the
+/// selected pane, or answered that none was selected, instead of the pane
+/// the thread speaks for.
+#[gpui::test]
+fn a_bare_stop_in_a_panes_thread_stops_that_pane(cx: &mut TestAppContext) {
+    let threaded = threaded_pane(cx);
+    let pane = threaded.fixture.pane();
+    threaded
+        .fixture
+        .workspace
+        .update(cx, |ws, cx| ws.set_pane_working_for_test(pane, cx));
+    cx.update(|cx| {
+        dispatch_claimed(
+            "work",
+            threaded.generation,
+            &threaded.bot,
+            &thread_reply("!stop"),
+            cx,
+        )
+        .unwrap()
+    });
+    assert_eq!(
+        threaded
+            .fixture
+            .workspace
+            .update(cx, |ws, cx| ws.control_stop(pane, cx)),
+        Ok(crate::control::result::StopDisposition::AlreadyIdle)
+    );
+}
+
+/// A reply in a pane's thread answers the question card that pane waits on;
+/// the thread names the pane, not the card.
+#[gpui::test]
+fn a_thread_reply_answers_the_panes_live_question(cx: &mut TestAppContext) {
+    use crate::remote_channel::bridge::{
+        BridgePing, MessageTail, PingPrompt, QuestionButton, QuestionPrompt, QuestionPromptRef,
+    };
+    let mut threaded = threaded_pane(cx);
+    let pane = threaded.fixture.pane_ref(cx);
+    cx.update(|cx| {
+        let question = QuestionPromptRef {
+            session: 1,
+            question_id: 4,
+            field: 0,
+        };
+        assert!(RemoteChannels::send_ping(
+            BridgePing {
+                pane,
+                header: "question".into(),
+                tail: MessageTail::Plain("Which colour?".into()),
+                prompt: Some(PingPrompt::Question(QuestionPrompt {
+                    question,
+                    step: 1,
+                    rows: vec![vec![("Blue".into(), QuestionButton::Option(0))]],
+                })),
+            },
+            super::super::Delivery::Explicit,
+            cx,
+        ));
+        let pending = threaded.queue.try_recv().unwrap();
+        let prepared = super::super::outbound::prepare(&pending, cx).unwrap();
+        super::super::outbound::finish(
+            &pending,
+            Some(pane),
+            crate::remote_channel::cards::SendOutcome::Delivered(
+                prepared.parts(vec!["200.1".into()]),
+            ),
+            cx,
+        );
+        let effect = dispatch_claimed(
+            "work",
+            threaded.generation,
+            &threaded.bot,
+            &thread_reply("blue"),
+            cx,
+        )
+        .unwrap();
+        // The view holds no such question, so the answer is refused — in a
+        // question's words, which only a routed answer produces.
+        let question_answers = [
+            s::notification::remote_question_stale(),
+            s::notification::remote_permission_gone(),
+            s::notification::remote_question_text_not_taken(),
+        ];
+        assert!(
+            matches!(&effect, Effect::Reply(RenderedReply { text, .. }) if question_answers.contains(text)),
+            "routed as an answer, not a prompt"
         );
     });
 }

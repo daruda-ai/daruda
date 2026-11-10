@@ -2,7 +2,7 @@
 //! tap on it does. The value names the thread, not the pane, so it still
 //! finds the pane after a restart renumbers panes.
 
-use super::driver;
+use super::route;
 use crate::remote_channel::dispatch::{self, Effect};
 use crate::remote_channel::runtime::BotSession;
 use crate::surface::strings as s;
@@ -26,23 +26,32 @@ pub(crate) fn thread_of(data: &str) -> Option<&str> {
 /// say its conversation is not open. `None` when `data` is no stop button's.
 pub(crate) fn tap(id: &str, bot: &BotSession, data: &str, cx: &mut App) -> Option<Effect> {
     let thread = thread_of(data)?;
-    let effect = match driver::pane_of_thread(id, bot, thread, cx) {
+    let effect = match route::pane_of_thread(id, bot, thread, cx) {
         Some(pane) => dispatch::stop_pane(pane, &dispatch::Target::Remote(id.into()), cx),
         None => Effect::Reply(crate::remote_channel::command::RenderedReply {
             text: s::remote_channel::thread_closed(),
             keyboard: None,
         }),
     };
-    // A tap that comes to nothing must still not be answered by stripping the
-    // tapped message, as a stale card's is: this message is the thread's
-    // status root, which status updates own.
-    Some(match effect {
+    Some(never_strip_root(effect))
+}
+
+/// A tap that comes to nothing must still not be answered by stripping the
+/// tapped message, as a stale card's is: this message is the thread's
+/// status root, which status updates own.
+fn never_strip_root(effect: Effect) -> Effect {
+    match effect {
         Effect::None => Effect::Feedback {
             label: s::remote_channel::stale_callback(),
             edit: dispatch::Edit::KeepButtons,
         },
         effect => effect,
-    })
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn tap_effect_for_test(effect: Effect) -> Effect {
+    never_strip_root(effect)
 }
 
 #[cfg(test)]

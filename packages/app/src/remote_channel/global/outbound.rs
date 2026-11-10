@@ -493,7 +493,7 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
                 .await;
             cx.update(|cx| {
                 flush_edits(cx);
-                crate::remote_channel::threads::roots::flush(cx);
+                crate::remote_channel::threads::roots::retry(cx);
             });
         }
     })

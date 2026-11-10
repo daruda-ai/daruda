@@ -233,10 +233,10 @@ fn a_reply_under_the_root_drops_the_header_unless_it_is_all_there_is() {
 }
 
 mod status {
-    use super::super::roots::{Finished, Roots};
+    use super::super::roots::{Finished, RootFace, Roots};
     use super::super::status::{Ending, PaneActivity, ShownStatus};
     use super::*;
-    use crate::remote_channel::cards::EditFailure;
+    use crate::remote_channel::transport::slack::threads::RootFailure;
 
     #[test]
     fn work_keeps_the_time_it_began_until_the_turn_ends() {
@@ -309,45 +309,84 @@ mod status {
         }
     }
 
-    /// One edit per root at a time, carrying the newest status; a failed edit
-    /// is retried, and a root that is gone is dropped.
+    fn face(title: &str, shown: ShownStatus) -> RootFace {
+        RootFace {
+            title: title.into(),
+            shown,
+        }
+    }
+
+    /// One edit per root at a time, carrying the newest face.
     #[test]
-    fn a_root_is_edited_once_at_a_time_with_its_latest_status() {
+    fn a_root_is_edited_once_at_a_time_with_its_latest_face() {
         let mut roots = Roots::default();
         let working = ShownStatus::Working { since: NOW };
         let done = ShownStatus::Ended(Ending::Completed);
-        roots.want(&work(), "t", "1.1".into(), "title".into(), working);
-        let first = roots.ready();
+        roots.want(&work(), "t", "1.1".into(), face("title", working));
+        let first = roots.ready(false);
         assert_eq!(first.len(), 1);
-        assert!(roots.ready().is_empty(), "in flight");
+        assert!(roots.ready(false).is_empty(), "in flight");
 
-        roots.want(&work(), "t", "1.1".into(), "title".into(), done);
+        roots.want(&work(), "t", "1.1".into(), face("title", done));
         assert_eq!(roots.finish(&first[0], &Ok(())), Finished::Shown);
-        let second = roots.ready();
+        let second = roots.ready(false);
         assert_eq!(second.len(), 1);
-        assert_eq!(second[0].shown, done, "the status that changed meanwhile");
-
-        let failed = Err(EditFailure::Transient("rate limited".into()));
-        assert_eq!(roots.finish(&second[0], &failed), Finished::Retry);
-        assert_eq!(roots.ready().len(), 1, "retried with the same status");
-
-        let retried = roots.ready();
-        assert!(retried.is_empty(), "still in flight from the retry");
-        roots.want(&work(), "t", "2.2".into(), "title".into(), done);
-        let other = roots.ready();
-        let gone = Err(EditFailure::Gone("message_not_found".into()));
-        assert_eq!(roots.finish(&other[0], &gone), Finished::Gone);
-        assert_eq!(roots.wanted("work", "2.2"), None, "a gone root is dropped");
+        assert_eq!(
+            second[0].face.shown, done,
+            "the status that changed meanwhile"
+        );
     }
 
+    /// The defect this guards: only the status was compared, so a new title
+    /// at an unchanged status never reached the root.
     #[test]
-    fn a_status_already_shown_is_not_sent_again() {
+    fn a_new_title_alone_updates_the_root() {
         let mut roots = Roots::default();
         let done = ShownStatus::Ended(Ending::Completed);
-        roots.shown(&work(), "1.1", done);
-        roots.want(&work(), "t", "1.1".into(), "title".into(), done);
-        assert!(roots.ready().is_empty());
-        assert_eq!(roots.wanted("work", "1.1"), None);
+        roots.shown(&work(), "1.1", face("my_project\nClaude", done));
+        roots.want(&work(), "t", "1.1".into(), face("my_project\nClaude", done));
+        assert!(roots.ready(false).is_empty(), "already shown");
+        roots.want(&work(), "t", "1.1".into(), face("my_project\nCodex", done));
+        assert_eq!(roots.ready(false).len(), 1);
+    }
+
+    /// The defect this guards: a failed edit was resent on every flush, so a
+    /// rate-limited channel was pressed by each other root's change.
+    #[test]
+    fn a_passing_failure_waits_for_the_retry_tick() {
+        let mut roots = Roots::default();
+        let done = ShownStatus::Ended(Ending::Completed);
+        roots.want(&work(), "t", "1.1".into(), face("title", done));
+        let sent = roots.ready(false);
+        let failed = Err(RootFailure::Transient("ratelimited".into()));
+        assert_eq!(roots.finish(&sent[0], &failed), Finished::Retry);
+        assert!(roots.ready(false).is_empty(), "not on an ordinary flush");
+        assert_eq!(roots.ready(true).len(), 1, "on the retry tick");
+    }
+
+    /// Only a missing root lets its wanted face go as gone; a refused edit
+    /// drops the face but the caller keeps the thread.
+    #[test]
+    fn a_missing_or_refused_root_is_not_edited_again() {
+        let done = ShownStatus::Ended(Ending::Completed);
+        let cases = [
+            (
+                RootFailure::Missing("message_not_found".into()),
+                Finished::Missing,
+            ),
+            (
+                RootFailure::Refused("missing_scope".into()),
+                Finished::Refused,
+            ),
+        ];
+        for (failure, want) in cases {
+            let mut roots = Roots::default();
+            roots.want(&work(), "t", "1.1".into(), face("title", done));
+            let sent = roots.ready(true);
+            assert_eq!(roots.finish(&sent[0], &Err(failure)), want);
+            assert!(roots.ready(true).is_empty(), "{want:?}");
+            assert_eq!(roots.wanted("work", "1.1"), None, "{want:?}");
+        }
     }
 
     /// Activity of a pane with no thread is only remembered, for the root a
@@ -364,22 +403,29 @@ mod status {
             None,
             "unchanged"
         );
-        threads.want_for_pane(&work(), pane, shown);
+        threads.want_for_pane(pane, shown);
         assert_eq!(threads.roots.wanted("work", "1.1"), None, "no thread yet");
 
         let claude = conversation("claude", "s1");
         threads.place(&work(), pane, &claude, NOW);
-        threads.titles.insert(pane, claude.title.clone());
+        threads
+            .titles
+            .insert(("work".into(), pane), claude.title.clone());
         threads.remember(&work(), "t1".into(), claude.key.clone(), "1.1".into(), NOW);
-        threads.want_for_pane(&work(), pane, shown);
-        assert_eq!(threads.roots.wanted("work", "1.1"), Some(shown));
+        threads.want_for_pane(pane, shown);
+        assert_eq!(
+            threads.roots.wanted("work", "1.1"),
+            Some(face(&claude.title, shown))
+        );
     }
 }
 
-/// The host's reports reach a pane's root on a live Slack connection, and a
-/// closed pane is told so and then forgotten.
+/// The host's reports reach a pane's root, including on a connection that
+/// cannot send right now; a closed pane is told so, and its place is
+/// forgotten while its `Closed` status is kept for a root still landing.
 #[gpui::test]
 fn reported_activity_reaches_the_panes_root_until_it_closes(cx: &mut gpui::TestAppContext) {
+    use super::roots::RootFace;
     use super::status::{PaneActivity, ShownStatus};
     use crate::remote_channel::global::RemoteChannels;
     cx.update(|cx| {
@@ -395,8 +441,12 @@ fn reported_activity_reaches_the_panes_root_until_it_closes(cx: &mut gpui::TestA
         let claude = conversation("claude", "s1");
         let threads = &mut channels.threads;
         threads.place(&scope, pane, &claude, NOW);
-        threads.titles.insert(pane, claude.title.clone());
+        threads
+            .titles
+            .insert(("work".into(), pane), claude.title.clone());
         threads.remember(&scope, "t1".into(), claude.key.clone(), "1.1".into(), NOW);
+        // Not sending now does not lose the update; the retry tick sends it.
+        channels.connections.get_mut("work").unwrap().bot = None;
 
         super::roots::pane_activity(pane, PaneActivity::Working, cx);
         let wanted = |cx: &mut gpui::App| {
@@ -404,13 +454,81 @@ fn reported_activity_reaches_the_panes_root_until_it_closes(cx: &mut gpui::TestA
                 .threads
                 .roots
                 .wanted("work", "1.1")
+                .map(|face: RootFace| face.shown)
         };
         assert!(matches!(wanted(cx), Some(ShownStatus::Working { .. })));
 
         super::roots::pane_activity(pane, PaneActivity::Closed, cx);
         assert_eq!(wanted(cx), Some(ShownStatus::Closed));
         let threads = &cx.global::<RemoteChannels>().threads;
-        assert!(!threads.activity.contains_key(&pane), "forgotten once told");
-        assert!(!threads.titles.contains_key(&pane));
+        assert_eq!(threads.activity.get(&pane), Some(&ShownStatus::Closed));
+        assert!(!threads.last.keys().any(|(_, held)| *held == pane));
+        assert!(!threads.titles.keys().any(|(_, held)| *held == pane));
+    });
+}
+
+/// The defect this guards: after a restart this run did not know what a root
+/// showed, so a root left "working" stayed so until the status changed
+/// again. A post into an existing thread now brings its root up to date.
+#[test]
+fn a_post_into_an_existing_thread_brings_its_root_up_to_date() {
+    use super::roots::RootFace;
+    use super::status::{Ending, PaneActivity, ShownStatus};
+    let mut threads = Threads::load();
+    let claude = conversation("claude", "s1");
+    // A previous run left this thread; this run knows nothing of its root.
+    threads.remember(&work(), "t1".into(), claude.key.clone(), "1.1".into(), NOW);
+    let pane = pane(5);
+    let ended = PaneActivity::Ended(Ending::Completed);
+    threads.note_activity(pane, ended, NOW).unwrap();
+    assert_eq!(threads.roots.wanted("work", "1.1"), None, "not posted yet");
+
+    let (root, _) = threads.place(&work(), pane, &claude, NOW);
+    threads.want_root_after_place(&work(), pane, root.as_deref(), &claude);
+    assert_eq!(
+        threads.roots.wanted("work", "1.1"),
+        Some(RootFace {
+            title: claude.title.clone(),
+            shown: ShownStatus::Ended(Ending::Completed),
+        })
+    );
+}
+
+/// The defect this guards: after `/clear` or a switch, the pane's thread did
+/// not list its new conversation until the pane next posted, so replies and
+/// stop taps in the thread were refused while the pane was open and running.
+#[gpui::test]
+fn a_pane_that_moved_to_a_new_conversation_still_answers_in_its_thread(
+    cx: &mut gpui::TestAppContext,
+) {
+    use super::route::{ThreadReply, route_reply};
+    use crate::remote_channel::global::RemoteChannels;
+    let fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let pane_id = fixture.pane();
+    let key = fixture.workspace.update(cx, |ws, cx| {
+        ws.set_pane_session_for_test(pane_id, "s1", cx);
+        ws.remote_conversation(pane_id, cx).unwrap()
+    });
+    let pane = fixture.pane_ref(cx);
+    let bot = cx.update(|cx| {
+        let _outgoing = crate::remote_channel::global::tests::setup(cx);
+        let channels = cx.global_mut::<RemoteChannels>();
+        let connection = &channels.connections["work"];
+        let bot = connection.bot.clone().unwrap();
+        let scope = driver::scope("work", &bot, connection.config.recipient.as_ref().unwrap());
+        channels.threads.place(&scope, pane, &key, NOW);
+        channels
+            .threads
+            .remember(&scope, "t1".into(), key.key.clone(), "1.1".into(), NOW);
+        bot
+    });
+    fixture
+        .workspace
+        .update(cx, |ws, cx| ws.set_pane_session_for_test(pane_id, "s2", cx));
+    cx.update(|cx| {
+        assert_eq!(
+            route_reply("work", &bot, Some("1.1"), cx),
+            ThreadReply::Pane(pane)
+        );
     });
 }
