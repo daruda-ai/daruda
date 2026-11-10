@@ -32,6 +32,13 @@ fn moved(task: &str, run_in: TaskRunIn, cx: &App) -> TaskIntent {
     }
 }
 
+/// `task`'s start as a card written now would describe it.
+fn shown_now(fx: &GitFixture, task: &str, cx: &App) -> ShownTaskStart {
+    fx.ws
+        .read(cx)
+        .shown_task_start(cx.global::<GlobalTasks>().get(task).unwrap())
+}
+
 fn lane_count(ws: &Workspace) -> usize {
     ws.projects.iter().map(|p| p.lanes.len()).sum()
 }
@@ -142,8 +149,7 @@ async fn an_edit_landing_as_an_approved_start_reads_its_task_refuses_it(cx: &mut
             fake_lane(&fx.fake, &checkout, branch);
             crate::runs::seed::task(spec, None, cx)
         });
-        let shown =
-            cx.update(|cx| ShownTaskStart::of(cx.global::<GlobalTasks>().get(&task).unwrap()));
+        let shown = cx.update(|cx| shown_now(&fx, &task, cx));
         let (before, edited, answer) = cx
             .update_window(fx.window.into(), |_, window, cx| {
                 fx.ws.update(cx, |ws, cx| {
@@ -218,9 +224,7 @@ async fn a_task_reworded_after_its_start_is_recorded_tells_its_agent_the_origina
     cx.executor().allow_parking();
     for (branch, approved) in [("approved", true), ("desktop", false)] {
         let task = cx.update(|cx| new_worktree_task(&fx, branch, "Original prompt", cx));
-        let shown = approved.then(|| {
-            cx.update(|cx| ShownTaskStart::of(cx.global::<GlobalTasks>().get(&task).unwrap()))
-        });
+        let shown = approved.then(|| cx.update(|cx| shown_now(&fx, &task, cx)));
         let (edited, answer) = cx
             .update_window(fx.window.into(), |_, window, cx| {
                 fx.ws.update(cx, |ws, cx| {
@@ -272,7 +276,7 @@ async fn an_edit_proposed_while_an_approved_start_waits_is_read_before_it_starts
     let shown = cx.update(|cx| {
         let mut record = cx.global::<GlobalTasks>().get(&task).unwrap().clone();
         record.spec.prompt = "Shown prompt".into();
-        ShownTaskStart::of(&record)
+        fx.ws.read(cx).shown_task_start(&record)
     });
     let (first, second, answer) = cx
         .update_window(fx.window.into(), |_, window, cx| {
@@ -308,4 +312,244 @@ async fn an_edit_proposed_while_an_approved_start_waits_is_read_before_it_starts
         .flat_map(|probe| probe.drain_prompts())
         .collect();
     assert!(prompts.is_empty(), "{prompts:?}");
+}
+
+/// Ask to start `task`, let `change` land while its card waits, then
+/// approve: the start is refused as stale, nothing opens or is made, the
+/// task stays in Backlog, and no worktree slot is spent or held.
+async fn refused_after_change(
+    fixture: &crate::test_support::ControlFixture,
+    task: &str,
+    what: &str,
+    change: impl AsyncFnOnce(&mut TestAppContext),
+    cx: &mut TestAppContext,
+) {
+    let spent = cx.update(|cx| guards::spent_budget_for_test(cx));
+    let (id, outcome, _card) = ask(GatedCommand::TaskStart { task: task.into() }, cx);
+    let before = fixture
+        .workspace
+        .read_with(cx, |ws, _| (ws.all_pane_ids(), lane_count(ws)));
+    change(cx).await;
+    cx.update(|cx| assert!(resolve_desktop(id.0, "approve", cx)));
+    cx.executor().allow_parking();
+    let refused = outcome.recv().await.unwrap().unwrap();
+    cx.run_until_parked();
+    assert_eq!(refused, Err(ControlError::ApprovalStale), "{what}");
+    let after = fixture
+        .workspace
+        .read_with(cx, |ws, _| (ws.all_pane_ids(), lane_count(ws)));
+    assert_eq!(after, before, "{what}: nothing opened or was made");
+    assert_eq!(lifecycle(task, cx), Lifecycle::Backlog, "{what}");
+    cx.update(|cx| assert_eq!(guards::spent_budget_for_test(cx), spent, "{what}"));
+}
+
+/// A new worktree's task, branching from `base`, seeded in the host window.
+fn new_worktree_from(
+    fixture: &crate::test_support::ControlFixture,
+    base: Option<std::path::PathBuf>,
+    cx: &mut TestAppContext,
+) -> String {
+    fixture.workspace.update(cx, |ws, cx| {
+        let mut spec = crate::runs::seed::spec(ws.projects[0].uuid, "Login");
+        spec.base_worktree_path = base;
+        crate::runs::seed::task(spec, None, cx)
+    })
+}
+
+/// `task` with its base worktree and branch as `edit` leaves them.
+fn relocated(task: &str, edit: impl FnOnce(&mut TaskEdit), cx: &App) -> TaskIntent {
+    let spec = cx.global::<GlobalTasks>().get(task).unwrap().spec.clone();
+    let mut changed = TaskEdit {
+        title: spec.title,
+        prompt: spec.prompt,
+        notes: spec.notes,
+        base_worktree_path: spec.base_worktree_path,
+        branch: None,
+        run_in: None,
+        project: None,
+        flow: spec.flow,
+    };
+    edit(&mut changed);
+    TaskIntent::Edit {
+        id: task.into(),
+        edit: changed,
+    }
+}
+
+/// The worktree a new one branches from, and the branch it is cut as, are
+/// on the card: either edited while it waits refuses the approval.
+#[gpui::test]
+async fn a_task_start_whose_base_or_branch_was_edited_while_its_card_waits_is_refused(
+    cx: &mut TestAppContext,
+) {
+    let (fixture, lane, _claude) = host(cx);
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let here = fixture.workspace.read_with(cx, |ws, _| {
+        ws.lane_for(lane.lane_ref()).unwrap().path.clone()
+    });
+    type Edit = Box<dyn FnOnce(&mut TaskEdit)>;
+    let edits: [(&str, Edit); 2] = [
+        ("base", Box::new(|edit| edit.base_worktree_path = None)),
+        (
+            "branch",
+            Box::new(|edit| edit.branch = Some("renamed".into())),
+        ),
+    ];
+    for (what, edit) in edits {
+        let task = new_worktree_from(&fixture, Some(here.clone()), cx);
+        refused_after_change(
+            &fixture,
+            &task,
+            what,
+            async |cx: &mut TestAppContext| {
+                let edited = cx.update(|cx| RunsHost::task(relocated(&task, edit, cx), cx));
+                edited.await.unwrap();
+            },
+            cx,
+        )
+        .await;
+    }
+}
+
+/// Set the lane at `lane` to have `branch` checked out, as a git refresh
+/// does when someone switches it.
+fn check_out(
+    fixture: &crate::test_support::ControlFixture,
+    lane: daruda_store::project::LaneRef,
+    branch: &str,
+    cx: &mut TestAppContext,
+) {
+    fixture.workspace.update(cx, |ws, _| {
+        let found = ws.lane_for_mut(lane).unwrap();
+        found.kind = daruda_store::project::LaneKind::Git {
+            branch: Some(branch.into()),
+            repo_root: found.path.clone(),
+            worktree_root: found.path.clone(),
+        };
+    });
+}
+
+/// A card names the worktree a task runs in or branches from, which decides
+/// the code its agent starts on: that worktree checking out another branch
+/// while the card waits refuses the approval, with no task edited at all.
+#[gpui::test]
+async fn a_task_start_whose_worktree_switched_branch_while_its_card_waits_is_refused(
+    cx: &mut TestAppContext,
+) {
+    let (fixture, lane, _claude) = host(cx);
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let here = fixture.workspace.read_with(cx, |ws, _| {
+        ws.lane_for(lane.lane_ref()).unwrap().path.clone()
+    });
+    let existing = fixture.workspace.update(cx, |ws, cx| {
+        let mut spec = crate::runs::seed::spec(ws.projects[0].uuid, "Login");
+        spec.run_in = TaskRunIn::ExistingLane { path: here.clone() };
+        crate::runs::seed::task(spec, None, cx)
+    });
+    let branching = new_worktree_from(&fixture, Some(here.clone()), cx);
+    for (what, task) in [("existing", existing), ("new from it", branching)] {
+        check_out(&fixture, lane.lane_ref(), "main", cx);
+        refused_after_change(
+            &fixture,
+            &task,
+            what,
+            async |cx: &mut TestAppContext| check_out(&fixture, lane.lane_ref(), "other", cx),
+            cx,
+        )
+        .await;
+    }
+}
+
+/// The same switch, once approved: the start resolves the base branch
+/// again where it reads the task and refuses before the repository lock or
+/// git.
+#[gpui::test]
+async fn a_base_switched_as_an_approved_start_reads_its_task_refuses_it(cx: &mut TestAppContext) {
+    let fx = GitFixture::open(cx, &daruda_config::Config::default(), |repo| repo);
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    cx.executor().allow_parking();
+    let (task, base) = fx.ws.update(cx, |ws, cx| {
+        let base = ws.active;
+        let mut spec = crate::runs::seed::spec(ws.projects[0].uuid, "Fix it");
+        spec.base_worktree_path = Some(ws.lane_for(base).unwrap().path.clone());
+        spec.branch_name = "switched".into();
+        let checkout = crate::workspace::lane_ops::lane_checkout_path(&fx.root, "switched");
+        fake_lane(&fx.fake, &checkout, "switched");
+        (crate::runs::seed::task(spec, None, cx), base)
+    });
+    let shown = cx.update(|cx| shown_now(&fx, &task, cx));
+    let answer = cx
+        .update_window(fx.window.into(), |_, window, cx| {
+            fx.ws.update(cx, |ws, cx| {
+                if let Some(daruda_store::project::LaneKind::Git { branch, .. }) =
+                    ws.lane_for_mut(base).map(|lane| &mut lane.kind)
+                {
+                    *branch = Some("elsewhere".into());
+                } else {
+                    panic!("the base is a git lane");
+                }
+                let submitter = crate::runs::FlowSubmitter::Orchestrator { solicited: false };
+                let agent = crate::workspace::ChatAgent::Preferred(None);
+                ws.control_task_start(&task, submitter, agent, Some(shown), window, cx)
+            })
+        })
+        .unwrap();
+    let refused = answer.recv().await.expect("answered");
+    cx.run_until_parked();
+    assert_eq!(refused, Err(ControlError::ApprovalStale));
+    let added = fx
+        .fake
+        .calls()
+        .into_iter()
+        .any(|call| matches!(call, crate::lane::git::GitCall::AddLane { .. }));
+    assert!(!added, "git made no worktree");
+    assert_eq!(lifecycle(&task, cx), Lifecycle::Backlog);
+}
+
+/// A flow whose one agent asks for `mode`.
+fn flow_asking(mode: &str) -> String {
+    format!(
+        "version: 1\ndefaults:\n  agent:\n    id: claude\nnodes:\n  - id: a\n    kind: agent\n    agent:\n      mode: {mode}\n    output: a.md\n    prompt: p\n"
+    )
+}
+
+/// A flow task's card names the modes its flow file gives its agents: that
+/// file rewritten while the card waits refuses the approval, though the task
+/// still names the same flow.
+#[gpui::test]
+async fn a_task_start_whose_flow_file_changed_while_its_card_waits_is_refused(
+    cx: &mut TestAppContext,
+) {
+    let (fixture, lane, _claude) = host(cx);
+    let here = fixture.workspace.read_with(cx, |ws, _| {
+        ws.lane_for(lane.lane_ref()).unwrap().path.clone()
+    });
+    let flows = crate::workspace::flow_paths::flows_dir(&here);
+    std::fs::create_dir_all(&flows).unwrap();
+    let file = flows.join("ship.yaml");
+    std::fs::write(&file, flow_asking("plan")).unwrap();
+    let task = fixture.workspace.update(cx, |ws, cx| {
+        let mut spec = crate::runs::seed::spec(ws.projects[0].uuid, "Ship");
+        spec.run_in = TaskRunIn::ExistingLane { path: here.clone() };
+        spec.flow = Some(daruda_store::tasks::TaskFlow {
+            name: "ship".into(),
+            profile: None,
+            input: None,
+        });
+        crate::runs::seed::task(spec, None, cx)
+    });
+    let rewritten = file.clone();
+    refused_after_change(
+        &fixture,
+        &task,
+        "flow content",
+        async move |_: &mut TestAppContext| {
+            std::fs::write(&rewritten, flow_asking("bypassPermissions")).unwrap()
+        },
+        cx,
+    )
+    .await;
+    // The card read the file it pinned: it named the mode the file had then.
+    let (_id, _outcome, card) = ask(GatedCommand::TaskStart { task }, cx);
+    assert!(card.contains("bypassPermissions"), "{card}");
 }

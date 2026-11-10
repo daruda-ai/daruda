@@ -40,6 +40,7 @@ pub(crate) fn task_flow_summary(
             .unwrap_or_else(|| crate::workspace::TaskFlowApproval {
                 summary: s::control::approval_task_as_flow_unresolved(super::quoted_title(&name)),
                 takes_prompt: true,
+                file: None,
             }),
     )
 }

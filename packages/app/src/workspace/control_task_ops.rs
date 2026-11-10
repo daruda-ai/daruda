@@ -108,6 +108,7 @@ impl Workspace {
                     crate::control::exec::quoted_title(&flow.name),
                 ),
                 takes_prompt: true,
+                file: None,
             },
         }
     }
@@ -171,6 +172,18 @@ impl Workspace {
             spec.base_worktree_path.as_deref(),
             flow,
         ))
+    }
+
+    /// What an approval to start `task` is written from: the start it
+    /// describes, and how it names the flow the task runs as, if any. The
+    /// flow file the start pins is the one that summary was read from.
+    pub(crate) fn control_task_start_card(
+        &self,
+        task: &daruda_store::tasks::TaskRecord,
+    ) -> (ShownTaskStart, Option<super::TaskFlowApproval>) {
+        let flow = self.control_task_flow_approval(task);
+        let file = flow.as_ref().and_then(|flow| flow.file.clone());
+        (self.shown_task_start_with(task, file), flow)
     }
 
     /// Add a Backlog task to `project`, saved like one the form creates.

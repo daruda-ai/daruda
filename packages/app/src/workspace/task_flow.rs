@@ -60,6 +60,33 @@ pub(crate) struct TaskFlowApproval {
     /// True unless the flow was found and declares no input for the prompt:
     /// a flow found only once the card is answered still takes it.
     pub takes_prompt: bool,
+    /// The file `summary` was read from; `None` when the flow was not found
+    /// or could not be read.
+    pub file: Option<FlowFileSeen>,
+}
+
+/// A flow file as one read saw it: where the task's flow name resolved and
+/// a SHA-256 digest of the bytes there. A start a card approved compares
+/// this, so a flow edited, or shadowed by another file of that name, after
+/// the card named its modes is refused rather than run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FlowFileSeen {
+    path: PathBuf,
+    digest: [u8; 32],
+}
+
+impl FlowFileSeen {
+    /// Read `path` once: what was seen, and the text to parse from that same
+    /// read. `None` when it cannot be read.
+    fn read(path: &Path) -> Option<(Self, String)> {
+        use sha2::{Digest as _, Sha256};
+        let bytes = std::fs::read(path).ok()?;
+        let seen = Self {
+            path: path.to_path_buf(),
+            digest: Sha256::digest(&bytes).into(),
+        };
+        Some((seen, String::from_utf8_lossy(&bytes).into_owned()))
+    }
 }
 
 /// A task's flow, found.
@@ -146,9 +173,13 @@ impl Workspace {
             return TaskFlowApproval {
                 summary: s::approval_task_as_flow_unresolved(quoted_title(&flow.name)),
                 takes_prompt: true,
+                file: None,
             };
         };
-        let modes = flow_permission_modes(&target.path, target.profile.as_deref());
+        let read = FlowFileSeen::read(&target.path);
+        let modes = read.as_ref().map_or_else(Vec::new, |(_, text)| {
+            flow_permission_modes(text, target.profile.as_deref())
+        });
         // A flow of commands alone has no agent to give a mode to.
         let modes = if modes.is_empty() {
             s::approval_flow_no_agents()
@@ -165,7 +196,22 @@ impl Workspace {
         TaskFlowApproval {
             summary,
             takes_prompt: target.input.is_some(),
+            file: read.map(|(seen, _)| seen),
         }
+    }
+
+    /// The file `flow` resolves to for a task of `project` that runs per
+    /// `run_in`, as [`Self::task_flow_approval`] reads it for a card; `None`
+    /// when it does not resolve or cannot be read.
+    pub(in crate::workspace) fn task_flow_file(
+        &self,
+        project: ProjectUuid,
+        run_in: &TaskRunIn,
+        base: Option<&Path>,
+        flow: &TaskFlow,
+    ) -> Option<FlowFileSeen> {
+        let target = self.resolve_task_flow(project, run_in, base, flow).ok()?;
+        FlowFileSeen::read(&target.path).map(|(seen, _)| seen)
     }
 
     /// Show the flow run `task_id` last started, on the Flows page, if it ran
@@ -251,18 +297,13 @@ impl Workspace {
 /// one phone message, while a count says there is more to read.
 const FLOW_MODES_QUOTED: usize = 4;
 
-/// The permission modes the flow's agents run under with `profile`, each
-/// once, in node order; `None` for a node that names none and so runs in
-/// the agent's own default. A new flow defaults to `bypassPermissions`, so
-/// an approval says it rather than leave it to be found out.
-pub(in crate::workspace) fn flow_permission_modes(
-    path: &Path,
-    profile: Option<&str>,
-) -> Vec<Option<String>> {
-    let Some(loaded) = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| daruda_flow::load(&text, profile).ok())
-    else {
+/// The permission modes the agents of the flow in `text` run under with
+/// `profile`, each once, in node order; `None` for a node that names none
+/// and so runs in the agent's own default. A new flow defaults to
+/// `bypassPermissions`, so an approval says it rather than leave it to be
+/// found out.
+fn flow_permission_modes(text: &str, profile: Option<&str>) -> Vec<Option<String>> {
+    let Ok(loaded) = daruda_flow::load(text, profile) else {
         return Vec::new();
     };
     let mut modes: Vec<Option<String>> = Vec::new();
@@ -397,7 +438,7 @@ mod tests {
             format!("version: 1\ndefaults:\n  agent:\n    id: claude\nnodes:\n{nodes}"),
         )
         .unwrap();
-        flow_permission_modes(&path, None)
+        flow_permission_modes(&std::fs::read_to_string(&path).unwrap(), None)
     }
 
     fn agent_node(id: &str, mode: Option<&str>) -> String {

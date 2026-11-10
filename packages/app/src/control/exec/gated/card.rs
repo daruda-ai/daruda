@@ -9,7 +9,7 @@ use crate::runs::GlobalTasks;
 use crate::surface::strings as s;
 
 use super::tasks::task_title;
-use super::{Asked, disclosure, flow_resume, quoted_title, task_flow_summary};
+use super::{Asked, disclosure, flow_resume, quoted_title};
 
 /// A card's sentence: known now, or still being read off the UI thread.
 pub(super) enum CardText {
@@ -120,9 +120,11 @@ pub(super) fn approval_summary(asked: &Asked, cx: &mut App) -> Result<CardText, 
         }
         // A flow given the prompt hands it to its agents, so its card quotes
         // it as a chat's does.
-        Asked::TaskStart { task, shown, .. } => match shown {
+        Asked::TaskStart {
+            task, shown, flow, ..
+        } => match shown {
             None => {
-                let flow = task_flow_summary(task, cx).ok_or(ControlError::TaskNotFound)?;
+                let flow = flow.as_ref().ok_or(ControlError::TaskNotFound)?;
                 let location = task_start_location(task, cx)?;
                 let title = task_title(task, cx);
                 flow.takes_prompt

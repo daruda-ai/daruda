@@ -54,12 +54,15 @@ enum Asked {
         task: NewTask,
     },
     /// `agent` is unused by a flow-backed task, whose nodes name their own;
-    /// its `shown` is `None`.
+    /// its `shown` is `None`, and `flow` how its card names the flow, read
+    /// with `spec` so the file the card's modes came from is the one pinned.
     TaskStart {
         task: String,
         agent: String,
         shown: Option<ChatDisclosure>,
-        spec: ShownTaskStart,
+        /// Boxed: the largest variant by far, and moved once per approval.
+        spec: Box<ShownTaskStart>,
+        flow: Option<crate::workspace::TaskFlowApproval>,
     },
     /// `shown` is the new pane a reopen opens, even while a pane still shows
     /// the run: that one may close before the answer. `None` when no new
@@ -123,9 +126,16 @@ impl Asked {
             },
             GatedCommand::TaskStart { task } => {
                 let agent = in_task_window(&task, cx, |ws, _, _| Ok(ws.open_agent_id(None)))?;
+                let (spec, flow) = in_task_window(&task, cx, |ws, _, cx| {
+                    cx.global::<GlobalTasks>()
+                        .get(&task)
+                        .map(|record| ws.control_task_start_card(record))
+                        .ok_or(ControlError::TaskNotFound)
+                })?;
                 Self::TaskStart {
                     shown: disclosure::task_start(&task, &agent, mode, cx)?,
-                    spec: shown_task_start(&task, cx)?,
+                    spec: Box::new(spec),
+                    flow,
                     agent,
                     task,
                 }
@@ -171,9 +181,10 @@ impl Asked {
                 agent,
                 shown,
                 spec,
+                ..
             } => {
                 requested(&disclosure::task_start(task, agent, mode, cx)?) == requested(shown)
-                    && shown_task_start(task, cx)? == *spec
+                    && shown_task_start(task, cx)? == **spec
             }
             Self::TaskOpen { task, shown } => {
                 requested(&disclosure::task_open(task, mode, cx)?) == requested(shown)
@@ -384,12 +395,15 @@ fn left_a_worktree(outcome: &ControlOutcome) -> bool {
     )
 }
 
-/// `task`'s definition as a start card describes it.
-fn shown_task_start(task: &str, cx: &App) -> Result<ShownTaskStart, ControlError> {
-    cx.global::<GlobalTasks>()
-        .get(task)
-        .map(ShownTaskStart::of)
-        .ok_or(ControlError::TaskNotFound)
+/// `task`'s start as its card describes it, read now in the window that
+/// holds its project.
+fn shown_task_start(task: &str, cx: &mut App) -> Result<ShownTaskStart, ControlError> {
+    in_task_window(task, cx, |ws, _, cx| {
+        cx.global::<GlobalTasks>()
+            .get(task)
+            .map(|record| ws.shown_task_start(record))
+            .ok_or(ControlError::TaskNotFound)
+    })
 }
 
 /// Do the thing, now that the user has said yes. A chat it opens takes
@@ -426,7 +440,7 @@ async fn perform_gated(
             task, agent, spec, ..
         } => {
             let agent = crate::workspace::ChatAgent::Pinned(agent);
-            return start_task(task, agent, spec, caller, cx).await;
+            return start_task(task, agent, *spec, caller, cx).await;
         }
         Asked::TaskOpen { task, .. } => {
             return cx.update(|cx| tasks::open_task_in(task, mode, caller, cx));
