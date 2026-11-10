@@ -7,11 +7,23 @@ use daruda_config::{ModeChoice, SessionPreferences};
 
 use crate::workspace::Workspace;
 
-/// A chat's agent and requested permission mode, as a person reads them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A chat's agent and requested permission mode, as a person reads them,
+/// and by id as the chat will ask for them.
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ChatDisclosure {
     pub(crate) agent_name: String,
     pub(crate) mode: String,
+    pub(crate) requested: RequestedChat,
+}
+
+/// What a chat asks for, by id: the agent and its permission-mode
+/// candidates in priority order. An approval compares this rather than the
+/// card's words, which change when a connecting adapter names its modes
+/// although the chat asks for the same one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct RequestedChat {
+    pub(crate) agent_id: String,
+    pub(crate) modes: Vec<String>,
 }
 
 impl Workspace {
@@ -30,6 +42,10 @@ impl Workspace {
         ChatDisclosure {
             agent_name: card_label(agent.map_or(agent_id, |a| a.name.as_str())),
             mode: self.requested_mode_label(agent_id, &preferences),
+            requested: RequestedChat {
+                agent_id: agent_id.to_owned(),
+                modes: preferences.modes,
+            },
         }
     }
 

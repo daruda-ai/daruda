@@ -580,6 +580,50 @@ async fn an_approval_whose_mode_changed_is_refused_before_anything_is_created(
     assert_eq!(lifecycle, daruda_store::tasks::Lifecycle::Backlog);
 }
 
+/// An adapter connecting while the card waits names its modes in the
+/// vocabulary, which changes how a card would name the mode it asks for,
+/// and the agent is renamed: the chat still asks for the same agent and
+/// mode by id, so the approval opens it.
+#[gpui::test]
+async fn an_approval_whose_mode_only_got_a_new_name_opens_its_chat(cx: &mut TestAppContext) {
+    let (fixture, lane, claude) = host(cx);
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let (id, outcome, card) = ask(GatedCommand::ChatNew { lane, agent: None }, cx);
+    assert!(card.contains(BYPASS), "{card}");
+    let delegated = daruda_config::ModeChoice::FollowDelegated;
+    fixture.workspace.update(cx, |ws, _| {
+        let before = ws.control_chat_disclosure(&claude.id, &delegated);
+        let source = claude.launch.adapter_command().to_owned();
+        ws.agent_vocabulary.record_modes(
+            &claude.id,
+            &source,
+            vec![daruda_store::agent_vocabulary::VocabEntry {
+                id: "bypassPermissions".into(),
+                name: "Skip every check".into(),
+                description: None,
+            }],
+        );
+        let renamed = AgentDefinition {
+            name: "Renamed Claude".into(),
+            ..claude.clone()
+        };
+        set_catalog(ws, &renamed);
+        let after = ws.control_chat_disclosure(&claude.id, &delegated);
+        assert_ne!(after.mode, before.mode, "the card would read otherwise");
+        assert_ne!(after.agent_name, before.agent_name);
+        assert_eq!(after.requested, before.requested);
+    });
+    cx.update(|cx| assert!(resolve_desktop(id.0, "approve", cx)));
+    cx.executor().allow_parking();
+    let opened = outcome.recv().await.unwrap().unwrap();
+    cx.run_until_parked();
+    let Ok(ControlResult::ChatCreated { target, agent }) = opened else {
+        panic!("a chat opens: {opened:?}")
+    };
+    assert_eq!(agent, claude.id);
+    assert_eq!(opened_agent(&fixture, target, cx), claude.id);
+}
+
 /// Creating a task starts nothing, so its card names no mode: a later start
 /// from the desktop runs in the agent's ordinary mode.
 #[gpui::test]

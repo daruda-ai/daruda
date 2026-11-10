@@ -139,15 +139,19 @@ impl Asked {
     }
 
     /// Refuse an approval whose chat would no longer open as its card said:
-    /// the agent's name or its mode in `mode` changed in settings, or its
-    /// adapter renamed that mode, while the card waited; or a task start's
-    /// task was edited so its card no longer describes it. Read the same way
-    /// `resolve` read it, and before anything is created.
+    /// the permission mode it asks for in `mode` changed in settings while
+    /// the card waited; or a task start's task was edited so its card no
+    /// longer describes it. Read the same way `resolve` read it, and before
+    /// anything is created. A chat is compared by the ids it asks for, not
+    /// the card's words: a renamed agent, or an adapter that connected and
+    /// named its modes, still opens the chat the card approved.
     fn still_shown(
         &self,
         mode: &daruda_config::ModeChoice,
         cx: &mut App,
     ) -> Result<(), ControlError> {
+        let requested =
+            |shown: &Option<ChatDisclosure>| shown.as_ref().map(|d| d.requested.clone());
         let unchanged = match self {
             Self::LaneCreate {
                 workspace,
@@ -155,9 +159,12 @@ impl Asked {
                 agent,
                 shown,
                 ..
-            } => disclosure::in_project(*workspace, *project, agent, mode, cx)? == *shown,
+            } => {
+                disclosure::in_project(*workspace, *project, agent, mode, cx)?.requested
+                    == shown.requested
+            }
             Self::ChatNew { lane, agent, shown } => {
-                disclosure::in_lane(*lane, agent, mode, cx)? == *shown
+                disclosure::in_lane(*lane, agent, mode, cx)?.requested == shown.requested
             }
             Self::TaskStart {
                 task,
@@ -165,10 +172,12 @@ impl Asked {
                 shown,
                 spec,
             } => {
-                disclosure::task_start(task, agent, mode, cx)? == *shown
+                requested(&disclosure::task_start(task, agent, mode, cx)?) == requested(shown)
                     && shown_task_start(task, cx)? == *spec
             }
-            Self::TaskOpen { task, shown } => disclosure::task_open(task, mode, cx)? == *shown,
+            Self::TaskOpen { task, shown } => {
+                requested(&disclosure::task_open(task, mode, cx)?) == requested(shown)
+            }
             Self::TaskCreate { .. } | Self::FlowResume(_) => true,
         };
         if unchanged {

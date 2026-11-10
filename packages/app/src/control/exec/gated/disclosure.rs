@@ -15,8 +15,9 @@ use crate::surface::strings as s;
 use crate::workspace::ChatDisclosure;
 
 // How each command's chat is disclosed, read from the window that opens it.
-// A card reads it once; the approved work reads it again and compares, so a
-// settings or adapter change meanwhile cannot open a chat the card never named.
+// A card reads it once; the approved work reads it again and compares what
+// the chat asks for by id, so a settings change meanwhile cannot open a chat
+// the card never named, while a name that only reads otherwise does not.
 
 /// `agent`'s chat in a new worktree of `project`. `agent` is pinned: once
 /// the catalog drops it, this refuses as the work would.

@@ -290,26 +290,27 @@ and a person's pick stands. The agent is resolved when the card is built and
 pinned as `ChatAgent::Pinned`; the pane open resolves it again
 (`Workspace::resolve_chat_agent`), so an agent removed meanwhile is refused as
 `agent_unavailable` rather than replaced. The card's `ChatDisclosure` (agent
-name and requested-mode label) travels with the approved command as `Asked`'s
-`shown`; after approval, before any git work or pane, `Asked::still_shown`
-reads it again the same way and refuses a difference as `approval_stale` (a
-mode or agent name edited in Settings, or an adapter's renamed mode, while the
-card waited). A `task_start` card also carries the task definition it was
-written from (`workspace::ShownTaskStart`: project, `run_in`, branch, base
-worktree, title, prompt, flow). `still_shown` compares it, the budget slot
-follows its `run_in`, and the start compares it once more where it reads the
-task, with no task proposal still landing, and before the repository lock, git
-or the log; an edit landing in between answers `approval_stale` and the
-reserved slot is released unspent. The start's commit freezes the run's title
-and prompt as checked, so a later edit never reaches the agent. A `task_open`
-card names the mode a new pane would take even while a pane still shows the
-run, since that pane may close before the answer. Found after git, the worktree
-is kept as a lane with nothing open and the refusal is
-`agent_unavailable_worktree_kept`, carrying its handle, so the caller can open
-a chat there rather than retry a branch name git now refuses; it spends the
-agent's worktree budget like a success. A task start (chat or flow) that fails
-after its new worktree is registered (the pane, the prompt's delivery, the
-flow's submission, a cancel landing meanwhile) is
+name and requested-mode label, and by id the `RequestedChat`: agent and mode
+candidates) travels with the approved command as `Asked`'s `shown`; after
+approval, before any git work or pane, `Asked::still_shown` reads it again the
+same way and refuses a different `RequestedChat` as `approval_stale` (a mode
+edited in Settings while the card waited). A renamed agent, or an adapter that
+connected meanwhile and named its modes, changes only the card's words. A
+`task_start` card also carries the task definition it was written from
+(`workspace::ShownTaskStart`: project, `run_in`, branch, base worktree, title,
+prompt, flow). `still_shown` compares it, the budget slot follows its `run_in`,
+and the start compares it once more where it reads the task, with no task
+proposal still landing, and before the repository lock, git or the log; an edit
+landing in between answers `approval_stale` and the reserved slot is released
+unspent. The start's commit freezes the run's title and prompt as checked, so a
+later edit never reaches the agent. A `task_open` card names the mode a new
+pane would take even while a pane still shows the run, since that pane may
+close before the answer. Found after git, the worktree is kept as a lane with
+nothing open and the refusal is `agent_unavailable_worktree_kept`, carrying its
+handle, so the caller can open a chat there rather than retry a branch name git
+now refuses; it spends the agent's worktree budget like a success. A task start
+(chat or flow) that fails after its new worktree is registered (the pane, the
+prompt's delivery, the flow's submission, a cancel landing meanwhile) is
 `TaskStartError::WorktreeKept` around its cause, answering
 `task_start_failed_worktree_kept` with the handle and the cause's detail, and
 spends the budget the same way. A project or window closed while git ran leaves

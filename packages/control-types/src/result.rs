@@ -766,9 +766,9 @@ pub enum ControlError {
     /// Refused rather than opened under another agent the person never saw.
     AgentUnavailable,
     /// What an approval card described would now run otherwise: its chat's
-    /// agent name or requested permission mode changed in settings, its
-    /// adapter renamed that mode, or a task start's task was edited (where
-    /// it runs, its title, prompt or flow) before the start read it.
+    /// requested permission mode changed in settings, or a task start's task
+    /// was edited (where it runs, its title, prompt or flow) before the
+    /// start read it.
     /// Refused before anything is created, since the person approved
     /// something that no longer exists; asking again shows the current one.
     ApprovalStale,

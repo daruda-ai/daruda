@@ -14,6 +14,7 @@ fn the_agent_phrase_names_the_agent_and_its_requested_mode() {
     let disclosure = ChatDisclosure {
         agent_name: "Claude Code".into(),
         mode: "Bypass Permissions".into(),
+        ..ChatDisclosure::default()
     };
     assert_eq!(
         agent_phrase(&disclosure),
