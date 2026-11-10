@@ -204,7 +204,7 @@ pub(crate) fn send_reply(
 ) -> transport::Result<()> {
     match thread {
         Some(thread) => {
-            slack::threads::post_in_thread(credentials, recipient, thread, message, |_| {})
+            slack::threads::post_in_thread(credentials, recipient, thread, false, message, |_| {})
         }
         None => transport::send(kind, credentials, recipient, message),
     }

@@ -3,8 +3,8 @@
 //! ask [`crate::remote_channel::transport::pane_threads`] before using this.
 
 use super::{
-    API, Credentials, Message, Result, SentPart, TRANSIENT_REFUSALS, api, post, post_payload,
-    refusal,
+    API, Credentials, Message, Reply, Result, SentPart, TRANSIENT_REFUSALS, api, post,
+    post_payload, refusal,
 };
 use crate::remote_channel::transport::http;
 use daruda_config::remote::RemoteRecipient;
@@ -20,15 +20,16 @@ pub(crate) struct RootView<'a> {
 }
 
 impl RootView<'_> {
+    /// The pane's name in bold on its own line, its status below, so a
+    /// thread list tells panes apart before it tells their states.
     fn blocks(&self) -> Vec<Value> {
-        let mut elements = Vec::new();
+        let mut elements =
+            vec![json!({"type": "text", "text": self.title, "style": {"bold": true}})];
         if let Some((emoji, label)) = self.status {
+            elements.push(json!({"type": "text", "text": "\n"}));
             elements.push(json!({"type": "emoji", "name": emoji}));
-            elements.push(
-                json!({"type": "text", "text": format!(" {label}\n"), "style": {"bold": true}}),
-            );
+            elements.push(json!({"type": "text", "text": format!(" {label}")}));
         }
-        elements.push(json!({"type": "text", "text": self.title}));
         let mut blocks = vec![json!({"type": "rich_text", "elements": [
             {"type": "rich_text_section", "elements": elements}]})];
         if let Some((label, value)) = self.stop {
@@ -40,10 +41,10 @@ impl RootView<'_> {
         blocks
     }
 
-    /// The notification and accessibility text.
+    /// The notification and thread-list text: the pane first, then its state.
     fn fallback(&self) -> String {
         match self.status {
-            Some((_, label)) => format!("{label}\n{}", self.title),
+            Some((_, label)) => format!("{} — {label}", self.title),
             None => self.title.to_owned(),
         }
     }
@@ -130,15 +131,18 @@ fn root_result(
     )
 }
 
-/// Post `message` as replies under `root`.
+/// Post `message` as replies under `root`; with `broadcast`, also shown in
+/// the conversation, where a long-lived thread's root has scrolled away.
 pub(crate) fn post_in_thread(
     credentials: &Credentials,
     recipient: &RemoteRecipient,
     root: &str,
+    broadcast: bool,
     message: Message,
     on_sent: impl FnMut(SentPart),
 ) -> Result<Vec<String>> {
-    post(credentials, recipient, message, Some(root), on_sent)
+    let reply = Reply { root, broadcast };
+    post(credentials, recipient, message, Some(reply), on_sent)
 }
 
 #[cfg(test)]
@@ -153,38 +157,44 @@ mod tests {
         }
     }
 
+    /// The pane's name leads, in bold, so a thread list and a notification
+    /// tell panes apart before they tell their states.
     #[test]
-    fn a_root_shows_its_status_over_the_literal_pane_name() {
+    fn a_root_names_its_pane_first_and_its_status_below() {
         let titled = RootView {
-            title: "my_project\nClaude",
+            title: "my_project · Claude",
             status: None,
             stop: None,
         };
         let payload = root_payload(&recipient(), &titled);
         assert_eq!(payload["channel"], "D1");
-        assert_eq!(payload["text"], "my_project\nClaude");
+        assert_eq!(payload["text"], "my_project · Claude");
         assert!(payload.get("thread_ts").is_none());
         let elements = &payload["blocks"][0]["elements"][0]["elements"];
-        assert_eq!(elements.as_array().unwrap().len(), 1, "no status yet");
         assert_eq!(
-            elements[0],
-            json!({"type": "text", "text": "my_project\nClaude"})
+            elements,
+            &json!([{"type": "text", "text": "my_project · Claude", "style": {"bold": true}}]),
+            "no status yet"
         );
 
         let working = RootView {
-            title: "my_project\nClaude",
+            title: "my_project · Claude",
             status: Some(("hourglass_flowing_sand", "Working since 2:05 PM")),
             stop: Some(("Stop", "thr:abc")),
         };
         let payload = root_payload(&recipient(), &working);
-        assert_eq!(payload["text"], "Working since 2:05 PM\nmy_project\nClaude");
-        let elements = &payload["blocks"][0]["elements"][0]["elements"];
         assert_eq!(
-            elements[0],
+            payload["text"],
+            "my_project · Claude — Working since 2:05 PM"
+        );
+        let elements = &payload["blocks"][0]["elements"][0]["elements"];
+        assert_eq!(elements[0]["text"], "my_project · Claude");
+        assert_eq!(elements[1]["text"], "\n");
+        assert_eq!(
+            elements[2],
             json!({"type": "emoji", "name": "hourglass_flowing_sand"})
         );
-        assert_eq!(elements[1]["text"], " Working since 2:05 PM\n");
-        assert_eq!(elements[2]["text"], "my_project\nClaude");
+        assert_eq!(elements[3]["text"], " Working since 2:05 PM");
         let button = &payload["blocks"][1]["elements"][0];
         assert_eq!(button["value"], "thr:abc");
         assert_eq!(button["text"]["text"], "Stop");
@@ -229,13 +239,19 @@ mod tests {
     }
 
     #[test]
-    fn a_reply_carries_its_root() {
-        let payload = post_payload(&recipient(), "done", Vec::new(), Some("1.2"));
-        assert_eq!(payload["thread_ts"], "1.2");
-        assert!(
-            post_payload(&recipient(), "done", Vec::new(), None)
-                .get("thread_ts")
-                .is_none()
-        );
+    fn a_reply_carries_its_root_and_surfaces_only_when_asked() {
+        let reply = |broadcast| {
+            Some(Reply {
+                root: "1.2",
+                broadcast,
+            })
+        };
+        let quiet = post_payload(&recipient(), "done", Vec::new(), reply(false));
+        assert_eq!(quiet["thread_ts"], "1.2");
+        assert!(quiet.get("reply_broadcast").is_none());
+        let surfaced = post_payload(&recipient(), "done", Vec::new(), reply(true));
+        assert_eq!(surfaced["reply_broadcast"], true);
+        let top = post_payload(&recipient(), "done", Vec::new(), None);
+        assert!(top.get("thread_ts").is_none() && top.get("reply_broadcast").is_none());
     }
 }

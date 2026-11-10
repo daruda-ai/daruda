@@ -25,17 +25,21 @@ pub(crate) struct ThreadPlan {
     root: Option<String>,
     /// Said in the thread first: the pane moved to a new conversation.
     divider: Option<String>,
+    /// Also shown in the conversation, where the root has scrolled away.
+    broadcast: bool,
 }
 
-/// Decide the thread for a message from `pane` on connection `id`. `None`
-/// when the channel has no pane threads or the pane has no conversation yet;
-/// the message then goes out at the top as before.
+/// Decide the thread for a message from `pane` on connection `id`; `carded`
+/// when it asks the person something with buttons. `None` when the channel
+/// has no pane threads or the pane has no conversation yet; the message then
+/// goes out at the top as before.
 pub(crate) fn plan(
     id: &str,
     kind: ChannelKind,
     bot: &BotSession,
     recipient: &RemoteRecipient,
     pane: PaneRef,
+    carded: bool,
     cx: &mut App,
 ) -> Option<ThreadPlan> {
     if !transport::pane_threads(kind) {
@@ -47,6 +51,7 @@ pub(crate) fn plan(
     let (root, divider) = threads.place(&scope, pane, &conversation, now());
     let shown = threads.activity_of(pane);
     let id = threads.want_root_after_place(&scope, pane, root.as_deref(), &conversation);
+    let broadcast = surfaces(root.is_some(), carded, shown);
     Some(ThreadPlan {
         scope,
         id,
@@ -56,7 +61,16 @@ pub(crate) fn plan(
         shown,
         root,
         divider,
+        broadcast,
     })
+}
+
+/// Whether a reply also shows in the conversation. A long-lived thread's
+/// root scrolls away, so what the person must see — a turn's result, or a
+/// question with buttons — surfaces there too; progress stays in the
+/// thread. A post that starts its thread is already at the bottom.
+pub(super) fn surfaces(existing_root: bool, carded: bool, shown: Option<ShownStatus>) -> bool {
+    existing_root && (carded || matches!(shown, Some(ShownStatus::Ended(_))))
 }
 
 pub(super) fn conversation_of(pane: PaneRef, cx: &mut App) -> Option<PaneConversation> {
@@ -112,6 +126,7 @@ pub(crate) fn deliver(
             credentials,
             recipient,
             &root,
+            false,
             Message::plain(divider.clone(), None),
             |_| {},
         )
@@ -125,7 +140,14 @@ pub(crate) fn deliver(
     drop_header_under_root(&mut message);
     Posted {
         root: started,
-        result: slack::threads::post_in_thread(credentials, recipient, &root, message, on_sent),
+        result: slack::threads::post_in_thread(
+            credentials,
+            recipient,
+            &root,
+            plan.broadcast,
+            message,
+            on_sent,
+        ),
     }
 }
 

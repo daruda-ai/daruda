@@ -108,6 +108,7 @@ pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
             None,
         ),
     };
+    let carded = message.keyboard.is_some();
     let thread = pane.and_then(|pane| {
         driver::plan(
             &pending.id,
@@ -115,6 +116,7 @@ pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
             &pending.bot,
             &pending.recipient,
             pane,
+            carded,
             cx,
         )
     });

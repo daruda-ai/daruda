@@ -216,12 +216,20 @@ pub fn send(
     post(credentials, recipient, message, None, on_sent)
 }
 
+/// Where a post goes: the top of the conversation, or a reply under a root,
+/// also shown in the conversation when `broadcast`.
+#[derive(Clone, Copy)]
+struct Reply<'a> {
+    root: &'a str,
+    broadcast: bool,
+}
+
 /// Post `message` at the top of the conversation, or as replies under `thread`.
 fn post(
     credentials: &Credentials,
     recipient: &RemoteRecipient,
     message: Message,
-    thread: Option<&str>,
+    reply: Option<Reply<'_>>,
     mut on_sent: impl FnMut(SentPart),
 ) -> Result<Vec<String>> {
     let (text, markdown) = super::format::slack(&message);
@@ -246,7 +254,14 @@ fn post(
         } else {
             text.clone()
         };
-        let payload = post_payload(recipient, &fallback, message_blocks, thread);
+        // A broadcast surfaces the message once: its last part, which
+        // carries the buttons when it has any.
+        let last = index + 1 == parts.len();
+        let reply = reply.map(|reply| Reply {
+            broadcast: reply.broadcast && last,
+            ..reply
+        });
+        let payload = post_payload(recipient, &fallback, message_blocks, reply);
         let response = api(&credentials.bot, "chat.postMessage", &payload)?;
         let id = http::required(&response, "ts")?;
         on_sent(SentPart {
@@ -265,15 +280,18 @@ fn post_payload(
     recipient: &RemoteRecipient,
     fallback: &str,
     blocks: Vec<Value>,
-    thread: Option<&str>,
+    reply: Option<Reply<'_>>,
 ) -> Value {
     let mut payload = json!({
         "channel": recipient.conversation_id, "text": fallback, "mrkdwn": false,
         "parse": "none", "unfurl_links": false, "unfurl_media": false,
         "blocks": blocks,
     });
-    if let Some(thread) = thread {
-        payload["thread_ts"] = json!(thread);
+    if let Some(reply) = reply {
+        payload["thread_ts"] = json!(reply.root);
+        if reply.broadcast {
+            payload["reply_broadcast"] = json!(true);
+        }
     }
     payload
 }

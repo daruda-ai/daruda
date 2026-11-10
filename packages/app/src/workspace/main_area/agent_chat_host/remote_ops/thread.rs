@@ -22,7 +22,8 @@ impl Workspace {
                 session: view.session_id()?.to_owned(),
             },
             agent_name: view.agent_name().to_owned(),
-            title: self.remote_header(pane_id, cx),
+            // One line: a thread list shows a root's first line only.
+            title: self.remote_header(pane_id, cx).replace('\n', " · "),
         })
     }
 
