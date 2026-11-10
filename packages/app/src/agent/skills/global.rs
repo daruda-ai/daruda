@@ -183,7 +183,8 @@ mod tests {
         );
         std::fs::write(&manifest_path, r#"{"plugins":{}}"#).unwrap();
         let (_, _, removed) = snapshot(root.path(), &root.path().join("personal"), &user);
-        assert!(removed.themes.is_empty());
+        assert!(!removed.themes.contains_key("plugin/example@market/example"));
+        assert!(removed.themes.contains_key("builtin/cats"));
         let (watch, _, _) = snapshot(root.path(), &root.path().join("personal"), &user);
         std::fs::create_dir_all(user.join("personal")).unwrap();
         std::fs::write(user.join("personal/theme.json"), r##"{"version":1,"id":"personal","name":"Personal","states":{"idle":{"colors":{"dark":"#abcdef","light":"#123456"}}}}"##).unwrap();

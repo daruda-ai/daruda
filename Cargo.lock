@@ -1639,6 +1639,7 @@ dependencies = [
  "portable-pty",
  "pulldown-cmark",
  "raw-window-handle",
+ "rust-embed",
  "rust-i18n",
  "semver",
  "serde",

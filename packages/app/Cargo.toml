@@ -79,6 +79,8 @@ lsp-types = { workspace = true }
 portable-pty = { workspace = true }
 pulldown-cmark = { workspace = true, default-features = false }
 rust-i18n = { workspace = true }
+# Packaged debug builds must also work without the source checkout.
+rust-embed = { workspace = true, features = ["debug-embed"] }
 semver = { workspace = true }
 sys-locale = "0.3"
 # Named directly, not inherited: a flow run's `FlowEvent` channel is built

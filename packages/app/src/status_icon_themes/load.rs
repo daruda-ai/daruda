@@ -15,7 +15,7 @@ const MAX_LAYERS: usize = 4;
 const MAX_THEMES: usize = 128;
 const MAX_HOLD_TICKS: u64 = 40;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct LoadError {
     path: PathBuf,
     detail: String,
@@ -27,7 +27,7 @@ impl std::fmt::Display for LoadError {
 }
 impl std::error::Error for LoadError {}
 
-fn error(path: &Path, detail: impl ToString) -> LoadError {
+pub(super) fn error(path: &Path, detail: impl ToString) -> LoadError {
     LoadError {
         path: path.into(),
         detail: detail.to_string(),
@@ -51,8 +51,10 @@ fn color(value: &str) -> Result<u32, &'static str> {
     }
     u32::from_str_radix(&value[1..], 16).map_err(|_| "colors must be #rrggbb")
 }
-fn load_svg(path: &Path, color: LayerColor) -> Result<Layer, LoadError> {
-    let bytes = read(path, MAX_SVG_BYTES)?;
+fn load_svg(path: &Path, bytes: Arc<[u8]>, color: LayerColor) -> Result<Layer, LoadError> {
+    if bytes.len() > MAX_SVG_BYTES as usize {
+        return Err(error(path, "file exceeds size limit"));
+    }
     let text = std::str::from_utf8(&bytes).map_err(|e| error(path, e))?;
     let doc = usvg::roxmltree::Document::parse(text).map_err(|e| error(path, e))?;
     if doc.root_element().tag_name().name() != "svg" {
@@ -97,12 +99,16 @@ fn load_svg(path: &Path, color: LayerColor) -> Result<Layer, LoadError> {
     bytes.hash(&mut hash);
     Ok(Layer {
         key: format!("status-theme/{:016x}", hash.finish()),
-        svg: Arc::from(bytes),
+        svg: bytes,
         color,
     })
 }
 
-fn load_frame(root: &Path, canonical: &Path, spec: FrameSpec) -> Result<Frame, LoadError> {
+fn load_frame(
+    root: &Path,
+    spec: FrameSpec,
+    read_svg: &impl Fn(&Path) -> Result<Arc<[u8]>, LoadError>,
+) -> Result<Frame, LoadError> {
     let specs = match spec {
         FrameSpec::Svg(svg) => vec![LayerSpec { svg, color: None }],
         FrameSpec::Layered(spec) => spec.layers,
@@ -125,16 +131,11 @@ fn load_frame(root: &Path, canonical: &Path, spec: FrameSpec) -> Result<Frame, L
                 "frame must be a relative SVG path inside the package",
             ));
         }
-        let file =
-            daruda_core::path::canonicalize(root.join(relative)).map_err(|e| error(root, e))?;
-        if !daruda_core::path::is_within(&file, canonical) {
-            return Err(error(root, "frame escapes package directory"));
-        }
         let color = match spec.color {
             Some(value) => LayerColor::Fixed(color(&value).map_err(|e| error(root, e))?),
             None => LayerColor::Theme,
         };
-        let layer = load_svg(&file, color)?;
+        let layer = load_svg(&root.join(relative), read_svg(relative)?, color)?;
         bytes += layer.svg.len();
         if bytes > MAX_SVG_BYTES as usize {
             return Err(error(root, "combined frame SVGs exceed size limit"));
@@ -147,8 +148,30 @@ fn load_frame(root: &Path, canonical: &Path, spec: FrameSpec) -> Result<Frame, L
 }
 
 pub(super) fn package(manifest_path: &Path, namespace: &str) -> Result<Theme, LoadError> {
-    let manifest: Manifest = serde_json::from_slice(&read(manifest_path, MAX_MANIFEST_BYTES)?)
-        .map_err(|e| error(manifest_path, e))?;
+    let bytes = read(manifest_path, MAX_MANIFEST_BYTES)?;
+    let root = manifest_path.parent().unwrap_or(Path::new("."));
+    let canonical = daruda_core::path::canonicalize(root).map_err(|e| error(root, e))?;
+    package_bytes(manifest_path, namespace, &bytes, |relative| {
+        let file =
+            daruda_core::path::canonicalize(root.join(relative)).map_err(|e| error(root, e))?;
+        if !daruda_core::path::is_within(&file, &canonical) {
+            return Err(error(root, "frame escapes package directory"));
+        }
+        read(&file, MAX_SVG_BYTES).map(Arc::from)
+    })
+}
+
+/// File and bundled packages share validation, timing and renderer cache keys.
+pub(super) fn package_bytes(
+    manifest_path: &Path,
+    namespace: &str,
+    bytes: &[u8],
+    read_svg: impl Fn(&Path) -> Result<Arc<[u8]>, LoadError>,
+) -> Result<Theme, LoadError> {
+    if bytes.len() > MAX_MANIFEST_BYTES as usize {
+        return Err(error(manifest_path, "file exceeds size limit"));
+    }
+    let manifest: Manifest = serde_json::from_slice(bytes).map_err(|e| error(manifest_path, e))?;
     if manifest.version != 1
         || manifest.id.is_empty()
         || manifest.id.len() > 80
@@ -169,7 +192,6 @@ pub(super) fn package(manifest_path: &Path, namespace: &str) -> Result<Theme, Lo
         ));
     }
     let root = manifest_path.parent().unwrap_or(Path::new("."));
-    let canonical = daruda_core::path::canonicalize(root).map_err(|e| error(root, e))?;
     let mut states = std::collections::BTreeMap::new();
     for (state, spec) in manifest.states {
         if spec.frames.len() > MAX_FRAMES
@@ -189,7 +211,7 @@ pub(super) fn package(manifest_path: &Path, namespace: &str) -> Result<Theme, Lo
         }
         let mut frames = Vec::new();
         for spec in spec.frames {
-            frames.push(load_frame(root, &canonical, spec)?);
+            frames.push(load_frame(root, spec, &read_svg)?);
         }
         let colors = spec
             .colors

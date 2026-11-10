@@ -1,9 +1,10 @@
 # Cats
 
 A rounded kitten status icon theme for daruda, with artwork for all nine states.
-Its stable selection ID is `user/cats`.
+It is bundled with daruda as `builtin/cats`. Select **Cats** in Settings →
+Workspace → Sidebar → Status icon theme; no installation is needed.
 
-## Install
+## Customize a user copy
 
 1. In Settings → Workspace → Sidebar → Status icon theme, choose
    **Open theme folder**.
@@ -13,6 +14,7 @@ Its stable selection ID is `user/cats`.
    remembers the selection across restarts.
 
 The installed manifest lives at `<profile>/status-icon-themes/cats/theme.json`.
+The user copy has a separate stable ID, `user/cats`; app updates preserve it.
 An explicit `DARUDA_DATA_DIR` uses that directory as the profile root. See the
 [theme format](../README.md) for profile discovery, validation and customization.
 

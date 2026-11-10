@@ -1,9 +1,12 @@
 # Status icon themes
 
 Settings → Workspace → Sidebar → Status icon theme selects the artwork used by
-left-dock lane and session indicators, including the compact rail. Dots and
-Icons are bundled; Dots is the default. Custom themes inherit either and
-override individual states.
+left-dock lane and session indicators, including the compact rail. Dots,
+Icons, Cats, Dogs and Rabbits are bundled; Dots is the default. Animal artwork
+is embedded in release and debug executables on every platform, so it needs no
+separate installation. Their stable IDs are `builtin/cats`, `builtin/dogs` and
+`builtin/rabbits`. Custom themes inherit Dots or Icons and override individual
+states.
 Selections apply immediately and survive restart; activity, permission, elapsed
 time and completion decisions remain owned by the sessions.
 
@@ -15,6 +18,12 @@ time and completion decisions remain owned by the sessions.
 - [Dogs](dogs/README.md) and [Rabbits](rabbits/README.md) provide nine static poses.
   All three use opaque facial layers, an empty home for Disconnected, and a
   raised front paw for Needs attention.
+
+The animal directories are also the source of the bundled artwork. Copy one to
+the user theme folder only to customize it; that copy has a separate `user/` ID.
+Existing `user/cats`, `user/dogs` and `user/rabbits` selections keep using their
+installed files. Select the bundled theme to use the artwork shipped with the
+app. Updates never overwrite user packages or change the saved selection.
 
 ## Create a user theme
 

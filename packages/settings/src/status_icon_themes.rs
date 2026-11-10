@@ -12,11 +12,15 @@ pub(super) fn options(
         SelectOption::new("dots", s::settings::status_icon_theme_dots()),
         SelectOption::new("icons", s::settings::status_icon_theme_icons()),
     ];
-    choices.extend(
-        themes
-            .iter()
-            .map(|(id, name)| SelectOption::new(id.clone(), format!("{name} · {id}"))),
-    );
+    choices.extend(themes.iter().map(|(id, name)| {
+        let label = match id.as_str() {
+            "builtin/cats" => s::settings::status_icon_theme_cats(),
+            "builtin/dogs" => s::settings::status_icon_theme_dogs(),
+            "builtin/rabbits" => s::settings::status_icon_theme_rabbits(),
+            _ => format!("{name} · {id}"),
+        };
+        SelectOption::new(id.clone(), label)
+    }));
     if let StatusIconTheme::Custom(id) = selected
         && !themes.iter().any(|(choice, _)| choice == id)
     {
@@ -59,6 +63,27 @@ impl SettingsView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bundled_choices_use_localized_labels_and_keep_user_copies_distinct() {
+        let themes = vec![
+            ("builtin/cats".into(), "Cats".into()),
+            ("builtin/dogs".into(), "Dogs".into()),
+            ("builtin/rabbits".into(), "Rabbits".into()),
+            ("user/cats".into(), "My cats".into()),
+        ];
+        let choices = options(&themes, &StatusIconTheme::Custom("builtin/cats".into()));
+        assert_eq!(choices.len(), 6);
+        for (id, label) in [
+            ("builtin/cats", s::settings::status_icon_theme_cats()),
+            ("builtin/dogs", s::settings::status_icon_theme_dogs()),
+            ("builtin/rabbits", s::settings::status_icon_theme_rabbits()),
+            ("user/cats", "My cats · user/cats".into()),
+        ] {
+            let choice = choices.iter().find(|o| o.value.as_ref() == id).unwrap();
+            assert_eq!(choice.label.as_ref(), label, "{id}");
+        }
+    }
+
     #[test]
     fn unavailable_selection_stays_selectable_without_hiding_builtins() {
         let selected = StatusIconTheme::Custom("user/gone".into());

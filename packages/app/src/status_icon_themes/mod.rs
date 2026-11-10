@@ -1,4 +1,5 @@
-//! Installed status artwork, shared by dock rendering and Settings.
+//! Bundled and installed status artwork, shared by dock rendering and Settings.
+mod bundled;
 mod load;
 mod model;
 pub(crate) mod render;
@@ -11,7 +12,7 @@ pub(crate) struct StatusIconThemes(pub Catalog);
 impl Global for StatusIconThemes {}
 pub(crate) fn init(cx: &mut App) {
     if !cx.has_global::<StatusIconThemes>() {
-        cx.set_global(StatusIconThemes::default());
+        cx.set_global(StatusIconThemes(load(&[])));
     }
 }
 pub(crate) fn current(cx: &App) -> &Catalog {
@@ -39,7 +40,10 @@ pub(crate) fn sources(
 }
 
 pub(crate) fn load(sources: &[(String, PathBuf)]) -> Catalog {
-    let (catalog, errors) = load::catalog(sources);
+    let (mut catalog, mut errors) = bundled::load();
+    let (installed, installed_errors) = load::catalog(sources);
+    catalog.themes.extend(installed.themes);
+    errors.extend(installed_errors);
     for error in errors {
         use daruda_store::observability::{
             error_report::{ErrorReport, ErrorSeverity},

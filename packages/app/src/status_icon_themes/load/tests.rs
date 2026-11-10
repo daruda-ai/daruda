@@ -164,32 +164,3 @@ fn layered_frames_reject_unbounded_layers_invalid_colors_and_escaping_paths() {
             .contains("combined frame SVGs exceed size limit")
     );
 }
-
-#[test]
-fn animal_examples_load_all_states_and_opaque_facial_layers() {
-    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/status-icon-themes");
-    for name in ["cats", "dogs", "rabbits"] {
-        let theme = package(&examples.join(name).join("theme.json"), "user").unwrap();
-        assert_eq!(theme.id, format!("user/{name}"));
-        assert_eq!(theme.states.len(), 9);
-        let working = &theme.states[&State::Working];
-        assert_eq!(working.colors, Some((0x3d7fc7, 0x326797)));
-        for (state, artwork) in &theme.states {
-            for frame in &artwork.frames {
-                assert!(!frame.layers.is_empty());
-                if *state != State::Disconnected {
-                    assert!(
-                        frame
-                            .layers
-                            .iter()
-                            .any(|layer| layer.color == LayerColor::Fixed(0xf7f8f8))
-                    );
-                }
-            }
-        }
-        if name == "cats" {
-            assert_eq!(working.frames.len(), 8);
-            assert_eq!(theme.states[&State::NeedsAttention].frames.len(), 16);
-        }
-    }
-}

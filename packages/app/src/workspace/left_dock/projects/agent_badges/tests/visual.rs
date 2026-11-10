@@ -258,15 +258,15 @@ fn capture_status_icon_themes_and_live_switch() {
             ),
             (
                 "cats",
-                daruda_config::StatusIconTheme::Custom("user/cats".into()),
+                daruda_config::StatusIconTheme::Custom("builtin/cats".into()),
             ),
             (
                 "dogs",
-                daruda_config::StatusIconTheme::Custom("user/dogs".into()),
+                daruda_config::StatusIconTheme::Custom("builtin/dogs".into()),
             ),
             (
                 "rabbits",
-                daruda_config::StatusIconTheme::Custom("user/rabbits".into()),
+                daruda_config::StatusIconTheme::Custom("builtin/rabbits".into()),
             ),
             ("restored", daruda_config::StatusIconTheme::Dots),
         ] {
@@ -291,7 +291,11 @@ fn capture_status_icon_themes_and_live_switch() {
                     use gpui::BorrowAppContext as _;
                     cx.update_global::<crate::status_icon_themes::StatusIconThemes, _>(
                         |catalog, _| {
-                            let theme = catalog.0.themes.get_mut(&format!("user/{name}")).unwrap();
+                            let theme = catalog
+                                .0
+                                .themes
+                                .get_mut(&format!("builtin/{name}"))
+                                .unwrap();
                             let original = theme.clone();
                             for artwork in theme.states.values_mut() {
                                 for frame in &mut artwork.frames {

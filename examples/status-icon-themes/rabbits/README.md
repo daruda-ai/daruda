@@ -1,9 +1,10 @@
 # Rabbits
 
-A long-eared rabbit status icon theme for daruda. Stable selection ID:
-`user/rabbits`.
+A long-eared rabbit status icon theme bundled with daruda as `builtin/rabbits`.
+Select **Rabbits** in Settings → Workspace → Sidebar → Status icon theme; no
+installation is needed.
 
-In Settings → Workspace → Sidebar → Status icon theme, choose **Open theme
+To customize a separate `user/rabbits` copy, choose **Open theme
 folder**, copy this entire directory into it, then select **Rabbits · user/rabbits**.
 Keep `theme.json` and every SVG file together. See the [theme format](../README.md)
 for profile paths and layer support.

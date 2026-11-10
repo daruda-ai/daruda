@@ -1,9 +1,10 @@
 # Dogs
 
-A floppy-eared puppy status icon theme for daruda. Stable selection ID:
-`user/dogs`.
+A floppy-eared puppy status icon theme bundled with daruda as `builtin/dogs`.
+Select **Dogs** in Settings → Workspace → Sidebar → Status icon theme; no
+installation is needed.
 
-In Settings → Workspace → Sidebar → Status icon theme, choose **Open theme
+To customize a separate `user/dogs` copy, choose **Open theme
 folder**, copy this entire directory into it, then select **Dogs · user/dogs**.
 Keep `theme.json` and every SVG file together. See the [theme format](../README.md)
 for profile paths and layer support.

@@ -1648,11 +1648,13 @@ session rows stay aligned at every size.
 
 ### Left dock status icon themes
 
-Settings → Workspace → Left dock offers Dots (default) and Icons. The choice
+Settings → Workspace → Left dock offers Dots (default), Icons, Cats, Dogs and
+Rabbits. Animal themes are embedded in every executable and use `builtin/` IDs;
+separate user copies keep their `user/` IDs and are never overwritten. The choice
 applies live to lane, session, and compact-rail status artwork and persists in
 `left_dock.status_icon_theme`. It does not change activity or completion rules.
 Normal-size artwork remains 16px for leading indicators and 12px for badges.
-Both themes share the existing 250ms status clock.
+All themes share the existing 250ms status clock.
 
 The icon theme uses a gray plug with blinking gray lightning for Connecting, a
 blue speech bubble with advancing dots for Working, and an ice-colored terminal
