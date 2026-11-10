@@ -156,7 +156,69 @@ fn a_missing_or_refused_root_is_not_edited_again() {
         assert_eq!(roots.finish(&sent[0], &Err(failure)), want);
         assert!(roots.ready(true).is_empty(), "{want:?}");
         assert_eq!(roots.wanted("work", "1.1"), None, "{want:?}");
+        roots.want(&work(), "t", "1.1".into(), face("again", done));
+        assert_eq!(
+            roots.wanted("work", "1.1").is_some(),
+            want == Finished::Missing,
+            "a refused root is not asked again this run: {want:?}"
+        );
     }
+}
+
+/// A connection that cannot send right now keeps its update for the retry
+/// tick, without counting it a failure.
+#[test]
+fn an_update_waits_while_its_connection_cannot_send() {
+    let mut roots = Roots::default();
+    let done = ShownStatus::Ended(Ending::Completed);
+    roots.want(&work(), "t", "1.1".into(), face("title", done));
+    let sent = roots.ready(false);
+    roots.hold(&sent[0]);
+    assert!(roots.ready(false).is_empty(), "not on an ordinary flush");
+    assert_eq!(roots.ready(true).len(), 1, "on the retry tick");
+}
+
+/// The defect this guards: a closed pane's status was kept forever under its
+/// number, so a reopened window's pane by the same number first showed
+/// closed. A pane that posts is open; a closed one is forgotten in time.
+#[test]
+fn a_reopened_pane_by_a_closed_ones_number_is_not_closed() {
+    let mut threads = Threads::load();
+    let pane = pane(9);
+    threads.note_activity(pane, PaneActivity::Working, NOW);
+    threads.note_activity(pane, PaneActivity::Closed, NOW);
+    assert_eq!(threads.activity_of(pane), Some(ShownStatus::Closed));
+    threads.place(&work(), pane, &conversation("claude", "s1"), NOW);
+    assert_eq!(threads.activity_of(pane), None, "it posts, so it is open");
+
+    let other = super::pane(10);
+    threads.note_activity(other, PaneActivity::Closed, NOW);
+    threads.forget_closed(NOW + 10 * 60);
+    assert_eq!(threads.activity_of(other), None, "forgotten in time");
+}
+
+/// A subject that arrives after a post reaches the root at once.
+#[test]
+fn a_new_subject_alone_updates_the_root() {
+    let mut threads = Threads::load();
+    let pane = pane(11);
+    let claude = conversation("claude", "s1");
+    threads.note_activity(pane, PaneActivity::Working, NOW);
+    threads.place(&work(), pane, &claude, NOW);
+    threads.want_root_after_place(&work(), pane, None, &claude);
+    threads.remember(&work(), "t1".into(), claude.key.clone(), "1.1".into(), NOW);
+    let named = RootName {
+        title: claude.name.title.clone(),
+        subject: Some("Fix the login bug".into()),
+    };
+    threads.rename_pane(pane, &named);
+    assert_eq!(
+        threads
+            .roots_ref()
+            .wanted("work", "1.1")
+            .map(|face| face.name),
+        Some(named)
+    );
 }
 
 /// Activity of a pane with no thread is only remembered, for the root a

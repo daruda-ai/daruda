@@ -37,4 +37,23 @@ fn a_pane_that_moved_to_a_new_conversation_still_answers_in_its_thread(
             ThreadReply::Pane(pane)
         );
     });
+
+    // Once the conversation the pane moved to has a thread of its own, that
+    // thread speaks for the pane; the old one no longer reaches it.
+    cx.update(|cx| {
+        let channels = cx.global_mut::<RemoteChannels>();
+        let connection = &channels.connections["work"];
+        let scope = Scope::serving("work", &bot, connection.config.recipient.as_ref().unwrap());
+        let moved = ConversationKey {
+            agent: key.key.agent.clone(),
+            session: "s2".into(),
+        };
+        channels
+            .threads
+            .remember(&scope, "t2".into(), moved, "2.2".into(), NOW);
+        assert_eq!(
+            route_reply("work", &bot, Some("1.1"), cx),
+            ThreadReply::Closed
+        );
+    });
 }

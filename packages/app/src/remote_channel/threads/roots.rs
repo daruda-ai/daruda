@@ -30,6 +30,7 @@ pub(super) struct RootFace {
 pub(super) struct RootLook {
     title: String,
     subject: Option<String>,
+    separator: String,
     status: Option<(&'static str, String)>,
     stop: Option<(String, String)>,
 }
@@ -39,6 +40,7 @@ impl RootLook {
         Self {
             title: name.title.clone(),
             subject: name.subject.clone(),
+            separator: crate::surface::strings::remote_channel::thread_detail_separator(),
             status: shown.map(ShownStatus::view),
             stop: shown.filter(|shown| shown.is_running()).map(|_| {
                 (
@@ -53,6 +55,7 @@ impl RootLook {
         slack::threads::RootView {
             title: &self.title,
             subject: self.subject.as_deref(),
+            separator: &self.separator,
             status: self
                 .status
                 .as_ref()
@@ -104,11 +107,20 @@ pub(crate) struct Roots {
     waiting: HashSet<RootKey>,
     /// What each root shows now, as far as this run knows.
     shown: HashMap<RootKey, RootFace>,
+    /// Roots Slack refused to edit: not asked again this run, since the same
+    /// edit would be refused again.
+    refused: HashSet<RootKey>,
 }
 
 impl Roots {
     /// Ask `root` to show `face`.
     pub(super) fn want(&mut self, scope: &Scope, id: &str, root: String, face: RootFace) {
+        if self
+            .refused
+            .contains(&(scope.connection.clone(), root.clone()))
+        {
+            return;
+        }
         self.desired.insert(
             (scope.connection.clone(), root.clone()),
             RootUpdate {
@@ -168,6 +180,7 @@ impl Roots {
             }
             Err(RootFailure::Refused(_)) => {
                 self.desired.remove(&key);
+                self.refused.insert(key);
                 Finished::Refused
             }
             Err(RootFailure::Transient(_)) => {
@@ -175,6 +188,14 @@ impl Roots {
                 Finished::Retry
             }
         }
+    }
+
+    /// Put `update` back to wait for the retry tick: its connection cannot
+    /// send right now. Expected while it reconnects, so not a failure.
+    pub(super) fn hold(&mut self, update: &RootUpdate) {
+        let key = update.key();
+        self.in_flight.remove(&key);
+        self.waiting.insert(key);
     }
 
     /// Drop updates for scopes no connection serves any more: a removed
@@ -212,13 +233,15 @@ pub(crate) fn pane_activity(pane: PaneRef, activity: PaneActivity, cx: &mut App)
     flush(cx);
 }
 
-/// Give `pane`'s roots its latest name; sent with their next update.
+/// Give `pane`'s roots its latest name; a root whose name changed is updated.
 pub(crate) fn pane_named(pane: PaneRef, name: &RootName, cx: &mut App) {
-    if cx.has_global::<RemoteChannels>() {
-        cx.global_mut::<RemoteChannels>()
-            .threads
-            .rename_pane(pane, name);
+    if !cx.has_global::<RemoteChannels>() {
+        return;
     }
+    cx.global_mut::<RemoteChannels>()
+        .threads
+        .rename_pane(pane, name);
+    flush(cx);
 }
 
 /// Send every root update that is due now.
@@ -250,6 +273,7 @@ pub(crate) fn retry(cx: &mut App) {
             _ => unsettled.push(id.clone()),
         }
     }
+    channels.threads.forget_closed(now());
     let roots = channels.threads.roots();
     roots.keep_scopes(|scope| scopes.contains(scope) || unsettled.contains(&scope.connection));
     let ready = roots.ready(true);
@@ -260,17 +284,20 @@ fn send(ready: Vec<RootUpdate>, cx: &mut App) {
     for update in ready {
         cx.spawn(async move |cx| {
             let serving = cx.update(|cx| serving(&update.scope, cx));
-            let result = match serving {
-                Some((bot, recipient)) => {
-                    let update = update.clone();
-                    cx.background_executor()
-                        .spawn(async move { replace(&bot, &recipient, &update) })
-                        .await
-                }
-                None => Err(RootFailure::Transient(
-                    "Remote channel is not serving".into(),
-                )),
+            let Some((bot, recipient)) = serving else {
+                cx.update(|cx| {
+                    cx.global_mut::<RemoteChannels>()
+                        .threads
+                        .roots()
+                        .hold(&update)
+                });
+                return;
             };
+            let sent = update.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move { replace(&bot, &recipient, &sent) })
+                .await;
             cx.update(|cx| settle(update, result, cx));
         })
         .detach();

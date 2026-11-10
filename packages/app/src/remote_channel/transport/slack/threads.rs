@@ -15,6 +15,8 @@ pub(crate) struct RootView<'a> {
     pub title: &'a str,
     /// What the pane's conversation is about, under its name.
     pub subject: Option<&'a str>,
+    /// Joins name, subject and status in the notification text.
+    pub separator: &'a str,
     /// Slack emoji name and the status words.
     pub status: Option<(&'a str, &'a str)>,
     /// The stop button's label and value, while there is work to stop.
@@ -57,7 +59,7 @@ impl RootView<'_> {
         .into_iter()
         .flatten()
         .collect::<Vec<_>>()
-        .join(" — ")
+        .join(self.separator)
     }
 }
 
@@ -175,6 +177,7 @@ mod tests {
         let titled = RootView {
             title: "my_project · Claude",
             subject: None,
+            separator: " — ",
             status: None,
             stop: None,
         };
@@ -192,6 +195,7 @@ mod tests {
         let working = RootView {
             title: "my_project · Claude",
             subject: Some("Fix the login bug"),
+            separator: " — ",
             status: Some(("hourglass_flowing_sand", "Working since 2:05 PM")),
             stop: Some(("Stop", "thr:abc")),
         };

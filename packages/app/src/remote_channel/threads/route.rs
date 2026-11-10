@@ -118,7 +118,7 @@ pub(crate) fn route_reply(
     let Some(conversations) = channels.threads.sessions_of_root(&scope, thread) else {
         return ThreadReply::Unknown;
     };
-    match pane_holding(id, &conversations, cx) {
+    match pane_holding(&scope, &conversations, cx) {
         Some(pane) => ThreadReply::Pane(pane),
         None => ThreadReply::Closed,
     }
@@ -135,22 +135,35 @@ pub(super) fn pane_of_thread(
     let recipient = channels.connections.get(id)?.config.recipient.as_ref()?;
     let scope = Scope::serving(id, bot, recipient);
     let conversations = channels.threads.sessions_of_thread(&scope, thread)?;
-    pane_holding(id, &conversations, cx)
+    pane_holding(&scope, &conversations, cx)
 }
 
 /// The open pane whose conversation is one of `conversations`. A pane that
 /// has moved on to a new conversation — cleared, or switched agent — is not
 /// listed under it until it next posts, so the conversation it last posted
-/// from on connection `id` still names it.
-fn pane_holding(id: &str, conversations: &[ConversationKey], cx: &mut App) -> Option<PaneRef> {
+/// from on connection `id` still names it; unless the pane moved to a
+/// conversation that has a thread of its own, which now speaks for it.
+fn pane_holding(scope: &Scope, conversations: &[ConversationKey], cx: &mut App) -> Option<PaneRef> {
     if let Some(pane) = open_pane_with(conversations, cx) {
         return Some(pane);
     }
     let moved_on = cx
         .global::<RemoteChannels>()
         .threads
-        .panes_last_in(id, conversations);
-    moved_on.into_iter().find(|pane| is_open(*pane, cx))
+        .panes_last_in(&scope.connection, conversations);
+    moved_on.into_iter().find(|pane| {
+        if !is_open(*pane, cx) {
+            return false;
+        }
+        match super::driver::conversation_of(*pane, cx) {
+            Some(now) => !cx
+                .global::<RemoteChannels>()
+                .threads
+                .has_thread(scope, &now.key),
+            // Still connecting its new conversation: nothing else speaks for it.
+            None => true,
+        }
+    })
 }
 
 fn open_pane_with(conversations: &[ConversationKey], cx: &mut App) -> Option<PaneRef> {

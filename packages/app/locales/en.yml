@@ -2610,6 +2610,10 @@ remote_channel:
   thread_status_overage: "Stopped at the usage limit"
   thread_status_closed: "Closed"
   thread_stop_button: "Stop"
+  # Joins the lines of a pane's name into the one line a thread root shows.
+  thread_name_separator: " · "
+  # Joins a thread root's name, subject and status in its notification text.
+  thread_detail_separator: " — "
 
 library:
   toggle_needs_project: "Claude enablement is per project. Open a local project to change it."

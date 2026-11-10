@@ -10,6 +10,10 @@ use crate::surface::strings as s;
 use daruda_store::remote_threads::RemoteThreadStore;
 use std::collections::HashMap;
 
+/// How long a closed pane's status outlives it: past any root of its still
+/// being posted.
+const CLOSED_KEPT_SECS: i64 = 10 * 60;
+
 pub(crate) struct Threads {
     book: Book,
     /// The conversation each pane last spoke from on each connection: how a
@@ -20,9 +24,12 @@ pub(crate) struct Threads {
     /// The name each pane's root on each connection was last given. Memory
     /// only, like `last`.
     names: HashMap<(String, PaneRef), RootName>,
-    /// Each pane's latest status, for roots made later. A closed pane keeps
-    /// `Closed` here so a root still being posted for it lands closed.
+    /// Each open pane's latest status, for roots made later.
     activity: HashMap<PaneRef, ShownStatus>,
+    /// When each pane closed, so a root still being posted for it lands
+    /// closed. Kept apart from `activity` and only briefly: a reopened
+    /// window can number its panes the same way, and must not read closed.
+    closed: HashMap<PaneRef, i64>,
     roots: Roots,
     store: Option<RemoteThreadStore>,
 }
@@ -37,6 +44,7 @@ impl Threads {
             last: HashMap::new(),
             names: HashMap::new(),
             activity: HashMap::new(),
+            closed: HashMap::new(),
             roots: Roots::default(),
             store,
         };
@@ -62,6 +70,9 @@ impl Threads {
         conversation: &PaneConversation,
         now: i64,
     ) -> (Option<String>, Option<String>) {
+        // A pane that posts is open, whatever an earlier pane by its number
+        // did.
+        self.closed.remove(&pane);
         let previous = self
             .last
             .insert((scope.connection.clone(), pane), conversation.key.clone());
@@ -146,24 +157,36 @@ impl Threads {
         name: &RootName,
         posted: Option<ShownStatus>,
     ) {
-        let face = |shown| RootFace {
+        let posted = posted.map(|shown| RootFace {
             name: name.clone(),
             shown,
-        };
-        if let Some(shown) = posted {
-            self.roots.shown(scope, root, face(shown));
+        });
+        if let Some(face) = &posted {
+            self.roots.shown(scope, root, face.clone());
         }
-        if let Some(&current) = self.activity.get(&pane)
-            && posted != Some(current)
+        // The name may have changed while the root was posting, too.
+        let current = self.activity_of(pane).map(|shown| RootFace {
+            name: self
+                .names
+                .get(&(scope.connection.clone(), pane))
+                .cloned()
+                .unwrap_or_else(|| name.clone()),
+            shown,
+        });
+        if let Some(current) = current
+            && posted.as_ref() != Some(&current)
         {
-            self.roots.want(scope, id, root.to_owned(), face(current));
+            self.roots.want(scope, id, root.to_owned(), current);
         }
     }
 
     // --- Pane activity ----------------------------------------------------
 
     pub(super) fn activity_of(&self, pane: PaneRef) -> Option<ShownStatus> {
-        self.activity.get(&pane).copied()
+        match self.closed.contains_key(&pane) {
+            true => Some(ShownStatus::Closed),
+            false => self.activity.get(&pane).copied(),
+        }
     }
 
     /// Note `pane`'s activity. The status its roots should now show, or
@@ -174,12 +197,18 @@ impl Threads {
         activity: PaneActivity,
         now: i64,
     ) -> Option<ShownStatus> {
-        let previous = self.activity.get(&pane).copied();
+        let previous = self.activity_of(pane);
         let shown = ShownStatus::next(previous, activity, now);
         if previous == Some(shown) {
             return None;
         }
-        self.activity.insert(pane, shown);
+        if shown == ShownStatus::Closed {
+            self.activity.remove(&pane);
+            self.closed.insert(pane, now);
+        } else {
+            self.closed.remove(&pane);
+            self.activity.insert(pane, shown);
+        }
         Some(shown)
     }
 
@@ -207,13 +236,29 @@ impl Threads {
         }
     }
 
-    /// Give `pane`'s roots its latest name, for the next update they get. The
-    /// conversation's subject usually arrives mid-turn, after the post that
-    /// last named it.
+    /// Give `pane`'s roots its latest name. Every post names them anew; this
+    /// carries a subject that arrived since, as it usually does mid-turn, to
+    /// roots that would otherwise keep the old one until the next post.
     pub(super) fn rename_pane(&mut self, pane: PaneRef, name: &RootName) {
+        let mut renamed = false;
         for (_, held) in self.names.iter_mut().filter(|((_, held), _)| *held == pane) {
+            renamed |= *held != *name;
             *held = name.clone();
         }
+        if renamed && let Some(shown) = self.activity_of(pane) {
+            self.want_for_pane(pane, shown);
+        }
+    }
+
+    /// Forget panes closed long enough ago that no root of theirs can still
+    /// be posting.
+    pub(super) fn forget_closed(&mut self, now: i64) {
+        self.closed.retain(|_, at| now - *at < CLOSED_KEPT_SECS);
+    }
+
+    /// Whether `key` has a thread of its own in `scope`.
+    pub(super) fn has_thread(&self, scope: &Scope, key: &ConversationKey) -> bool {
+        self.book.for_conversation(scope, key).is_some()
     }
 
     /// Forget where a closed pane posted. Its `Closed` status is kept, so a
