@@ -15,7 +15,8 @@ time and completion decisions remain owned by the sessions.
 - [Soft Ice](soft-ice/theme.json) inherits Icons and overrides tool execution
   with two animated frames.
 - [Cats](cats/README.md) replaces all nine states with animated kitten artwork.
-- [Dogs](dogs/README.md) and [Rabbits](rabbits/README.md) provide nine static poses.
+- [Dogs](dogs/README.md) and [Rabbits](rabbits/README.md) animate four active states
+  and keep the other five states static.
   All three use opaque facial layers, an empty home for Disconnected, and a
   raised front paw for Needs attention.
 

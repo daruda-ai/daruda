@@ -35,9 +35,18 @@ fn animal_themes_embed_all_states_and_opaque_facial_layers() {
                 }
             }
         }
-        if name == "cats" {
-            assert_eq!(working.frames.len(), 8);
-            assert_eq!(theme.states[&State::NeedsAttention].frames.len(), 16);
+        for state in [
+            State::Connecting,
+            State::Working,
+            State::ExecutingTool,
+            State::NeedsAttention,
+        ] {
+            let poses: std::collections::HashSet<_> = theme.states[&state]
+                .frames
+                .iter()
+                .map(|frame| &frame.layers[0].key)
+                .collect();
+            assert!(poses.len() > 1, "{name}/{state:?} must visibly animate");
         }
     }
 }
