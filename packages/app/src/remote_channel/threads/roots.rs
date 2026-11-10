@@ -3,9 +3,8 @@
 //! edit at a time per root; an edit that failed for a passing reason is
 //! retried on the remote channel's retry tick with the latest face.
 
-use super::Scope;
-use super::driver::{Threads, now, scope};
 use super::status::{PaneActivity, ShownStatus};
+use super::{Scope, now};
 use crate::remote_channel::bridge::PaneRef;
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
@@ -23,6 +22,44 @@ type RootKey = (String, String);
 pub(super) struct RootFace {
     pub title: String,
     pub shown: ShownStatus,
+}
+
+/// A root's face as Slack shows it: the status emoji and words over the
+/// pane's name, and a stop button while there is work to stop. One builder
+/// for the root's first post and every later edit, so the two cannot drift.
+pub(super) struct RootLook {
+    title: String,
+    status: Option<(&'static str, String)>,
+    stop: Option<(String, String)>,
+}
+
+impl RootLook {
+    pub(super) fn new(title: &str, shown: Option<ShownStatus>, id: &str) -> Self {
+        Self {
+            title: title.to_owned(),
+            status: shown.map(ShownStatus::view),
+            stop: shown.filter(|shown| shown.is_running()).map(|_| {
+                (
+                    crate::surface::strings::remote_channel::thread_stop_button(),
+                    super::stop::token(id),
+                )
+            }),
+        }
+    }
+
+    pub(super) fn view(&self) -> slack::threads::RootView<'_> {
+        slack::threads::RootView {
+            title: &self.title,
+            status: self
+                .status
+                .as_ref()
+                .map(|(emoji, label)| (*emoji, label.as_str())),
+            stop: self
+                .stop
+                .as_ref()
+                .map(|(label, value)| (label.as_str(), value.as_str())),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -153,57 +190,6 @@ impl Roots {
     }
 }
 
-impl Threads {
-    /// Note `pane`'s activity. The status its roots should now show, or
-    /// `None` when nothing changed.
-    pub(super) fn note_activity(
-        &mut self,
-        pane: PaneRef,
-        activity: PaneActivity,
-        now: i64,
-    ) -> Option<ShownStatus> {
-        let previous = self.activity.get(&pane).copied();
-        let shown = ShownStatus::next(previous, activity, now);
-        if previous == Some(shown) {
-            return None;
-        }
-        self.activity.insert(pane, shown);
-        Some(shown)
-    }
-
-    /// Ask every root `pane` has to show `shown`. Found through the threads
-    /// the pane posted in this run, whatever state their connections are in:
-    /// a connection that cannot send now is caught up on its retry tick.
-    pub(super) fn want_for_pane(&mut self, pane: PaneRef, shown: ShownStatus) {
-        let wanted: Vec<_> = self
-            .last
-            .iter()
-            .filter(|((_, held), _)| *held == pane)
-            .filter_map(|((connection, _), key)| {
-                let record = self.book.for_connection(connection, key)?;
-                let title = self.titles.get(&(connection.clone(), pane))?;
-                Some((
-                    Scope::of(record),
-                    record.id.clone(),
-                    record.root.clone(),
-                    title.clone(),
-                ))
-            })
-            .collect();
-        for (scope, id, root, title) in wanted {
-            self.roots
-                .want(&scope, &id, root, RootFace { title, shown });
-        }
-    }
-
-    /// Forget where a closed pane posted. Its `Closed` status is kept, so a
-    /// root still being posted for it is closed as soon as it lands.
-    pub(super) fn forget_pane(&mut self, pane: PaneRef) {
-        self.last.retain(|(_, held), _| *held != pane);
-        self.titles.retain(|(_, held), _| *held != pane);
-    }
-}
-
 /// Report `pane`'s activity. Panes with no thread yet only remember it, for
 /// the root a later message starts.
 pub(crate) fn pane_activity(pane: PaneRef, activity: PaneActivity, cx: &mut App) {
@@ -228,7 +214,11 @@ pub(crate) fn flush(cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {
         return;
     }
-    let ready = cx.global_mut::<RemoteChannels>().threads.roots.ready(false);
+    let ready = cx
+        .global_mut::<RemoteChannels>()
+        .threads
+        .roots()
+        .ready(false);
     send(ready, cx);
 }
 
@@ -243,12 +233,12 @@ pub(crate) fn retry(cx: &mut App) {
     let mut unsettled = Vec::new();
     for (id, connection) in &channels.connections {
         match (&connection.bot, &connection.config.recipient) {
-            (Some(bot), Some(recipient)) => scopes.push(scope(id, bot, recipient)),
+            (Some(bot), Some(recipient)) => scopes.push(Scope::serving(id, bot, recipient)),
             // Reconnecting: its identity is not known yet, so keep its roots.
             _ => unsettled.push(id.clone()),
         }
     }
-    let roots = &mut channels.threads.roots;
+    let roots = channels.threads.roots();
     roots.keep_scopes(|scope| scopes.contains(scope) || unsettled.contains(&scope.connection));
     let ready = roots.ready(true);
     send(ready, cx);
@@ -281,25 +271,8 @@ fn replace(
     recipient: &RemoteRecipient,
     update: &RootUpdate,
 ) -> Result<(), RootFailure> {
-    let (emoji, label) = update.face.shown.view();
-    let stop = update.face.shown.is_running().then(|| {
-        (
-            crate::surface::strings::remote_channel::thread_stop_button(),
-            super::stop::token(&update.id),
-        )
-    });
-    slack::threads::replace_root(
-        &bot.credentials,
-        recipient,
-        &update.root,
-        &slack::threads::RootView {
-            title: &update.face.title,
-            status: Some((emoji, &label)),
-            stop: stop
-                .as_ref()
-                .map(|(label, value)| (label.as_str(), value.as_str())),
-        },
-    )
+    let look = RootLook::new(&update.face.title, Some(update.face.shown), &update.id);
+    slack::threads::replace_root(&bot.credentials, recipient, &update.root, &look.view())
 }
 
 /// The session that may edit roots made under `scope`: the connection's live
@@ -308,13 +281,13 @@ fn serving(scope: &Scope, cx: &App) -> Option<(Arc<BotSession>, RemoteRecipient)
     let connection = cx.global::<RemoteChannels>().live(&scope.connection, cx)?;
     let bot = connection.bot.clone()?;
     let recipient = connection.config.recipient.clone()?;
-    (connection.can_send() && super::driver::scope(&scope.connection, &bot, &recipient) == *scope)
+    (connection.can_send() && Scope::serving(&scope.connection, &bot, &recipient) == *scope)
         .then_some((bot, recipient))
 }
 
 fn settle(update: RootUpdate, result: Result<(), RootFailure>, cx: &mut App) {
     let threads = &mut cx.global_mut::<RemoteChannels>().threads;
-    match threads.roots.finish(&update, &result) {
+    match threads.roots().finish(&update, &result) {
         Finished::Shown => flush(cx),
         // The root is gone; the pane's next message starts a new thread.
         Finished::Missing => {
@@ -325,9 +298,7 @@ fn settle(update: RootUpdate, result: Result<(), RootFailure>, cx: &mut App) {
                     "remote.thread.root_gone",
                 );
             }
-            if threads.book.forget_root(&update.scope, &update.root) {
-                threads.save();
-            }
+            threads.forget_root(&update.scope, &update.root);
         }
         Finished::Refused => {
             if let Err(RootFailure::Refused(reason)) = &result {

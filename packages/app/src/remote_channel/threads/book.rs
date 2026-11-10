@@ -22,6 +22,19 @@ pub(crate) struct Scope {
 }
 
 impl Scope {
+    /// The identity threads on connection `id` are made under now.
+    pub(crate) fn serving(
+        id: &str,
+        bot: &crate::remote_channel::runtime::BotSession,
+        recipient: &daruda_config::remote::RemoteRecipient,
+    ) -> Self {
+        Self {
+            connection: id.to_owned(),
+            bot: crate::remote_channel::lock::digest_of(&bot.credentials.bot),
+            conversation: recipient.conversation_id.clone(),
+        }
+    }
+
     /// The identity `record` was made under.
     pub(crate) fn of(record: &ThreadRecord) -> Self {
         Self {

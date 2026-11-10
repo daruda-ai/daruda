@@ -257,7 +257,7 @@ fn install_connection_with_queue(
         events,
         outbound,
         applied: None,
-        threads: crate::remote_channel::threads::driver::Threads::load(),
+        threads: crate::remote_channel::threads::state::Threads::load(),
     });
     super::super::reconcile(cx);
     let connection = cx
@@ -916,6 +916,7 @@ fn a_remote_card_that_never_left_is_offered_once_more(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_thread_reply_reaches_its_pane_and_an_unplaceable_thread_is_refused(cx: &mut TestAppContext) {
     use crate::remote_channel::bridge::PaneRef;
+    use crate::remote_channel::threads::route::ThreadReply;
     use crate::remote_channel::threads::{ConversationKey, Scope};
 
     let fixture = crate::test_support::workspace_with_agent_chat(cx);

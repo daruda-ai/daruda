@@ -4,7 +4,7 @@ use crate::remote_channel::{
     dispatch::{self, Edit, Effect},
     pairing::pair_code,
     runtime::{BotSession, WorkerEvent, channel_key},
-    threads::route::{self, ThreadReply},
+    threads::route,
     transport::{self, IncomingKind, Message},
 };
 use crate::settings_store::SettingsStore;
@@ -119,37 +119,9 @@ fn dispatch_claimed(
             let text = text
                 .strip_prefix('!')
                 .map_or_else(|| text.clone(), |command| format!("/{command}"));
-            let card = connection.desk.borrow().question_reply(reply_to.as_ref());
-            let thread = match card {
-                Some(_) => ThreadReply::Untracked,
-                None => route::route_reply(id, bot, reply_to.as_deref(), cx),
-            };
-            let connection = cx.global_mut::<RemoteChannels>().connections.get_mut(id)?;
-            match thread {
-                ThreadReply::Untracked => connection.core.route_text(text, reply_to.clone(), card),
-                // A bare stop typed in a pane's thread means that pane, not
-                // whichever one is selected.
-                ThreadReply::Pane(pane) if is_bare_stop(&text) => {
-                    return Some(dispatch::stop_pane(
-                        pane,
-                        &dispatch::Target::Remote(id.into()),
-                        cx,
-                    ));
-                }
-                ThreadReply::Pane(pane) => {
-                    let card = connection.desk.get_mut().live_question_of(pane);
-                    connection.core.route_text_to(text, pane, card)
-                }
-                // A command is ours wherever it is typed; anything else, and a
-                // bare stop that would fall to the selection, would have to
-                // guess an agent.
-                ThreadReply::Closed | ThreadReply::Unknown
-                    if is_command(&text) && !is_bare_stop(&text) =>
-                {
-                    connection.core.route_text(text, None, None)
-                }
-                ThreadReply::Closed => return Some(refusal(s::remote_channel::thread_closed())),
-                ThreadReply::Unknown => return Some(refusal(s::remote_channel::thread_unknown())),
+            match route::route_message(id, bot, text, reply_to.as_ref(), cx)? {
+                Ok(routed) => routed,
+                Err(answer) => return Some(answer),
             }
         }
         IncomingKind::Callback { data, .. } => {
@@ -181,30 +153,6 @@ fn dispatch_claimed(
             .note_tap(data, message_id.clone(), managed);
     }
     Some(effect)
-}
-
-/// Whether `text` is one of daruda's commands, used rightly or not.
-fn is_command(text: &str) -> bool {
-    use crate::control::spec::{ParseError, parse};
-    !matches!(
-        parse(text),
-        Err(ParseError::NotACommand | ParseError::Unknown { .. })
-    )
-}
-
-/// Whether `text` is `/stop` naming no pane.
-fn is_bare_stop(text: &str) -> bool {
-    matches!(
-        crate::control::spec::parse(text),
-        Ok(crate::control::spec::ControlCommand::Stop { target: None })
-    )
-}
-
-fn refusal(text: String) -> Effect {
-    Effect::Reply(crate::remote_channel::command::RenderedReply {
-        text,
-        keyboard: None,
-    })
 }
 
 pub(super) fn spawn(receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) {

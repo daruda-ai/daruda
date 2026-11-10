@@ -1,14 +1,81 @@
 //! The inbound side of pane threads: which pane a reply or a tap in a thread
 //! is for, and where the answer to it goes.
 
-use super::ConversationKey;
-use super::driver::scope;
-use crate::remote_channel::bridge::PaneRef;
+use super::{ConversationKey, Scope};
+use crate::remote_channel::bridge::{PaneRef, Routed};
+use crate::remote_channel::command::RenderedReply;
+use crate::remote_channel::dispatch::{self, Effect};
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::transport::{self, Credentials, IncomingKind, Message, slack};
+use crate::surface::strings as s;
 use daruda_config::remote::{ChannelKind, RemoteRecipient};
 use gpui::App;
+
+/// Decide what a text message on connection `id` comes to: a routed action,
+/// or an answer given instead. A reply to a question card answers it; a reply
+/// in a pane's thread goes to that pane, where a bare stop stops that pane;
+/// a thread this app cannot place takes only daruda's own commands. `None`
+/// when the connection is gone.
+pub(crate) fn route_message(
+    id: &str,
+    bot: &BotSession,
+    text: String,
+    reply_to: Option<&String>,
+    cx: &mut App,
+) -> Option<Result<Routed, Effect>> {
+    let card = cx
+        .global::<RemoteChannels>()
+        .connections
+        .get(id)?
+        .question_reply(reply_to);
+    let thread = match card {
+        Some(_) => ThreadReply::Untracked,
+        None => route_reply(id, bot, reply_to.map(String::as_str), cx),
+    };
+    let target = dispatch::Target::Remote(id.into());
+    let connection = cx.global_mut::<RemoteChannels>().connections.get_mut(id)?;
+    Some(match thread {
+        ThreadReply::Untracked => Ok(connection.core.route_text(text, reply_to.cloned(), card)),
+        ThreadReply::Pane(pane) if is_bare_stop(&text) => {
+            Err(dispatch::stop_pane(pane, &target, cx))
+        }
+        ThreadReply::Pane(pane) => {
+            let card = connection.live_question_of(pane);
+            Ok(connection.core.route_text_to(text, pane, card))
+        }
+        // A bare stop here would fall to the selection: another agent.
+        ThreadReply::Closed | ThreadReply::Unknown if is_command(&text) && !is_bare_stop(&text) => {
+            Ok(connection.core.route_text(text, None, None))
+        }
+        ThreadReply::Closed => Err(refusal(s::remote_channel::thread_closed())),
+        ThreadReply::Unknown => Err(refusal(s::remote_channel::thread_unknown())),
+    })
+}
+
+/// Whether `text` is one of daruda's commands, used rightly or not.
+fn is_command(text: &str) -> bool {
+    use crate::control::spec::{ParseError, parse};
+    !matches!(
+        parse(text),
+        Err(ParseError::NotACommand | ParseError::Unknown { .. })
+    )
+}
+
+/// Whether `text` is `/stop` naming no pane.
+fn is_bare_stop(text: &str) -> bool {
+    matches!(
+        crate::control::spec::parse(text),
+        Ok(crate::control::spec::ControlCommand::Stop { target: None })
+    )
+}
+
+fn refusal(text: String) -> Effect {
+    Effect::Reply(RenderedReply {
+        text,
+        keyboard: None,
+    })
+}
 
 /// Where a reply posted in a thread goes.
 #[derive(Debug, PartialEq, Eq)]
@@ -47,11 +114,10 @@ pub(crate) fn route_reply(
     {
         return ThreadReply::Untracked;
     }
-    let scope = scope(id, bot, recipient);
-    let Some(record) = channels.threads.book.for_root(&scope, thread) else {
+    let scope = Scope::serving(id, bot, recipient);
+    let Some(conversations) = channels.threads.sessions_of_root(&scope, thread) else {
         return ThreadReply::Unknown;
     };
-    let conversations = record.sessions.clone();
     match pane_holding(id, &conversations, cx) {
         Some(pane) => ThreadReply::Pane(pane),
         None => ThreadReply::Closed,
@@ -67,13 +133,8 @@ pub(super) fn pane_of_thread(
 ) -> Option<PaneRef> {
     let channels = cx.global::<RemoteChannels>();
     let recipient = channels.connections.get(id)?.config.recipient.as_ref()?;
-    let scope = scope(id, bot, recipient);
-    let conversations = channels
-        .threads
-        .book
-        .by_id(&scope, thread)?
-        .sessions
-        .clone();
+    let scope = Scope::serving(id, bot, recipient);
+    let conversations = channels.threads.sessions_of_thread(&scope, thread)?;
     pane_holding(id, &conversations, cx)
 }
 
@@ -85,14 +146,10 @@ fn pane_holding(id: &str, conversations: &[ConversationKey], cx: &mut App) -> Op
     if let Some(pane) = open_pane_with(conversations, cx) {
         return Some(pane);
     }
-    let moved_on: Vec<PaneRef> = cx
+    let moved_on = cx
         .global::<RemoteChannels>()
         .threads
-        .last
-        .iter()
-        .filter(|((connection, _), key)| connection == id && conversations.contains(key))
-        .map(|((_, pane), _)| *pane)
-        .collect();
+        .panes_last_in(id, conversations);
     moved_on.into_iter().find(|pane| is_open(*pane, cx))
 }
 

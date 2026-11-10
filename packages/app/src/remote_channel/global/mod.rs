@@ -43,7 +43,7 @@ pub struct RemoteChannels {
     events: UnboundedSender<WorkerEvent>,
     outbound: UnboundedSender<Pending>,
     applied: Option<Vec<ChannelConfig>>,
-    pub(crate) threads: super::threads::driver::Threads,
+    pub(crate) threads: super::threads::state::Threads,
 }
 
 impl Global for RemoteChannels {}
@@ -120,6 +120,22 @@ impl Connection {
             .bind(super::lock::digest_of(&bot.credentials.bot));
         self.bot = Some(bot);
         changed
+    }
+
+    /// The question card a reply to `reply_to` answers, if it names one.
+    pub(crate) fn question_reply(
+        &self,
+        reply_to: Option<&String>,
+    ) -> Option<crate::remote_channel::cards::QuestionCard> {
+        self.desk.borrow().question_reply(reply_to)
+    }
+
+    /// The newest question card `pane` still waits on.
+    pub(crate) fn live_question_of(
+        &mut self,
+        pane: PaneRef,
+    ) -> Option<crate::remote_channel::cards::QuestionCard> {
+        self.desk.get_mut().live_question_of(pane)
     }
 
     /// What a button tap answers: a card's, or else a listing row's.
@@ -524,7 +540,7 @@ pub fn install(cx: &mut App) {
         events,
         outbound,
         applied: None,
-        threads: super::threads::driver::Threads::load(),
+        threads: super::threads::state::Threads::load(),
     });
     inbound::spawn(incoming, cx);
     outbound::spawn(outgoing, cx);

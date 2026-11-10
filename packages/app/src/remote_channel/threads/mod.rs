@@ -6,6 +6,7 @@ mod book;
 pub(crate) mod driver;
 pub(crate) mod roots;
 pub(crate) mod route;
+pub(crate) mod state;
 pub(crate) mod status;
 pub(crate) mod stop;
 
@@ -23,3 +24,12 @@ pub(crate) struct PaneConversation {
 
 #[cfg(test)]
 mod tests;
+
+/// Unix seconds now.
+pub(crate) fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX)
+        })
+}

@@ -53,7 +53,7 @@ pub(crate) fn setup(cx: &mut App) -> futures::channel::mpsc::UnboundedReceiver<P
         events,
         outbound,
         applied: None,
-        threads: crate::remote_channel::threads::driver::Threads::load(),
+        threads: crate::remote_channel::threads::state::Threads::load(),
     });
     reconcile(cx);
     for connection in cx.global_mut::<RemoteChannels>().connections.values_mut() {
@@ -430,7 +430,7 @@ fn disabled_or_revoked_connections_cannot_deliver(cx: &mut gpui::TestAppContext)
             events,
             outbound,
             applied: None,
-            threads: crate::remote_channel::threads::driver::Threads::load(),
+            threads: crate::remote_channel::threads::state::Threads::load(),
         });
         reconcile(cx);
         let connection = cx
