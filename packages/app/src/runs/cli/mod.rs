@@ -184,26 +184,37 @@ impl RunsHost {
             .map(|(_, run, exec)| (run.clone(), exec))
             .collect();
         for (run, exec) in runs {
-            match (run.source.cli_process(), &run.session_id) {
-                (Some(CliProcessState::Running { pid }), Some(session)) => {
-                    if let Some(dir) = sessions_dir(data_dir, run.account_id) {
-                        Self::cli_tracker(cx).track_session(session.clone(), *pid, dir);
-                    }
-                }
-                (Some(CliProcessState::Discovering | CliProcessState::Running { .. }), _) => {
-                    Self::propose_fact(
-                        TaskEvent::CliProcessObserved {
-                            exec: exec.clone(),
-                            process: CliProcessState::Unknown,
-                            at: Utc::now(),
-                        },
-                        cx,
-                    )
-                }
-                _ => {}
-            }
-            Self::reconcile_lost_cli(exec, cx);
+            let sessions = sessions_dir(data_dir, run.account_id);
+            Self::restore_cli_run(&run, exec, sessions, cx);
         }
+    }
+
+    /// Re-arm a restored run's exit tracking in `sessions`, or demote its
+    /// process to `Unknown` when nothing can track it: no new start makes a
+    /// CLI run, so tracking is the only way a Running one still ends.
+    fn restore_cli_run(
+        run: &TaskExecution,
+        exec: ExecutionRef,
+        sessions: Option<PathBuf>,
+        cx: &mut App,
+    ) {
+        match (run.source.cli_process(), &run.session_id, sessions) {
+            (Some(CliProcessState::Running { pid }), Some(session), Some(dir)) => {
+                Self::cli_tracker(cx).track_session(session.clone(), *pid, dir);
+            }
+            (Some(CliProcessState::Discovering | CliProcessState::Running { .. }), _, _) => {
+                Self::propose_fact(
+                    TaskEvent::CliProcessObserved {
+                        exec: exec.clone(),
+                        process: CliProcessState::Unknown,
+                        at: Utc::now(),
+                    },
+                    cx,
+                )
+            }
+            _ => {}
+        }
+        Self::reconcile_lost_cli(exec, cx);
     }
 
     fn apply_cli_tracker_event(event: ProcessExited, cx: &mut App) {

@@ -478,3 +478,31 @@ fn restart_rearms_tracking_for_running_pids_only(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// A running CLI run whose sessions directory cannot be resolved has
+/// nothing left to end it, so it settles as the other untrackable ones do.
+#[gpui::test]
+fn a_restored_cli_with_no_sessions_dir_does_not_stay_running(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        RunsHost::inline_commits_for_test(cx);
+        let run = SeedRun::cli("/cli", CliProcessState::Running { pid: 4242 }).session("homeless");
+        let id = seed::task(
+            seed::spec(Default::default(), "CLI"),
+            Some((&run, SeedEnd::Running)),
+            cx,
+        );
+        let (run, exec) = cli_runs(cx.global::<GlobalTasks>(), |_| true)
+            .find(|(task, _, _)| task.id() == id)
+            .map(|(_, run, exec)| (run.clone(), exec))
+            .unwrap();
+        RunsHost::restore_cli_run(&run, exec, None, cx);
+        assert_eq!(RunsHost::cli_tracker(cx).known_process("homeless"), None);
+        assert!(matches!(
+            cx.global::<GlobalTasks>().get(&id).unwrap().lifecycle,
+            Lifecycle::Interrupted {
+                cause: daruda_store::tasks::machine::InterruptCause::AppRestart,
+                ..
+            }
+        ));
+    });
+}
