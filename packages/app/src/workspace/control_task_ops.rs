@@ -110,9 +110,10 @@ impl Workspace {
         }
     }
 
-    /// Where the approval to start `task` as a chat says it runs: the branch
-    /// its first prompt's header names, quoted since the agent receives it,
-    /// and the worktree an existing one runs in.
+    /// Where the approval to start `task` says it runs: the branch its
+    /// first prompt's header names, quoted since the agent receives it, and
+    /// the worktree an existing one runs in, or the one a new worktree
+    /// branches from, which decides the code it starts with.
     pub(crate) fn control_task_start_location(
         &self,
         task: &daruda_store::tasks::TaskRecord,
@@ -121,7 +122,14 @@ impl Workspace {
         use crate::surface::strings::control as s;
         let path = match &task.spec.run_in {
             daruda_store::tasks::TaskRunIn::NewWorktree => {
-                return s::approval_task_in_new_branch(quoted_title(&task.spec.branch_name));
+                let branch = quoted_title(&task.spec.branch_name);
+                return match task.spec.base_worktree_path.as_deref() {
+                    Some(base) => s::approval_task_in_new_branch_from(
+                        branch,
+                        quoted_title(&self.control_worktree_name_at(base)),
+                    ),
+                    None => s::approval_task_in_new_branch(branch),
+                };
             }
             daruda_store::tasks::TaskRunIn::ExistingLane { path } => path,
         };
@@ -137,6 +145,14 @@ impl Workspace {
             }
             _ => s::approval_task_in_worktree(quoted_title(&name)),
         }
+    }
+
+    /// The worktree at `path` by its name, or by the path once no lane
+    /// holds it.
+    fn control_worktree_name_at(&self, path: &std::path::Path) -> String {
+        self.lane_ref_at(path)
+            .and_then(|lane| self.lane_for(lane))
+            .map_or_else(|| path.display().to_string(), |lane| lane.display_name())
     }
 
     /// How the approval to start `task` names the flow it runs as, if it

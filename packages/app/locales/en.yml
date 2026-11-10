@@ -2398,6 +2398,9 @@ control:
   task_start_failed: "%{title} did not start: %{reason}"
   # `agent` is approval_agent: a delegated chat runs in its agent's
   # delegated mode, approving tools by itself, so the card says which.
+  # A worktree's quoted name, and the quoted ref an agent asked it to
+  # branch from.
+  approval_lane_on_base: "%{name} (from %{base})"
   approval_lane_create: "daruda wants to create the worktree %{name} and open %{agent} there. Allow?"
   # `prompt` is a one-line excerpt of what the new chat is sent first.
   approval_lane_create_prompt: "daruda wants to create the worktree %{name} and open %{agent} there, prompting %{prompt}. Allow?"
@@ -2484,6 +2487,8 @@ control:
   approval_task_create_prompt: "daruda wants to add the task %{title} to %{project}, to run %{location} %{surface} with the prompt %{prompt}. Allow?"
   approval_task_in_new_worktree: "in a new worktree"
   approval_task_in_new_branch: "in a new worktree on the branch %{branch}"
+  # `base` names the worktree the new one branches from.
+  approval_task_in_new_branch_from: "in a new worktree on the branch %{branch}, from %{base}"
   approval_task_in_worktree: "in the worktree %{lane}"
   approval_task_in_worktree_on_branch: "in the worktree %{lane} on the branch %{branch}"
   approval_task_as_chat: "as an agent chat"
@@ -2505,11 +2510,12 @@ control:
   approval_task_start: "daruda wants to start the task %{title} %{location} with %{agent}, prompting %{prompt}. Allow?"
   # A task whose prompt is empty.
   approval_task_start_no_prompt: "daruda wants to start the task %{title} %{location} with %{agent}. Allow?"
-  # `flow` is one of the approval_task_as_flow phrases.
-  approval_task_start_flow: "daruda wants to start the task %{title} %{flow}. Allow?"
+  # `location` is one of the approval_task_in_* phrases; `flow` one of the
+  # approval_task_as_flow phrases.
+  approval_task_start_flow: "daruda wants to start the task %{title} %{location} %{flow}. Allow?"
   # A flow given the task's prompt as an input; `prompt` is a one-line
   # excerpt of it, as its agents receive it.
-  approval_task_start_flow_prompt: "daruda wants to start the task %{title} %{flow}, giving it the prompt %{prompt}. Allow?"
+  approval_task_start_flow_prompt: "daruda wants to start the task %{title} %{location} %{flow}, giving it the prompt %{prompt}. Allow?"
   # The task's run has no session a new pane could load: only a pane
   # already showing it can come up.
   approval_task_open: "daruda wants to open the chat of the task %{title}. Allow?"

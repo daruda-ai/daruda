@@ -244,6 +244,91 @@ fn a_worktree_card_quotes_its_prompt_when_it_carries_one(cx: &mut TestAppContext
     }
 }
 
+/// The ref a worktree branches from decides the code its agent starts
+/// with, so a requested one is named, quoted like the worktree's own name;
+/// a blank one branches from the project's default and names none.
+#[gpui::test]
+fn a_worktree_card_names_the_base_it_branches_from(cx: &mut TestAppContext) {
+    let (_fixture, lane, claude) = host(cx);
+    let agent = s::control::approval_agent(&claude.name, BYPASS);
+    let name = s::control::approval_quoted("disclosure");
+    for (base, shown) in [
+        (
+            Some("origin/main"),
+            Some(s::control::approval_quoted("origin/main")),
+        ),
+        (
+            Some("main\u{202E}\nevil"),
+            Some(format!(
+                "{}{}",
+                s::control::approval_quoted("main evil"),
+                s::control::approval_hidden_chars(1)
+            )),
+        ),
+        (Some("  "), None),
+        (None, None),
+    ] {
+        let (id, _outcome, card) = ask(
+            GatedCommand::LaneCreate {
+                workspace: lane.workspace,
+                project: lane.project,
+                name: "disclosure".into(),
+                base_ref: base.map(str::to_owned),
+                agent: None,
+                prompt: Some("Go".into()),
+            },
+            cx,
+        );
+        let worktree = match shown {
+            Some(shown) => s::control::approval_lane_on_base(&name, shown),
+            None => name.clone(),
+        };
+        assert_eq!(
+            card,
+            s::control::approval_lane_create_prompt(
+                worktree,
+                &agent,
+                s::control::approval_quoted("Go")
+            ),
+            "{base:?}"
+        );
+        refuse(id, cx);
+    }
+}
+
+/// A new worktree a task branches from another names that one, which
+/// decides the code its agent starts with.
+#[gpui::test]
+async fn a_task_start_card_names_the_worktree_it_branches_from(cx: &mut TestAppContext) {
+    let (fixture, lane, _claude) = host(cx);
+    let (task, base, branch) = fixture.workspace.update(cx, |ws, cx| {
+        let found = ws.lane_for_mut(lane.lane_ref()).unwrap();
+        found.name = Some("Base\u{202E} lane".into());
+        let path = found.path.clone();
+        let project = ws.project_for(lane.project).unwrap().uuid;
+        let spec = daruda_store::tasks::TaskSpec::new(
+            project,
+            "Login".into(),
+            "Fix it".into(),
+            Some(path),
+            chrono::Utc::now(),
+        );
+        let branch = spec.branch_name.clone();
+        let task = crate::runs::seed::task(spec, None, cx);
+        let base = ws.control_lane_name(lane.lane_ref());
+        (task, base, branch)
+    });
+    let (id, _outcome, card) = ask(GatedCommand::TaskStart { task }, cx);
+    let location =
+        s::control::approval_task_in_new_branch_from(quoted_title(&branch), quoted_title(&base));
+    assert!(card.contains(&location), "{card}");
+    assert!(
+        card.contains(&s::control::approval_hidden_chars(1)),
+        "{card}"
+    );
+    refuse(id, cx);
+}
+
 /// A title someone else wrote cannot reverse the rest of its card, which
 /// counts what it dropped, and a task with a blank prompt starts without
 /// quoting one.
