@@ -10,7 +10,7 @@ use crate::control::result::{ControlError, ControlOutcome, ControlResult, LaneHa
 use crate::control::spec::{GatedCommand, NewTask};
 use crate::remote_channel::bridge::PaneRef;
 use crate::runs::GlobalTasks;
-use crate::workspace::ChatDisclosure;
+use crate::workspace::{ChatDisclosure, ShownTaskStart};
 
 use super::{Dispatch, Pending, in_lane_window, in_pane_window, in_project_window, in_task_window};
 
@@ -31,6 +31,8 @@ pub(crate) use tasks::{begin_task_start, open_task, task_flow_summary};
 /// minutes while the window's last agent changes, so it is a concrete id.
 /// `shown` is the chat the card names, agent and mode as read then; the
 /// approved work reads it again before anything is created (`still_shown`).
+/// A task start's `spec` is the definition its card was written from, held
+/// the same way and checked once more where the start reads the task.
 enum Asked {
     LaneCreate {
         workspace: daruda_store::project::WorkspaceUuid,
@@ -57,6 +59,7 @@ enum Asked {
         task: String,
         agent: String,
         shown: Option<ChatDisclosure>,
+        spec: ShownTaskStart,
     },
     /// `shown` is the new pane a reopen opens, even while a pane still shows
     /// the run: that one may close before the answer. `None` when no new
@@ -122,6 +125,7 @@ impl Asked {
                 let agent = in_task_window(&task, cx, |ws, _, _| Ok(ws.open_agent_id(None)))?;
                 Self::TaskStart {
                     shown: disclosure::task_start(&task, &agent, mode, cx)?,
+                    spec: shown_task_start(&task, cx)?,
                     agent,
                     task,
                 }
@@ -136,7 +140,8 @@ impl Asked {
 
     /// Refuse an approval whose chat would no longer open as its card said:
     /// the agent's name or its mode in `mode` changed in settings, or its
-    /// adapter renamed that mode, while the card waited. Read the same way
+    /// adapter renamed that mode, while the card waited; or a task start's
+    /// task was edited so its card no longer describes it. Read the same way
     /// `resolve` read it, and before anything is created.
     fn still_shown(
         &self,
@@ -154,8 +159,14 @@ impl Asked {
             Self::ChatNew { lane, agent, shown } => {
                 disclosure::in_lane(*lane, agent, mode, cx)? == *shown
             }
-            Self::TaskStart { task, agent, shown } => {
+            Self::TaskStart {
+                task,
+                agent,
+                shown,
+                spec,
+            } => {
                 disclosure::task_start(task, agent, mode, cx)? == *shown
+                    && shown_task_start(task, cx)? == *spec
             }
             Self::TaskOpen { task, shown } => disclosure::task_open(task, mode, cx)? == *shown,
             Self::TaskCreate { .. } | Self::FlowResume(_) => true,
@@ -292,10 +303,7 @@ fn reserve_gated(
     asked.still_shown(mode, cx)?;
     let creates_lane = match asked {
         Asked::LaneCreate { .. } => true,
-        Asked::TaskStart { task, .. } => cx
-            .global::<GlobalTasks>()
-            .get(task)
-            .is_some_and(task_creates_lane),
+        Asked::TaskStart { spec, .. } => spec.creates_worktree(),
         _ => false,
     };
     creates_lane
@@ -333,15 +341,15 @@ fn guard_gated(asked: &Asked, cx: &mut App) -> Result<(), ControlError> {
         }),
         // Only a start that creates a worktree spends the budget, as
         // `daruda_worktree_create` does; an existing one is already there.
-        Asked::TaskStart { task, .. } => {
+        // The card's location decides it; a different one is stale.
+        Asked::TaskStart { task, spec, .. } => {
             let tasks = cx.global::<GlobalTasks>();
             let found = tasks.get(task).ok_or(ControlError::TaskNotFound)?;
             if found.lifecycle != daruda_store::tasks::Lifecycle::Backlog {
                 return Err(ControlError::TaskNotBacklog);
             }
-            let creates_lane = task_creates_lane(found);
             in_task_window(task, cx, |_ws, _window, _cx| Ok(()))?;
-            if creates_lane {
+            if spec.creates_worktree() {
                 crate::control::guards::guard_agent_budget(cx)?;
             }
             Ok(())
@@ -367,11 +375,12 @@ fn left_a_worktree(outcome: &ControlOutcome) -> bool {
     )
 }
 
-fn task_creates_lane(task: &daruda_store::tasks::TaskRecord) -> bool {
-    matches!(
-        task.spec.run_in,
-        daruda_store::tasks::TaskRunIn::NewWorktree
-    )
+/// `task`'s definition as a start card describes it.
+fn shown_task_start(task: &str, cx: &App) -> Result<ShownTaskStart, ControlError> {
+    cx.global::<GlobalTasks>()
+        .get(task)
+        .map(ShownTaskStart::of)
+        .ok_or(ControlError::TaskNotFound)
 }
 
 /// Do the thing, now that the user has said yes. A chat it opens takes
@@ -404,9 +413,11 @@ async fn perform_gated(
         }
         // The start takes its mode from `caller`, as `mode` was taken from
         // its origin: `exec::origin`'s tests pin the two together.
-        Asked::TaskStart { task, agent, .. } => {
+        Asked::TaskStart {
+            task, agent, spec, ..
+        } => {
             let agent = crate::workspace::ChatAgent::Pinned(agent);
-            return start_task(task, agent, caller, cx).await;
+            return start_task(task, agent, spec, caller, cx).await;
         }
         Asked::TaskOpen { task, .. } => {
             return cx.update(|cx| tasks::open_task_in(task, mode, caller, cx));

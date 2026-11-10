@@ -27,7 +27,7 @@ fn quoted(text: impl AsRef<str>) -> String {
 
 /// The orchestrator's host window, whose catalog holds Claude and a second
 /// agent; nothing has been used yet, so a chat opens Claude.
-fn host(
+pub(super) fn host(
     cx: &mut TestAppContext,
 ) -> (
     crate::test_support::ControlFixture,
@@ -54,7 +54,7 @@ fn set_catalog(ws: &mut Workspace, claude: &AgentDefinition) {
 }
 
 /// Send `command` for approval and read the card it put up.
-fn ask(
+pub(super) fn ask(
     command: GatedCommand,
     cx: &mut TestAppContext,
 ) -> (

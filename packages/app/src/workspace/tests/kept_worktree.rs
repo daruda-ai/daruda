@@ -40,7 +40,7 @@ fn start_then(
         fx.ws.update(cx, |ws, cx| {
             let submitter = crate::runs::FlowSubmitter::Orchestrator { solicited: false };
             let agent = crate::workspace::ChatAgent::Preferred(None);
-            let answer = ws.control_task_start(id, submitter, agent, window, cx);
+            let answer = ws.control_task_start(id, submitter, agent, None, window, cx);
             meanwhile(ws, window, cx);
             answer
         })

@@ -39,6 +39,8 @@ pub(crate) use control_task_ops::ControlTaskStart;
 pub(crate) use main_area::agent_chat_host::agent_chat_ops::chat_open::{
     ChatAgent, ChatOpen, mode_for,
 };
+/// What an approval card described a task's start by, which the start checks.
+pub(crate) use right_dock::task_start::ShownTaskStart;
 pub(crate) use task_flow::TaskFlowApproval;
 mod close_guard_ops;
 pub(crate) mod delete_project_modal;

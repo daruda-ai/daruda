@@ -10,6 +10,8 @@ use std::time::Duration;
 mod announcements;
 #[path = "orchestrator_approvals/disclosure.rs"]
 mod disclosure;
+#[path = "orchestrator_approvals/stale_task_start.rs"]
+mod stale_task_start;
 
 fn setup(cx: &mut TestAppContext) -> Receiver<crate::remote_channel::bridge::Outbound> {
     setup_bridge(cx, true, Some(42))

@@ -295,7 +295,13 @@ name and requested-mode label) travels with the approved command as `Asked`'s
 `shown`; after approval, before any git work or pane, `Asked::still_shown`
 reads it again the same way and refuses a difference as `approval_stale` (a
 mode or agent name edited in Settings, or an adapter's renamed mode, while
-the card waited). A `task_open` card names the mode a new pane would take
+the card waited). A `task_start` card also carries the task definition it
+was written from (`workspace::ShownTaskStart`: project, `run_in`, branch,
+base worktree, title, prompt, flow). `still_shown` compares it, the budget
+slot follows its `run_in`, and the start compares it once more where it
+reads the task, after RunsHost settles and before the repository lock, git
+or the log; an edit landing in between answers `approval_stale` and the
+reserved slot is released unspent. A `task_open` card names the mode a new pane would take
 even while a pane still shows the run, since that pane may close before the
 answer. Found after git, the worktree is
 kept as a lane with nothing open and the refusal is

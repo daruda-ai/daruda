@@ -2473,7 +2473,7 @@ control:
   error_agent_unavailable: "The agent that approval named is no longer set up, so no chat was opened."
   # The approved card's agent name or permission mode changed in settings
   # (or its adapter renamed the mode) before the approval landed.
-  error_approval_stale: "The agent or permission mode that approval named changed before it was approved, so nothing was created. Ask again to see the current one."
+  error_approval_stale: "What that approval described (the agent, its permission mode, or the task it starts) changed before it ran, so nothing was created. Ask again to see the current one."
   # The same, found after git made the worktree: it is kept, empty.
   error_agent_unavailable_worktree_kept: "The agent that approval named is no longer set up, so no chat was opened. The worktree was still created and stays in daruda with nothing open in it."
   error_approval_unavailable: "daruda could not ask for approval — no desktop or remote channel is available."

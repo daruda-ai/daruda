@@ -53,6 +53,44 @@ impl TaskStarted {
     }
 }
 
+/// The parts of a task's definition an approval card describes its start
+/// by: where it runs (`run_in`, the new branch and the worktree it branches
+/// from, the project), what it is called, what its agent is told, and the
+/// flow it runs as. A start approved from a card carries the values the card
+/// was written from and refuses to run any other definition, so an edit that
+/// lands between the card and the start cannot move it somewhere unasked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ShownTaskStart {
+    project: daruda_store::project::ProjectUuid,
+    title: String,
+    prompt: String,
+    run_in: TaskRunIn,
+    branch: String,
+    base: Option<PathBuf>,
+    flow: Option<daruda_store::tasks::TaskFlow>,
+}
+
+impl ShownTaskStart {
+    pub(crate) fn of(task: &TaskRecord) -> Self {
+        let spec = &task.spec;
+        Self {
+            project: spec.project,
+            title: spec.title.clone(),
+            prompt: spec.prompt.clone(),
+            run_in: spec.run_in.clone(),
+            branch: spec.branch_name.clone(),
+            base: spec.base_worktree_path.clone(),
+            flow: spec.flow.clone(),
+        }
+    }
+
+    /// Whether this start makes a new worktree, which is what spends an
+    /// orchestrator's budget.
+    pub(crate) fn creates_worktree(&self) -> bool {
+        matches!(self.run_in, TaskRunIn::NewWorktree)
+    }
+}
+
 pub(crate) type TaskStartOutcome = Result<TaskStarted, TaskStartError>;
 
 pub(super) type Answer = smol::channel::Sender<TaskStartOutcome>;
@@ -86,7 +124,14 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<TaskStartOutcome> {
         let submitter = crate::runs::FlowSubmitter::of_task(started_by, false);
-        self.begin_task_start_for(task_id, submitter, ChatAgent::Preferred(None), window, cx)
+        self.begin_task_start_for(
+            task_id,
+            submitter,
+            ChatAgent::Preferred(None),
+            None,
+            window,
+            cx,
+        )
     }
 
     /// [`Self::begin_task_start`] for `submitter`, whose solicitation a
@@ -95,11 +140,14 @@ impl Workspace {
     /// A chat task opens `agent` (a gated start's card pinned it) in the
     /// mode `submitter` gets, so the two cannot be paired otherwise. A
     /// flow-backed task reads neither; its nodes name their own.
+    /// `shown` is the definition a card approved: one that differs once the
+    /// start reads the task is refused before anything is recorded.
     pub(crate) fn begin_task_start_for(
         &mut self,
         task_id: &str,
         submitter: crate::runs::FlowSubmitter,
         agent: ChatAgent,
+        shown: Option<ShownTaskStart>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<TaskStartOutcome> {
@@ -117,8 +165,15 @@ impl Workspace {
             return rx;
         }
         if RunsHost::settled(cx) {
-            let started =
-                self.start_task_into(task_id, submitter, chat, answer.clone(), window, cx);
+            let started = self.start_task_into(
+                task_id,
+                submitter,
+                chat,
+                shown.as_ref(),
+                answer.clone(),
+                window,
+                cx,
+            );
             if let Err(e) = started {
                 self.finish_task_start(Err(e), None, &answer, cx);
             }
@@ -129,7 +184,15 @@ impl Workspace {
         cx.spawn_in(window, async move |ws, cx| {
             barrier.await;
             let entered = ws.update_in(cx, |ws, window, cx| {
-                let started = ws.start_task_into(&id, submitter, chat, answer.clone(), window, cx);
+                let started = ws.start_task_into(
+                    &id,
+                    submitter,
+                    chat,
+                    shown.as_ref(),
+                    answer.clone(),
+                    window,
+                    cx,
+                );
                 if let Err(e) = started {
                     ws.finish_task_start(Err(e), None, &answer, cx);
                 }
@@ -168,11 +231,14 @@ impl Workspace {
     /// Check the task can start, record the request, then continue once the
     /// log holds it. `Err` is a refusal taken before anything was recorded or
     /// spawned, leaving the task in Backlog.
+    #[allow(clippy::too_many_arguments)] // Each is one caller-held fact the
+    // two entry branches (settled now, or after the barrier) hand over as is.
     fn start_task_into(
         &mut self,
         task_id: &str,
         submitter: crate::runs::FlowSubmitter,
         chat: ChatOpen,
+        shown: Option<&ShownTaskStart>,
         answer: Answer,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -185,6 +251,11 @@ impl Workspace {
             .ok_or(TaskStartError::NotFound)?;
         if task.lifecycle != Lifecycle::Backlog {
             return Err(TaskStartError::NotBacklog);
+        }
+        // The definition read here, after any commit still landing, is the
+        // one the start runs; the lock, git and the log come after.
+        if shown.is_some_and(|shown| *shown != ShownTaskStart::of(&task)) {
+            return Err(TaskStartError::ChangedSinceShown);
         }
         let reveal = reveal_for(started_by);
         let route = match &task.spec.flow {

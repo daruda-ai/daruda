@@ -17,7 +17,9 @@ use crate::workspace::Workspace;
 use crate::workspace::control_lane_ops::Unregistered;
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::right_dock::task_chat_ops::TaskChatError;
-use crate::workspace::right_dock::task_start::{KeptWorktree, TaskStartError, TaskStarted};
+use crate::workspace::right_dock::task_start::{
+    KeptWorktree, ShownTaskStart, TaskStartError, TaskStarted,
+};
 use crate::workspace::task_draft::{DraftError, DraftLocation, TaskDraft};
 
 /// A started execution, its worktree, and its chat when it has one.
@@ -213,17 +215,18 @@ impl Workspace {
 
     /// Start `task`, answering on the returned channel. A refusal is on it
     /// before this returns, as with [`Self::begin_task_start_for`], which
-    /// `agent` is passed to.
+    /// `agent` and `shown` are passed to.
     pub(crate) fn control_task_start(
         &mut self,
         task: &str,
         submitter: crate::runs::FlowSubmitter,
         agent: crate::workspace::ChatAgent,
+        shown: Option<ShownTaskStart>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<ControlTaskStart> {
         let (tx, rx) = smol::channel::bounded(1);
-        let started = self.begin_task_start_for(task, submitter, agent, window, cx);
+        let started = self.begin_task_start_for(task, submitter, agent, shown, window, cx);
         // SILENT-OK on each send below: a caller that stopped listening
         // has nothing left to tell.
         if let Ok(outcome) = started.try_recv() {
@@ -332,6 +335,7 @@ fn control_start_error(
         },
         TaskStartError::FlowRefused { detail, .. } => ControlError::TaskStartFailed { detail },
         TaskStartError::AgentUnavailable => ControlError::AgentUnavailable,
+        TaskStartError::ChangedSinceShown => ControlError::ApprovalStale,
         TaskStartError::WorktreeKept {
             at: KeptWorktree::Unregistered(path),
             cause,

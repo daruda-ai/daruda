@@ -45,14 +45,16 @@ pub(crate) fn task_flow_summary(
 }
 
 /// A start for the agent: approved already, so this only waits for it.
-/// `agent` is the one its card named.
+/// `agent` is the one its card named, and `shown` the definition it
+/// described the start by.
 pub(super) async fn start_task(
     task: String,
     agent: crate::workspace::ChatAgent,
+    shown: crate::workspace::ShownTaskStart,
     caller: Caller,
     cx: &mut gpui::AsyncApp,
 ) -> ControlOutcome {
-    cx.update(|cx| begin_task_start(task, caller, agent, cx))?
+    cx.update(|cx| begin_shown_task_start(task, caller, agent, Some(shown), cx))?
         .finish(cx)
         .await
 }
@@ -76,12 +78,25 @@ pub(crate) fn begin_task_start(
     agent: crate::workspace::ChatAgent,
     cx: &mut App,
 ) -> Result<PendingTaskStart, ControlError> {
+    begin_shown_task_start(task, caller, agent, None, cx)
+}
+
+/// [`begin_task_start`] for a start an approval card described as `shown`:
+/// a task edited since is refused with `ApprovalStale` before anything is
+/// recorded or made.
+fn begin_shown_task_start(
+    task: String,
+    caller: Caller,
+    agent: crate::workspace::ChatAgent,
+    shown: Option<crate::workspace::ShownTaskStart>,
+    cx: &mut App,
+) -> Result<PendingTaskStart, ControlError> {
     let title = task_title(&task, cx);
     let (workspace, answer) = in_task_window(&task, cx, |ws, window, cx| {
         let submitter = caller.flow_submitter();
         Ok((
             ws.uuid(),
-            ws.control_task_start(&task, submitter, agent.clone(), window, cx),
+            ws.control_task_start(&task, submitter, agent.clone(), shown.clone(), window, cx),
         ))
     })?;
     Ok(PendingTaskStart {

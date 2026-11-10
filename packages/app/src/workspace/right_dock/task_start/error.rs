@@ -42,6 +42,10 @@ pub(crate) enum TaskStartError {
     NotRecorded {
         detail: String,
     },
+    /// The task's definition is no longer the one an approval card
+    /// described its start by (`ShownTaskStart`): an edit landed between
+    /// the card and the start. Refused before anything is recorded.
+    ChangedSinceShown,
     /// The agent a control start's card named was removed. Before the start
     /// was recorded, nothing was; after, no pane opened under another agent.
     AgentUnavailable,
@@ -108,7 +112,10 @@ impl TaskStartError {
     pub(super) fn failure(&self) -> Option<StartFailure> {
         Some(match self {
             Self::NotFound => StartFailure::NotFound,
-            Self::NotBacklog | Self::NotRecorded { .. } | Self::RemoteLane => return None,
+            Self::NotBacklog
+            | Self::NotRecorded { .. }
+            | Self::RemoteLane
+            | Self::ChangedSinceShown => return None,
             Self::WorktreeKept { cause, .. } => return cause.failure(),
             Self::AgentUnavailable => StartFailure::AgentMissing,
             Self::ProjectNotOpen => StartFailure::ProjectNotOpen,
@@ -145,8 +152,11 @@ impl TaskStartError {
                 }
                 return Some(report);
             }
+            // The caller that showed the card is answered; the desktop
+            // started nothing it could act on.
             Self::NotFound
             | Self::NotBacklog
+            | Self::ChangedSinceShown
             | Self::AgentUnavailable
             | Self::PaneUnavailable
             | Self::PromptUndelivered
