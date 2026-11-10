@@ -1,7 +1,7 @@
 //! `daruda_flow_resume` once routed: which run a handle names, the window
 //! that keeps it, and resuming it under the one handle its owner holds.
 
-use gpui::App;
+use gpui::{App, AsyncApp, Task};
 
 use crate::control::mcp::runs::{run_handle, run_key};
 use crate::control::result::{ControlError, ControlOutcome, ControlResult, NotResumableReason};
@@ -103,36 +103,63 @@ fn running_task_run(exec: &ExecutionRef, cx: &App) -> Result<String, ControlErro
     Ok(run.run_id)
 }
 
-/// What the card says about resuming `target`: the run is read here, and
-/// anything no answer could change is refused before the card.
-pub(super) fn summary(target: &ResumeTarget, cx: &mut App) -> Result<String, ControlError> {
-    let plan = in_run_window(&target.run_id, cx, |ws, lane, run_dir, cx| {
-        ws.control_flow_resume_check(lane, run_dir, cx)
+/// What the card says about resuming `target`. Anything no answer could
+/// change is refused before the card: what this process knows now, and what
+/// the run's directory says once the returned task has read it off the UI
+/// thread.
+pub(super) fn summary(
+    target: &ResumeTarget,
+    cx: &mut App,
+) -> Result<Task<Result<String, ControlError>>, ControlError> {
+    let site = in_run_window(&target.run_id, cx, |ws, lane, run_dir, cx| {
+        ws.control_flow_resume_site(lane, run_dir, cx)
     })?;
-    Ok(if plan.passed == plan.total {
-        s::control::approval_flow_resume_all_passed(&plan.name, plan.total)
-    } else {
-        s::control::approval_flow_resume(&plan.name, plan.passed, plan.total)
-    })
+    let read = cx
+        .background_executor()
+        .spawn(async move { site.read().map(|run| run.plan()) });
+    Ok(cx.spawn(async move |_| {
+        let plan = read.await?;
+        Ok(if plan.passed == plan.total {
+            s::control::approval_flow_resume_all_passed(&plan.name, plan.total)
+        } else {
+            s::control::approval_flow_resume(&plan.name, plan.passed, plan.total)
+        })
+    }))
 }
 
 /// Resume `target` as the approved command's own episode: its caller, with
-/// the solicitation captured before the card. An orchestrator resume scopes
-/// only the owner's key, or one run would end twice.
-pub(super) fn resume(
+/// the solicitation captured before the card. The run is checked and read
+/// again, since the worktree can change while the card waits. An
+/// orchestrator resume scopes only the owner's key, or one run would end
+/// twice.
+pub(super) async fn resume(
     target: ResumeTarget,
     caller: super::super::Caller,
-    cx: &mut App,
+    cx: &mut AsyncApp,
 ) -> ControlOutcome {
-    let owner = target.owner(cx)?;
-    let resumed = in_run_window(&target.run_id, cx, |ws, lane, run_dir, cx| {
-        ws.control_flow_resume(lane, run_dir, caller.flow_submitter(), cx)
+    // A Task that stopped running is refused before its run is read; the
+    // owner is picked again below, against the scope as it then stands.
+    let site = cx.update(|cx| {
+        target.owner(cx)?;
+        in_run_window(&target.run_id, cx, |ws, lane, run_dir, cx| {
+            ws.control_flow_resume_site(lane, run_dir, cx)
+        })
     })?;
-    caller.scope_run(owner.clone(), cx);
-    Ok(ControlResult::FlowResuming {
-        handle: run_handle(owner),
-        name: resumed.name,
-        lane: resumed.lane,
+    let run = cx
+        .background_executor()
+        .spawn(async move { site.read() })
+        .await?;
+    cx.update(|cx| {
+        let owner = target.owner(cx)?;
+        let resumed = in_run_window(&target.run_id, cx, |ws, lane, run_dir, cx| {
+            ws.control_flow_resume(lane, run_dir, run, caller.flow_submitter(), cx)
+        })?;
+        caller.scope_run(owner.clone(), cx);
+        Ok(ControlResult::FlowResuming {
+            handle: run_handle(owner),
+            name: resumed.name,
+            lane: resumed.lane,
+        })
     })
 }
 
@@ -142,7 +169,7 @@ pub(super) fn resume(
 pub(super) fn in_run_window<T>(
     run_id: &str,
     cx: &mut App,
-    mut f: impl FnMut(
+    f: impl FnOnce(
         &mut crate::workspace::Workspace,
         daruda_store::project::LaneRef,
         &std::path::Path,
@@ -154,9 +181,10 @@ pub(super) fn in_run_window<T>(
         .filter(|run_dir| run_dir.is_dir())
         .ok_or(ControlError::FlowRunNotFound)?;
     let mut out = None;
+    let mut f = Some(f);
     crate::window_registry::WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
-        if out.is_none()
-            && let Some(lane) = ws.control_lane_holding_run(&run_dir)
+        if let Some(lane) = ws.control_lane_holding_run(&run_dir)
+            && let Some(f) = f.take()
         {
             out = Some(f(ws, lane, &run_dir, cx));
         }

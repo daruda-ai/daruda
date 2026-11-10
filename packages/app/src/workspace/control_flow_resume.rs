@@ -3,8 +3,10 @@
 //! The run is named by its id; its directory says which worktree keeps it.
 //! What no answer could change is refused before the card, and checked
 //! again after it, since the worktree can change while the card waits.
+//! Each check is in two halves: what this process knows, on the UI thread,
+//! then the run's directory, read off it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use gpui::{App, Context};
 
@@ -12,7 +14,7 @@ use crate::control::result::{ControlError, FlowNotStartedReason, LaneHandle, Not
 use crate::workspace::Workspace;
 use crate::workspace::flow_ops::FlowStartRefused;
 use crate::workspace::flow_paths;
-use crate::workspace::flow_request::{FlowSubmitError, ReadResume};
+use crate::workspace::flow_request::{ReadResume, ResumeSite};
 use daruda_control_types::runs::RunHandle;
 use daruda_flow::marker::RunStatus;
 use daruda_flow::resume::ResumeError;
@@ -25,6 +27,51 @@ pub(crate) struct FlowResumePlan {
     /// Nodes the run log says passed, of the nodes the run selected.
     pub passed: usize,
     pub total: usize,
+}
+
+/// A run a resume may pick up as far as this process knows, with where to
+/// read it. [`Self::read`] blocks on the run's files.
+pub(crate) struct ResumeRead {
+    name: String,
+    run_dir: PathBuf,
+    site: ResumeSite,
+}
+
+impl ResumeRead {
+    /// Read the run, refusing one its directory says cannot be picked up.
+    pub(crate) fn read(self) -> Result<ResumableRun, ControlError> {
+        let Self {
+            name,
+            run_dir,
+            site,
+        } = self;
+        match site.read(&run_dir) {
+            Ok(read) => Ok(ResumableRun { name, read }),
+            Err(error) => Err(resume_refusal(name, error)),
+        }
+    }
+}
+
+/// A run read as a resume continues it.
+pub(crate) struct ResumableRun {
+    name: String,
+    read: ReadResume,
+}
+
+impl ResumableRun {
+    /// What an approval card says about resuming this run.
+    pub(crate) fn plan(&self) -> FlowResumePlan {
+        let resumed = &self.read.resumed;
+        let selected = match &resumed.until {
+            Some(until) => resumed.loaded.graph().ancestors(until).len() + 1,
+            None => resumed.loaded.flow().nodes.len(),
+        };
+        FlowResumePlan {
+            name: self.name.clone(),
+            passed: resumed.passed.len().min(selected),
+            total: selected,
+        }
+    }
 }
 
 /// A resume handed to the process, under the run's own id.
@@ -47,39 +94,18 @@ impl Workspace {
             .map(|(lane_ref, _, _)| lane_ref)
     }
 
-    /// Whether the run in `run_dir`, kept by `lane`, can be picked up now,
-    /// and what a card asking about it names.
+    /// Whether the run in `run_dir`, kept by `lane`, can be picked up as far
+    /// as this process knows, and where to read it to find out the rest.
     ///
     /// The worktree is checked before the run: a lock another run holds
     /// makes this run's own status unreadable, and the run in the way is the
     /// answer worth giving, named as a start names it.
-    pub(crate) fn control_flow_resume_check(
+    pub(crate) fn control_flow_resume_site(
         &self,
         lane: LaneRef,
         run_dir: &Path,
         cx: &App,
-    ) -> Result<FlowResumePlan, ControlError> {
-        let (name, read) = self.read_resumable(lane, run_dir, cx)?;
-        let resumed = &read.resumed;
-        let selected = match &resumed.until {
-            Some(until) => resumed.loaded.graph().ancestors(until).len() + 1,
-            None => resumed.loaded.flow().nodes.len(),
-        };
-        Ok(FlowResumePlan {
-            name,
-            passed: resumed.passed.len().min(selected),
-            total: selected,
-        })
-    }
-
-    /// [`Self::control_flow_resume_check`]'s checks, answering the run's
-    /// name and the read a resume is built from.
-    fn read_resumable(
-        &self,
-        lane: LaneRef,
-        run_dir: &Path,
-        cx: &App,
-    ) -> Result<(String, ReadResume), ControlError> {
+    ) -> Result<ResumeRead, ControlError> {
         let cwd = self
             .lane_for(lane)
             .map(|lane| lane.path.clone())
@@ -106,9 +132,12 @@ impl Workspace {
             }
             return Err(ControlError::FlowLocked { held_by, name });
         }
-        match self.read_flow_resume(lane, run_dir) {
-            Ok(read) => Ok((name, read)),
-            Err(FlowSubmitError::Resume(error)) => Err(resume_refusal(name, error)),
+        match self.resume_site(lane) {
+            Ok(site) => Ok(ResumeRead {
+                name,
+                run_dir: run_dir.to_path_buf(),
+                site,
+            }),
             // A worktree that no longer resolves is refused as a start
             // refuses it, before any card asks about the run.
             Err(other) => {
@@ -117,17 +146,18 @@ impl Workspace {
         }
     }
 
-    /// Resume the run in `run_dir` for `submitter`, the way the Flows panel
-    /// does, after checking it again: the card may have waited while the
-    /// worktree changed. That one read is what the resume is built from.
+    /// Resume `run` for `submitter`, the way the Flows panel does. `run` is
+    /// the read made after the card, since the worktree can change while the
+    /// card waits; that read is what the resume is built from.
     pub(crate) fn control_flow_resume(
         &mut self,
         lane: LaneRef,
         run_dir: &Path,
+        run: ResumableRun,
         submitter: crate::runs::FlowSubmitter,
         cx: &mut Context<Self>,
     ) -> Result<FlowResumed, ControlError> {
-        let (name, read) = self.read_resumable(lane, run_dir, cx)?;
+        let ResumableRun { name, read } = run;
         let run_id = match self.submit_flow_resume(lane, run_dir, read, submitter, cx) {
             Ok(run_id) => run_id,
             Err(refused) => return Err(self.control_refusal(lane, name, refused, cx)),

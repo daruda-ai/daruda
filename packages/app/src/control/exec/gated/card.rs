@@ -11,6 +11,14 @@ use crate::surface::strings as s;
 use super::tasks::task_title;
 use super::{Asked, disclosure, flow_resume, quoted_title, task_flow_summary};
 
+/// A card's sentence: known now, or still being read off the UI thread.
+pub(super) enum CardText {
+    Now(String),
+    /// Resolves to the sentence, or to a refusal what was read makes before
+    /// any card is shown.
+    Read(gpui::Task<Result<String, ControlError>>),
+}
+
 /// One line naming what the user is being asked to allow, built here because
 /// `GatedCommand` carries no rendered sentences. A target that cannot be
 /// named is refused rather than asked about. A chat's card names its pinned
@@ -20,9 +28,9 @@ pub(super) fn approval_summary(
     asked: &Asked,
     mode: &daruda_config::ModeChoice,
     cx: &mut App,
-) -> Result<String, ControlError> {
+) -> Result<CardText, ControlError> {
     use disclosure::{agent_phrase, prompt_phrase};
-    Ok(match asked {
+    Ok(CardText::Now(match asked {
         Asked::LaneCreate {
             workspace,
             project,
@@ -150,8 +158,8 @@ pub(super) fn approval_summary(
                 None => s::control::approval_task_open(task_title(task, cx)),
             }
         }
-        Asked::FlowResume(target) => flow_resume::summary(target, cx)?,
-    })
+        Asked::FlowResume(target) => return flow_resume::summary(target, cx).map(CardText::Read),
+    }))
 }
 
 /// `task`'s prompt as its start card quotes it; see `prompt_phrase`.

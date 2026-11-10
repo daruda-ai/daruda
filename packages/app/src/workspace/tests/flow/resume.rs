@@ -185,20 +185,29 @@ fn deferred(dispatch: Dispatch) -> smol::channel::Receiver<Option<ControlOutcome
     }
 }
 
+/// What this process knows refuses on the spot; what the run's files say is
+/// answered once they are read off the UI thread. Neither shows a card.
 fn refused_before_the_card(command: GatedCommand, cx: &mut TestAppContext) -> ControlError {
+    let dispatch = cx.update(|cx| exec::run_gated(command, CommandOrigin::Orchestrator, cx));
+    let error = match dispatch {
+        Dispatch::Ready(Err(error)) => error,
+        Dispatch::Ready(Ok(result)) => panic!("not refused: {result:?}"),
+        Dispatch::Deferred { outcome, .. } => {
+            cx.run_until_parked();
+            match outcome.try_recv() {
+                Ok(Some(Err(error))) => error,
+                other => panic!("asked before refusing: {other:?}"),
+            }
+        }
+    };
     cx.update(|cx| {
-        let dispatch = exec::run_gated(command, CommandOrigin::Orchestrator, cx);
         assert_eq!(
             approval::waiting_count_for_test(cx),
             0,
             "a refusal no answer can change is not asked about"
         );
-        match dispatch {
-            Dispatch::Ready(Err(error)) => error,
-            Dispatch::Ready(Ok(result)) => panic!("not refused: {result:?}"),
-            Dispatch::Deferred { .. } => panic!("asked before refusing"),
-        }
-    })
+    });
+    error
 }
 
 /// The approved resume runs only what had not passed, keeps the handle and
@@ -376,22 +385,13 @@ async fn a_worktree_that_no_longer_resolves_is_refused_as_a_start_is(cx: &mut Te
         reason: crate::control::result::FlowNotStartedReason::LaneUnresolvable,
     };
 
-    let (checked, resumed) = ws.update(cx, |ws, cx| {
+    // Before the card and after it, the run is located by this one check.
+    let checked = ws.update(cx, |ws, cx| {
         let here = ws.active;
-        (
-            ws.control_flow_resume_check(here, &run_dir, cx).err(),
-            ws.control_flow_resume(
-                here,
-                &run_dir,
-                crate::runs::FlowSubmitter::Orchestrator { solicited: false },
-                cx,
-            )
-            .err(),
-        )
+        ws.control_flow_resume_site(here, &run_dir, cx).err()
     });
 
-    assert_eq!(checked, Some(expected.clone()));
-    assert_eq!(resumed, Some(expected));
+    assert_eq!(checked, Some(expected));
 }
 
 /// Another live process holds the worktree: named like a start names it,
@@ -467,6 +467,71 @@ async fn the_flows_panel_resume_is_the_desktops_episode(cx: &mut TestAppContext)
     );
 }
 
+/// A second Continue while the first is still reading the run is the same
+/// click: one resume, and no offer to stop the run it started.
+#[gpui::test]
+async fn a_continue_while_the_run_is_being_read_is_the_same_click(cx: &mut TestAppContext) {
+    let run = interrupted_orchestrator_run(cx).await;
+    let here = run.ws.read_with(cx, |ws, _| ws.active);
+    run.ws.update(cx, |ws, cx| {
+        ws.resume_flow_run(here, &run.run_dir, cx);
+        assert!(
+            ws.flow_resume_reads.contains(&run.run_dir),
+            "the first click is still reading"
+        );
+        ws.resume_flow_run(here, &run.run_dir, cx);
+        assert_eq!(
+            ws.flow_resume_reads.len(),
+            1,
+            "the second click read nothing"
+        );
+    });
+    cx.run_until_parked();
+    run.ws.read_with(cx, |ws, _| {
+        assert!(
+            !matches!(
+                ws.overlays.flow_picker,
+                crate::workspace::command::flow_picker::FlowPicker::Stopping { .. }
+            ),
+            "the second click was refused as a second resume"
+        );
+        assert!(ws.flow_resume_reads.is_empty());
+    });
+    assert!(
+        wait_for_run(cx, |cx| {
+            run.run_dir.join("DONE").exists() && !run_is_held(cx, run.lane.path())
+        })
+        .await,
+        "the resumed run did not finish"
+    );
+}
+
+/// A resume taken back while its card is still being read is answered with
+/// nothing, and no card is ever shown.
+#[gpui::test]
+async fn a_resume_taken_back_while_its_card_is_read_asks_nothing(cx: &mut TestAppContext) {
+    let run = interrupted_orchestrator_run(cx).await;
+    let outcome =
+        cx.update(
+            |cx| match exec::run_gated(run.resume(), CommandOrigin::Orchestrator, cx) {
+                Dispatch::Deferred { outcome, pending } => {
+                    assert_eq!(
+                        approval::waiting_count_for_test(cx),
+                        0,
+                        "the card waits for the run to be read"
+                    );
+                    assert!(pending.is_live(cx), "live while its card is read");
+                    pending.withdraw(cx);
+                    outcome
+                }
+                Dispatch::Ready(outcome) => panic!("answered without reading: {outcome:?}"),
+            },
+        );
+    cx.run_until_parked();
+    cx.update(|cx| assert_eq!(approval::waiting_count_for_test(cx), 0));
+    assert!(matches!(outcome.try_recv(), Ok(None)), "owed no reply");
+}
+
 /// A desktop Continue of a run the orchestrator asked for from the phone
 /// stays the desktop's episode, while the end the orchestrator is owed keeps
 /// the solicitation its key already had.
@@ -478,6 +543,7 @@ async fn a_desktop_resume_keeps_the_solicitation_the_run_was_owed_with(cx: &mut 
     let here = run.ws.read_with(cx, |ws, _| ws.active);
     run.ws
         .update(cx, |ws, cx| ws.resume_flow_run(here, &run.run_dir, cx));
+    cx.run_until_parked();
     let submitter = cx.update(|cx| {
         RunsHost::flow_run(run.lane.path(), cx)
             .map(|flow| flow.submitter_for_test())

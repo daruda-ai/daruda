@@ -18,7 +18,7 @@ mod disclosure;
 mod flow_resume;
 mod tasks;
 
-use card::approval_summary;
+use card::{CardText, approval_summary};
 pub(crate) use disclosure::quoted_title;
 use tasks::start_task;
 pub(crate) use tasks::{begin_task_start, open_task, task_flow_summary};
@@ -146,10 +146,37 @@ fn run_gated_with(
         Err(refusal) => return Dispatch::Ready(Err(refusal)),
     };
     let caller = origin.capture(cx);
-    let delivery = caller.delivery(crate::app_presence::is_away(cx));
-    let (approval, answer) = crate::control::approval::request(summary, delivery, cx);
+    // Reserved before any read, so the call can be taken back while its card
+    // is still being written.
+    let (approval, answer) = crate::control::approval::reserve(cx);
+    let reading = match summary {
+        CardText::Now(summary) => {
+            let delivery = caller.delivery(crate::app_presence::is_away(cx));
+            crate::control::approval::ask(approval, summary, delivery, cx);
+            None
+        }
+        CardText::Read(summary) => Some(summary),
+    };
     let (tx, rx) = smol::channel::bounded(1);
     cx.spawn(async move |cx| {
+        if let Some(summary) = reading {
+            match summary.await {
+                // Presence as it is once the card is ready to show, not as
+                // it was before the read.
+                Ok(summary) => cx.update(|cx| {
+                    let delivery = caller.delivery(crate::app_presence::is_away(cx));
+                    crate::control::approval::ask(approval, summary, delivery, cx);
+                }),
+                Err(refusal) => {
+                    // Refused before the card, like the refusals above, unless
+                    // the caller already took the call back and is owed nothing.
+                    let owed = cx.update(|cx| crate::control::approval::abandon(approval, cx));
+                    // SILENT-OK: the caller went away; nothing was asked or done.
+                    let _ = tx.send(owed.then_some(Err(refusal))).await;
+                    return;
+                }
+            }
+        }
         let outcome: Option<ControlOutcome> = match answer.recv().await {
             // Approval may have waited while another creation spent a slot.
             // Reserve before the first await so overlapping approvals cannot
@@ -290,7 +317,7 @@ async fn perform_gated(
 ) -> ControlOutcome {
     let created = match asked {
         Asked::FlowResume(target) => {
-            return cx.update(|cx| flow_resume::resume(target, caller, cx));
+            return flow_resume::resume(target, caller, cx).await;
         }
         Asked::TaskCreate {
             workspace,

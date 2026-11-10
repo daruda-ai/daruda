@@ -7,7 +7,9 @@ use gpui::Context;
 
 use super::FlowStartRefused;
 use crate::workspace::Workspace;
-use crate::workspace::flow_request::{FlowSelection, FlowSubmission, union_strip_env};
+use crate::workspace::flow_request::{
+    FlowSelection, FlowSubmission, FlowSubmitError, union_strip_env,
+};
 
 impl Workspace {
     /// Start `path` in `lane` for `started_by`, returning the run's id.
@@ -45,20 +47,51 @@ impl Workspace {
 
     /// The Flows panel's Continue: the desktop resumes the run, so the
     /// desktop is owed its answer, and a refusal is its own toast.
+    ///
+    /// The run is read in the background, like every other read of a run
+    /// directory, and submitted or refused once read.
     pub(in crate::workspace) fn resume_flow_run(
         &mut self,
         lane_ref: daruda_store::project::LaneRef,
         run_dir: &Path,
         cx: &mut Context<Self>,
     ) {
-        let submitter = crate::runs::FlowSubmitter::Desktop;
-        let submitted = self
-            .read_flow_resume(lane_ref, run_dir)
-            .map_err(FlowStartRefused::Submit)
-            .and_then(|read| self.submit_flow_resume(lane_ref, run_dir, read, submitter, cx));
-        if let Err(refused) = submitted {
-            self.answer_flow_start_refusal(lane_ref, refused, cx);
+        let site = match self.resume_site(lane_ref) {
+            Ok(site) => site,
+            Err(e) => {
+                self.answer_flow_start_refusal(lane_ref, FlowStartRefused::Submit(e), cx);
+                return;
+            }
+        };
+        if !self.flow_resume_reads.insert(run_dir.to_path_buf()) {
+            return;
         }
+        let run_dir = run_dir.to_path_buf();
+        let read_dir = run_dir.clone();
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            move || site.read(&read_dir),
+            move |ws, read, cx| {
+                ws.flow_resume_reads.remove(&run_dir);
+                let submitted = read
+                    .map_err(FlowSubmitError::Resume)
+                    .and_then(|read| ws.still_resumes(lane_ref, &read).map(|()| read))
+                    .map_err(FlowStartRefused::Submit)
+                    .and_then(|read| {
+                        ws.submit_flow_resume(
+                            lane_ref,
+                            &run_dir,
+                            read,
+                            crate::runs::FlowSubmitter::Desktop,
+                            cx,
+                        )
+                    });
+                if let Err(refused) = submitted {
+                    ws.answer_flow_start_refusal(lane_ref, refused, cx);
+                }
+            },
+        )
+        .detach();
     }
 
     /// Continue the run `read` found in `run_dir` through the funnel a fresh

@@ -109,7 +109,6 @@ async fn a_flow_that_does_not_load_leaves_nothing_behind(cx: &mut TestAppContext
 #[gpui::test]
 async fn a_lane_whose_folder_is_gone_is_refused_the_same_way_everywhere(cx: &mut TestAppContext) {
     let (lane, ws, flow_path, _wh) = workspace_with_a_flow(cx, super::ONE_AGENT);
-    let run_dir = crate::workspace::flow_paths::runs_dir(lane.path()).join("01J");
     std::fs::remove_dir_all(lane.path()).expect("delete the lane out from under the workspace");
 
     let refusals = ws.update(cx, |ws, cx| {
@@ -117,7 +116,7 @@ async fn a_lane_whose_folder_is_gone_is_refused_the_same_way_everywhere(cx: &mut
             ws.build_flow_request(ws.active, &flow_path, None, &FlowSelection::default(), cx)
                 .err(),
             ws.check_flow(ws.active, &flow_path, None, cx).err(),
-            ws.read_flow_resume(ws.active, &run_dir).err(),
+            ws.resume_site(ws.active).err(),
         ]
     });
 
@@ -801,7 +800,10 @@ fn resume_submission(
     crate::workspace::flow_request::FlowSubmission,
     crate::workspace::flow_request::FlowSubmitError,
 > {
-    let read = ws.read_flow_resume(lane, run_dir)?;
+    let read = ws
+        .resume_site(lane)?
+        .read(run_dir)
+        .map_err(crate::workspace::flow_request::FlowSubmitError::Resume)?;
     ws.resume_request(lane, run_dir, read, cx)
 }
 

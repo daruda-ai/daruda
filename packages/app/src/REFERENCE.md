@@ -524,9 +524,14 @@ picked against the scope as it then stands. It finds the run through
 whose lane keeps its directory. The run is read once before the card into the
 plan the card quotes (passed nodes come from `resume::prepare`'s replay; all
 passed has its own wording), and once more after approval, since the worktree
-can change while the card waits; that read (`Workspace::read_flow_resume`,
-which resolves the lane's tree and lock once, as the Flows panel's Continue
-does) is the one the resume request is built from. Refusals no answer can
+can change while the card waits; that read (`Workspace::resume_site`, which
+resolves the lane's tree and lock once, as the Flows panel's Continue does,
+then `ResumeSite::read`) is the one the resume request is built from. Both
+reads, like Continue's, run on the background executor: what this process
+knows is checked on the UI thread, the run's files off it. The approval id is
+reserved (`approval::reserve`) before the first read, so the call can be
+withdrawn while its card is still being read; a refusal the read makes
+abandons the reservation and is answered without a card. Refusals no answer can
 change come before the card: `flow_run_not_found`, `flow_locked` naming the
 holder (checked first through `lane_busy`, the check a start makes, since
 another run's lock hides this run's status; a live holder of this same run is

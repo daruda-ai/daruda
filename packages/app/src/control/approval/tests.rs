@@ -167,6 +167,55 @@ async fn a_withdrawn_request_settles_once_and_forgets_its_tokens(cx: &mut TestAp
     assert!(answer.is_empty());
 }
 
+/// A reserved request is live before its card: it can be taken back, and a
+/// card asked for afterwards is never shown. Nobody can answer it meanwhile,
+/// and it does not read as a card waiting on the user.
+#[gpui::test]
+async fn a_reserved_request_can_be_taken_back_before_its_card(cx: &mut TestAppContext) {
+    let _outbound = setup(cx);
+    let (id, answer) = cx.update(reserve);
+    cx.update(|cx| {
+        assert!(is_waiting(id, cx));
+        assert!(!has_waiting(cx));
+        assert!(!resolve(
+            id,
+            ApprovalChoice::Approved,
+            Answerer::Telegram,
+            cx
+        ));
+        assert!(withdraw(id, cx));
+        assert!(!is_waiting(id, cx));
+        assert!(!abandon(id, cx), "the withdrawal already answered it");
+        ask(id, "create worktree x".into(), Delivery::Explicit, cx);
+        assert_eq!(waiting_count_for_test(cx), 0);
+    });
+    assert_eq!(answer.recv().await, Ok(ApprovalOutcome::Withdrawn));
+}
+
+/// Abandoning a reserved request answers nothing: the caller refuses with
+/// what it read, and a later withdrawal finds nothing to take back.
+#[gpui::test]
+async fn an_abandoned_request_is_gone_without_an_answer(cx: &mut TestAppContext) {
+    let _outbound = setup(cx);
+    let (id, answer) = cx.update(reserve);
+    cx.update(|cx| {
+        assert!(abandon(id, cx));
+        assert!(!is_waiting(id, cx));
+        assert!(!withdraw(id, cx));
+    });
+    assert!(answer.recv().await.is_err(), "no outcome is sent");
+}
+
+/// Stopping the orchestrator takes back requests still being read too.
+#[gpui::test]
+async fn stopping_takes_back_requests_still_being_read(cx: &mut TestAppContext) {
+    let _outbound = setup(cx);
+    let (id, answer) = cx.update(reserve);
+    cx.update(withdraw_all);
+    cx.update(|cx| assert!(!is_waiting(id, cx)));
+    assert_eq!(answer.recv().await, Ok(ApprovalOutcome::Withdrawn));
+}
+
 #[gpui::test]
 async fn each_request_keeps_its_own_deadline(cx: &mut TestAppContext) {
     let _outbound = setup(cx);

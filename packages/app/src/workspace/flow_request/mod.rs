@@ -118,9 +118,40 @@ enum FlowText<'a> {
     Draft { text: &'a str, path: &'a Path },
 }
 
-/// An interrupted run as [`Workspace::read_flow_resume`] found it, with the
-/// lane's directory and tree that read resolved, so the request built from
-/// it continues the run in the worktree its read named.
+/// Where a lane's interrupted run is read from: the lane's directory, its
+/// tree, and the lock that tree implies, decided from the workspace's lanes.
+///
+/// Reading the run itself is disk work and goes to the background through
+/// [`ResumeSite::read`]. What it reads can be stale by the time the resume is
+/// submitted, which is safe: the engine reads what the run finished again
+/// once it holds the lane's lock.
+pub(in crate::workspace) struct ResumeSite {
+    cwd: PathBuf,
+    tree: daruda_flow::lock::CanonicalTree,
+    lock_dir: PathBuf,
+}
+
+impl ResumeSite {
+    /// Read the run in `run_dir` as a resume continues it, with
+    /// [`process_is_alive`] — the predicate the request built from it uses.
+    /// Blocking file reads: call it off the UI thread.
+    pub(in crate::workspace) fn read(
+        self,
+        run_dir: &Path,
+    ) -> Result<ReadResume, daruda_flow::resume::ResumeError> {
+        let is_alive: fn(u32) -> bool = process_is_alive;
+        let resumed = daruda_flow::resume::prepare(run_dir, Some(&self.lock_dir), &is_alive)?;
+        Ok(ReadResume {
+            cwd: self.cwd,
+            tree: self.tree,
+            resumed,
+        })
+    }
+}
+
+/// An interrupted run as [`ResumeSite::read`] found it, with the lane's
+/// directory and tree that read resolved, so the request built from it
+/// continues the run in the worktree its read named.
 pub(in crate::workspace) struct ReadResume {
     pub cwd: PathBuf,
     pub tree: daruda_flow::lock::CanonicalTree,
@@ -229,26 +260,42 @@ impl Workspace {
         Ok(daruda_flow::request::check_request(&submission.request))
     }
 
-    /// Read the run in `run_dir`, kept by `lane_ref`, as a resume continues it.
+    /// Where a run kept by `lane_ref` is read from for a resume.
     ///
-    /// The tree and the liveness predicate are decided **once, here**, for
-    /// the question, the lock it implies and the request built from it. Two
-    /// answers can disagree, and then the panel offers a resume that the
-    /// lock immediately refuses as held.
-    pub(in crate::workspace) fn read_flow_resume(
+    /// The tree is decided **once, here**, for the question, the lock it
+    /// implies and the request built from it. Two answers can disagree, and
+    /// then the panel offers a resume that the lock immediately refuses as
+    /// held.
+    pub(in crate::workspace) fn resume_site(
         &self,
         lane_ref: daruda_store::project::LaneRef,
-        run_dir: &Path,
-    ) -> Result<ReadResume, FlowSubmitError> {
+    ) -> Result<ResumeSite, FlowSubmitError> {
         let (cwd, tree) = self.lane_tree(lane_ref)?;
-        let is_alive: fn(u32) -> bool = process_is_alive;
         // Where this lane's lock lives, outside the tree. Told to look
         // anywhere else, `prepare` reads every run as `Unknown` — which is
         // to say unresumable, silently.
         let lock_dir = daruda_flow::lock::lock_dir_for(&self.lock_root, &tree);
-        let resumed = daruda_flow::resume::prepare(run_dir, Some(&lock_dir), &is_alive)
-            .map_err(FlowSubmitError::Resume)?;
-        Ok(ReadResume { cwd, tree, resumed })
+        Ok(ResumeSite {
+            cwd,
+            tree,
+            lock_dir,
+        })
+    }
+
+    /// Whether `lane_ref` still resolves to the tree `read` was read in. The
+    /// lane can be removed while its run is read off the UI thread, and a
+    /// resume must not start in the folder it left behind.
+    pub(in crate::workspace) fn still_resumes(
+        &self,
+        lane_ref: daruda_store::project::LaneRef,
+        read: &ReadResume,
+    ) -> Result<(), FlowSubmitError> {
+        let (_, tree) = self.lane_tree(lane_ref)?;
+        if tree == read.tree {
+            Ok(())
+        } else {
+            Err(FlowSubmitError::NoLane)
+        }
     }
 
     /// Assemble a request that **continues** the run `read` names, rather

@@ -86,11 +86,15 @@ impl From<ApprovalChoice> for ApprovalOutcome {
     }
 }
 
-/// Requests still waiting for an answer.
+/// Requests still waiting for an answer, and the ones whose card is still
+/// being written.
 #[derive(Default)]
 struct Approvals {
     next_id: u64,
     waiting: HashMap<ApprovalId, WaitingApproval>,
+    /// Reserved by [`reserve`], with no card yet. Only a withdrawal settles
+    /// one here: nobody can answer a card that was never shown.
+    preparing: HashMap<ApprovalId, Sender<ApprovalOutcome>>,
 }
 
 struct WaitingApproval {
@@ -132,30 +136,54 @@ impl Offer {
 
 impl Global for Approvals {}
 
-/// Ask the user, and answer on the returned channel exactly once.
-///
-/// Always offer a desktop host card; remote cards obey `delivery`. Only the
-/// absence of both surfaces is undeliverable. Settlement updates remote cards
-/// immediately and defers desktop refresh to avoid Workspace re-entry.
-///
-/// The channel is bounded at one and never awaited by the sender, so a caller
-/// that has given up cannot block the resolution.
-///
-/// The id comes back so the caller can [`withdraw`] the question. It is minted
-/// even when the answer is already in the channel — settling an id that names
-/// no waiting request is a no-op by construction, so there is no state where
-/// the caller has to ask whether it has one.
+/// Ask the user in one step: [`reserve`], then [`ask`]. The dispatcher takes
+/// the two apart so a card can be read before it is shown.
+#[cfg(any(test, feature = "screenshot"))]
 pub(crate) fn request(
     summary: String,
     delivery: Delivery,
     cx: &mut App,
 ) -> (ApprovalId, Receiver<ApprovalOutcome>) {
+    let (id, rx) = reserve(cx);
+    ask(id, summary, delivery, cx);
+    (id, rx)
+}
+
+/// Mint a request whose card is not shown yet, answered on the returned
+/// channel exactly once. Follow with [`ask`] or [`abandon`].
+///
+/// The id is live from here: [`is_waiting`] holds and [`withdraw`] settles it
+/// as `Withdrawn`, so a caller can take the question back while its card is
+/// still being read. The channel is bounded at one and never awaited by the
+/// sender, so a caller that has given up cannot block the resolution.
+///
+/// A reservation has no deadline and does not count toward
+/// [`APPROVALS_IN_FLIGHT_MAX`]: it lasts as long as its caller's read, and the
+/// cap is applied when [`ask`] shows the card.
+pub(crate) fn reserve(cx: &mut App) -> (ApprovalId, Receiver<ApprovalOutcome>) {
     let (tx, rx) = smol::channel::bounded(1);
+    let approvals = cx.default_global::<Approvals>();
+    approvals.next_id += 1;
+    let id = ApprovalId(approvals.next_id);
+    approvals.preparing.insert(id, tx);
+    (id, rx)
+}
+
+/// Show the card for a reserved request. Does nothing when the caller took
+/// it back meanwhile: that withdrawal already answered it.
+///
+/// Always offer a desktop host card; remote cards obey `delivery`. Only the
+/// absence of both surfaces is undeliverable. Settlement updates remote cards
+/// immediately and defers desktop refresh to avoid Workspace re-entry.
+/// Settling an id that names no waiting request is a no-op by construction,
+/// so a caller never has to ask whether its id is still good.
+pub(crate) fn ask(id: ApprovalId, summary: String, delivery: Delivery, cx: &mut App) {
     let deadline = cx.background_executor().now() + APPROVAL_TIMEOUT;
-    let (id, full) = {
+    let full = {
         let approvals = cx.default_global::<Approvals>();
-        approvals.next_id += 1;
-        let id = ApprovalId(approvals.next_id);
+        let Some(tx) = approvals.preparing.remove(&id) else {
+            return;
+        };
         let full = approvals.waiting.len() >= APPROVALS_IN_FLIGHT_MAX;
         approvals.waiting.insert(
             id,
@@ -167,7 +195,7 @@ pub(crate) fn request(
                 offer: Offer::of(delivery),
             },
         );
-        (id, full)
+        full
     };
     if full {
         settle(id, Settlement::TooManyPending, cx);
@@ -177,7 +205,13 @@ pub(crate) fn request(
             spawn_timeout(id, cx);
         }
     }
-    (id, rx)
+}
+
+/// Drop a reserved request without asking: what was read refuses the
+/// command, and the caller answers with that refusal. `false` when the
+/// caller had already taken the question back, so there is nobody to answer.
+pub(crate) fn abandon(id: ApprovalId, cx: &mut App) -> bool {
+    cx.has_global::<Approvals>() && cx.global_mut::<Approvals>().preparing.remove(&id).is_some()
 }
 
 /// Take back a question nobody has answered yet. `false` when it was already
@@ -186,25 +220,48 @@ pub(crate) fn request(
 /// The work behind the card has not started (that is what "waiting" means), so
 /// withdrawing is enough to make sure it never does.
 pub(crate) fn withdraw(id: ApprovalId, cx: &mut App) -> bool {
-    settle(id, Settlement::Withdrawn(Withdrawal::Caller), cx)
+    withdraw_preparing(id, cx) || settle(id, Settlement::Withdrawn(Withdrawal::Caller), cx)
 }
 
 pub(crate) fn withdraw_all(cx: &mut App) {
-    let ids: Vec<_> = cx
+    let (preparing, waiting): (Vec<_>, Vec<_>) = cx
         .try_global::<Approvals>()
-        .map(|approvals| approvals.waiting.keys().copied().collect())
+        .map(|approvals| {
+            (
+                approvals.preparing.keys().copied().collect(),
+                approvals.waiting.keys().copied().collect(),
+            )
+        })
         .unwrap_or_default();
-    for id in ids {
+    for id in preparing {
+        withdraw_preparing(id, cx);
+    }
+    for id in waiting {
         settle(id, Settlement::Withdrawn(Withdrawal::OrchestratorStop), cx);
     }
 }
 
-/// Whether `id` is still waiting for an answer.
-pub(crate) fn is_waiting(id: ApprovalId, cx: &App) -> bool {
-    cx.try_global::<Approvals>()
-        .is_some_and(|a| a.waiting.contains_key(&id))
+/// Answer a reserved request `Withdrawn`. No card exists yet, so there is
+/// nothing to settle on any surface.
+fn withdraw_preparing(id: ApprovalId, cx: &mut App) -> bool {
+    if !cx.has_global::<Approvals>() {
+        return false;
+    }
+    let Some(tx) = cx.global_mut::<Approvals>().preparing.remove(&id) else {
+        return false;
+    };
+    let _ = tx.try_send(ApprovalOutcome::Withdrawn);
+    true
 }
 
+/// Whether `id` is still waiting for an answer, or for its card.
+pub(crate) fn is_waiting(id: ApprovalId, cx: &App) -> bool {
+    cx.try_global::<Approvals>()
+        .is_some_and(|a| a.waiting.contains_key(&id) || a.preparing.contains_key(&id))
+}
+
+/// Whether a card is up and unanswered. A request still being prepared has
+/// no card for anyone to answer, so it does not count.
 pub(crate) fn has_waiting(cx: &App) -> bool {
     cx.try_global::<Approvals>()
         .is_some_and(|approvals| !approvals.waiting.is_empty())

@@ -509,6 +509,10 @@ pub struct Workspace {
     /// invocations from racing on `git worktree add` against the same
     /// repository. Released once git returns, before the lane is finalized.
     pub(in crate::workspace) pending_lane_creates: HashSet<std::path::PathBuf>,
+    /// Run directories the Flows panel's Continue is still reading in the
+    /// background. A second Continue for one of them is the same click, not
+    /// a second resume to refuse as already running.
+    pub(in crate::workspace) flow_resume_reads: HashSet<std::path::PathBuf>,
     /// Background watches and their pumps — see [`lifetimes::Pumps`].
     pub(in crate::workspace) pumps: lifetimes::Pumps,
     /// Last version surfaced via the "update available" toast. Guards

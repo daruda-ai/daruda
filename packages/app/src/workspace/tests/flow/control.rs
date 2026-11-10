@@ -1775,6 +1775,7 @@ async fn a_desktop_resume_of_a_phone_started_run_stays_off_the_phone(cx: &mut Te
     let here = ws.read_with(cx, |ws, _| ws.active);
     let before = ws.read_with(cx, |ws, _| ws.error_history().len());
     ws.update(cx, |ws, cx| ws.resume_flow_run(here, &run_dir, cx));
+    cx.run_until_parked();
     let errors = ws.read_with(cx, |ws, _| {
         ws.error_history()[before..]
             .iter()

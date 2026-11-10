@@ -230,6 +230,7 @@ impl Workspace {
             input_dock: main_area::bottom_dock::input_dock::InputDock::new(config, window, cx),
             persistence_suspended: false,
             pending_lane_creates: HashSet::new(),
+            flow_resume_reads: HashSet::new(),
             // The shared root in production; under the test's own data
             // directory otherwise, so a suite takes no lock the developer's
             // app could see and leaves nothing in their config directory.
