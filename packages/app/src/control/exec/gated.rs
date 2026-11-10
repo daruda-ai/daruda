@@ -21,8 +21,8 @@ mod tasks;
 
 use card::{CardText, approval_summary};
 pub(crate) use disclosure::{card_label, quoted_title};
-use tasks::start_task;
 pub(crate) use tasks::{begin_task_start, open_task, task_flow_summary};
+use tasks::{shown_task_start, start_task};
 
 /// A command as its card asked about it. A resume's run is resolved once,
 /// before the card, so a handle such as `TaskLatest` cannot name another
@@ -393,17 +393,6 @@ fn left_a_worktree(outcome: &ControlOutcome) -> bool {
                 | ControlError::TaskStartFailedWorktreeKept { .. }
                 | ControlError::WorktreeUnregistered { .. })
     )
-}
-
-/// `task`'s start as its card describes it, read now in the window that
-/// holds its project.
-fn shown_task_start(task: &str, cx: &mut App) -> Result<ShownTaskStart, ControlError> {
-    in_task_window(task, cx, |ws, _, cx| {
-        cx.global::<GlobalTasks>()
-            .get(task)
-            .map(|record| ws.shown_task_start(record))
-            .ok_or(ControlError::TaskNotFound)
-    })
 }
 
 /// Do the thing, now that the user has said yes. A chat it opens takes

@@ -45,6 +45,20 @@ pub(crate) fn task_flow_summary(
     )
 }
 
+/// `task`'s start as its card describes it, read now in the window that
+/// holds its project.
+pub(super) fn shown_task_start(
+    task: &str,
+    cx: &mut App,
+) -> Result<crate::workspace::ShownTaskStart, ControlError> {
+    in_task_window(task, cx, |ws, _, cx| {
+        cx.global::<GlobalTasks>()
+            .get(task)
+            .map(|record| ws.shown_task_start(record))
+            .ok_or(ControlError::TaskNotFound)
+    })
+}
+
 /// A start for the agent: approved already, so this only waits for it.
 /// `agent` is the one its card named, and `shown` the definition it
 /// described the start by.
