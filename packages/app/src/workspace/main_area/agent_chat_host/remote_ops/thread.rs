@@ -3,7 +3,7 @@
 use crate::remote_channel::threads::{ConversationKey, PaneConversation};
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
-use gpui::Context;
+use gpui::{App, Context};
 
 impl Workspace {
     /// The pane's live conversation and the title its thread root shows.
@@ -22,5 +22,24 @@ impl Workspace {
             agent_name: view.agent_name().to_owned(),
             title: self.remote_header(pane_id, cx),
         })
+    }
+
+    /// The open pane holding one of `conversations`: where a reply in that
+    /// conversation's thread goes.
+    pub(crate) fn pane_with_conversation(
+        &self,
+        conversations: &[ConversationKey],
+        cx: &App,
+    ) -> Option<PaneId> {
+        self.every_agent_chat()
+            .find(|(_, view)| {
+                let view = view.read(cx);
+                view.session_id().is_some_and(|session| {
+                    conversations
+                        .iter()
+                        .any(|key| key.agent == view.agent_id() && key.session == session)
+                })
+            })
+            .map(|(pane, _)| pane)
     }
 }

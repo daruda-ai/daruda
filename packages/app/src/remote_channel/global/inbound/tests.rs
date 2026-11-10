@@ -895,3 +895,110 @@ fn a_remote_card_that_never_left_is_offered_once_more(cx: &mut TestAppContext) {
         assert!(approval::withdraw(id, cx));
     });
 }
+
+/// A reply in a pane's thread reaches that pane, whatever the plain-text
+/// target is; a thread no open pane holds is refused instead of guessed,
+/// unless the reply is one of daruda's own commands.
+#[gpui::test]
+fn a_thread_reply_reaches_its_pane_and_an_unplaceable_thread_is_refused(cx: &mut TestAppContext) {
+    use crate::remote_channel::bridge::PaneRef;
+    use crate::remote_channel::threads::{ConversationKey, Scope};
+
+    let fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let root = tempfile::tempdir().unwrap();
+    let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
+    let set_session = |session: &str, cx: &mut TestAppContext| {
+        fixture.workspace.update(cx, |ws, cx| {
+            ws.set_pane_session_for_test(fixture.pane(), session, cx);
+            let pane = PaneRef {
+                workspace: ws.uuid(),
+                pane: fixture.pane(),
+            };
+            let key: ConversationKey = ws.remote_conversation(fixture.pane(), cx).unwrap().key;
+            (pane, key)
+        })
+    };
+    let (pane, key) = set_session("s1", cx);
+    let generation = cx.update(|cx| {
+        let generation = install_connection("work", bot.clone(), cx);
+        let scope = Scope {
+            connection: "work".into(),
+            bot: lock::digest_of("shared-bot"),
+            conversation: "room".into(),
+        };
+        let channels = cx.global_mut::<RemoteChannels>();
+        channels.threads.remember(&scope, key, "100.1".into(), 1);
+        channels
+            .connections
+            .get_mut("work")
+            .unwrap()
+            .core
+            .record_sent("50.5".into(), pane);
+        generation
+    });
+
+    cx.update(|cx| {
+        let cases = [
+            (
+                Some("100.1"),
+                ThreadReply::Pane(pane),
+                "the pane's own thread",
+            ),
+            (
+                Some("50.5"),
+                ThreadReply::Untracked,
+                "a ping sent before threads",
+            ),
+            (None, ThreadReply::Untracked, "the top of the chat"),
+            (
+                Some("999.9"),
+                ThreadReply::Unknown,
+                "a thread no pane started",
+            ),
+        ];
+        for (thread, want, label) in cases {
+            assert_eq!(
+                driver::route_reply("work", &bot, thread, cx),
+                want,
+                "{label}"
+            );
+        }
+    });
+
+    set_session("s2", cx);
+    cx.update(|cx| {
+        assert_eq!(
+            driver::route_reply("work", &bot, Some("100.1"), cx),
+            ThreadReply::Closed,
+            "the thread's conversation is no longer open"
+        );
+        let reply = |text: &str, thread: &str, cx: &mut App| {
+            let incoming = transport::Incoming {
+                event_id: format!("{thread}-{text}"),
+                sender: RemoteRecipient {
+                    user_id: "user".into(),
+                    conversation_id: "room".into(),
+                    scope_id: "scope".into(),
+                },
+                kind: IncomingKind::Message {
+                    text: text.into(),
+                    reply_to: Some(thread.into()),
+                },
+            };
+            dispatch_claimed("work", generation, &bot, &incoming, cx).unwrap()
+        };
+        for (thread, refusal) in [
+            ("100.1", s::remote_channel::thread_closed()),
+            ("999.9", s::remote_channel::thread_unknown()),
+        ] {
+            assert!(
+                matches!(reply("ship it", thread, cx), Effect::Reply(RenderedReply { text, .. }) if text == refusal),
+                "plain text in {thread} is refused"
+            );
+            assert!(
+                !matches!(reply("!list", thread, cx), Effect::Reply(RenderedReply { text, .. }) if text == refusal),
+                "a command in {thread} still runs"
+            );
+        }
+    });
+}

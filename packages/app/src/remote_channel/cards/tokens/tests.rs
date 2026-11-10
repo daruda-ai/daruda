@@ -257,3 +257,27 @@ fn forgetting_a_card_touches_only_its_own_tokens() {
         Some(InboundAction::ResolveFlowAsk { ask_id: 3, .. })
     ));
 }
+
+/// A reply in a pane's thread names the pane, not a card: it answers the
+/// newest card that pane still waits on, and nothing once all are settled.
+#[test]
+fn a_thread_reply_answers_the_panes_newest_live_question() {
+    let mut tokens = CardTokens::<String>::default();
+    let (asked, _) = question(&mut tokens, 9);
+    tokens.note_question_sent("m1".into(), pane(1), asked, 9);
+    tokens.note_question_sent("m2".into(), pane(1), asked, 10);
+    let live = Some(QuestionCard::Live {
+        pane: pane(1),
+        question: asked,
+    });
+    assert_eq!(tokens.live_question_of(pane(1)), live);
+    assert_eq!(tokens.live_question_of(pane(2)), None, "another pane");
+    tokens.tombstone(&question_card(asked, 10));
+    assert_eq!(
+        tokens.live_question_of(pane(1)),
+        live,
+        "the older step is live"
+    );
+    tokens.tombstone(&question_card(asked, 9));
+    assert_eq!(tokens.live_question_of(pane(1)), None, "all settled");
+}

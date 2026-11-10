@@ -61,6 +61,30 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
         reply_to_message_id: Option<M>,
         card: Option<QuestionCard>,
     ) -> Routed {
+        let reply_to = reply_to_message_id
+            .and_then(|id| self.sent_pings.get(&id))
+            .copied();
+        self.route_text_with(text, reply_to, card)
+    }
+
+    /// [`Self::route_text`] for a reply whose thread already named its pane.
+    /// The plain-text target is left as it was: answering inside one pane's
+    /// thread does not redirect what the person types at the top.
+    pub(crate) fn route_text_to(
+        &mut self,
+        text: String,
+        pane: PaneRef,
+        card: Option<QuestionCard>,
+    ) -> Routed {
+        self.route_text_with(text, Some(pane), card)
+    }
+
+    fn route_text_with(
+        &mut self,
+        text: String,
+        reply_to: Option<PaneRef>,
+        card: Option<QuestionCard>,
+    ) -> Routed {
         // Parsing sits behind the gate on purpose: a listing names projects,
         // lanes, and session titles, so an unauthorized chat must not reach it.
         // A name we do not own is held back rather than answered: the agent's
@@ -89,10 +113,6 @@ impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
             }
             None => {}
         }
-
-        let reply_to = reply_to_message_id
-            .and_then(|id| self.sent_pings.get(&id))
-            .copied();
 
         match self
             .command_state

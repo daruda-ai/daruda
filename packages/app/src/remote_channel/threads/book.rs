@@ -54,6 +54,13 @@ impl Book {
             .find(|record| scope.holds(record) && record.sessions.contains(key))
     }
 
+    /// The thread whose root message is `root`.
+    pub(crate) fn for_root(&self, scope: &Scope, root: &str) -> Option<&ThreadRecord> {
+        self.threads
+            .iter()
+            .find(|record| scope.holds(record) && record.root == root)
+    }
+
     /// Record a new thread for `key` rooted at `root`. A conversation belongs to
     /// one thread, so any older claim on `key` in this scope is dropped.
     pub(crate) fn insert(&mut self, scope: &Scope, key: ConversationKey, root: String, now: i64) {

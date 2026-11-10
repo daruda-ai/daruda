@@ -68,6 +68,17 @@ impl Workspace {
             .collect()
     }
 
+    /// Give `pane` the live session `session`, as a connect would.
+    pub(crate) fn set_pane_session_for_test(
+        &mut self,
+        pane: PaneId,
+        session: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let view = self.agent_chat_view(pane).expect("pane").clone();
+        view.update(cx, |v, _| v.set_session_id_for_test(Some(session.into())));
+    }
+
     /// Drive one pane into each of the three states `/brief` counts. Each
     /// writes the field the sanctioned predicate reads — `activity_state`
     /// folds turn + permissions, and `map_health` reads `status`.

@@ -381,6 +381,17 @@ impl<M: Eq + std::hash::Hash + Clone> CardTokens<M> {
         })
     }
 
+    /// The newest question card `pane` still waits on: what a reply in the
+    /// pane's thread answers, since the thread names the pane, not the card.
+    pub(super) fn live_question_of(&self, pane: PaneRef) -> Option<QuestionCard> {
+        self.sent_questions_order
+            .iter()
+            .rev()
+            .filter_map(|message| self.sent_questions.get(message))
+            .find(|card| card.0 == pane && !self.settled_questions.contains(card))
+            .map(|&(pane, question, _)| QuestionCard::Live { pane, question })
+    }
+
     /// Retire `card`'s tokens into bounded tombstones: a late flow tap still
     /// names its original question, and other settled taps cannot compete
     /// with the settlement edit.

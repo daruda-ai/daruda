@@ -163,3 +163,20 @@ fn only_an_owned_command_outranks_a_question_card_reply() {
         InboundAction::StaleQuestion
     );
 }
+
+/// A reply inside one pane's thread goes to that pane and leaves the
+/// plain-text target where it was, so the next top-level message is not
+/// redirected by an answer given elsewhere.
+#[test]
+fn a_thread_reply_reaches_its_pane_without_moving_the_target() {
+    let mut core = RoutingCore::<String>::default();
+    core.record_sent("1.1".into(), pane(1));
+    assert!(matches!(
+        core.route_text_to("go".into(), pane(2), None).ready(),
+        InboundAction::InjectPrompt {
+            pane: PaneRef { pane: 2, .. },
+            ..
+        }
+    ));
+    assert_eq!(injected_into(&mut core), Some(pane(1)));
+}

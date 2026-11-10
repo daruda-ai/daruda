@@ -5,7 +5,7 @@ use super::{Book, ConversationKey, PaneConversation, Scope};
 use crate::remote_channel::bridge::{MessageTail, PaneRef};
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
-use crate::remote_channel::transport::{self, Credentials, Message, slack};
+use crate::remote_channel::transport::{self, Credentials, IncomingKind, Message, slack};
 use crate::surface::strings as s;
 use daruda_config::remote::{ChannelKind, RemoteRecipient};
 use daruda_store::remote_threads::RemoteThreadStore;
@@ -75,7 +75,7 @@ impl Threads {
     }
 
     /// Record the thread a post started for `key`.
-    pub(super) fn remember(&mut self, scope: &Scope, key: ConversationKey, root: String, now: i64) {
+    pub(crate) fn remember(&mut self, scope: &Scope, key: ConversationKey, root: String, now: i64) {
         self.book.insert(scope, key, root, now);
         self.book.prune(now);
         self.save();
@@ -227,6 +227,101 @@ pub(crate) fn record_root(plan: &ThreadPlan, root: String, cx: &mut App) {
     cx.global_mut::<RemoteChannels>()
         .threads
         .remember(&plan.scope, plan.key.clone(), root, now());
+}
+
+/// Where a reply posted in a thread goes.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ThreadReply {
+    /// Not a pane thread on this channel: routed as before threads.
+    Untracked,
+    /// The open pane the thread speaks for.
+    Pane(PaneRef),
+    /// A pane thread whose conversation is open in no window.
+    Closed,
+    /// A thread no pane started and no message here answers.
+    Unknown,
+}
+
+/// Route a reply posted under `thread` on connection `id`. A message sent
+/// before threads keeps its old routing; a thread this app cannot place is
+/// refused rather than guessed, since a guess delivers to the wrong agent.
+pub(crate) fn route_reply(
+    id: &str,
+    bot: &BotSession,
+    thread: Option<&str>,
+    cx: &mut App,
+) -> ThreadReply {
+    let Some(thread) = thread else {
+        return ThreadReply::Untracked;
+    };
+    let channels = cx.global::<RemoteChannels>();
+    let Some(connection) = channels.connections.get(id) else {
+        return ThreadReply::Untracked;
+    };
+    let Some(recipient) = &connection.config.recipient else {
+        return ThreadReply::Untracked;
+    };
+    if !transport::pane_threads(connection.config.kind)
+        || connection.core.sent_pings.contains_key(thread)
+    {
+        return ThreadReply::Untracked;
+    }
+    let scope = Scope {
+        connection: id.to_owned(),
+        bot: crate::remote_channel::lock::digest_of(&bot.credentials.bot),
+        conversation: recipient.conversation_id.clone(),
+    };
+    let Some(record) = channels.threads.book.for_root(&scope, thread) else {
+        return ThreadReply::Unknown;
+    };
+    let conversations = record.sessions.clone();
+    match open_pane_with(&conversations, cx) {
+        Some(pane) => ThreadReply::Pane(pane),
+        None => ThreadReply::Closed,
+    }
+}
+
+fn open_pane_with(conversations: &[ConversationKey], cx: &mut App) -> Option<PaneRef> {
+    let mut found = None;
+    crate::window_registry::WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
+        if found.is_none()
+            && let Some(pane) = ws.pane_with_conversation(conversations, cx)
+        {
+            found = Some(PaneRef {
+                workspace: ws.uuid(),
+                pane,
+            });
+        }
+    });
+    found
+}
+
+/// The thread a reply to `incoming` belongs in: the one it was posted in.
+pub(crate) fn reply_thread(kind: ChannelKind, incoming: &IncomingKind) -> Option<String> {
+    match incoming {
+        IncomingKind::Message {
+            reply_to: Some(thread),
+            ..
+        } if transport::pane_threads(kind) => Some(thread.clone()),
+        IncomingKind::Message { .. } | IncomingKind::Callback { .. } => None,
+    }
+}
+
+/// Send a reply in `thread`, or at the top when there is none. Blocking.
+pub(crate) fn send_reply(
+    kind: ChannelKind,
+    credentials: &Credentials,
+    recipient: &RemoteRecipient,
+    thread: Option<&str>,
+    message: Message,
+) -> transport::Result<()> {
+    match thread {
+        Some(thread) => {
+            slack::threads::post_in_thread(credentials, recipient, thread, message, |_| {})
+        }
+        None => transport::send(kind, credentials, recipient, message),
+    }
+    .map(drop)
 }
 
 fn now() -> i64 {

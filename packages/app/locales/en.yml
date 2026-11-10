@@ -2598,6 +2598,8 @@ remote_channel:
   held_elsewhere: "Another daruda is connected to this bot"
   thread_new_conversation: "— New conversation —"
   thread_switched_agent: "— Switched to %{agent} —"
+  thread_closed: "This conversation is not open in daruda now."
+  thread_unknown: "Not sure which agent this thread belongs to. Reply in an agent's thread, or write in the chat itself."
 
 library:
   toggle_needs_project: "Claude enablement is per project. Open a local project to change it."

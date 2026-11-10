@@ -199,6 +199,10 @@ where
         self.tokens.question_reply(reply_to)
     }
 
+    pub(crate) fn live_question_of(&self, pane: PaneRef) -> Option<QuestionCard> {
+        self.tokens.live_question_of(pane)
+    }
+
     /// Record that `message` was tapped. A managed card's settlement, or a
     /// retired token's, owns the message before its send response arrives.
     pub(crate) fn note_tap(&mut self, data: &str, message: M, managed: bool) {

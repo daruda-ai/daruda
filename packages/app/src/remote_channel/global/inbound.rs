@@ -4,6 +4,7 @@ use crate::remote_channel::{
     dispatch::{self, Edit, Effect},
     pairing::pair_code,
     runtime::{BotSession, WorkerEvent, channel_key},
+    threads::driver::{self, ThreadReply},
     transport::{self, IncomingKind, Message},
 };
 use crate::settings_store::SettingsStore;
@@ -113,16 +114,34 @@ fn dispatch_claimed(
     if !connection.config.accepts(&incoming.sender) {
         return None;
     }
-    let connection = cx.global_mut::<RemoteChannels>().connections.get_mut(id)?;
     let routed = match &incoming.kind {
         IncomingKind::Message { text, reply_to } => {
             let text = text
                 .strip_prefix('!')
                 .map_or_else(|| text.clone(), |command| format!("/{command}"));
-            let card = connection.desk.get_mut().question_reply(reply_to.as_ref());
-            connection.core.route_text(text, reply_to.clone(), card)
+            let card = connection.desk.borrow().question_reply(reply_to.as_ref());
+            let thread = match card {
+                Some(_) => ThreadReply::Untracked,
+                None => driver::route_reply(id, bot, reply_to.as_deref(), cx),
+            };
+            let connection = cx.global_mut::<RemoteChannels>().connections.get_mut(id)?;
+            match thread {
+                ThreadReply::Untracked => connection.core.route_text(text, reply_to.clone(), card),
+                ThreadReply::Pane(pane) => {
+                    let card = connection.desk.get_mut().live_question_of(pane);
+                    connection.core.route_text_to(text, pane, card)
+                }
+                // A command is ours wherever it is typed; anything else would
+                // have to guess an agent.
+                ThreadReply::Closed | ThreadReply::Unknown if is_command(&text) => {
+                    connection.core.route_text(text, None, None)
+                }
+                ThreadReply::Closed => return Some(refusal(s::remote_channel::thread_closed())),
+                ThreadReply::Unknown => return Some(refusal(s::remote_channel::thread_unknown())),
+            }
         }
         IncomingKind::Callback { data, .. } => {
+            let connection = cx.global_mut::<RemoteChannels>().connections.get_mut(id)?;
             crate::remote_channel::bridge::Routed::Ready(connection.route_tap(data))
         }
     };
@@ -147,6 +166,22 @@ fn dispatch_claimed(
             .note_tap(data, message_id.clone(), managed);
     }
     Some(effect)
+}
+
+/// Whether `text` is one of daruda's commands, used rightly or not.
+fn is_command(text: &str) -> bool {
+    use crate::control::spec::{ParseError, parse};
+    !matches!(
+        parse(text),
+        Err(ParseError::NotACommand | ParseError::Unknown { .. })
+    )
+}
+
+fn refusal(text: String) -> Effect {
+    Effect::Reply(crate::remote_channel::command::RenderedReply {
+        text,
+        keyboard: None,
+    })
 }
 
 pub(super) fn spawn(receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) {
@@ -279,14 +314,19 @@ async fn serve<F: Future<Output = ClaimResult>>(
     let Some((kind, bot, recipient, tap)) = delivery else {
         return Served::Done;
     };
+    let thread = driver::reply_thread(kind, &incoming.kind);
     let result = cx
         .background_executor()
         .spawn(async move {
             match feedback_for(effect, incoming.kind, tap) {
                 Feedback::Nothing => Ok(()),
-                Feedback::Send(message) => {
-                    transport::send(kind, &bot.credentials, &recipient, message).map(|_| ())
-                }
+                Feedback::Send(message) => driver::send_reply(
+                    kind,
+                    &bot.credentials,
+                    &recipient,
+                    thread.as_deref(),
+                    message,
+                ),
                 Feedback::Edit {
                     message_id,
                     original,
