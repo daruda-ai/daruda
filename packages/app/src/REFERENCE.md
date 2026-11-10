@@ -277,73 +277,69 @@ phone `/task` — runs in its agent's `delegated_mode`
 (`daruda_config::effective_delegated_mode`; unset means the policy default,
 Claude `bypassPermissions` and Codex `agent-full-access`, else the agent's
 `default_mode`; a blank `delegated_mode = ""` opts out of the policy default
-and follows `default_mode`). A desktop Start or menu chat, the orchestrator's own pane
-and flows use `default_mode` or the flow's mode. The split is one function,
-`workspace::mode_for(StartedBy)`. A gated command computes it once, names it
-on its card and hands the work that `ChatOpen`; a task start takes only the
-`ChatAgent` and derives the mode from its submitter
+and follows `default_mode`). A desktop Start or menu chat, the orchestrator's
+own pane and flows use `default_mode` or the flow's mode. The split is one
+function, `workspace::mode_for(StartedBy)`. A gated command computes it once,
+names it on its card and hands the work that `ChatOpen`; a task start takes
+only the `ChatAgent` and derives the mode from its submitter
 (`Workspace::begin_task_start_for`), so a submitter cannot be paired with
-another caller's mode, card or no card. The
-pane persists the result as `ModeChoice` (`FollowDefault`,
-`FollowDelegated`, `Picked`), set before its first connect; a live config
-edit moves a following session to the new mode, and a person's pick stands.
-The agent is resolved when the card is built and pinned as
-`ChatAgent::Pinned`; the pane open resolves it again
+another caller's mode, card or no card. The pane persists the result as
+`ModeChoice` (`FollowDefault`, `FollowDelegated`, `Picked`), set before its
+first connect; a live config edit moves a following session to the new mode,
+and a person's pick stands. The agent is resolved when the card is built and
+pinned as `ChatAgent::Pinned`; the pane open resolves it again
 (`Workspace::resolve_chat_agent`), so an agent removed meanwhile is refused as
 `agent_unavailable` rather than replaced. The card's `ChatDisclosure` (agent
 name and requested-mode label) travels with the approved command as `Asked`'s
 `shown`; after approval, before any git work or pane, `Asked::still_shown`
 reads it again the same way and refuses a difference as `approval_stale` (a
-mode or agent name edited in Settings, or an adapter's renamed mode, while
-the card waited). A `task_start` card also carries the task definition it
-was written from (`workspace::ShownTaskStart`: project, `run_in`, branch,
-base worktree, title, prompt, flow). `still_shown` compares it, the budget
-slot follows its `run_in`, and the start compares it once more where it
-reads the task, with no task proposal still landing, and before the
-repository lock, git or the log; an edit landing in between answers
-`approval_stale` and the reserved slot is released unspent. The start's
-commit freezes the run's title and prompt as checked, so a later edit
-never reaches the agent. A `task_open` card names the mode a new pane would take
-even while a pane still shows the run, since that pane may close before the
-answer. Found after git, the worktree is
-kept as a lane with nothing open and the refusal is
-`agent_unavailable_worktree_kept`, carrying its handle, so the caller can
-open a chat there rather than retry a branch name git now refuses; it spends
-the agent's worktree budget like a success. A task start (chat or flow) that
-fails after its new worktree is registered (the pane, the prompt's delivery,
-the flow's submission, a cancel landing meanwhile) is
+mode or agent name edited in Settings, or an adapter's renamed mode, while the
+card waited). A `task_start` card also carries the task definition it was
+written from (`workspace::ShownTaskStart`: project, `run_in`, branch, base
+worktree, title, prompt, flow). `still_shown` compares it, the budget slot
+follows its `run_in`, and the start compares it once more where it reads the
+task, with no task proposal still landing, and before the repository lock, git
+or the log; an edit landing in between answers `approval_stale` and the
+reserved slot is released unspent. The start's commit freezes the run's title
+and prompt as checked, so a later edit never reaches the agent. A `task_open`
+card names the mode a new pane would take even while a pane still shows the
+run, since that pane may close before the answer. Found after git, the worktree
+is kept as a lane with nothing open and the refusal is
+`agent_unavailable_worktree_kept`, carrying its handle, so the caller can open
+a chat there rather than retry a branch name git now refuses; it spends the
+agent's worktree budget like a success. A task start (chat or flow) that fails
+after its new worktree is registered (the pane, the prompt's delivery, the
+flow's submission, a cancel landing meanwhile) is
 `TaskStartError::WorktreeKept` around its cause, answering
 `task_start_failed_worktree_kept` with the handle and the cause's detail, and
-spends the budget the same way. A project or window closed while git ran
-leaves the checkout on disk with its branch and no lane, so there is no
-handle to give: a task start (`TaskStartError::left_unregistered`) or a
-`worktree_create` answers `worktree_unregistered` with the checkout's path,
-which `git worktree remove` clears (`git worktree prune` keeps it, since its
+spends the budget the same way. A project or window closed while git ran leaves
+the checkout on disk with its branch and no lane, so there is no handle to
+give: a task start (`TaskStartError::left_unregistered`) or a `worktree_create`
+answers `worktree_unregistered` with the checkout's path, which
+`git worktree remove` clears (`git worktree prune` keeps it, since its
 directory exists), and spends the budget too. A recorded task start fails as
-`AgentMissing` when its agent is gone, either way. A card discloses the agent, the requested mode,
-the task title and the prompt through `agent_text`: titles and prompts are
-flattened to one line, their quote marks neutralized, a long one shows its
-quoted start and end around the count it leaves out (the middle is disclosed
-only as that count, never shown), and the invisible characters dropped (bidi,
-zero-width, tag) are counted, since the agent still receives them. Both
-counts stand outside the card's quotation marks, where quoted text cannot
-forge them. A branch name may not contain those characters
+`AgentMissing` when its agent is gone, either way. A card discloses the agent,
+the requested mode, the task title and the prompt through `agent_text`: titles
+and prompts are flattened to one line, their quote marks neutralized, a long
+one shows its quoted start and end around the count it leaves out (the middle
+is disclosed only as that count, never shown), and the invisible characters
+dropped (bidi, zero-width, tag) are counted, since the agent still receives
+them. Both counts stand outside the card's quotation marks, where quoted text
+cannot forge them. A branch name may not contain those characters
 (`BranchNameRule::InvisibleChar`), since it reaches the agent's first prompt
 uncounted; worktree and branch names are still quoted on a card the same way.
-So are project names, and a chat task's start card names its worktree and
-the branch its first prompt's header gives the agent, which an existing
-worktree's git checkout chose without that rule. A phone announcement
-flattens the agent and worktree names it shows.
-A mode name the adapter advertised that daruda's seed does not match
-is shown beside the mode id. Phone `/task` rows quote titles the same way.
-A flow task's start card quotes the prompt too unless the flow was found to
-declare no input for it (`TaskFlowApproval::takes_prompt`). The
-`task_create` card quotes the prompt by the same rule, since a phone `/task`
-start shows no card: like a chat task's announcement, its notice names the
-flow and its modes, not the prompt, which the person either approved on the
-card when the orchestrator created the task or typed on the desktop.
-A card for a chat already open names no mode, since that pane keeps its
-own.
+So are project names, and a chat task's start card names its worktree and the
+branch its first prompt's header gives the agent, which an existing worktree's
+git checkout chose without that rule. A phone announcement flattens the agent
+and worktree names it shows. A mode name the adapter advertised that daruda's
+seed does not match is shown beside the mode id. Phone `/task` rows quote
+titles the same way. A flow task's start card quotes the prompt too unless the
+flow was found to declare no input for it (`TaskFlowApproval::takes_prompt`).
+The `task_create` card quotes the prompt by the same rule, since a phone
+`/task` start shows no card: like a chat task's announcement, its notice names
+the flow and its modes, not the prompt, which the person either approved on the
+card when the orchestrator created the task or typed on the desktop. A card for
+a chat already open names no mode, since that pane keeps its own.
 
 `control/approval` owns the process-wide pending decision. The orchestrator's
 host-owned card strip remains answerable without a remote channel. Desktop and
