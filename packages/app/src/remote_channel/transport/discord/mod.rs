@@ -203,6 +203,12 @@ fn parse(event: &Value) -> Option<Incoming> {
             user_id: user["id"].as_str()?.to_owned(),
             conversation_id: data["channel_id"].as_str()?.to_owned(),
             scope_id: data["guild_id"].as_str().unwrap_or_default().to_owned(),
+            // A guild channel has other members; outside a guild it is a DM.
+            conversation_kind: if data["guild_id"].is_string() {
+                daruda_config::remote::ConversationKind::Shared
+            } else {
+                daruda_config::remote::ConversationKind::Direct
+            },
         },
         kind,
     })

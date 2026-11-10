@@ -41,6 +41,7 @@ pub(crate) fn setup(cx: &mut App) -> futures::channel::mpsc::UnboundedReceiver<P
             user_id: "1".into(),
             conversation_id: "2".into(),
             scope_id: "3".into(),
+            conversation_kind: daruda_config::remote::ConversationKind::Unknown,
         });
         config.remote.channels.push(channel);
     }
@@ -420,6 +421,7 @@ fn disabled_or_revoked_connections_cannot_deliver(cx: &mut gpui::TestAppContext)
             user_id: "U1".into(),
             conversation_id: "D1".into(),
             scope_id: "T1".into(),
+            conversation_kind: daruda_config::remote::ConversationKind::Unknown,
         });
         config.remote.channels.push(channel);
         cx.global_mut::<SettingsStore>()

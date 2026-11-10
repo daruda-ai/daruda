@@ -18,6 +18,7 @@ fn paired_slack() -> daruda_config::Config {
         user_id: "U1".to_owned(),
         conversation_id: "D1".to_owned(),
         scope_id: "T1".to_owned(),
+        conversation_kind: daruda_config::remote::ConversationKind::Unknown,
     });
     let mut config = daruda_config::Config::default();
     config.remote.channels = vec![channel];

@@ -149,6 +149,7 @@ mod tests {
             user_id: "U1".into(),
             conversation_id: "D1".into(),
             scope_id: "T1".into(),
+            conversation_kind: daruda_config::remote::ConversationKind::Unknown,
         }
     }
 

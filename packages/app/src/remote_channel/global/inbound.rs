@@ -155,6 +155,16 @@ fn dispatch_claimed(
     Some(effect)
 }
 
+/// The pairing confirmation, saying who else reads the conversation.
+fn pair_success(kind: daruda_config::remote::ConversationKind) -> String {
+    use daruda_config::remote::ConversationKind;
+    match kind {
+        ConversationKind::Direct => s::remote_channel::pair_success_direct(),
+        ConversationKind::Shared => s::remote_channel::pair_success_shared(),
+        ConversationKind::Unknown => s::remote_channel::pair_success(),
+    }
+}
+
 pub(super) fn spawn(receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) {
     serve_events(receiver, crate::runs::RunsHost::claim_inbound, cx);
 }
@@ -229,7 +239,7 @@ async fn serve<F: Future<Output = ClaimResult>>(
             }
         });
         if persisted {
-            let message = Message::plain(s::remote_channel::pair_success(), None);
+            let message = Message::plain(pair_success(recipient.conversation_kind), None);
             let result = cx
                 .background_executor()
                 .spawn(async move { transport::send(kind, &bot.credentials, &recipient, message) })

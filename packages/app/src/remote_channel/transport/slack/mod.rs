@@ -118,6 +118,7 @@ fn parse(envelope: &Value) -> Option<Incoming> {
                     user_id: event["user"].as_str()?.to_owned(),
                     conversation_id: event["channel"].as_str()?.to_owned(),
                     scope_id: payload["team_id"].as_str()?.to_owned(),
+                    conversation_kind: conversation_kind(event["channel_type"].as_str()),
                 },
                 kind: IncomingKind::Message {
                     text: unescape(event["text"].as_str()?),
@@ -131,6 +132,7 @@ fn parse(envelope: &Value) -> Option<Incoming> {
                 user_id: payload["user"]["id"].as_str()?.to_owned(),
                 conversation_id: payload["channel"]["id"].as_str()?.to_owned(),
                 scope_id: payload["team"]["id"].as_str()?.to_owned(),
+                conversation_kind: daruda_config::remote::ConversationKind::Unknown,
             },
             kind: IncomingKind::Callback {
                 data: payload["actions"][0]["value"].as_str()?.to_owned(),
@@ -142,6 +144,18 @@ fn parse(envelope: &Value) -> Option<Incoming> {
             },
         }),
         _ => None,
+    }
+}
+
+/// Who else reads a conversation, by Slack's `channel_type`: only a DM with
+/// the bot is private to the person; a channel, private channel or group DM
+/// has other members.
+fn conversation_kind(channel_type: Option<&str>) -> daruda_config::remote::ConversationKind {
+    use daruda_config::remote::ConversationKind;
+    match channel_type {
+        Some("im") => ConversationKind::Direct,
+        Some("channel" | "group" | "mpim") => ConversationKind::Shared,
+        _ => ConversationKind::Unknown,
     }
 }
 

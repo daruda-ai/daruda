@@ -143,3 +143,29 @@ fn chat_update_refusals_are_gone_unless_slack_names_them_transient() {
         assert_eq!(got, want, "{shown}");
     }
 }
+
+/// A DM with the bot is the person's alone; anywhere else has other members,
+/// which the person is told when pairing there.
+#[test]
+fn a_message_says_who_else_reads_its_conversation() {
+    use daruda_config::remote::ConversationKind;
+    let cases = [
+        (Some("im"), ConversationKind::Direct),
+        (Some("channel"), ConversationKind::Shared),
+        (Some("group"), ConversationKind::Shared),
+        (Some("mpim"), ConversationKind::Shared),
+        (None, ConversationKind::Unknown),
+    ];
+    for (channel_type, want) in cases {
+        let mut event = json!({"type":"message", "user":"U1", "channel":"D1", "text":"!pair ABC"});
+        if let Some(channel_type) = channel_type {
+            event["channel_type"] = json!(channel_type);
+        }
+        let value = json!({"type":"events_api", "payload":{"event_id":"Ev", "team_id":"T1", "event": event}});
+        assert_eq!(
+            parse(&value).unwrap().sender.conversation_kind,
+            want,
+            "{channel_type:?}"
+        );
+    }
+}

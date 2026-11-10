@@ -147,6 +147,12 @@ agents from your phone, receive their results, and answer their approvals.
 Turn on **Only while away** to forward messages only when you are away from
 daruda.
 
+Pair a Slack or Discord bot where you want the replies: in your direct
+message with the bot, only you see them; in a channel, its members can read
+the agents' replies, code and file paths included, while only you can control
+the agents. Messages there are kept like any other in your workspace, under
+its retention and export settings.
+
 <img src=".github/readme/en/remote-control.png" alt="Remote Control settings with the /daruda orchestrator route and a Slack integration with bot and app token fields" width="100%" />
 
 ### Terminals in the same window

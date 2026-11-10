@@ -55,6 +55,7 @@ async fn independent_connections_keep_serving_while_one_claim_waits(cx: &mut Tes
                         user_id: "stranger".into(),
                         conversation_id: "2".into(),
                         scope_id: "3".into(),
+                        conversation_kind: daruda_config::remote::ConversationKind::Unknown,
                     },
                     kind: IncomingKind::Message {
                         text: "!list".into(),
@@ -152,6 +153,7 @@ async fn a_healthy_channels_approval_and_reconnect_do_not_wait_for_another_claim
                     user_id: "stranger".into(),
                     conversation_id: "2".into(),
                     scope_id: "3".into(),
+                    conversation_kind: daruda_config::remote::ConversationKind::Unknown,
                 },
                 kind: IncomingKind::Message {
                     text: "!list".into(),

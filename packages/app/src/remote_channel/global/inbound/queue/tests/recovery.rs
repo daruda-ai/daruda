@@ -48,6 +48,7 @@ async fn a_ready_queued_before_claim_failure_cannot_release_the_failed_command(
                     user_id: "stranger".into(),
                     conversation_id: "2".into(),
                     scope_id: "3".into(),
+                    conversation_kind: daruda_config::remote::ConversationKind::Unknown,
                 },
                 kind: IncomingKind::Message {
                     text: "!list".into(),

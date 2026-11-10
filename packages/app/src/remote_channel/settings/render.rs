@@ -4,8 +4,17 @@ use crate::{
     surface::strings as s,
     ui::{self, Disableable, IconName, theme},
 };
-use daruda_config::remote::ChannelKind;
+use daruda_config::remote::{ChannelKind, ConversationKind};
 use gpui::{Context, IntoElement, Render, Window, div, prelude::*, px};
+
+/// Who else reads the paired conversation, when daruda recorded it.
+fn audience_note(kind: ConversationKind) -> Option<String> {
+    match kind {
+        ConversationKind::Direct => Some(s::remote_channel::paired_direct()),
+        ConversationKind::Shared => Some(s::remote_channel::paired_shared()),
+        ConversationKind::Unknown => None,
+    }
+}
 
 fn status_label(status: Status) -> String {
     match status {
@@ -171,6 +180,10 @@ impl Render for ChannelSettings {
                                 })),
                         ),
                 );
+                if let Some(note) = audience_note(recipient.conversation_kind) {
+                    section =
+                        section.child(div().text_color(theme::current(cx).text_muted).child(note));
+                }
             } else {
                 section = section.child(
                     ui::button(("remote-pair", index), s::remote_channel::pair())
@@ -181,6 +194,11 @@ impl Render for ChannelSettings {
                 );
             }
             if let Some(code) = &row.pair_code {
+                section = section.child(
+                    div()
+                        .text_color(theme::current(cx).text_muted)
+                        .child(s::remote_channel::pair_hint()),
+                );
                 section = section.child(
                     div()
                         .flex()

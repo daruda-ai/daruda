@@ -246,6 +246,7 @@ fn install_connection_with_queue(
         user_id: "user".into(),
         conversation_id: "room".into(),
         scope_id: "scope".into(),
+        conversation_kind: daruda_config::remote::ConversationKind::Unknown,
     });
     config.remote.channels.push(channel);
     cx.global_mut::<SettingsStore>()
@@ -304,6 +305,7 @@ async fn slack_redelivery_after_a_profile_uuid_handoff_has_no_second_effect_or_r
                     user_id: "user".into(),
                     conversation_id: "room".into(),
                     scope_id: "scope".into(),
+                    conversation_kind: daruda_config::remote::ConversationKind::Unknown,
                 },
                 kind: IncomingKind::Message {
                     text: "!list".into(),
@@ -515,6 +517,7 @@ fn from(user: &str, event_id: &str, generation: uuid::Uuid) -> WorkerEvent {
                 user_id: user.into(),
                 conversation_id: "room".into(),
                 scope_id: "scope".into(),
+                conversation_kind: daruda_config::remote::ConversationKind::Unknown,
             },
             kind: IncomingKind::Message {
                 text: "hello".into(),
@@ -996,6 +999,7 @@ fn a_thread_reply_reaches_its_pane_and_an_unplaceable_thread_is_refused(cx: &mut
                     user_id: "user".into(),
                     conversation_id: "room".into(),
                     scope_id: "scope".into(),
+                    conversation_kind: daruda_config::remote::ConversationKind::Unknown,
                 },
                 kind: IncomingKind::Message {
                     text: text.into(),
@@ -1058,6 +1062,7 @@ fn a_root_stop_tap_reaches_the_threads_pane_and_answers_in_the_thread(cx: &mut T
                     user_id: "user".into(),
                     conversation_id: "room".into(),
                     scope_id: "scope".into(),
+                    conversation_kind: daruda_config::remote::ConversationKind::Unknown,
                 },
                 kind: IncomingKind::Callback {
                     data,
@@ -1162,6 +1167,7 @@ fn thread_reply(text: &str) -> transport::Incoming {
             user_id: "user".into(),
             conversation_id: "room".into(),
             scope_id: "scope".into(),
+            conversation_kind: daruda_config::remote::ConversationKind::Unknown,
         },
         kind: IncomingKind::Message {
             text: text.into(),
