@@ -167,7 +167,9 @@ pub(crate) fn delegated_picker_value(stored: Option<&str>) -> SharedString {
 /// The delegated-mode picker's options: a "no override" entry naming what
 /// [`daruda_config::delegated_default`] picks, by the name an approval card
 /// gives it; then "Same as session mode", the stated opt-out of that default;
-/// then the row's mode vocabulary.
+/// then the row's mode vocabulary. An adapter with no policy default already
+/// follows the session mode from the first entry, so the opt-out is offered
+/// only to keep a stored blank selected and saved as it is.
 pub(crate) fn agent_row_delegated_options(
     vocabulary: &AgentVocabularyCache,
     agent_id: &str,
@@ -178,28 +180,28 @@ pub(crate) fn agent_row_delegated_options(
     let seed_modes = seed.as_ref().map_or(&[][..], |seed| seed.modes.as_slice());
     let known = vocabulary.known_modes_for(agent_id, command);
     let entries = known_axis(known, seed_modes);
-    let default_named = match daruda_config::delegated_default_for_command(command) {
+    let policy_default = daruda_config::delegated_default_for_command(command);
+    let default_named = match policy_default {
         Some(id) => daruda_config::mode_display_name(known, command, id),
         None => s::settings::agent_field_default_mode(),
     };
-    let saved = if saved == DELEGATED_FOLLOWS_SESSION {
-        ""
-    } else {
-        saved
-    };
+    let follows_saved = saved == DELEGATED_FOLLOWS_SESSION;
+    let saved = if follows_saved { "" } else { saved };
     let mut options = options_with_sentinel(
         entries,
         s::settings::agent_delegated_mode_default_named(default_named),
         saved,
         mode_label,
     );
-    options.insert(
-        1,
-        SelectOption::new(
-            DELEGATED_FOLLOWS_SESSION,
-            s::settings::agent_delegated_mode_follows_session_mode(),
-        ),
-    );
+    if policy_default.is_some() || follows_saved {
+        options.insert(
+            1,
+            SelectOption::new(
+                DELEGATED_FOLLOWS_SESSION,
+                s::settings::agent_delegated_mode_follows_session_mode(),
+            ),
+        );
+    }
     options
 }
 
@@ -446,14 +448,14 @@ mod tests {
                 crate::strings::settings::agent_field_default_mode()
             )
         );
-        assert_eq!(values(&other), vec!["", FOLLOWS, "legacy"]);
+        assert_eq!(values(&other), vec!["", "legacy"]);
     }
 
     const FOLLOWS: &str = super::DELEGATED_FOLLOWS_SESSION;
 
-    /// "Same as session mode" sits right after the policy default on every
-    /// adapter, and a stored blank selects it rather than the default or an
-    /// appended blank entry.
+    /// While a blank is stored, "Same as session mode" sits right after the
+    /// policy default on every adapter, and the blank selects it rather than
+    /// the default or an appended blank entry.
     #[test]
     fn the_delegated_picker_offers_same_as_session_mode_for_a_blank_value() {
         let vocabulary = AgentVocabularyCache::default();
@@ -475,6 +477,28 @@ mod tests {
             assert_eq!(super::delegated_picker_value(Some(blank)).as_ref(), FOLLOWS);
         }
         assert_eq!(super::delegated_picker_value(Some("plan")).as_ref(), "plan");
+    }
+
+    /// An adapter with no policy default follows the session mode from its
+    /// Default entry, so a second entry doing the same is not offered; one
+    /// with a policy default offers it as the way out of that default.
+    #[test]
+    fn same_as_session_mode_is_offered_only_where_it_differs_from_default() {
+        let vocabulary = AgentVocabularyCache::default();
+        for (command, offered) in [
+            (CLAUDE, true),
+            ("npx codex-acp", true),
+            ("other --acp", false),
+        ] {
+            for saved in ["", "plan"] {
+                let options = agent_row_delegated_options(&vocabulary, "a", command, saved);
+                assert_eq!(
+                    values(&options).iter().any(|v| v == FOLLOWS),
+                    offered,
+                    "{command} {saved:?}"
+                );
+            }
+        }
     }
 
     /// A value pinned before the agent ever advertised anything has to stay
