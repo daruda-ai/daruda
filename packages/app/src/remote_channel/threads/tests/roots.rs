@@ -53,8 +53,8 @@ fn work_keeps_the_time_it_began_until_the_turn_ends() {
     }
 }
 
-/// Emoji names render as Slack's art; U+23F9 with no variation selector
-/// renders as a plain glyph, which is why stopping shows `octagonal_sign`.
+/// Emoji names render as Slack's art, where a bare character such as U+23F9
+/// with no variation selector renders as a plain glyph.
 #[test]
 fn every_status_names_a_slack_emoji() {
     let cases = [
@@ -65,7 +65,7 @@ fn every_status_names_a_slack_emoji() {
         (ShownStatus::NeedsYou { since: NOW }, "bell"),
         (ShownStatus::Ended(Ending::Completed), "white_check_mark"),
         (ShownStatus::Ended(Ending::Failed), "x"),
-        (ShownStatus::Ended(Ending::Stopped), "octagonal_sign"),
+        (ShownStatus::Ended(Ending::Stopped), "double_vertical_bar"),
         (ShownStatus::Ended(Ending::OverageStopped), "credit_card"),
         (ShownStatus::Closed, "door"),
     ];

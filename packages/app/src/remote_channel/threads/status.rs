@@ -86,9 +86,10 @@ impl ShownStatus {
                 s::remote_channel::thread_status_completed(),
             ),
             Self::Ended(Ending::Failed) => ("x", s::remote_channel::thread_status_failed()),
-            Self::Ended(Ending::Stopped) => {
-                ("octagonal_sign", s::remote_channel::thread_status_stopped())
-            }
+            Self::Ended(Ending::Stopped) => (
+                "double_vertical_bar",
+                s::remote_channel::thread_status_stopped(),
+            ),
             Self::Ended(Ending::OverageStopped) => {
                 ("credit_card", s::remote_channel::thread_status_overage())
             }
