@@ -89,6 +89,12 @@ pub fn send_recording(
     }
 }
 
+/// Whether `kind` gives each pane a thread of its own. The one question asked
+/// before using a transport's thread API; other channels post at the top.
+pub(crate) fn pane_threads(kind: ChannelKind) -> bool {
+    matches!(kind, ChannelKind::Slack)
+}
+
 pub fn edit(
     kind: ChannelKind,
     credentials: &Credentials,

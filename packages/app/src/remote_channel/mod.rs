@@ -12,6 +12,7 @@ pub(crate) mod lock;
 mod pairing;
 pub(crate) mod runtime;
 pub(crate) mod settings;
+pub(crate) mod threads;
 pub(crate) mod trace;
 pub(crate) mod transport;
 

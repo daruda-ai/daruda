@@ -86,6 +86,13 @@ impl StorageLayout {
         self
     }
 
+    pub(crate) const REMOTE_THREADS_FILE: &'static str = "remote-threads.json";
+
+    /// Profile-scoped: thread records name this profile's panes.
+    pub(crate) fn remote_threads(&self) -> PathBuf {
+        self.data.join(Self::REMOTE_THREADS_FILE)
+    }
+
     pub(crate) fn status_icon_themes(&self) -> PathBuf {
         self.data.join("status-icon-themes")
     }

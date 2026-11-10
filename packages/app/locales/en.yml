@@ -2596,6 +2596,8 @@ remote_channel:
   retrying: "Reconnecting"
   failed: "Connection rejected: check bot permissions"
   held_elsewhere: "Another daruda is connected to this bot"
+  thread_new_conversation: "— New conversation —"
+  thread_switched_agent: "— Switched to %{agent} —"
 
 library:
   toggle_needs_project: "Claude enablement is per project. Open a local project to change it."

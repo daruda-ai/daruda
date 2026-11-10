@@ -43,6 +43,7 @@ pub struct RemoteChannels {
     events: UnboundedSender<WorkerEvent>,
     outbound: UnboundedSender<Pending>,
     applied: Option<Vec<ChannelConfig>>,
+    pub(crate) threads: super::threads::driver::Threads,
 }
 
 impl Global for RemoteChannels {}
@@ -523,6 +524,7 @@ pub fn install(cx: &mut App) {
         events,
         outbound,
         applied: None,
+        threads: super::threads::driver::Threads::load(),
     });
     inbound::spawn(incoming, cx);
     outbound::spawn(outgoing, cx);

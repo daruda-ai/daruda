@@ -14,6 +14,7 @@ mod persistence;
 mod persistence_recovery;
 mod project;
 mod remote_channels;
+mod remote_threads;
 mod run_ledger;
 mod session_host_id;
 mod support;

@@ -19,6 +19,7 @@ use crate::workspace::main_area::pane_tree::PaneId;
 mod diff_preview;
 mod inbound;
 mod questions;
+mod thread;
 
 pub(in crate::workspace) use daruda_chat::phone_turn::{FirstResponseOutcome, PhoneTurn};
 

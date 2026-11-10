@@ -245,6 +245,7 @@ fn install_connection(id: &str, bot: Arc<BotSession>, cx: &mut App) -> uuid::Uui
         events,
         outbound,
         applied: None,
+        threads: crate::remote_channel::threads::driver::Threads::load(),
     });
     super::super::reconcile(cx);
     let connection = cx

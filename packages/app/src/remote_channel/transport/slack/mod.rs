@@ -210,6 +210,17 @@ pub fn send(
     credentials: &Credentials,
     recipient: &RemoteRecipient,
     message: Message,
+    on_sent: impl FnMut(&str),
+) -> Result<Vec<String>> {
+    post(credentials, recipient, message, None, on_sent)
+}
+
+/// Post `message` at the top of the conversation, or as replies under `thread`.
+fn post(
+    credentials: &Credentials,
+    recipient: &RemoteRecipient,
+    message: Message,
+    thread: Option<&str>,
     mut on_sent: impl FnMut(&str),
 ) -> Result<Vec<String>> {
     let (text, markdown) = super::format::slack(&message);
@@ -234,20 +245,32 @@ pub fn send(
         } else {
             text.clone()
         };
-        let response = api(
-            &credentials.bot,
-            "chat.postMessage",
-            &json!({
-                "channel": recipient.conversation_id, "text": fallback, "mrkdwn": false,
-                "parse": "none", "unfurl_links": false, "unfurl_media": false,
-                "blocks": message_blocks,
-            }),
-        )?;
+        let payload = post_payload(recipient, &fallback, message_blocks, thread);
+        let response = api(&credentials.bot, "chat.postMessage", &payload)?;
         let id = http::required(&response, "ts")?;
         on_sent(id);
         ids.push(id.to_owned());
     }
     Ok(ids)
+}
+
+/// A `chat.postMessage` body: literal fallback text, no unfurling, and a
+/// reply under `thread` when given.
+fn post_payload(
+    recipient: &RemoteRecipient,
+    fallback: &str,
+    blocks: Vec<Value>,
+    thread: Option<&str>,
+) -> Value {
+    let mut payload = json!({
+        "channel": recipient.conversation_id, "text": fallback, "mrkdwn": false,
+        "parse": "none", "unfurl_links": false, "unfurl_media": false,
+        "blocks": blocks,
+    });
+    if let Some(thread) = thread {
+        payload["thread_ts"] = json!(thread);
+    }
+    payload
 }
 
 pub fn edit(
@@ -289,6 +312,8 @@ fn update_result(
         Err(failure) => Err(http::edit_failure(failure)),
     }
 }
+
+pub(crate) mod threads;
 
 #[cfg(test)]
 mod tests;

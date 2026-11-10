@@ -23,6 +23,7 @@ pub mod persistence;
 pub(crate) mod profile;
 pub mod project;
 pub mod remote_channels;
+pub mod remote_threads;
 pub mod run_ledger;
 mod storage;
 pub mod tasks;

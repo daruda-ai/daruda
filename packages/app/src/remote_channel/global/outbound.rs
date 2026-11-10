@@ -5,6 +5,7 @@ use crate::remote_channel::{
         Begun, CardId, CardScope, EditOutcome, SendClaim, SendOutcome, Settlement, quit::QuitEdit,
     },
     runtime::BotSession,
+    threads::driver::{self, ThreadPlan},
     transport::{self, Message},
 };
 use daruda_config::remote::{ChannelKind, RemoteRecipient};
@@ -42,6 +43,8 @@ pub(super) struct Prepared {
     message: Message,
     pane: Option<PaneRef>,
     original: String,
+    /// The pane's thread, on a channel that gives panes their own.
+    thread: Option<ThreadPlan>,
 }
 
 pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
@@ -78,6 +81,16 @@ pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
     } else {
         format!("{}\n{tail}", message.header)
     };
+    let thread = pane.and_then(|pane| {
+        driver::plan(
+            &pending.id,
+            kind,
+            &pending.bot,
+            &pending.recipient,
+            pane,
+            cx,
+        )
+    });
     Some(Prepared {
         kind,
         bot: pending.bot.clone(),
@@ -85,6 +98,7 @@ pub(super) fn prepare(pending: &Pending, cx: &mut App) -> Option<Prepared> {
         message,
         pane,
         original,
+        thread,
     })
 }
 
@@ -488,24 +502,46 @@ fn spawn_connection(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
             };
             let pane = prepared.pane;
             let original = prepared.original.clone();
-            let (outcome, result) = cx
+            let (outcome, result, thread) = cx
                 .background_executor()
                 .spawn(async move {
                     if !prepared.bot.is_live() {
-                        return (SendOutcome::NotSent, Ok(Vec::new()));
+                        return (SendOutcome::NotSent, Ok(Vec::new()), None);
                     }
                     let mut sent = Vec::new();
-                    let result = transport::send_recording(
-                        prepared.kind,
-                        &prepared.bot.credentials,
-                        &prepared.recipient,
-                        prepared.message,
-                        |id| sent.push(id.to_owned()),
-                    );
-                    (sent_outcome(sent), result)
+                    let record = |id: &str| sent.push(id.to_owned());
+                    let (result, started) = match &prepared.thread {
+                        Some(plan) => {
+                            let posted = driver::deliver(
+                                plan,
+                                &prepared.bot.credentials,
+                                &prepared.recipient,
+                                prepared.message,
+                                record,
+                            );
+                            (posted.result, posted.root)
+                        }
+                        None => (
+                            transport::send_recording(
+                                prepared.kind,
+                                &prepared.bot.credentials,
+                                &prepared.recipient,
+                                prepared.message,
+                                record,
+                            ),
+                            None,
+                        ),
+                    };
+                    let started = prepared.thread.zip(started);
+                    (sent_outcome(sent), result, started)
                 })
                 .await;
-            cx.update(|cx| finish(&pending, pane, outcome, original, cx));
+            cx.update(|cx| {
+                if let Some((plan, root)) = &thread {
+                    driver::record_root(plan, root.clone(), cx);
+                }
+                finish(&pending, pane, outcome, original, cx);
+            });
             if let Err(error) = result {
                 crate::remote_channel::log_error(
                     "Remote message failed to send",
