@@ -356,6 +356,9 @@ pub(crate) fn render_error(error: &ControlError) -> String {
         ControlError::TaskStartFailedWorktreeKept { .. } => {
             s::control::error_task_start_failed_worktree_kept()
         }
+        // The path stays on the desktop, as the other answers keep it; the
+        // MCP result carries it.
+        ControlError::WorktreeUnregistered { .. } => s::control::error_worktree_unregistered(),
     }
 }
 

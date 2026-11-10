@@ -21,6 +21,7 @@ use gpui::{Context, Window};
 use super::task_existing_lane_ops::ExistingLaneStart;
 use super::task_start::{
     Answer, StartedOn, TaskStartError, TaskStarted, WorktreeStart, abandon_start,
+    window_closed_after,
 };
 use crate::runs::{FlowSubmitter, GlobalTasks, RunsHost};
 use crate::workspace::Workspace;
@@ -212,6 +213,7 @@ impl Workspace {
                     }
                 })
                 .await;
+            let gone = window_closed_after(&added, &plan.new_path);
             let continued = ws.update_in(cx, |ws, window, cx| {
                 // Released before registering, as a chat task's start does:
                 // the worktree is on disk either way.
@@ -226,12 +228,9 @@ impl Workspace {
                     return;
                 }
                 if ws.project_for(project_id).is_none() {
-                    ws.finish_task_start(
-                        Err(TaskStartError::ProjectNotOpen),
-                        Some(&exec),
-                        &answer,
-                        cx,
-                    );
+                    let closed =
+                        TaskStartError::ProjectNotOpen.left_unregistered(plan.new_path.clone());
+                    ws.finish_task_start(Err(closed), Some(&exec), &answer, cx);
                     return;
                 }
                 let worktree = plan.new_path.clone();
@@ -242,7 +241,7 @@ impl Workspace {
                 ws.launch_task_flow(exec.clone(), lane, worktree, launch, answer.clone(), cx);
             });
             if continued.is_err() {
-                abandon_start(&exec, &answer, cx);
+                abandon_start(&exec, gone, &answer, cx);
             }
         })
         .detach();
@@ -292,7 +291,12 @@ impl Workspace {
                 ws.finish_task_start(outcome, Some(&exec), &answer, cx);
             });
             if finished.is_err() {
-                abandon_start(&exec, &answer, cx);
+                abandon_start(
+                    &exec,
+                    lane.failed(TaskStartError::WindowClosed),
+                    &answer,
+                    cx,
+                );
             }
         })
         .detach();

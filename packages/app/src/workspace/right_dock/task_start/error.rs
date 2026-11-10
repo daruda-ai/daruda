@@ -27,9 +27,6 @@ pub(crate) enum TaskStartError {
     GitAddFailed {
         detail: String,
     },
-    FinalizeFailed {
-        detail: String,
-    },
     /// The pane opened but the prompt never reached it. The task is now
     /// `Error`; `detail` says why, for the control surface.
     PromptUndelivered {
@@ -44,11 +41,12 @@ pub(crate) enum TaskStartError {
     /// The agent a control start's card named was removed. Before the start
     /// was recorded, nothing was; after, no pane opened under another agent.
     AgentUnavailable,
-    /// `cause`, after git made the task's new worktree and it was
-    /// registered as `lane`: the worktree stays, so the caller can use it
-    /// and the orchestrator's budget counts it. Built by [`Self::kept_in`].
+    /// `cause`, after git made the task's new worktree: it stays on disk
+    /// `at` a lane or an unregistered path, so the caller is told where and
+    /// the orchestrator's budget counts it. Built by [`Self::kept_in`] and
+    /// [`Self::left_unregistered`].
     WorktreeKept {
-        lane: daruda_store::project::LaneRef,
+        at: KeptWorktree,
         cause: Box<TaskStartError>,
     },
     /// The task's flow is not one its lane can run by that name.
@@ -62,14 +60,38 @@ pub(crate) enum TaskStartError {
     },
 }
 
+/// Where a failed start's new worktree stays.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum KeptWorktree {
+    /// Registered as this lane, so it can be used as it is.
+    Lane(daruda_store::project::LaneRef),
+    /// On disk at this path with its branch checked out, but no lane: the
+    /// project or window closed between `git worktree add` and registering
+    /// it. `git worktree prune` keeps it (its directory exists); `git
+    /// worktree remove <path>` removes it, leaving the branch.
+    Unregistered(PathBuf),
+}
+
 impl TaskStartError {
     /// This failure, found once the start's new worktree was registered as
     /// `lane`.
     pub(in crate::workspace) fn kept_in(self, lane: daruda_store::project::LaneRef) -> Self {
+        self.kept(KeptWorktree::Lane(lane))
+    }
+
+    /// This failure, found after git made the start's new worktree at
+    /// `path` but before any lane registered it.
+    pub(in crate::workspace) fn left_unregistered(self, path: PathBuf) -> Self {
+        self.kept(KeptWorktree::Unregistered(path))
+    }
+
+    /// Wrapped once: a failure that already names its worktree keeps the
+    /// place it named.
+    fn kept(self, at: KeptWorktree) -> Self {
         match self {
             kept @ Self::WorktreeKept { .. } => kept,
             cause => Self::WorktreeKept {
-                lane,
+                at,
                 cause: Box::new(cause),
             },
         }
@@ -91,7 +113,6 @@ impl TaskStartError {
             Self::LaneMissing { .. } => StartFailure::LaneMissing,
             Self::PaneUnavailable => StartFailure::PaneUnavailable,
             Self::GitAddFailed { .. } => StartFailure::GitAddFailed,
-            Self::FinalizeFailed { .. } => StartFailure::FinalizeFailed,
             Self::PromptUndelivered { .. } => StartFailure::PromptUndelivered,
             Self::WindowClosed => StartFailure::WindowClosed,
             Self::FlowMissing => StartFailure::FlowMissing,
@@ -110,7 +131,16 @@ impl TaskStartError {
                 ErrorSeverity::Info,
                 "tasks.remote_lane",
             ),
-            Self::WorktreeKept { cause, .. } => return cause.report(),
+            Self::WorktreeKept { at, cause } => {
+                let mut report = cause.report()?;
+                if let KeptWorktree::Unregistered(path) = at {
+                    report.context.insert(
+                        "worktree".into(),
+                        daruda_store::observability::system_info::redact_home(path),
+                    );
+                }
+                return Some(report);
+            }
             Self::NotFound
             | Self::NotBacklog
             | Self::AgentUnavailable
@@ -170,14 +200,9 @@ impl TaskStartError {
                         .build(),
                 );
             }
-            Self::GitAddFailed { detail } | Self::FinalizeFailed { detail } => {
-                let message = if matches!(self, Self::GitAddFailed { .. }) {
-                    error::lane_create_failed()
-                } else {
-                    error::lane_finalize_failed()
-                };
+            Self::GitAddFailed { detail } => {
                 return Some(
-                    ErrorReport::new(message)
+                    ErrorReport::new(error::lane_create_failed())
                         .severity(ErrorSeverity::Error)
                         .at(file!(), line!())
                         .with_context("detail", detail.clone())

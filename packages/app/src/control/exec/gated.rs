@@ -260,14 +260,16 @@ fn guard_gated(asked: &Asked, cx: &mut App) -> Result<(), ControlError> {
 }
 
 /// Whether a creation spent its slot: a success, or a refusal that names the
-/// worktree it kept. A task start's failure after git registered its new
-/// worktree is always one of those refusals; see `TaskStartError::kept_in`.
+/// worktree git made — kept as a lane or left unregistered on disk. A
+/// failure after git made one is always such a refusal; see
+/// `TaskStartError::kept_in` and `TaskStartError::left_unregistered`.
 fn left_a_worktree(outcome: &ControlOutcome) -> bool {
     matches!(
         outcome,
         Ok(_)
             | Err(ControlError::AgentUnavailableWorktreeKept { .. }
-                | ControlError::TaskStartFailedWorktreeKept { .. })
+                | ControlError::TaskStartFailedWorktreeKept { .. }
+                | ControlError::WorktreeUnregistered { .. })
     )
 }
 

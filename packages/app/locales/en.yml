@@ -1521,7 +1521,6 @@ error:
   lane_create_failed: "Worktree create failed"
   lane_flow_lock_cleanup_failed: "Worktree flow-lock cleanup failed"
   lane_disk_cleanup_failed: "Worktree disk cleanup failed"
-  lane_finalize_failed: "Worktree finalize failed"
   lane_remove_failed: "Cannot remove worktree"
   mcp_delete_failed: "MCP delete failed"
   mcp_reload_failed: "MCP reload failed (%{source})"
@@ -2540,6 +2539,9 @@ control:
   error_task_start_failed: "The task did not start. daruda has the reason."
   # The same, after git made the task's worktree: it is kept in daruda.
   error_task_start_failed_worktree_kept: "The task did not start. daruda has the reason. Its worktree was still created and stays in daruda."
+  # Git made the worktree, but its project or window closed before daruda
+  # added it: it is on disk with its branch, listed nowhere in daruda.
+  error_worktree_unregistered: "The worktree was created, but its project or window closed before daruda could add it. It is still on disk with its branch checked out; remove it with git worktree remove before using that name again."
   error_task_title_empty: "A task needs a title."
   error_task_not_recorded: "daruda could not save that task change. The desktop has the reason."
   error_task_no_session: "That task has no conversation to open yet."

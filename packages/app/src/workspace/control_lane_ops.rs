@@ -22,6 +22,28 @@ use crate::workspace::Workspace;
 /// it, so a caller can talk to the new agent without listing again.
 pub(crate) type CreatedLane = Result<(LaneRef, PaneRef), ControlError>;
 
+/// Why a worktree git made was never registered as a lane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum Unregistered {
+    ProjectClosed,
+    WindowClosed,
+}
+
+impl Unregistered {
+    /// The answer for a checkout left at `path`, with the reason in the fixed
+    /// English a control answer carries.
+    pub(in crate::workspace) fn at(self, path: std::path::PathBuf) -> ControlError {
+        let detail = match self {
+            Self::ProjectClosed => "its project closed before daruda registered it",
+            Self::WindowClosed => "its window closed before daruda registered it",
+        };
+        ControlError::WorktreeUnregistered {
+            path,
+            detail: detail.to_owned(),
+        }
+    }
+}
+
 impl Workspace {
     /// Create a worktree in `project` and open `chat` in it.
     ///
@@ -81,9 +103,15 @@ impl Workspace {
                         .await
                 };
 
+                // Once git made the checkout, a window gone before it is
+                // registered leaves it on disk with no lane: name its path.
+                let gone = match &add {
+                    Ok(()) => Unregistered::WindowClosed.at(plan.new_path.clone()),
+                    Err(_) => ControlError::TargetGone,
+                };
                 let outcome = match async_cx.update(|window, app_cx| {
                     let Some(workspace) = weak.upgrade() else {
-                        return Err(ControlError::TargetGone);
+                        return Err(gone.clone());
                     };
                     workspace.update(app_cx, |ws, cx| {
                         // The lock is released before finalizing, matching the
@@ -118,10 +146,7 @@ impl Workspace {
                     })
                 }) {
                     Ok(outcome) => outcome,
-                    // The window is gone, so the checkout may be on disk with
-                    // nothing knowing about it — the same documented outcome
-                    // the task path has, cleaned up by `git worktree prune`.
-                    Err(_) => Err(ControlError::TargetGone),
+                    Err(_) => Err(gone),
                 };
                 let _ = tx.try_send(outcome);
             })

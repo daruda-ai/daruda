@@ -23,7 +23,7 @@ use daruda_chat::view::AgentSessionStatus;
 
 mod error;
 
-pub(crate) use error::TaskStartError;
+pub(crate) use error::{KeptWorktree, TaskStartError};
 
 /// Where an accepted start handed the task's prompt over.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -248,7 +248,7 @@ impl Workspace {
                 }
             });
             if continued.is_err() {
-                abandon_start(&exec, &answer, cx);
+                abandon_start(&exec, TaskStartError::WindowClosed, &answer, cx);
             }
         })
         .detach();
@@ -352,6 +352,7 @@ impl Workspace {
                         }
                     })
                     .await;
+                let gone = window_closed_after(&result, &plan.new_path);
 
                 let update_result = async_cx.update(|window, app_cx| {
                     let Some(workspace) = me.upgrade() else {
@@ -360,10 +361,10 @@ impl Workspace {
                     workspace.update(app_cx, |ws, cx| {
                         // Lock is released *before* finalize_chat_lane runs,
                         // so a retry against the same repo isn't blocked.
-                        // The worktree is on disk either way: a failed
-                        // finalize leaves it unregistered (`git worktree
-                        // prune` cleans it up), a removed agent registers it
-                        // with nothing open.
+                        // The worktree is on disk either way: a project
+                        // closed meanwhile leaves it unregistered, named by
+                        // its path; a removed agent registers it with
+                        // nothing open.
                         ws.release_repo_lock(&plan.repo_root);
                         let started = result
                             .map_err(|detail| TaskStartError::GitAddFailed { detail })
@@ -377,9 +378,8 @@ impl Workspace {
                                     cx,
                                 )
                                 .map_err(|e| match e {
-                                    FinalizeError::Failed(detail) => {
-                                        TaskStartError::FinalizeFailed { detail }
-                                    }
+                                    FinalizeError::ProjectClosed => TaskStartError::ProjectNotOpen
+                                        .left_unregistered(plan.new_path.clone()),
                                     FinalizeError::AgentUnavailable { lane } => {
                                         TaskStartError::AgentUnavailable.kept_in(lane)
                                     }
@@ -427,7 +427,7 @@ impl Workspace {
                             .dedup("task_workflow.completion.update_failed")
                             .build(),
                     );
-                    abandon_start(&exec, &answer, async_cx);
+                    abandon_start(&exec, gone, &answer, async_cx);
                 }
             })
             .detach();
@@ -620,15 +620,29 @@ pub(super) fn fail_start(exec: &ExecutionRef, e: &TaskStartError, cx: &mut App) 
     RunsHost::delivery_failed(exec.clone(), crate::runs::DeliveryFailure::Start(cause), cx);
 }
 
-/// The window closed under a recorded start: record it, then answer.
-pub(super) fn abandon_start(exec: &ExecutionRef, answer: &Answer, cx: &gpui::AsyncApp) {
-    cx.update(|cx| abandon_start_now(exec, answer, cx));
+/// The window closed once `git worktree add` answered `added`: a checkout
+/// git made is left on disk with no lane, so the failure names its `path`.
+pub(super) fn window_closed_after(added: &Result<(), String>, path: &Path) -> TaskStartError {
+    match added {
+        Ok(()) => TaskStartError::WindowClosed.left_unregistered(path.to_path_buf()),
+        Err(_) => TaskStartError::WindowClosed,
+    }
 }
 
-fn abandon_start_now(exec: &ExecutionRef, answer: &Answer, cx: &mut App) {
-    fail_start(exec, &TaskStartError::WindowClosed, cx);
-    // SILENT-OK: the caller may have stopped listening.
-    let _ = answer.try_send(Err(TaskStartError::WindowClosed));
+/// The window closed under a recorded start: record it, then answer with
+/// `closed` — `WindowClosed`, wrapped with the worktree the start left on
+/// disk if it made one.
+pub(super) fn abandon_start(
+    exec: &ExecutionRef,
+    closed: TaskStartError,
+    answer: &Answer,
+    cx: &gpui::AsyncApp,
+) {
+    cx.update(|cx| {
+        fail_start(exec, &closed, cx);
+        // SILENT-OK: the caller may have stopped listening.
+        let _ = answer.try_send(Err(closed));
+    });
 }
 
 #[cfg(test)]

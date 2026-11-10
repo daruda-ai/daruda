@@ -323,6 +323,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<(LaneRef, PaneRef), ControlError> {
         use crate::workspace::lane_ops::{FinalizeError, LaneReveal};
+        let path = plan.new_path.clone();
         let pane = self
             .finalize_chat_lane(plan, project, chat, LaneReveal::Foreground, window, cx)
             .map_err(|e| match e {
@@ -334,14 +335,11 @@ impl Workspace {
                         worktree: crate::control::result::LaneHandle::new(self.uuid(), lane),
                     }
                 }
-                // The checkout is on disk and only the bookkeeping failed,
-                // which is not something a caller can fix by asking
-                // differently — so the detail says that rather than
-                // forwarding the toast's localized wording onto a machine
-                // payload.
-                FinalizeError::Failed(_) => ControlError::LaneCreateFailed {
-                    detail: "the worktree was created but daruda could not register it".to_owned(),
-                },
+                // The checkout is on disk with no lane, so the caller is
+                // told its path: a retry with the same name fails on it.
+                FinalizeError::ProjectClosed => {
+                    crate::workspace::control_lane_ops::Unregistered::ProjectClosed.at(path)
+                }
             })?;
         Ok((
             self.active,

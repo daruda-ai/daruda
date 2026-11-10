@@ -298,9 +298,12 @@ the flow's submission, a cancel landing meanwhile) is
 `TaskStartError::WorktreeKept` around its cause, answering
 `task_start_failed_worktree_kept` with the handle and the cause's detail, and
 spends the budget the same way. A project or window closed while git ran
-leaves the checkout unregistered, with no handle to give: that start keeps
-its plain refusal and is not counted. A recorded task start fails as
-`AgentMissing` either way. A card discloses the agent, the requested mode,
+leaves the checkout on disk with its branch and no lane, so there is no
+handle to give: a task start (`TaskStartError::left_unregistered`) or a
+`worktree_create` answers `worktree_unregistered` with the checkout's path,
+which `git worktree remove` clears (`git worktree prune` keeps it, since its
+directory exists), and spends the budget too. A recorded task start fails as
+`AgentMissing` when its agent is gone, either way. A card discloses the agent, the requested mode,
 the task title and the prompt through `agent_text`: titles and prompts are
 flattened to one line, their quote marks neutralized, a long one shows its
 quoted start and end around the count it leaves out (the middle is disclosed

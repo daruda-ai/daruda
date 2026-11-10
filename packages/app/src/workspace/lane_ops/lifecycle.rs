@@ -184,8 +184,9 @@ impl Workspace {
     /// Post-git UI-thread work for a lane a person makes by hand: spawn a
     /// shell at the new checkout, wrap it in a Tab / LaneRuntime, register
     /// the Lane, and activate it. Errors leave the created worktree orphaned
-    /// on disk (recover via `git worktree prune`) and bubble the message back
-    /// to the modal.
+    /// on disk with its branch checked out — `git worktree prune` keeps it,
+    /// since its directory exists; `git worktree remove <path>` removes it —
+    /// and bubble the message back to the modal.
     pub(in crate::workspace) fn finalize_terminal_lane(
         &mut self,
         plan: CreateWorktreePlan,
@@ -232,9 +233,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<PaneId, FinalizeError> {
         if self.project_for(project_id).is_none() {
-            return Err(FinalizeError::Failed(
-                crate::surface::strings::create_lane::err_no_active_project(),
-            ));
+            return Err(FinalizeError::ProjectClosed);
         }
         let Ok(agent_id) = self.resolve_chat_agent(&chat.agent) else {
             let lane = self.register_created_lane(plan, project_id, None, reveal, window, cx);

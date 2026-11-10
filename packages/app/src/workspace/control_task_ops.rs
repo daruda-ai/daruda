@@ -14,9 +14,10 @@ use crate::control::result::{ControlError, TaskProject};
 use crate::control::spec::NewTask;
 use crate::runs::{GlobalTasks, TaskCommitError, TaskIntent};
 use crate::workspace::Workspace;
+use crate::workspace::control_lane_ops::Unregistered;
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::right_dock::task_chat_ops::TaskChatError;
-use crate::workspace::right_dock::task_start::{TaskStartError, TaskStarted};
+use crate::workspace::right_dock::task_start::{KeptWorktree, TaskStartError, TaskStarted};
 use crate::workspace::task_draft::{DraftError, DraftLocation, TaskDraft};
 
 /// A started execution, its worktree, and its chat when it has one.
@@ -213,14 +214,21 @@ impl Workspace {
             let _ = tx.try_send(self.control_task_started(outcome));
             return rx;
         }
+        // Captured now: a failure that left a worktree on disk is answered
+        // with it even if this window is gone by then.
+        let workspace = self.uuid();
         cx.spawn(async move |ws, cx| {
             let outcome = started
                 .recv()
                 .await
-                .unwrap_or(Err(TaskStartError::WindowClosed));
-            let answer = ws
-                .update(cx, |ws, _| ws.control_task_started(outcome))
-                .unwrap_or(Err(ControlError::TargetGone));
+                .unwrap_or(Err(TaskStartError::WindowClosed))
+                .map_err(|e| control_start_error(e, workspace));
+            let answer = match outcome {
+                Ok(started) => ws
+                    .update(cx, |ws, _| ws.control_task_located(started))
+                    .unwrap_or(Err(ControlError::TargetGone)),
+                Err(refused) => Err(refused),
+            };
             let _ = tx.try_send(answer);
         })
         .detach();
@@ -232,6 +240,11 @@ impl Workspace {
         outcome: Result<TaskStarted, TaskStartError>,
     ) -> ControlTaskStart {
         let started = outcome.map_err(|e| control_start_error(e, self.uuid()))?;
+        self.control_task_located(started)
+    }
+
+    /// The lane and chat a started task runs in.
+    fn control_task_located(&self, started: TaskStarted) -> ControlTaskStart {
         let lane = self
             .lane_ref_at(&started.worktree)
             .ok_or(ControlError::TargetGone)?;
@@ -289,16 +302,30 @@ fn control_start_error(
         TaskStartError::PaneUnavailable => ControlError::TaskStartFailed {
             detail: "no pane could be opened in the worktree".into(),
         },
-        TaskStartError::GitAddFailed { detail }
-        | TaskStartError::FinalizeFailed { detail }
-        | TaskStartError::PromptUndelivered { detail } => ControlError::TaskStartFailed { detail },
+        TaskStartError::GitAddFailed { detail } | TaskStartError::PromptUndelivered { detail } => {
+            ControlError::TaskStartFailed { detail }
+        }
         TaskStartError::NotRecorded { detail } => ControlError::TaskNotRecorded { detail },
         TaskStartError::FlowMissing => ControlError::TaskStartFailed {
             detail: crate::workspace::task_flow::TaskFlowProblem::NotFound.to_string(),
         },
         TaskStartError::FlowRefused { detail, .. } => ControlError::TaskStartFailed { detail },
         TaskStartError::AgentUnavailable => ControlError::AgentUnavailable,
-        TaskStartError::WorktreeKept { lane, cause } => {
+        TaskStartError::WorktreeKept {
+            at: KeptWorktree::Unregistered(path),
+            cause,
+        } => match *cause {
+            TaskStartError::ProjectNotOpen => Unregistered::ProjectClosed.at(path),
+            TaskStartError::WindowClosed => Unregistered::WindowClosed.at(path),
+            other => ControlError::WorktreeUnregistered {
+                path,
+                detail: control_start_error(other, workspace).to_string(),
+            },
+        },
+        TaskStartError::WorktreeKept {
+            at: KeptWorktree::Lane(lane),
+            cause,
+        } => {
             let worktree = crate::control::result::LaneHandle::new(workspace, lane);
             match control_start_error(*cause, workspace) {
                 ControlError::AgentUnavailable => {

@@ -82,6 +82,8 @@ pub enum StartFailure {
     LaneMissing,
     PaneUnavailable,
     GitAddFailed,
+    /// No longer recorded: a project closed after git now records
+    /// `ProjectNotOpen`. Kept so logs that hold it still read.
     FinalizeFailed,
     PromptUndelivered,
     WindowClosed,

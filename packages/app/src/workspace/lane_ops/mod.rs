@@ -51,9 +51,10 @@ pub(in crate::workspace) enum LaneReveal {
 /// Why a created worktree did not open with its first chat.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum FinalizeError {
-    /// Nothing was registered; the message says why, as the create form
-    /// shows it.
-    Failed(String),
+    /// The project closed while git ran, so nothing was registered. The
+    /// checkout git made stays on disk at the plan's path, its branch
+    /// checked out, for the caller to name.
+    ProjectClosed,
     /// The chat's pinned agent is gone. `lane` is registered with nothing
     /// open, so the worktree on disk is not lost to the person.
     AgentUnavailable {

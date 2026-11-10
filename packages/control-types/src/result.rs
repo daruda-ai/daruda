@@ -781,6 +781,17 @@ pub enum ControlError {
         worktree: LaneHandle,
         detail: String,
     },
+    /// Git made a worktree at `path`, but its project or window closed before
+    /// daruda registered it; `detail` says which. Unlike the kept variants
+    /// there is no handle: the checkout stays on disk with its branch checked
+    /// out and no daruda window lists it, so a retry with the same name fails
+    /// on the branch and the path until `git worktree remove <path>` removes
+    /// it (the branch stays). `git worktree prune` does not: it drops only
+    /// worktrees whose directory is gone.
+    WorktreeUnregistered {
+        path: std::path::PathBuf,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for ControlError {
@@ -870,6 +881,12 @@ impl std::fmt::Display for ControlError {
             Self::TaskStartFailedWorktreeKept { detail, .. } => write!(
                 f,
                 "task did not start: {detail}; its worktree was created and kept"
+            ),
+            Self::WorktreeUnregistered { path, detail } => write!(
+                f,
+                "the worktree at {} was created but not registered: {detail}; \
+                 remove it with `git worktree remove` before reusing its branch",
+                path.display()
             ),
         }
     }
