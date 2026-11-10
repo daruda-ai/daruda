@@ -354,7 +354,7 @@ async fn a_phone_task_start_records_phone_provenance(cx: &mut gpui::TestAppConte
         super::begin_task_start(
             task.clone(),
             super::Caller::Phone,
-            crate::workspace::ChatOpen::preferred(daruda_store::tasks::StartedBy::Phone),
+            crate::workspace::ChatAgent::Preferred(None),
             cx,
         )
         .unwrap()

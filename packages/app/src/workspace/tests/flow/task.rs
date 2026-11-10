@@ -395,7 +395,7 @@ async fn an_orchestrator_flow_task_started_from_the_phone_asks_the_phone(cx: &mu
         crate::control::exec::begin_task_start(
             id.clone(),
             crate::control::exec::Caller::Orchestrator { solicited: true },
-            crate::workspace::ChatOpen::orchestrator_for_test(),
+            crate::workspace::ChatAgent::Preferred(None),
             cx,
         )
     });

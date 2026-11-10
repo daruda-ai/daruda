@@ -40,16 +40,6 @@ pub(crate) struct ChatOpen {
     pub(crate) mode: ModeChoice,
 }
 
-impl ChatOpen {
-    /// A chat no card pinned an agent for, in the mode `started_by` gets.
-    pub(crate) fn preferred(started_by: StartedBy) -> Self {
-        Self {
-            agent: ChatAgent::Preferred(None),
-            mode: mode_for(started_by),
-        }
-    }
-}
-
 #[cfg(test)]
 impl ChatOpen {
     /// A chat the orchestrator asks for, naming no agent.

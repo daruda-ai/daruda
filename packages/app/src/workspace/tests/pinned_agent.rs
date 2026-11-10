@@ -40,9 +40,13 @@ fn without_other() -> daruda_config::Config {
 
 fn pinned() -> ChatOpen {
     ChatOpen {
-        agent: ChatAgent::Pinned(OTHER.into()),
+        agent: pinned_agent(),
         mode: ModeChoice::FollowDelegated,
     }
+}
+
+fn pinned_agent() -> ChatAgent {
+    ChatAgent::Pinned(OTHER.into())
 }
 
 fn lane_count(ws: &Workspace) -> usize {
@@ -121,7 +125,7 @@ fn an_existing_lane_task_whose_pinned_agent_left_opens_no_chat(cx: &mut TestAppC
                 let id = crate::runs::seed::task(spec, None, cx);
                 let panes = ws.all_pane_ids();
                 let submitter = crate::runs::FlowSubmitter::Orchestrator { solicited: false };
-                let answer = ws.begin_task_start_for(&id, submitter, pinned(), window, cx);
+                let answer = ws.begin_task_start_for(&id, submitter, pinned_agent(), window, cx);
                 ws.reload_config(&without_other(), cx);
                 (id, answer, panes)
             })
@@ -173,7 +177,7 @@ async fn a_new_worktree_task_whose_pinned_agent_left_keeps_its_worktree(cx: &mut
                 let panes = ws.all_pane_ids();
                 let lanes = lane_count(ws);
                 let submitter = crate::runs::FlowSubmitter::Orchestrator { solicited: false };
-                let answer = ws.control_task_start(&id, submitter, pinned(), window, cx);
+                let answer = ws.control_task_start(&id, submitter, pinned_agent(), window, cx);
                 ws.reload_config(&without_other(), cx);
                 (id, answer, panes, lanes)
             })

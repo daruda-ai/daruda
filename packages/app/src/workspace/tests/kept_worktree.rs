@@ -39,8 +39,8 @@ fn start_then(
     cx.update_window(fx.window.into(), |_, window, cx| {
         fx.ws.update(cx, |ws, cx| {
             let submitter = crate::runs::FlowSubmitter::Orchestrator { solicited: false };
-            let answer =
-                ws.control_task_start(id, submitter, ChatOpen::orchestrator_for_test(), window, cx);
+            let agent = crate::workspace::ChatAgent::Preferred(None);
+            let answer = ws.control_task_start(id, submitter, agent, window, cx);
             meanwhile(ws, window, cx);
             answer
         })

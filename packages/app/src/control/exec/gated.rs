@@ -402,8 +402,11 @@ async fn perform_gated(
                 .await
                 .map(|task| ControlResult::TaskCreated { task });
         }
+        // The start takes its mode from `caller`, as `mode` was taken from
+        // its origin: `exec::origin`'s tests pin the two together.
         Asked::TaskStart { task, agent, .. } => {
-            return start_task(task, pinned_chat(agent, mode), caller, cx).await;
+            let agent = crate::workspace::ChatAgent::Pinned(agent);
+            return start_task(task, agent, caller, cx).await;
         }
         Asked::TaskOpen { task, .. } => {
             return cx.update(|cx| tasks::open_task_in(task, mode, caller, cx));

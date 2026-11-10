@@ -65,9 +65,7 @@ async fn delayed_announcement(kind: Announcement, cx: &mut TestAppContext) {
                         exec::begin_task_start(
                             task.clone(),
                             exec::Caller::Phone,
-                            crate::workspace::ChatOpen::preferred(
-                                daruda_store::tasks::StartedBy::Phone,
-                            ),
+                            crate::workspace::ChatAgent::Preferred(None),
                             cx,
                         )
                         .unwrap()

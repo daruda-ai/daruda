@@ -86,24 +86,27 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<TaskStartOutcome> {
         let submitter = crate::runs::FlowSubmitter::of_task(started_by, false);
-        let chat = ChatOpen::preferred(started_by);
-        self.begin_task_start_for(task_id, submitter, chat, window, cx)
+        self.begin_task_start_for(task_id, submitter, ChatAgent::Preferred(None), window, cx)
     }
 
     /// [`Self::begin_task_start`] for `submitter`, whose solicitation a
     /// flow-backed task's run carries: a control start captured it before
     /// its card, and the run's questions follow it as the task's end does.
-    /// `chat` is the chat a chat task opens: a gated start's card pinned its
-    /// agent and named its mode. A flow-backed task does not read it; its
-    /// nodes name their own agents and modes.
+    /// A chat task opens `agent` (a gated start's card pinned it) in the
+    /// mode `submitter` gets, so the two cannot be paired otherwise. A
+    /// flow-backed task reads neither; its nodes name their own.
     pub(crate) fn begin_task_start_for(
         &mut self,
         task_id: &str,
         submitter: crate::runs::FlowSubmitter,
-        chat: ChatOpen,
+        agent: ChatAgent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<TaskStartOutcome> {
+        let chat = ChatOpen {
+            agent,
+            mode: crate::workspace::mode_for(submitter.task_started_by()),
+        };
         let (answer, rx) = smol::channel::bounded(1);
         let started = cx
             .global::<GlobalTasks>()
