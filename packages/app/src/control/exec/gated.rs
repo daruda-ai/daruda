@@ -507,8 +507,8 @@ fn announce_chat(
     crate::remote_channel::announce_chat_created(
         pane,
         label.path.clone(),
-        &label.agent_name,
-        &label.mode,
+        &label.shown.agent_name,
+        &label.shown.mode,
         delivery,
         cx,
     );

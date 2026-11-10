@@ -35,10 +35,12 @@ pub(crate) struct ChatLabel {
     /// for. A request naming an id the catalog does not hold opens the
     /// default agent, and reporting the request back would hide that.
     pub(crate) agent: String,
-    pub(crate) agent_name: String,
-    /// The display name of the permission mode the pane asks for. Requested,
-    /// not applied: a chat is announced before its session connects.
-    pub(crate) mode: String,
+    /// How phone text names the agent and the permission mode the pane asks
+    /// for, bounded and set in isolates as a card names them: for a person
+    /// only, never a tool result, which names the agent by `agent`.
+    /// Requested, not applied: a chat is announced before its session
+    /// connects.
+    pub(crate) shown: ChatDisclosure,
 }
 
 impl Workspace {
@@ -112,8 +114,7 @@ impl Workspace {
                 one_line(&self.control_lane_name(lane)),
             ),
             agent: view.agent_id().to_owned(),
-            agent_name: crate::control::exec::card_label(view.agent_name()),
-            mode: self.requested_mode_label(view.agent_id(), &preferences),
+            shown: self.chat_disclosure_of(view.agent_id(), view.agent_name(), preferences),
         })
     }
 

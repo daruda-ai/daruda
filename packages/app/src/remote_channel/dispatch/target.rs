@@ -110,7 +110,7 @@ pub(crate) fn lent_target_reply(
         format!("pane={} agent={}", trace::pane(pane), label.agent)
     });
     Some(crate::remote_channel::command::RenderedReply {
-        text: s::control::target_lent(&label.path, &label.agent_name),
+        text: s::control::target_lent(&label.path, &label.shown.agent_name),
         keyboard: None,
     })
 }

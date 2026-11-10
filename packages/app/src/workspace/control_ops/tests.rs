@@ -88,7 +88,7 @@ async fn a_chat_label_names_its_worktree_and_agent(cx: &mut gpui::TestAppContext
         let default_agent = daruda_config::AgentDefinition::claude_default();
         assert_eq!(label.agent, default_agent.id, "the id a caller passes back");
         assert_eq!(
-            label.agent_name,
+            label.shown.agent_name,
             daruda_control_types::agent_text::isolate(&default_agent.name),
             "the name a person reads"
         );

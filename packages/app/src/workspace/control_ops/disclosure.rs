@@ -39,8 +39,20 @@ impl Workspace {
     ) -> ChatDisclosure {
         let agent = self.mirrors.agents.iter().find(|a| a.id == agent_id);
         let preferences = SessionPreferences::resolve(agent, None, mode);
+        let name = agent.map_or(agent_id, |a| a.name.as_str());
+        self.chat_disclosure_of(agent_id, name, preferences)
+    }
+
+    /// How a card or phone text names a chat of `agent_id`, called `name`,
+    /// that asks for `preferences`.
+    pub(super) fn chat_disclosure_of(
+        &self,
+        agent_id: &str,
+        name: &str,
+        preferences: SessionPreferences,
+    ) -> ChatDisclosure {
         ChatDisclosure {
-            agent_name: card_label(agent.map_or(agent_id, |a| a.name.as_str())),
+            agent_name: card_label(name),
             mode: self.requested_mode_label(agent_id, &preferences),
             requested: RequestedChat {
                 agent_id: agent_id.to_owned(),

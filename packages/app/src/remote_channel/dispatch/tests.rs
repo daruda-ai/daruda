@@ -70,7 +70,10 @@ async fn a_lent_target_is_reported_back_to_the_sender(cx: &mut gpui::TestAppCont
     match effect {
         super::Effect::Reply(reply) => assert_eq!(
             reply.text,
-            crate::surface::strings::control::target_lent(&expected.path, &expected.agent_name),
+            crate::surface::strings::control::target_lent(
+                &expected.path,
+                &expected.shown.agent_name
+            ),
         ),
         _ => panic!("a lent target must be reported, not silently used"),
     }
