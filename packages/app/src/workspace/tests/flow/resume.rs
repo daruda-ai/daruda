@@ -27,7 +27,7 @@ nodes:
   - id: second
     kind: command
     deps: [first]
-    run: \"test -f go || sleep 30; echo ran >> second.log\"
+    run: \"i=0; while [ ! -f go ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done; echo ran >> second.log\"
 ";
 
 /// An orchestrator-started run that a crash cut off right after `first`
@@ -540,16 +540,22 @@ async fn a_desktop_resume_keeps_the_solicitation_the_run_was_owed_with(cx: &mut 
     let run = interrupted_orchestrator_run(cx).await;
     let key = RunKey::Flow(run.run_id.clone());
     cx.update(|cx| RunsHost::register_run_solicited(key.clone(), true, cx));
+    // Hold `second` open so the episode is still held when it is read.
+    std::fs::remove_file(run.lane.path().join("go")).expect("hold `second` open");
     let here = run.ws.read_with(cx, |ws, _| ws.active);
     run.ws
         .update(cx, |ws, cx| ws.resume_flow_run(here, &run.run_dir, cx));
-    cx.run_until_parked();
+    assert!(
+        wait_for_run(cx, |cx| run_is_held(cx, run.lane.path())).await,
+        "the resume never took the lane"
+    );
     let submitter = cx.update(|cx| {
         RunsHost::flow_run(run.lane.path(), cx)
             .map(|flow| flow.submitter_for_test())
             .expect("held")
     });
     assert_eq!(submitter, crate::runs::FlowSubmitter::Desktop);
+    std::fs::write(run.lane.path().join("go"), "").expect("let `second` end");
     assert!(
         wait_for_run(cx, |cx| {
             run.run_dir.join("DONE").exists() && !run_is_held(cx, run.lane.path())

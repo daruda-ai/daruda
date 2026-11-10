@@ -1737,17 +1737,8 @@ async fn a_desktop_resume_of_a_phone_started_run_stays_off_the_phone(cx: &mut Te
         outcome_reaches_the_phone(&mut outbound, cx).is_some(),
         "the phone's own start answers the phone"
     );
-    // The run's end reaches the window after the host lets go of it, so
-    // wait for its toast too: counted below, it would pass for a refusal.
-    let finish_toasted = |cx: &mut TestAppContext| {
-        ws.read_with(cx, |ws, _| {
-            ws.error_history()
-                .iter()
-                .any(|r| r.title == crate::surface::strings::flow::run_finished_toast())
-        })
-    };
     assert!(
-        wait_for_run(cx, |cx| !run_is_held(cx, lane.path()) && finish_toasted(cx)).await,
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())).await,
         "the first run did not finish"
     );
 
@@ -1785,9 +1776,12 @@ async fn a_desktop_resume_of_a_phone_started_run_stays_off_the_phone(cx: &mut Te
     let before = ws.read_with(cx, |ws, _| ws.error_history().len());
     ws.update(cx, |ws, cx| ws.resume_flow_run(here, &run_dir, cx));
     cx.run_until_parked();
+    // A run's end is toasted too, and either run can end by now: only a
+    // report other than that end is a refusal.
     let errors = ws.read_with(cx, |ws, _| {
         ws.error_history()[before..]
             .iter()
+            .filter(|r| r.title != crate::surface::strings::flow::run_finished_toast())
             .map(|r| format!("{} {:?}", r.title, r.context))
             .collect::<Vec<_>>()
     });
