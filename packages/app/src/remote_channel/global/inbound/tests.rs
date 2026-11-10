@@ -929,7 +929,9 @@ fn a_thread_reply_reaches_its_pane_and_an_unplaceable_thread_is_refused(cx: &mut
             conversation: "room".into(),
         };
         let channels = cx.global_mut::<RemoteChannels>();
-        channels.threads.remember(&scope, key, "100.1".into(), 1);
+        channels
+            .threads
+            .remember(&scope, "t1".into(), key, "100.1".into(), 1);
         channels
             .connections
             .get_mut("work")
@@ -1002,5 +1004,71 @@ fn a_thread_reply_reaches_its_pane_and_an_unplaceable_thread_is_refused(cx: &mut
                 "a command in {thread} still runs"
             );
         }
+    });
+}
+
+/// A tap on a thread root's stop button stops the pane its thread speaks for,
+/// found by thread so it survives a restart; a thread whose conversation is
+/// not open says so. Its answer goes back into that thread.
+#[gpui::test]
+fn a_root_stop_tap_reaches_the_threads_pane_and_answers_in_the_thread(cx: &mut TestAppContext) {
+    use crate::remote_channel::threads::{ConversationKey, Scope, stop};
+
+    let fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let root = tempfile::tempdir().unwrap();
+    let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
+    let key: ConversationKey = fixture.workspace.update(cx, |ws, cx| {
+        ws.set_pane_session_for_test(fixture.pane(), "s1", cx);
+        ws.remote_conversation(fixture.pane(), cx).unwrap().key
+    });
+    let generation = cx.update(|cx| {
+        let generation = install_connection("work", bot.clone(), cx);
+        let scope = Scope {
+            connection: "work".into(),
+            bot: lock::digest_of("shared-bot"),
+            conversation: "room".into(),
+        };
+        cx.global_mut::<RemoteChannels>().threads.remember(
+            &scope,
+            "t1".into(),
+            key,
+            "100.1".into(),
+            1,
+        );
+        generation
+    });
+    cx.update(|cx| {
+        let tap = |data: String, cx: &mut App| {
+            let incoming = transport::Incoming {
+                event_id: data.clone(),
+                sender: RemoteRecipient {
+                    user_id: "user".into(),
+                    conversation_id: "room".into(),
+                    scope_id: "scope".into(),
+                },
+                kind: IncomingKind::Callback {
+                    data,
+                    message_id: "100.1".into(),
+                    original: String::new(),
+                },
+            };
+            let thread = driver::reply_thread(ChannelKind::Slack, &incoming.kind);
+            (
+                dispatch_claimed("work", generation, &bot, &incoming, cx),
+                thread,
+            )
+        };
+        let closed = s::remote_channel::thread_closed();
+        let (effect, thread) = tap(stop::token("t1"), cx);
+        assert!(
+            !matches!(&effect, Some(Effect::Reply(RenderedReply { text, .. })) if *text == closed),
+            "the open pane is stopped"
+        );
+        assert_eq!(thread.as_deref(), Some("100.1"), "answered in the thread");
+        let (effect, _) = tap(stop::token("unknown"), cx);
+        assert!(
+            matches!(&effect, Some(Effect::Reply(RenderedReply { text, .. })) if *text == closed),
+            "a thread no open pane holds"
+        );
     });
 }

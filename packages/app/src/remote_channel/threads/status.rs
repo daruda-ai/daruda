@@ -57,6 +57,11 @@ impl ShownStatus {
         }
     }
 
+    /// Whether a stop can still act on the pane.
+    pub(crate) fn is_running(self) -> bool {
+        matches!(self, Self::Working { .. } | Self::NeedsYou { .. })
+    }
+
     fn began(previous: Option<ShownStatus>) -> Option<i64> {
         match previous? {
             Self::Working { since } | Self::NeedsYou { since } => Some(since),

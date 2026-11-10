@@ -21,6 +21,8 @@ type RootKey = (String, String);
 #[derive(Clone, Debug)]
 pub(super) struct RootUpdate {
     pub scope: Scope,
+    /// The thread's id, which its stop button carries.
+    pub id: String,
     pub root: String,
     pub title: String,
     pub shown: ShownStatus,
@@ -54,11 +56,19 @@ pub(crate) struct Roots {
 
 impl Roots {
     /// Ask `root` to show `shown` under `title`.
-    pub(super) fn want(&mut self, scope: &Scope, root: String, title: String, shown: ShownStatus) {
+    pub(super) fn want(
+        &mut self,
+        scope: &Scope,
+        id: &str,
+        root: String,
+        title: String,
+        shown: ShownStatus,
+    ) {
         self.desired.insert(
             (scope.connection.clone(), root.clone()),
             RootUpdate {
                 scope: scope.clone(),
+                id: id.to_owned(),
                 root,
                 title,
                 shown,
@@ -150,8 +160,8 @@ impl Threads {
         ) else {
             return;
         };
-        let (root, title) = (record.root.clone(), title.clone());
-        self.roots.want(scope, root, title, shown);
+        let (id, root, title) = (record.id.clone(), record.root.clone(), title.clone());
+        self.roots.want(scope, &id, root, title, shown);
     }
 
     /// Forget a closed pane once its roots have been told.
@@ -214,6 +224,12 @@ pub(crate) fn flush(cx: &mut App) {
                     cx.background_executor()
                         .spawn(async move {
                             let status = update.shown.view();
+                            let stop = update.shown.is_running().then(|| {
+                                (
+                                    crate::surface::strings::remote_channel::thread_stop_button(),
+                                    super::stop::token(&update.id),
+                                )
+                            });
                             slack::threads::replace_root(
                                 &bot.credentials,
                                 &recipient,
@@ -221,6 +237,9 @@ pub(crate) fn flush(cx: &mut App) {
                                 &slack::threads::RootView {
                                     title: &update.title,
                                     status: Some((status.0, &status.1)),
+                                    stop: stop
+                                        .as_ref()
+                                        .map(|(label, value)| (label.as_str(), value.as_str())),
                                 },
                             )
                         })

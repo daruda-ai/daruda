@@ -6,6 +6,7 @@ mod book;
 pub(crate) mod driver;
 pub(crate) mod roots;
 pub(crate) mod status;
+pub(crate) mod stop;
 
 pub(crate) use book::{Book, Scope};
 pub(crate) use daruda_store::remote_threads::ConversationKey;

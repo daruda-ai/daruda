@@ -196,6 +196,17 @@ pub(crate) fn report_target_gone(
     ))
 }
 
+/// Stop `pane` for the phone, as `/stop` aimed at it does, without touching
+/// what plain text or a bare `/stop` addresses.
+pub(crate) fn stop_pane(pane: PaneRef, target: &super::Target, cx: &mut App) -> super::Effect {
+    let outcome = crate::control::exec::run(
+        crate::control::spec::ResolvedCommand::Stop { target: pane },
+        crate::control::exec::CommandOrigin::Phone,
+        cx,
+    );
+    render_reply(&outcome, None, target, cx).map_or(super::Effect::None, super::Effect::Reply)
+}
+
 /// Render an outcome the executor never saw, against the live ordinal table.
 pub(crate) fn render_outcome(
     outcome: &ControlOutcome,

@@ -1828,6 +1828,7 @@ remote_channel:
   thread_status_stopped: "정지됨"
   thread_status_overage: "사용량 한도로 자동 정지"
   thread_status_closed: "닫힘"
+  thread_stop_button: "멈추기"
 
 library:
   toggle_needs_project: "Claude 활성화 상태는 프로젝트별입니다. 로컬 프로젝트를 열어 변경하세요."

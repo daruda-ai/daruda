@@ -54,6 +54,13 @@ impl Book {
             .find(|record| scope.holds(record) && record.sessions.contains(key))
     }
 
+    /// The thread named `id`, as its stop button names it.
+    pub(crate) fn by_id(&self, scope: &Scope, id: &str) -> Option<&ThreadRecord> {
+        self.threads
+            .iter()
+            .find(|record| scope.holds(record) && record.id == id)
+    }
+
     /// The thread whose root message is `root`.
     pub(crate) fn for_root(&self, scope: &Scope, root: &str) -> Option<&ThreadRecord> {
         self.threads
@@ -63,10 +70,17 @@ impl Book {
 
     /// Record a new thread for `key` rooted at `root`. A conversation belongs to
     /// one thread, so any older claim on `key` in this scope is dropped.
-    pub(crate) fn insert(&mut self, scope: &Scope, key: ConversationKey, root: String, now: i64) {
+    pub(crate) fn insert(
+        &mut self,
+        scope: &Scope,
+        id: String,
+        key: ConversationKey,
+        root: String,
+        now: i64,
+    ) {
         self.release(scope, &key);
         self.threads.push(ThreadRecord {
-            id: uuid::Uuid::new_v4().simple().to_string(),
+            id,
             connection: scope.connection.clone(),
             bot: scope.bot.clone(),
             conversation: scope.conversation.clone(),

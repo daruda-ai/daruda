@@ -84,9 +84,16 @@ impl Threads {
         }
     }
 
-    /// Record the thread a post started for `key`.
-    pub(crate) fn remember(&mut self, scope: &Scope, key: ConversationKey, root: String, now: i64) {
-        self.book.insert(scope, key, root, now);
+    /// Record the thread `id` a post started for `key`.
+    pub(crate) fn remember(
+        &mut self,
+        scope: &Scope,
+        id: String,
+        key: ConversationKey,
+        root: String,
+        now: i64,
+    ) {
+        self.book.insert(scope, id, key, root, now);
         self.book.prune(now);
         self.save();
     }
@@ -107,6 +114,8 @@ impl Threads {
 /// Where one pane message goes.
 pub(crate) struct ThreadPlan {
     scope: Scope,
+    /// The thread's id: its record's, or the one a root started now takes.
+    id: String,
     pane: PaneRef,
     key: ConversationKey,
     title: String,
@@ -141,13 +150,21 @@ pub(crate) fn plan(
         .titles
         .insert(pane, conversation.title.clone())
         .is_some_and(|old| old != conversation.title);
+    let id = root
+        .as_deref()
+        .and_then(|root| threads.book.for_root(&scope, root))
+        .map_or_else(
+            || uuid::Uuid::new_v4().simple().to_string(),
+            |record| record.id.clone(),
+        );
     if let (Some(root), Some(shown), true) = (&root, shown, retitled) {
         threads
             .roots
-            .want(&scope, root.clone(), conversation.title.clone(), shown);
+            .want(&scope, &id, root.clone(), conversation.title.clone(), shown);
     }
     Some(ThreadPlan {
         scope,
+        id,
         pane,
         key: conversation.key,
         title: conversation.title,
@@ -201,11 +218,20 @@ pub(crate) fn deliver(
     on_sent: impl FnMut(SentPart),
 ) -> Posted {
     let status = plan.shown.map(ShownStatus::view);
+    let stop = plan.shown.filter(|shown| shown.is_running()).map(|_| {
+        (
+            s::remote_channel::thread_stop_button(),
+            super::stop::token(&plan.id),
+        )
+    });
     let view = slack::threads::RootView {
         title: &plan.title,
         status: status
             .as_ref()
             .map(|(emoji, label)| (*emoji, label.as_str())),
+        stop: stop
+            .as_ref()
+            .map(|(label, value)| (label.as_str(), value.as_str())),
     };
     let (root, started) = match &plan.root {
         Some(root) => (root.clone(), None),
@@ -263,7 +289,13 @@ pub(super) fn drop_header_under_root(message: &mut Message) {
 /// bring its root up to the pane's status if that moved while it was posting.
 pub(crate) fn record_root(plan: &ThreadPlan, root: String, cx: &mut App) {
     let threads = &mut cx.global_mut::<RemoteChannels>().threads;
-    threads.remember(&plan.scope, plan.key.clone(), root.clone(), now());
+    threads.remember(
+        &plan.scope,
+        plan.id.clone(),
+        plan.key.clone(),
+        root.clone(),
+        now(),
+    );
     if let Some(shown) = plan.shown {
         threads.roots.shown(&plan.scope, &root, shown);
     }
@@ -272,7 +304,7 @@ pub(crate) fn record_root(plan: &ThreadPlan, root: String, cx: &mut App) {
     {
         threads
             .roots
-            .want(&plan.scope, root, plan.title.clone(), current);
+            .want(&plan.scope, &plan.id, root, plan.title.clone(), current);
     }
     super::roots::flush(cx);
 }
@@ -325,6 +357,25 @@ pub(crate) fn route_reply(
     }
 }
 
+/// The open pane the thread `thread` speaks for, on connection `id`.
+pub(super) fn pane_of_thread(
+    id: &str,
+    bot: &BotSession,
+    thread: &str,
+    cx: &mut App,
+) -> Option<PaneRef> {
+    let channels = cx.global::<RemoteChannels>();
+    let recipient = channels.connections.get(id)?.config.recipient.as_ref()?;
+    let scope = scope(id, bot, recipient);
+    let conversations = channels
+        .threads
+        .book
+        .by_id(&scope, thread)?
+        .sessions
+        .clone();
+    open_pane_with(&conversations, cx)
+}
+
 fn open_pane_with(conversations: &[ConversationKey], cx: &mut App) -> Option<PaneRef> {
     let mut found = None;
     crate::window_registry::WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
@@ -340,13 +391,20 @@ fn open_pane_with(conversations: &[ConversationKey], cx: &mut App) -> Option<Pan
     found
 }
 
-/// The thread a reply to `incoming` belongs in: the one it was posted in.
+/// The thread a reply to `incoming` belongs in: the one it was posted in,
+/// or the one whose root holds the tapped stop button.
 pub(crate) fn reply_thread(kind: ChannelKind, incoming: &IncomingKind) -> Option<String> {
+    if !transport::pane_threads(kind) {
+        return None;
+    }
     match incoming {
         IncomingKind::Message {
             reply_to: Some(thread),
             ..
-        } if transport::pane_threads(kind) => Some(thread.clone()),
+        } => Some(thread.clone()),
+        IncomingKind::Callback {
+            data, message_id, ..
+        } if super::stop::thread_of(data).is_some() => Some(message_id.clone()),
         IncomingKind::Message { .. } | IncomingKind::Callback { .. } => None,
     }
 }

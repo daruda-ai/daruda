@@ -44,7 +44,7 @@ fn conversation(agent: &str, session: &str) -> PaneConversation {
 #[test]
 fn a_thread_is_found_only_under_the_identity_that_made_it() {
     let mut book = Book::default();
-    book.insert(&work(), key("claude", "s1"), "1.1".into(), NOW);
+    book.insert(&work(), "t".into(), key("claude", "s1"), "1.1".into(), NOW);
     let found = |scope: &Scope| {
         book.for_conversation(scope, &key("claude", "s1"))
             .map(|r| r.root.clone())
@@ -68,8 +68,8 @@ fn a_thread_is_found_only_under_the_identity_that_made_it() {
 #[test]
 fn a_conversation_belongs_to_one_thread() {
     let mut book = Book::default();
-    book.insert(&work(), key("claude", "s1"), "1.1".into(), NOW);
-    book.insert(&work(), key("claude", "s1"), "2.2".into(), NOW);
+    book.insert(&work(), "t".into(), key("claude", "s1"), "1.1".into(), NOW);
+    book.insert(&work(), "t".into(), key("claude", "s1"), "2.2".into(), NOW);
     assert_eq!(book.records().len(), 1, "the older claim is released");
     assert_eq!(book.records()[0].root, "2.2");
 }
@@ -77,9 +77,9 @@ fn a_conversation_belongs_to_one_thread() {
 #[test]
 fn a_new_conversation_continues_the_previous_thread() {
     let mut book = Book::default();
-    book.insert(&work(), key("claude", "s1"), "1.1".into(), NOW);
+    book.insert(&work(), "t".into(), key("claude", "s1"), "1.1".into(), NOW);
     // Another thread already holds the conversation being continued into.
-    book.insert(&work(), key("claude", "s2"), "9.9".into(), NOW);
+    book.insert(&work(), "t".into(), key("claude", "s2"), "9.9".into(), NOW);
 
     let root = book.continue_with(&work(), &key("claude", "s1"), key("claude", "s2"), NOW + 5);
 
@@ -105,7 +105,7 @@ fn a_new_conversation_continues_the_previous_thread() {
 #[test]
 fn a_thread_keeps_only_its_recent_conversations() {
     let mut book = Book::default();
-    book.insert(&work(), key("claude", "0"), "1.1".into(), NOW);
+    book.insert(&work(), "t".into(), key("claude", "0"), "1.1".into(), NOW);
     for n in 1..MAX_SESSIONS + 5 {
         book.continue_with(
             &work(),
@@ -125,7 +125,7 @@ fn a_thread_keeps_only_its_recent_conversations() {
 #[test]
 fn use_is_saved_at_most_once_per_interval() {
     let mut book = Book::default();
-    book.insert(&work(), key("claude", "s1"), "1.1".into(), NOW);
+    book.insert(&work(), "t".into(), key("claude", "s1"), "1.1".into(), NOW);
     assert!(!book.touch(&work(), "1.1", NOW + TOUCH_INTERVAL_SECS - 1));
     assert!(book.touch(&work(), "1.1", NOW + TOUCH_INTERVAL_SECS));
     assert!(!book.touch(&work(), "unknown", NOW + 10 * TOUCH_INTERVAL_SECS));
@@ -136,6 +136,7 @@ fn pruning_drops_stale_threads_then_keeps_the_newest() {
     let mut book = Book::default();
     book.insert(
         &work(),
+        "t".into(),
         key("claude", "old"),
         "0.0".into(),
         NOW - MAX_AGE_SECS - 1,
@@ -143,6 +144,7 @@ fn pruning_drops_stale_threads_then_keeps_the_newest() {
     for n in 0..MAX_THREADS + 3 {
         book.insert(
             &work(),
+            "t".into(),
             key("claude", &n.to_string()),
             n.to_string(),
             NOW - n as i64,
@@ -175,7 +177,7 @@ fn a_pane_keeps_its_thread_across_conversations() {
         (None, None),
         "no thread yet"
     );
-    threads.remember(&work(), claude.key.clone(), "1.1".into(), NOW);
+    threads.remember(&work(), "t1".into(), claude.key.clone(), "1.1".into(), NOW);
     assert_eq!(
         threads.place(&work(), pane, &claude, NOW),
         (Some("1.1".into()), None),
@@ -314,12 +316,12 @@ mod status {
         let mut roots = Roots::default();
         let working = ShownStatus::Working { since: NOW };
         let done = ShownStatus::Ended(Ending::Completed);
-        roots.want(&work(), "1.1".into(), "title".into(), working);
+        roots.want(&work(), "t", "1.1".into(), "title".into(), working);
         let first = roots.ready();
         assert_eq!(first.len(), 1);
         assert!(roots.ready().is_empty(), "in flight");
 
-        roots.want(&work(), "1.1".into(), "title".into(), done);
+        roots.want(&work(), "t", "1.1".into(), "title".into(), done);
         assert_eq!(roots.finish(&first[0], &Ok(())), Finished::Shown);
         let second = roots.ready();
         assert_eq!(second.len(), 1);
@@ -331,7 +333,7 @@ mod status {
 
         let retried = roots.ready();
         assert!(retried.is_empty(), "still in flight from the retry");
-        roots.want(&work(), "2.2".into(), "title".into(), done);
+        roots.want(&work(), "t", "2.2".into(), "title".into(), done);
         let other = roots.ready();
         let gone = Err(EditFailure::Gone("message_not_found".into()));
         assert_eq!(roots.finish(&other[0], &gone), Finished::Gone);
@@ -343,7 +345,7 @@ mod status {
         let mut roots = Roots::default();
         let done = ShownStatus::Ended(Ending::Completed);
         roots.shown(&work(), "1.1", done);
-        roots.want(&work(), "1.1".into(), "title".into(), done);
+        roots.want(&work(), "t", "1.1".into(), "title".into(), done);
         assert!(roots.ready().is_empty());
         assert_eq!(roots.wanted("work", "1.1"), None);
     }
@@ -368,7 +370,7 @@ mod status {
         let claude = conversation("claude", "s1");
         threads.place(&work(), pane, &claude, NOW);
         threads.titles.insert(pane, claude.title.clone());
-        threads.remember(&work(), claude.key.clone(), "1.1".into(), NOW);
+        threads.remember(&work(), "t1".into(), claude.key.clone(), "1.1".into(), NOW);
         threads.want_for_pane(&work(), pane, shown);
         assert_eq!(threads.roots.wanted("work", "1.1"), Some(shown));
     }
@@ -394,7 +396,7 @@ fn reported_activity_reaches_the_panes_root_until_it_closes(cx: &mut gpui::TestA
         let threads = &mut channels.threads;
         threads.place(&scope, pane, &claude, NOW);
         threads.titles.insert(pane, claude.title.clone());
-        threads.remember(&scope, claude.key.clone(), "1.1".into(), NOW);
+        threads.remember(&scope, "t1".into(), claude.key.clone(), "1.1".into(), NOW);
 
         super::roots::pane_activity(pane, PaneActivity::Working, cx);
         let wanted = |cx: &mut gpui::App| {

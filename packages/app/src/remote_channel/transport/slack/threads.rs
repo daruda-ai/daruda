@@ -13,6 +13,8 @@ pub(crate) struct RootView<'a> {
     pub title: &'a str,
     /// Slack emoji name and the status words.
     pub status: Option<(&'a str, &'a str)>,
+    /// The stop button's label and value, while there is work to stop.
+    pub stop: Option<(&'a str, &'a str)>,
 }
 
 impl RootView<'_> {
@@ -25,8 +27,15 @@ impl RootView<'_> {
             );
         }
         elements.push(json!({"type": "text", "text": self.title}));
-        vec![json!({"type": "rich_text", "elements": [
-            {"type": "rich_text_section", "elements": elements}]})]
+        let mut blocks = vec![json!({"type": "rich_text", "elements": [
+            {"type": "rich_text_section", "elements": elements}]})];
+        if let Some((label, value)) = self.stop {
+            blocks.push(json!({"type": "actions", "elements": [{
+                "type": "button", "action_id": "thread-stop", "style": "danger",
+                "text": {"type": "plain_text", "text": label}, "value": value,
+            }]}));
+        }
+        blocks
     }
 
     /// The notification and accessibility text.
@@ -100,6 +109,7 @@ mod tests {
         let titled = RootView {
             title: "my_project\nClaude",
             status: None,
+            stop: None,
         };
         let payload = root_payload(&recipient(), &titled);
         assert_eq!(payload["channel"], "D1");
@@ -115,6 +125,7 @@ mod tests {
         let working = RootView {
             title: "my_project\nClaude",
             status: Some(("hourglass_flowing_sand", "Working since 2:05 PM")),
+            stop: Some(("Stop", "thr:abc")),
         };
         let payload = root_payload(&recipient(), &working);
         assert_eq!(payload["text"], "Working since 2:05 PM\nmy_project\nClaude");
@@ -125,6 +136,17 @@ mod tests {
         );
         assert_eq!(elements[1]["text"], " Working since 2:05 PM\n");
         assert_eq!(elements[2]["text"], "my_project\nClaude");
+        let button = &payload["blocks"][1]["elements"][0];
+        assert_eq!(button["value"], "thr:abc");
+        assert_eq!(button["text"]["text"], "Stop");
+        assert_eq!(
+            root_payload(&recipient(), &titled)["blocks"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1,
+            "no button without work to stop"
+        );
     }
 
     #[test]

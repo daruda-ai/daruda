@@ -141,6 +141,9 @@ fn dispatch_claimed(
             }
         }
         IncomingKind::Callback { data, .. } => {
+            if let Some(effect) = crate::remote_channel::threads::stop::tap(id, bot, data, cx) {
+                return Some(effect);
+            }
             let connection = cx.global_mut::<RemoteChannels>().connections.get_mut(id)?;
             crate::remote_channel::bridge::Routed::Ready(connection.route_tap(data))
         }
