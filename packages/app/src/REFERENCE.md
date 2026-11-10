@@ -299,9 +299,11 @@ the card waited). A `task_start` card also carries the task definition it
 was written from (`workspace::ShownTaskStart`: project, `run_in`, branch,
 base worktree, title, prompt, flow). `still_shown` compares it, the budget
 slot follows its `run_in`, and the start compares it once more where it
-reads the task, after RunsHost settles and before the repository lock, git
-or the log; an edit landing in between answers `approval_stale` and the
-reserved slot is released unspent. A `task_open` card names the mode a new pane would take
+reads the task, with no task proposal still landing, and before the
+repository lock, git or the log; an edit landing in between answers
+`approval_stale` and the reserved slot is released unspent. The start's
+commit freezes the run's title and prompt as checked, so a later edit
+never reaches the agent. A `task_open` card names the mode a new pane would take
 even while a pane still shows the run, since that pane may close before the
 answer. Found after git, the worktree is
 kept as a lane with nothing open and the refusal is

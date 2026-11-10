@@ -175,3 +175,137 @@ async fn an_edit_landing_as_an_approved_start_reads_its_task_refuses_it(cx: &mut
         assert_eq!(lifecycle(&task, cx), Lifecycle::Backlog);
     }
 }
+
+/// `task` retitled and reworded, everything else as it is.
+fn reworded(task: &str, title: &str, prompt: &str, cx: &App) -> TaskIntent {
+    let spec = cx.global::<GlobalTasks>().get(task).unwrap().spec.clone();
+    TaskIntent::Edit {
+        id: task.into(),
+        edit: TaskEdit {
+            title: title.into(),
+            prompt: prompt.into(),
+            notes: spec.notes,
+            base_worktree_path: spec.base_worktree_path,
+            branch: None,
+            run_in: None,
+            project: None,
+            flow: spec.flow,
+        },
+    }
+}
+
+/// A new worktree's chat task, `title` asking `prompt`, its checkout
+/// scripted so git can make it.
+fn new_worktree_task(fx: &GitFixture, branch: &str, prompt: &str, cx: &mut App) -> String {
+    let project = fx.ws.read(cx).projects[0].uuid;
+    let mut spec = crate::runs::seed::spec(project, "Original title");
+    spec.prompt = prompt.into();
+    spec.branch_name = branch.into();
+    let checkout = crate::workspace::lane_ops::lane_checkout_path(&fx.root, branch);
+    fake_lane(&fx.fake, &checkout, branch);
+    crate::runs::seed::task(spec, None, cx)
+}
+
+/// Reworded once its start is recorded, while git makes the worktree: the
+/// agent is still told what the start read, the card's words for an
+/// approved start and the person's for a desktop one.
+#[gpui::test]
+async fn a_task_reworded_after_its_start_is_recorded_tells_its_agent_the_original(
+    cx: &mut TestAppContext,
+) {
+    let fx = GitFixture::open(cx, &daruda_config::Config::default(), |repo| repo);
+    let probes = cx.update(Workspace::fake_agent_connections_for_test);
+    cx.executor().allow_parking();
+    for (branch, approved) in [("approved", true), ("desktop", false)] {
+        let task = cx.update(|cx| new_worktree_task(&fx, branch, "Original prompt", cx));
+        let shown = approved.then(|| {
+            cx.update(|cx| ShownTaskStart::of(cx.global::<GlobalTasks>().get(&task).unwrap()))
+        });
+        let (edited, answer) = cx
+            .update_window(fx.window.into(), |_, window, cx| {
+                fx.ws.update(cx, |ws, cx| {
+                    assert!(RunsHost::settled(cx), "the start reads the task at once");
+                    let submitter = crate::runs::FlowSubmitter::Orchestrator { solicited: false };
+                    let agent = crate::workspace::ChatAgent::Preferred(None);
+                    let answer = ws.control_task_start(&task, submitter, agent, shown, window, cx);
+                    let edited =
+                        RunsHost::task(reworded(&task, "Edited title", "Edited prompt", cx), cx);
+                    (edited, answer)
+                })
+            })
+            .unwrap();
+        edited
+            .await
+            .expect("a started task's words can still change");
+        let started = answer.recv().await.expect("answered");
+        cx.run_until_parked();
+        assert!(started.is_ok(), "{branch}: {started:?}");
+        let prompts: Vec<String> = probes
+            .borrow_mut()
+            .iter_mut()
+            .flat_map(|probe| probe.drain_prompts())
+            .collect();
+        assert_eq!(prompts.len(), 1, "{branch}: {prompts:?}");
+        assert!(
+            prompts[0].contains("Original title") && prompts[0].contains("Original prompt"),
+            "{branch}: {}",
+            prompts[0]
+        );
+        assert!(!prompts[0].contains("Edited"), "{branch}: {}", prompts[0]);
+    }
+}
+
+/// An edit proposed after an approved start began waiting for earlier
+/// commits, and still landing when that wait ends: the start reads the task
+/// only once nothing is landing, so it sees this edit too and refuses it,
+/// rather than checking the earlier words and recording the start after the
+/// edit, which would tell the agent words its card never showed.
+#[gpui::test(iterations = 20)]
+async fn an_edit_proposed_while_an_approved_start_waits_is_read_before_it_starts(
+    cx: &mut TestAppContext,
+) {
+    let fx = GitFixture::open(cx, &daruda_config::Config::default(), |repo| repo);
+    let probes = cx.update(Workspace::fake_agent_connections_for_test);
+    cx.executor().allow_parking();
+    let task = cx.update(|cx| new_worktree_task(&fx, "reworded", "Original prompt", cx));
+    // The card was written once the first edit landed.
+    let shown = cx.update(|cx| {
+        let mut record = cx.global::<GlobalTasks>().get(&task).unwrap().clone();
+        record.spec.prompt = "Shown prompt".into();
+        ShownTaskStart::of(&record)
+    });
+    let (first, second, answer) = cx
+        .update_window(fx.window.into(), |_, window, cx| {
+            fx.ws.update(cx, |ws, cx| {
+                let first =
+                    RunsHost::task(reworded(&task, "Original title", "Shown prompt", cx), cx);
+                assert!(!RunsHost::settled(cx), "the first edit is still landing");
+                let submitter = crate::runs::FlowSubmitter::Orchestrator { solicited: false };
+                let agent = crate::workspace::ChatAgent::Preferred(None);
+                let answer =
+                    ws.control_task_start(&task, submitter, agent, Some(shown), window, cx);
+                let second =
+                    RunsHost::task(reworded(&task, "Original title", "Unseen prompt", cx), cx);
+                (first, second, answer)
+            })
+        })
+        .unwrap();
+    first.await.unwrap();
+    second.await.unwrap();
+    let refused = answer.recv().await.expect("answered");
+    cx.run_until_parked();
+    assert_eq!(refused, Err(ControlError::ApprovalStale));
+    let added = fx
+        .fake
+        .calls()
+        .into_iter()
+        .any(|call| matches!(call, crate::lane::git::GitCall::AddLane { .. }));
+    assert!(!added, "git made no worktree");
+    assert_eq!(lifecycle(&task, cx), Lifecycle::Backlog);
+    let prompts: Vec<String> = probes
+        .borrow_mut()
+        .iter_mut()
+        .flat_map(|probe| probe.drain_prompts())
+        .collect();
+    assert!(prompts.is_empty(), "{prompts:?}");
+}

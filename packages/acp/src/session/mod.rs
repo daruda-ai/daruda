@@ -447,6 +447,18 @@ impl HandleProbe {
             }
         }
     }
+
+    /// The text of each prompt sent since the last drain, in order; other
+    /// commands are drained and dropped.
+    pub fn drain_prompts(&mut self) -> Vec<String> {
+        let mut prompts = Vec::new();
+        while let Ok(command) = self.0.try_recv() {
+            if let Command::Prompt(prompt) = command {
+                prompts.push(prompt.text);
+            }
+        }
+        prompts
+    }
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]

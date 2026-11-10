@@ -179,27 +179,42 @@ impl Workspace {
             }
             return rx;
         }
-        let barrier = RunsHost::barrier(cx);
+        let mut barrier = RunsHost::barrier(cx);
         let id = task_id.to_owned();
         cx.spawn_in(window, async move |ws, cx| {
-            barrier.await;
-            let entered = ws.update_in(cx, |ws, window, cx| {
-                let started = ws.start_task_into(
-                    &id,
-                    submitter,
-                    chat,
-                    shown.as_ref(),
-                    answer.clone(),
-                    window,
-                    cx,
-                );
-                if let Err(e) = started {
-                    ws.finish_task_start(Err(e), None, &answer, cx);
+            loop {
+                barrier.await;
+                // The run's description is frozen from the task as the log
+                // holds it when the start commits, so the start reads it only
+                // with nothing landing: a proposal made during the wait would
+                // otherwise commit before the start, unchecked and unread.
+                let entered = ws.update_in(cx, |ws, window, cx| {
+                    if !RunsHost::settled(cx) {
+                        return Some(RunsHost::barrier(cx));
+                    }
+                    let started = ws.start_task_into(
+                        &id,
+                        submitter,
+                        chat.clone(),
+                        shown.as_ref(),
+                        answer.clone(),
+                        window,
+                        cx,
+                    );
+                    if let Err(e) = started {
+                        ws.finish_task_start(Err(e), None, &answer, cx);
+                    }
+                    None
+                });
+                match entered {
+                    Ok(Some(next)) => barrier = next,
+                    Ok(None) => break,
+                    Err(_) => {
+                        // SILENT-OK: the caller may have stopped listening.
+                        let _ = answer.try_send(Err(TaskStartError::WindowClosed));
+                        break;
+                    }
                 }
-            });
-            if entered.is_err() {
-                // SILENT-OK: the caller may have stopped listening.
-                let _ = answer.try_send(Err(TaskStartError::WindowClosed));
             }
         })
         .detach();
