@@ -229,7 +229,7 @@ async fn an_approved_resume_runs_only_the_remaining_steps_under_the_same_handle(
     assert_eq!(
         asked,
         vec![crate::surface::strings::control::approval_flow_resume(
-            run.name(),
+            crate::control::exec::quoted_title(&run.name()),
             1,
             2
         )],
@@ -720,7 +720,12 @@ async fn a_run_cut_off_after_its_last_step_says_nothing_runs_again(cx: &mut Test
     cx.run_until_parked();
     assert_eq!(
         cx.update(|cx| approval::waiting_summaries_for_test(cx)),
-        vec![crate::surface::strings::control::approval_flow_resume_all_passed(run.name(), 2)]
+        vec![
+            crate::surface::strings::control::approval_flow_resume_all_passed(
+                crate::control::exec::quoted_title(&run.name()),
+                2
+            )
+        ]
     );
     cx.update(|cx| resolve_only_pending_for_test(ApprovalChoice::Refused, cx));
     cx.run_until_parked();

@@ -103,7 +103,7 @@ impl Workspace {
             Some(p) => self.task_flow_approval(p.uuid, &run_in, None, flow),
             None => super::TaskFlowApproval {
                 summary: crate::surface::strings::control::approval_task_as_flow_unresolved(
-                    &flow.name,
+                    crate::control::exec::quoted_title(&flow.name),
                 ),
                 takes_prompt: true,
             },

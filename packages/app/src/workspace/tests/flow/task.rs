@@ -318,12 +318,15 @@ fn a_flow_tasks_approval_names_what_it_runs(cx: &mut TestAppContext) {
         assert_eq!(
             ws.task_flow_approval(project, &run_in, None, &flow("ship"))
                 .summary,
-            s::approval_task_as_flow("ship.yaml", s::approval_flow_no_agents())
+            s::approval_task_as_flow(
+                crate::control::exec::quoted_title("ship.yaml"),
+                s::approval_flow_no_agents()
+            )
         );
         assert_eq!(
             ws.task_flow_approval(project, &run_in, None, &flow("gone"))
                 .summary,
-            s::approval_task_as_flow_unresolved("gone")
+            s::approval_task_as_flow_unresolved(crate::control::exec::quoted_title("gone"))
         );
         let takes_prompt = |name| {
             ws.task_flow_approval(project, &run_in, None, &flow(name))

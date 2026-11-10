@@ -2493,7 +2493,11 @@ control:
   approval_task_as_flow: "as the flow %{flow} (%{modes})"
   approval_task_as_flow_profile: "as the flow %{flow} with the profile %{profile} (%{modes})"
   approval_task_as_flow_unresolved: "as the flow %{flow}, which daruda cannot find there"
+  # `modes` lists each mode quoted, or approval_mode_agent_default for a
+  # node that names none, then approval_flow_modes_more past four.
   approval_flow_modes: "permission mode: %{modes}"
+  # Follows the quoted modes: how many more the flow names.
+  approval_flow_modes_more: "%{n} more"
   approval_flow_no_agents: "commands only, no agents"
   # `location` is one of the approval_task_in_* phrases, naming the branch
   # the first prompt's header gives the agent; `agent` is approval_agent;

@@ -3,6 +3,7 @@
 
 use gpui::{App, AsyncApp, Task};
 
+use super::quoted_title;
 use crate::control::mcp::runs::{run_handle, run_key};
 use crate::control::result::{ControlError, ControlOutcome, ControlResult, NotResumableReason};
 use crate::runs::RunsHost;
@@ -120,9 +121,9 @@ pub(super) fn summary(
     Ok(cx.spawn(async move |_| {
         let plan = read.await?;
         Ok(if plan.passed == plan.total {
-            s::control::approval_flow_resume_all_passed(&plan.name, plan.total)
+            s::control::approval_flow_resume_all_passed(quoted_title(&plan.name), plan.total)
         } else {
-            s::control::approval_flow_resume(&plan.name, plan.passed, plan.total)
+            s::control::approval_flow_resume(quoted_title(&plan.name), plan.passed, plan.total)
         })
     }))
 }
