@@ -151,9 +151,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> smol::channel::Receiver<TaskStartOutcome> {
-        let chat = ChatOpen {
-            agent,
-            mode: crate::workspace::mode_for(submitter.task_started_by()),
+        let request = StartRequest {
+            chat: ChatOpen {
+                agent,
+                mode: crate::workspace::mode_for(submitter.task_started_by()),
+            },
+            submitter,
+            shown,
         };
         let (answer, rx) = smol::channel::bounded(1);
         let started = cx
@@ -165,16 +169,7 @@ impl Workspace {
             return rx;
         }
         if RunsHost::settled(cx) {
-            let started = self.start_task_into(
-                task_id,
-                submitter,
-                chat,
-                shown.as_ref(),
-                answer.clone(),
-                window,
-                cx,
-            );
-            if let Err(e) = started {
+            if let Err(e) = self.start_task_into(task_id, request, answer.clone(), window, cx) {
                 self.finish_task_start(Err(e), None, &answer, cx);
             }
             return rx;
@@ -192,15 +187,8 @@ impl Workspace {
                     if !RunsHost::settled(cx) {
                         return Some(RunsHost::barrier(cx));
                     }
-                    let started = ws.start_task_into(
-                        &id,
-                        submitter,
-                        chat.clone(),
-                        shown.as_ref(),
-                        answer.clone(),
-                        window,
-                        cx,
-                    );
+                    let started =
+                        ws.start_task_into(&id, request.clone(), answer.clone(), window, cx);
                     if let Err(e) = started {
                         ws.finish_task_start(Err(e), None, &answer, cx);
                     }
@@ -246,18 +234,19 @@ impl Workspace {
     /// Check the task can start, record the request, then continue once the
     /// log holds it. `Err` is a refusal taken before anything was recorded or
     /// spawned, leaving the task in Backlog.
-    #[allow(clippy::too_many_arguments)] // Each is one caller-held fact the
-    // two entry branches (settled now, or after the barrier) hand over as is.
     fn start_task_into(
         &mut self,
         task_id: &str,
-        submitter: crate::runs::FlowSubmitter,
-        chat: ChatOpen,
-        shown: Option<&ShownTaskStart>,
+        request: StartRequest,
         answer: Answer,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(), TaskStartError> {
+        let StartRequest {
+            submitter,
+            chat,
+            shown,
+        } = request;
         let started_by = submitter.task_started_by();
         let task = cx
             .global::<GlobalTasks>()
@@ -269,7 +258,7 @@ impl Workspace {
         }
         // The definition read here, after any commit still landing, is the
         // one the start runs; the lock, git and the log come after.
-        if shown.is_some_and(|shown| *shown != ShownTaskStart::of(&task)) {
+        if shown.is_some_and(|shown| shown != ShownTaskStart::of(&task)) {
             return Err(TaskStartError::ChangedSinceShown);
         }
         let reveal = reveal_for(started_by);
@@ -649,6 +638,17 @@ impl Workspace {
         cx.notify();
         Ok(())
     }
+}
+
+/// What a start was asked with, handed over as one by either entry branch
+/// of [`Workspace::begin_task_start_for`]: settled now, or after the
+/// barrier.
+#[derive(Clone)]
+struct StartRequest {
+    submitter: crate::runs::FlowSubmitter,
+    /// The agent and mode a chat task opens; set from `submitter`.
+    chat: ChatOpen,
+    shown: Option<ShownTaskStart>,
 }
 
 /// A new worktree's start, checked and holding the repository's lock.
