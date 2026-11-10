@@ -1737,8 +1737,17 @@ async fn a_desktop_resume_of_a_phone_started_run_stays_off_the_phone(cx: &mut Te
         outcome_reaches_the_phone(&mut outbound, cx).is_some(),
         "the phone's own start answers the phone"
     );
+    // The run's end reaches the window after the host lets go of it, so
+    // wait for its toast too: counted below, it would pass for a refusal.
+    let finish_toasted = |cx: &mut TestAppContext| {
+        ws.read_with(cx, |ws, _| {
+            ws.error_history()
+                .iter()
+                .any(|r| r.title == crate::surface::strings::flow::run_finished_toast())
+        })
+    };
     assert!(
-        wait_for_run(cx, |cx| !run_is_held(cx, lane.path())).await,
+        wait_for_run(cx, |cx| !run_is_held(cx, lane.path()) && finish_toasted(cx)).await,
         "the first run did not finish"
     );
 
