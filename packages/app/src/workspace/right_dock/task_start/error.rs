@@ -33,7 +33,12 @@ pub(crate) enum TaskStartError {
     PromptUndelivered,
     /// The window went away while the worktree was being created.
     WindowClosed,
-    /// The task log did not record the start; nothing was spawned.
+    /// The task log refused a start's record. Refusing `DispatchRequested`
+    /// leaves the task in Backlog with nothing made. Refusing `LanePrepared`
+    /// comes after the lane (a new one wrapped in `WorktreeKept`) and a chat
+    /// task's pane exist; no failure is recorded against a log refusing
+    /// writes, so the task stays Preparing until the next startup's
+    /// reconcile settles it as undelivered.
     NotRecorded {
         detail: String,
     },
