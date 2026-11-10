@@ -7,11 +7,10 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::tasks::{
-    ExecutionRef, Lifecycle, StartedBy, TaskEvent, TaskExecutionSource, TaskRecord, TaskRunIn,
+    ExecutionRef, Lifecycle, StartedBy, TaskExecutionSource, TaskRecord, TaskRunIn,
 };
 use gpui::{App, Context, Window};
 
@@ -19,11 +18,13 @@ use crate::runs::{GlobalTasks, RunsHost, TaskCommitError};
 use crate::workspace::lane_ops::{CreateWorktreePlan, FinalizeError, LaneReveal};
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{ChatAgent, ChatOpen, Workspace};
-use daruda_chat::view::AgentSessionStatus;
 
+mod dispatch;
 mod error;
+mod shown;
 
 pub(crate) use error::{KeptWorktree, TaskStartError};
+pub(crate) use shown::ShownTaskStart;
 
 /// Where an accepted start handed the task's prompt over.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,117 +54,11 @@ impl TaskStarted {
     }
 }
 
-/// The parts of a task's definition an approval card describes its start
-/// by: where it runs (`run_in`, the new branch and the worktree it branches
-/// from, the project), what it is called, what its agent is told, and the
-/// flow it runs as. A start approved from a card carries the values the card
-/// was written from and refuses to run any other definition, so an edit that
-/// lands between the card and the start cannot move it somewhere unasked.
-///
-/// It also holds what the definition resolved to when the card was written,
-/// read the way the start reads it: the branch whose code the run starts
-/// from (`checkout`) and the flow file its name found (`flow_file`). A card
-/// names a worktree and a flow's modes; the worktree checking out another
-/// branch, or the flow file changing or being shadowed, while the card waits
-/// would run code or modes it never showed.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ShownTaskStart {
-    project: daruda_store::project::ProjectUuid,
-    title: String,
-    prompt: String,
-    run_in: TaskRunIn,
-    branch: String,
-    base: Option<PathBuf>,
-    flow: Option<daruda_store::tasks::TaskFlow>,
-    /// See [`Workspace::task_start_checkout`].
-    checkout: Option<String>,
-    flow_file: Option<crate::workspace::task_flow::FlowFileSeen>,
-}
-
-impl ShownTaskStart {
-    /// Whether this start makes a new worktree, which is what spends an
-    /// orchestrator's budget.
-    pub(crate) fn creates_worktree(&self) -> bool {
-        matches!(self.run_in, TaskRunIn::NewWorktree)
-    }
-}
-
 pub(crate) type TaskStartOutcome = Result<TaskStarted, TaskStartError>;
 
 pub(super) type Answer = smol::channel::Sender<TaskStartOutcome>;
 
 impl Workspace {
-    /// `task`'s start as a card describes it, its flow file read now.
-    pub(crate) fn shown_task_start(&self, task: &TaskRecord) -> ShownTaskStart {
-        let spec = &task.spec;
-        let flow_file = spec.flow.as_ref().and_then(|flow| {
-            self.task_flow_file(
-                spec.project,
-                &spec.run_in,
-                spec.base_worktree_path.as_deref(),
-                flow,
-            )
-        });
-        self.shown_task_start_with(task, flow_file)
-    }
-
-    /// [`Self::shown_task_start`] with the flow file a card's flow summary
-    /// was read from, so the card and what it pins come from one read.
-    pub(in crate::workspace) fn shown_task_start_with(
-        &self,
-        task: &TaskRecord,
-        flow_file: Option<crate::workspace::task_flow::FlowFileSeen>,
-    ) -> ShownTaskStart {
-        let spec = &task.spec;
-        ShownTaskStart {
-            project: spec.project,
-            title: spec.title.clone(),
-            prompt: spec.prompt.clone(),
-            run_in: spec.run_in.clone(),
-            branch: spec.branch_name.clone(),
-            base: spec.base_worktree_path.clone(),
-            flow: spec.flow.clone(),
-            checkout: self.task_start_checkout(spec),
-            flow_file,
-        }
-    }
-
-    /// The branch whose code a start of `spec` runs on: for a new worktree,
-    /// the ref its branch is cut from ([`Self::task_base_ref`]); for an
-    /// existing lane, the branch it has checked out. `None` when there is
-    /// none to name (a detached or plain lane, or a project not open).
-    pub(in crate::workspace) fn task_start_checkout(
-        &self,
-        spec: &daruda_store::tasks::TaskSpec,
-    ) -> Option<String> {
-        match &spec.run_in {
-            TaskRunIn::NewWorktree => {
-                let project_id = self.project_by_uuid(spec.project)?.id;
-                self.task_base_ref(project_id, spec)
-            }
-            TaskRunIn::ExistingLane { path } => self
-                .lane_ref_at(path)
-                .and_then(|lane| self.lane_for(lane))
-                .and_then(super::task_existing_lane_ops::lane_branch)
-                .map(str::to_owned),
-        }
-    }
-
-    /// The ref a new worktree for `spec` branches from: the branch its base
-    /// worktree has checked out, else the project's base branch. The start
-    /// and its card both resolve it here.
-    fn task_base_ref(
-        &self,
-        project_id: daruda_store::project::ProjectId,
-        spec: &daruda_store::tasks::TaskSpec,
-    ) -> Option<String> {
-        let base = spec
-            .base_worktree_path
-            .as_deref()
-            .and_then(|p| self.branch_for_worktree_path(p));
-        self.resolve_lane_base_ref_for(project_id, base)
-    }
-
     /// Start a Backlog task from the Tasks UI. The outcome is dropped: every
     /// failure the user can act on has raised its toast by then.
     pub(in crate::workspace) fn start_task(
@@ -575,134 +470,6 @@ impl Workspace {
                 }
             })
             .detach();
-    }
-
-    /// Answer after the preparation and delivery result is projected. Chat
-    /// queueing leaves the task Dispatching until its PromptSent arrives.
-    pub(super) fn answer_when_dispatched(
-        &mut self,
-        started: Result<(TaskStarted, gpui::Task<Result<(), TaskStartError>>), TaskStartError>,
-        exec: ExecutionRef,
-        answer: Answer,
-        cx: &mut Context<Self>,
-    ) {
-        let (started, dispatched) = match started {
-            Ok(started) => started,
-            Err(e) => {
-                self.finish_task_start(Err(e), Some(&exec), &answer, cx);
-                return;
-            }
-        };
-        cx.spawn(async move |ws, cx| {
-            let outcome = dispatched.await.map(|()| started);
-            let finished = ws.update(cx, |ws, cx| {
-                ws.finish_task_start(outcome.clone(), None, &answer, cx)
-            });
-            if finished.is_err() {
-                // SILENT-OK: the caller may have stopped listening.
-                let _ = answer.try_send(outcome);
-            }
-        })
-        .detach();
-    }
-
-    /// Bind chat `pane_id` to the run, record the pane's identity, and hand
-    /// it the prompt as an ACP turn. Preparation is durable before delivery;
-    /// only the turn's tagged PromptSent records Dispatched.
-    ///
-    /// Takes `pane_id` rather than relying on `focused_pane_id`: a start
-    /// asked for elsewhere opens its pane behind the one the window shows.
-    pub(super) fn dispatch_task_to_chat(
-        &mut self,
-        exec: &ExecutionRef,
-        worktree_path: &Path,
-        branch: &str,
-        pane_id: PaneId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<gpui::Task<Result<(), TaskStartError>>, TaskStartError> {
-        // A cancel that landed while the lane was made ends the start here.
-        let task = cx
-            .global::<GlobalTasks>()
-            .get(&exec.task_id)
-            .filter(|task| matches!(&task.lifecycle, Lifecycle::Preparing { exec: current, .. } if current == exec))
-            .cloned()
-            .ok_or(TaskStartError::NotBacklog)?;
-        let identity = self
-            .bind_task_chat_execution(exec, pane_id, cx)
-            .ok_or(TaskStartError::PaneUnavailable)?;
-        let prepared = RunsHost::propose(
-            TaskEvent::LanePrepared {
-                terminal_id: None,
-                exec: exec.clone(),
-                worktree: worktree_path.to_path_buf(),
-                agent_id: identity.agent_id,
-                account_id: identity.account_id,
-                cwd: identity.cwd,
-                at: Utc::now(),
-            },
-            cx,
-        );
-        let exec = exec.clone();
-        let branch = branch.to_owned();
-        Ok(cx.spawn_in(window, async move |ws, cx| {
-            prepared
-                .await
-                .map_err(|error| TaskStartError::NotRecorded {
-                    detail: error.to_string(),
-                })?;
-            let result = ws
-                .update_in(cx, |ws, window, cx| {
-                    ws.deliver_prepared_task(&exec, &task, &branch, pane_id, window, cx)
-                })
-                .unwrap_or(Err(TaskStartError::WindowClosed));
-            if let Err(error) = &result {
-                gpui::AsyncApp::update(cx, |cx| fail_start(&exec, error, cx));
-            }
-            result
-        }))
-    }
-
-    fn deliver_prepared_task(
-        &mut self,
-        exec: &ExecutionRef,
-        task: &TaskRecord,
-        branch: &str,
-        pane_id: PaneId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<(), TaskStartError> {
-        if RunsHost::pane_execution(self.run_pane(pane_id), cx) != Some(exec) {
-            return Err(TaskStartError::PaneUnavailable);
-        }
-        if !cx.global::<GlobalTasks>().get(&exec.task_id).is_some_and(|task| {
-            matches!(&task.lifecycle, Lifecycle::Dispatching { exec: current, .. } if current == exec)
-        }) {
-            return Err(TaskStartError::NotBacklog);
-        }
-        let rendered = daruda_store::tasks::render_task_prompt(task, branch);
-        let failed = self
-            .agent_chat_view(pane_id)
-            .is_some_and(|view| matches!(view.read(cx).status(), AgentSessionStatus::Error { .. }));
-        let input = crate::workspace::main_area::pane_input_ops::PaneTextInput {
-            body: rendered,
-            intent: crate::workspace::main_area::pane_input_ops::PaneTextIntent::Command {
-                submit: true,
-            },
-            task: Some(exec.clone()),
-        };
-        if failed || !self.deliver_text_to_pane(pane_id, input, window, cx) {
-            RunsHost::delivery_failed(
-                exec.clone(),
-                crate::runs::DeliveryFailure::Dropped(
-                    daruda_store::tasks::machine::UndeliveredReason::StartFailed,
-                ),
-                cx,
-            );
-            return Err(TaskStartError::PromptUndelivered);
-        }
-        cx.notify();
-        Ok(())
     }
 }
 
