@@ -29,6 +29,11 @@ impl Workspace {
         let pane = self.run_pane(pane_id);
         view.update(cx, |_, cx| {
             cx.on_release(move |view, cx| {
+                crate::remote_channel::threads::roots::pane_activity(
+                    pane_ref,
+                    crate::remote_channel::threads::status::PaneActivity::Closed,
+                    cx,
+                );
                 crate::remote_channel::settle_permissions(pane_ref, view.permission_session(), cx);
                 crate::remote_channel::settle_questions(
                     pane_ref,

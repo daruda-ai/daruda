@@ -143,6 +143,7 @@ impl Workspace {
             // fresh `Instant::now()`, so the whole tick uses one `now`.
             if view.read(cx).last_reconciled_busy() {
                 busy_ids.push(view.entity_id());
+                self.report_remote_busy(*pane_id, cx);
             }
             if let Some(outcome) = edge {
                 completions.push((*pane_id, outcome));

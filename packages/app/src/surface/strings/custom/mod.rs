@@ -14,6 +14,7 @@ pub(super) mod mcp;
 pub(super) mod menu;
 pub(super) mod modal;
 pub(super) mod notification;
+pub(super) mod remote_channel;
 pub(super) mod status;
 pub(super) mod task;
 pub(super) mod usage;

@@ -491,7 +491,10 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
             cx.background_executor()
                 .timer(crate::remote_channel::cards::RETRY_INTERVAL)
                 .await;
-            cx.update(flush_edits);
+            cx.update(|cx| {
+                flush_edits(cx);
+                crate::remote_channel::threads::roots::flush(cx);
+            });
         }
     })
     .detach();

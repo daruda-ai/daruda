@@ -116,6 +116,14 @@ impl Book {
         }
     }
 
+    /// Forget the thread rooted at `root`: its message is gone.
+    pub(crate) fn forget_root(&mut self, scope: &Scope, root: &str) -> bool {
+        let before = self.threads.len();
+        self.threads
+            .retain(|record| !(scope.holds(record) && record.root == root));
+        self.threads.len() != before
+    }
+
     /// Drop records past [`MAX_AGE_SECS`], then all but the newest
     /// [`MAX_THREADS`]. Whether anything was dropped.
     pub(crate) fn prune(&mut self, now: i64) -> bool {

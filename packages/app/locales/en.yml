@@ -76,6 +76,8 @@ timestamp:
   # order, clock convention and the words around the numbers all differ per
   # locale. Consumed by `strings::custom::flow`, not at call sites.
   month_day_and_time: "%b %-d, %-I:%M %p"
+  # `chrono` pattern for a time of day today, read by `strings::custom`.
+  time_of_day: "%-I:%M %p"
 
 # Command palette and quick switchers
 command:
@@ -2600,6 +2602,13 @@ remote_channel:
   thread_switched_agent: "— Switched to %{agent} —"
   thread_closed: "This conversation is not open in daruda now."
   thread_unknown: "Not sure which agent this thread belongs to. Reply in an agent's thread, or write in the chat itself."
+  thread_status_working: "Working since %{time}"
+  thread_status_needs_you: "Waiting for your answer"
+  thread_status_completed: "Done"
+  thread_status_failed: "Failed"
+  thread_status_stopped: "Stopped"
+  thread_status_overage: "Stopped at the usage limit"
+  thread_status_closed: "Closed"
 
 library:
   toggle_needs_project: "Claude enablement is per project. Open a local project to change it."

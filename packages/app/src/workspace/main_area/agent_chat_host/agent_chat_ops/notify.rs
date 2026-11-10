@@ -2,6 +2,7 @@
 //! side effects, including answering a waiting ask.
 
 use super::should_notify_agent_event;
+use crate::remote_channel::threads::status::Ending;
 use crate::runs::GlobalTasks;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
@@ -185,6 +186,15 @@ impl Workspace {
         if let Some(news) = super::super::lane_status::agent_outcome(&outcome) {
             self.record_agent_outcome(pane_id, news, cx);
         }
+        let ending = match outcome {
+            TurnOutcome::Completed => Ending::Completed,
+            TurnOutcome::Errored => Ending::Failed,
+            TurnOutcome::Stopped => match self.interrupt_cause(pane_id, cx) {
+                crate::control::result::InterruptCause::ExtraUsage { .. } => Ending::OverageStopped,
+                crate::control::result::InterruptCause::User => Ending::Stopped,
+            },
+        };
+        self.report_remote_ending(pane_id, ending, cx);
         let relay_completion = !self.orchestrator_owns_task_completion(pane_id, cx);
         if matches!(outcome, TurnOutcome::Completed) {
             self.maybe_notify_agent_completed(pane_id, cx);

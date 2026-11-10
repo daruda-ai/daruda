@@ -1,6 +1,8 @@
 //! Places a pane's message in its thread: decides the thread on the main
 //! thread, posts off it, and records the root a post created.
 
+use super::roots::Roots;
+use super::status::ShownStatus;
 use super::{Book, ConversationKey, PaneConversation, Scope};
 use crate::remote_channel::bridge::{MessageTail, PaneRef};
 use crate::remote_channel::global::RemoteChannels;
@@ -14,12 +16,17 @@ use std::collections::HashMap;
 
 /// Every connection's pane threads, and where they persist.
 pub(crate) struct Threads {
-    book: Book,
+    pub(super) book: Book,
     /// The conversation each pane last spoke from on each connection: how a
     /// pane that starts a new conversation finds the thread its previous one
     /// used. Memory only — after a restart a pane is found by the
     /// conversation it resumes.
-    last: HashMap<(String, PaneRef), ConversationKey>,
+    pub(super) last: HashMap<(String, PaneRef), ConversationKey>,
+    /// Each pane's latest root title and status, for roots made or retitled
+    /// later. Memory only, like `last`.
+    pub(super) titles: HashMap<PaneRef, String>,
+    pub(super) activity: HashMap<PaneRef, ShownStatus>,
+    pub(super) roots: Roots,
     store: Option<RemoteThreadStore>,
 }
 
@@ -31,6 +38,9 @@ impl Threads {
         let mut threads = Self {
             book: Book::from_records(records.unwrap_or_default()),
             last: HashMap::new(),
+            titles: HashMap::new(),
+            activity: HashMap::new(),
+            roots: Roots::default(),
             store,
         };
         if threads.book.prune(now()) {
@@ -81,7 +91,7 @@ impl Threads {
         self.save();
     }
 
-    fn save(&self) {
+    pub(super) fn save(&self) {
         if let Some(store) = &self.store
             && let Err(error) = store.save(self.book.records())
         {
@@ -97,8 +107,11 @@ impl Threads {
 /// Where one pane message goes.
 pub(crate) struct ThreadPlan {
     scope: Scope,
+    pane: PaneRef,
     key: ConversationKey,
     title: String,
+    /// What a root started by this post shows.
+    shown: Option<ShownStatus>,
     /// `None`: the pane has no thread yet, and the post starts one.
     root: Option<String>,
     /// Said in the thread first: the pane moved to a new conversation.
@@ -120,20 +133,37 @@ pub(crate) fn plan(
         return None;
     }
     let conversation = conversation_of(pane, cx)?;
-    let scope = Scope {
-        connection: id.to_owned(),
-        bot: crate::remote_channel::lock::digest_of(&bot.credentials.bot),
-        conversation: recipient.conversation_id.clone(),
-    };
+    let scope = scope(id, bot, recipient);
     let threads = &mut cx.global_mut::<RemoteChannels>().threads;
     let (root, divider) = threads.place(&scope, pane, &conversation, now());
+    let shown = threads.activity.get(&pane).copied();
+    let retitled = threads
+        .titles
+        .insert(pane, conversation.title.clone())
+        .is_some_and(|old| old != conversation.title);
+    if let (Some(root), Some(shown), true) = (&root, shown, retitled) {
+        threads
+            .roots
+            .want(&scope, root.clone(), conversation.title.clone(), shown);
+    }
     Some(ThreadPlan {
         scope,
+        pane,
         key: conversation.key,
         title: conversation.title,
+        shown,
         root,
         divider,
     })
+}
+
+/// The identity a connection's threads are made under.
+pub(super) fn scope(id: &str, bot: &BotSession, recipient: &RemoteRecipient) -> Scope {
+    Scope {
+        connection: id.to_owned(),
+        bot: crate::remote_channel::lock::digest_of(&bot.credentials.bot),
+        conversation: recipient.conversation_id.clone(),
+    }
 }
 
 fn divider_text(previous: &ConversationKey, now: &PaneConversation) -> String {
@@ -170,9 +200,16 @@ pub(crate) fn deliver(
     mut message: Message,
     on_sent: impl FnMut(SentPart),
 ) -> Posted {
+    let status = plan.shown.map(ShownStatus::view);
+    let view = slack::threads::RootView {
+        title: &plan.title,
+        status: status
+            .as_ref()
+            .map(|(emoji, label)| (*emoji, label.as_str())),
+    };
     let (root, started) = match &plan.root {
         Some(root) => (root.clone(), None),
-        None => match slack::threads::post_root(credentials, recipient, &plan.title) {
+        None => match slack::threads::post_root(credentials, recipient, &view) {
             Ok(root) => (root.clone(), Some(root)),
             Err(error) => {
                 crate::remote_channel::log_error(
@@ -222,11 +259,22 @@ pub(super) fn drop_header_under_root(message: &mut Message) {
     }
 }
 
-/// Remember the thread a post started for the plan's conversation.
+/// Remember the thread a post started for the plan's conversation, and
+/// bring its root up to the pane's status if that moved while it was posting.
 pub(crate) fn record_root(plan: &ThreadPlan, root: String, cx: &mut App) {
-    cx.global_mut::<RemoteChannels>()
-        .threads
-        .remember(&plan.scope, plan.key.clone(), root, now());
+    let threads = &mut cx.global_mut::<RemoteChannels>().threads;
+    threads.remember(&plan.scope, plan.key.clone(), root.clone(), now());
+    if let Some(shown) = plan.shown {
+        threads.roots.shown(&plan.scope, &root, shown);
+    }
+    if let Some(&current) = threads.activity.get(&plan.pane)
+        && plan.shown != Some(current)
+    {
+        threads
+            .roots
+            .want(&plan.scope, root, plan.title.clone(), current);
+    }
+    super::roots::flush(cx);
 }
 
 /// Where a reply posted in a thread goes.
@@ -266,11 +314,7 @@ pub(crate) fn route_reply(
     {
         return ThreadReply::Untracked;
     }
-    let scope = Scope {
-        connection: id.to_owned(),
-        bot: crate::remote_channel::lock::digest_of(&bot.credentials.bot),
-        conversation: recipient.conversation_id.clone(),
-    };
+    let scope = scope(id, bot, recipient);
     let Some(record) = channels.threads.book.for_root(&scope, thread) else {
         return ThreadReply::Unknown;
     };
@@ -324,7 +368,7 @@ pub(crate) fn send_reply(
     .map(drop)
 }
 
-fn now() -> i64 {
+pub(super) fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| {
