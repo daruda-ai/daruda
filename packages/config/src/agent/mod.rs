@@ -52,7 +52,8 @@ pub struct AgentDefinition {
     pub default_mode: Option<String>,
     /// Session mode for a session daruda opens because the phone or the
     /// orchestrator asked, in place of `default_mode`. `None` follows
-    /// [`delegated_default`]; read through [`effective_delegated_mode`].
+    /// [`delegated_default`]; a blank value follows `default_mode`, as a
+    /// desktop session does. Read through [`effective_delegated_mode`].
     pub delegated_mode: Option<String>,
     /// Model a pane under this agent runs on unless its user picked one —
     /// requested on every connect and on a live config edit.

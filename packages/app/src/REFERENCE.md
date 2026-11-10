@@ -276,7 +276,8 @@ A chat opened at the phone's or the orchestrator's request — `task_start`,
 phone `/task` — runs in its agent's `delegated_mode`
 (`daruda_config::effective_delegated_mode`; unset means the policy default,
 Claude `bypassPermissions` and Codex `agent-full-access`, else the agent's
-`default_mode`). A desktop Start or menu chat, the orchestrator's own pane
+`default_mode`; a blank `delegated_mode = ""` opts out of the policy default
+and follows `default_mode`). A desktop Start or menu chat, the orchestrator's own pane
 and flows use `default_mode` or the flow's mode. The split is one function,
 `workspace::mode_for(StartedBy)`. A gated command computes it once, names it
 on its card and hands the work that `ChatOpen`; a task start takes only the

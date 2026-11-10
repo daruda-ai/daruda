@@ -1454,12 +1454,26 @@ fn effective_delegated_mode_prefers_a_stated_mode_over_the_policy_default() {
         effective_delegated_mode(&claude(Some(" acceptEdits "))).as_deref(),
         Some("acceptEdits")
     );
-    // Blank is no statement at all.
-    for unset in [None, Some(""), Some("  ")] {
+    assert_eq!(
+        effective_delegated_mode(&claude(None)).as_deref(),
+        Some("bypassPermissions")
+    );
+    // Blank is stated: it opts out of the policy default, so the session
+    // follows `default_mode` as a desktop one does.
+    for blank in ["", "  "] {
         assert_eq!(
-            effective_delegated_mode(&claude(unset)).as_deref(),
-            Some("bypassPermissions"),
-            "{unset:?}"
+            effective_delegated_mode(&claude(Some(blank))),
+            None,
+            "{blank:?}"
+        );
+        let agent = AgentDefinition {
+            default_mode: Some("default".to_string()),
+            ..claude(Some(blank))
+        };
+        assert_eq!(
+            SessionPreferences::resolve(Some(&agent), None, &ModeChoice::FollowDelegated).modes,
+            ["default"],
+            "{blank:?}"
         );
     }
     assert_eq!(effective_delegated_mode(&agent_with(None, None)), None);

@@ -35,16 +35,18 @@ pub fn delegated_default_for_command(adapter_command: &str) -> Option<&'static s
     }
 }
 
-/// The agent's own `delegated_mode` when it states a non-blank one, else
-/// [`delegated_default`].
+/// The agent's own `delegated_mode` when it states one, else
+/// [`delegated_default`]. A blank one is stated too: it opts out of the
+/// policy default, so the session follows `default_mode` as a desktop one
+/// does — `None` here. Treating it as unset would hand a person who wrote
+/// `delegated_mode = ""` to keep prompts the no-prompt mode instead. The
+/// Settings picker never writes one: its default entry removes the key.
 pub fn effective_delegated_mode(agent: &AgentDefinition) -> Option<String> {
-    agent
-        .delegated_mode
-        .as_deref()
-        .map(str::trim)
-        .filter(|mode| !mode.is_empty())
-        .or_else(|| delegated_default(&agent.launch))
-        .map(str::to_string)
+    match agent.delegated_mode.as_deref().map(str::trim) {
+        Some("") => None,
+        Some(mode) => Some(mode.to_string()),
+        None => delegated_default(&agent.launch).map(str::to_string),
+    }
 }
 
 #[cfg(test)]
