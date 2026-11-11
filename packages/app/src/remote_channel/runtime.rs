@@ -231,6 +231,9 @@ pub fn start(
                 let publish = |incoming: Incoming| {
                     // Paired connections do not enqueue traffic from other channel members.
                     if config.recipient.is_some() && !config.accepts(&incoming.sender) {
+                        super::trace::delivery("incoming.rejected", || {
+                            format!("connection={} event_id={}", config.id, incoming.event_id)
+                        });
                         return true;
                     }
                     emit(WorkerPayload::Incoming(incoming))
@@ -239,6 +242,9 @@ pub fn start(
                 // person's openings and taps reach the foreground.
                 let publish_home = |event: HomeEvent| {
                     if !config.accepts_person(&event.user_id, &event.team_id) {
+                        super::trace::delivery("home.rejected", || {
+                            format!("connection={} event_id={}", config.id, event.event_id)
+                        });
                         return true;
                     }
                     emit(WorkerPayload::Home(event))

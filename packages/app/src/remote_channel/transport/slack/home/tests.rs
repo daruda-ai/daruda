@@ -284,3 +284,20 @@ fn a_home_tap_is_read_apart_from_a_message_tap() {
     let callback = parse(&message).expect("a message tap");
     assert!(matches!(callback.kind, IncomingKind::Callback { data, .. } if data == "opaque-token"));
 }
+
+/// A page tap names the workspace a message tap names; only an org-wide
+/// install, whose `team` is null, leaves the person's own team to name it.
+#[test]
+fn a_home_tap_names_the_team_a_message_tap_names() {
+    let action = json!({"type":"button", "value":"hom:7:0:stop"});
+    let team = |envelope: &Value| parse_home(envelope).map(|tap| tap.team_id);
+    let org_wide = home_tap(action.clone());
+    assert_eq!(team(&org_wide).as_deref(), Some("T1"), "the person's own");
+    let mut workspace = home_tap(action);
+    workspace["payload"]["team"] = json!({"id":"T2", "domain":"other"});
+    assert_eq!(
+        team(&workspace).as_deref(),
+        Some("T2"),
+        "the payload's team, as a message tap reads it"
+    );
+}

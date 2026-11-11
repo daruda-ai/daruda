@@ -74,9 +74,8 @@ pub(super) fn parse_home(envelope: &Value) -> Option<HomeEvent> {
 }
 
 /// A button tapped on the Home tab. Such a tap names no conversation or
-/// message, and `team` is null for an org-wide install, so the person's own
-/// `team_id` names the team. A link button carries no value: Slack opens the
-/// link itself, and the acknowledgment already sent is all it needs.
+/// message. A link button carries no value: Slack opens the link itself,
+/// and the acknowledgment already sent is all it needs.
 fn parse_home_tap(envelope: &Value) -> Option<HomeEvent> {
     let payload = &envelope["payload"];
     if payload["type"] != "block_actions"
@@ -85,10 +84,17 @@ fn parse_home_tap(envelope: &Value) -> Option<HomeEvent> {
     {
         return None;
     }
+    // The team a message tap names, so both are checked against one pairing;
+    // `team` is null for an org-wide install, leaving only the person's own.
+    let team = if payload["team"].is_null() {
+        &payload["user"]["team_id"]
+    } else {
+        &payload["team"]["id"]
+    };
     Some(HomeEvent {
         event_id: envelope["envelope_id"].as_str()?.to_owned(),
         user_id: payload["user"]["id"].as_str()?.to_owned(),
-        team_id: payload["user"]["team_id"].as_str()?.to_owned(),
+        team_id: team.as_str()?.to_owned(),
         kind: HomeEventKind::Tap {
             data: payload["actions"][0]["value"].as_str()?.to_owned(),
         },
