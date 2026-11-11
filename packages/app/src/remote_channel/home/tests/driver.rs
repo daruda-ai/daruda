@@ -80,9 +80,9 @@ fn a_tap_on_a_gone_pane_or_an_old_board_says_so_on_the_page(cx: &mut gpui::TestA
     let show_gone = |cx: &mut gpui::TestAppContext| {
         cx.update(|cx| {
             let home = &mut cx.global_mut::<RemoteChannels>().home;
-            let mut board = Board::new(vec![row("gone", None)], 10);
+            let mut board = Board::new(vec![row("gone", None)], 10, None);
             board.number(&mut home.numbering);
-            let generation = board.generation;
+            let generation = board.generation();
             home.queue.want(&scope, board);
             generation
         })
@@ -122,9 +122,9 @@ fn a_tap_on_a_gone_pane_or_an_old_board_says_so_on_the_page(cx: &mut gpui::TestA
             let outcome = home.outcome_for_test(&scope).unwrap_or_default();
             assert!(outcome.contains(want.as_str()), "{label}: {outcome}");
             let board = home.queue.board(&scope).expect("a board is owed");
-            assert!(board.rows.is_empty(), "{label}: rebuilt as the panes are");
+            assert!(board.rows().is_empty(), "{label}: rebuilt as the panes are");
             assert_eq!(
-                board.outcome.as_ref().map(|outcome| &outcome.text),
+                board.outcome().map(|outcome| &outcome.text),
                 Some(&outcome),
                 "{label}: the rebuilt page shows the result"
             );

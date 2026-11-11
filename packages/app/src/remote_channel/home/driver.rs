@@ -263,9 +263,8 @@ fn board(scope: &Scope, capacity: usize, cx: &mut App) -> Board {
             selected: selected == Some(row.summary.target),
         })
         .collect();
-    let mut board = Board::new(rows, capacity);
     let home = &mut cx.global_mut::<RemoteChannels>().home;
-    board.outcome = home.queue.outcome(scope).cloned();
+    let mut board = Board::new(rows, capacity, home.queue.outcome(scope).cloned());
     board.number(&mut home.numbering);
     board
 }

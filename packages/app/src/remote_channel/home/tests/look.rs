@@ -11,7 +11,7 @@ fn each_row_reads_its_status_and_links_only_a_known_thread() {
     linked.link = Some("https://x/p1".into());
     let mut unlinked = row("quiet", None);
     unlinked.thread = Some("2.2".into());
-    let page = Board::new(vec![linked, unlinked, row("left out", None)], 2);
+    let page = Board::new(vec![linked, unlinked, row("left out", None)], 2, None);
     let look = HomeLook::new(&page);
     let view = look.view();
     assert_eq!(view.rows[0].emoji, Some("bell"));
@@ -50,11 +50,11 @@ fn a_row_offers_stop_only_while_its_pane_runs() {
         row("quiet", None),
         row("closed", Some(ShownStatus::Closed)),
     ];
-    let mut page = Board::new(rows, 10);
-    page.outcome = Some(Outcome {
+    let outcome = Outcome {
         at: 0,
         text: "Stopped".into(),
-    });
+    };
+    let page = Board::new(rows, 10, Some(outcome));
     let look = HomeLook::new(&page);
     let view = look.view();
     let stops: Vec<bool> = view.rows.iter().map(|row| row.stop.is_some()).collect();

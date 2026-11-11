@@ -34,7 +34,7 @@ impl HomeLook {
     pub(super) fn new(board: &Board) -> Self {
         Self {
             header: s::remote_channel::home_header(),
-            outcome: board.outcome.as_ref().map(|outcome| {
+            outcome: board.outcome().map(|outcome| {
                 s::remote_channel::home_result(
                     chrono::DateTime::from_timestamp(outcome.at, 0).unwrap_or_default(),
                     &outcome.text,
@@ -42,7 +42,7 @@ impl HomeLook {
             }),
             empty: s::control::listing_empty(),
             rows: board
-                .rows
+                .rows()
                 .iter()
                 .enumerate()
                 .map(|(index, row)| {
@@ -64,7 +64,7 @@ impl HomeLook {
                     }
                 })
                 .collect(),
-            more: (board.omitted > 0).then(|| s::remote_channel::home_more(board.omitted)),
+            more: (board.omitted() > 0).then(|| s::remote_channel::home_more(board.omitted())),
             open_thread: s::remote_channel::home_open_thread(),
             select: s::remote_channel::home_select(),
             stop: s::remote_channel::home_stop(),

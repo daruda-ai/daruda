@@ -53,7 +53,7 @@ impl Home {
         stop: bool,
     ) -> Option<String> {
         let board = self.queue.board(scope)?;
-        let index = board.rows.iter().position(|row| row.pane == pane)?;
+        let index = board.rows().iter().position(|row| row.pane == pane)?;
         let act = if stop {
             token::Act::Stop
         } else {

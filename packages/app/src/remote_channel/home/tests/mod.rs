@@ -38,5 +38,5 @@ pub(super) fn scope(connection: &str, bot: &str) -> Scope {
 }
 
 pub(super) fn board(names: &[&str]) -> Board {
-    Board::new(names.iter().map(|name| row(name, None)).collect(), 10)
+    Board::new(names.iter().map(|name| row(name, None)).collect(), 10, None)
 }

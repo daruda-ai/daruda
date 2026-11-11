@@ -9,7 +9,7 @@ fn sent(queue: &mut PublishQueue) -> Vec<Vec<String>> {
         .map(|publication| {
             publication
                 .board
-                .rows
+                .rows()
                 .iter()
                 .map(|row| row.name.clone())
                 .collect()
@@ -277,7 +277,7 @@ fn a_tap_resolves_against_the_shown_or_coming_board() {
         board
     };
     let tap = |board: &Board| Tap {
-        generation: board.generation,
+        generation: board.generation(),
         index: 0,
         act: Act::Select,
     };
@@ -291,7 +291,7 @@ fn a_tap_resolves_against_the_shown_or_coming_board() {
     let publication = queue.ready(false).remove(0);
     assert_eq!(
         queue.resolve(&work, tap(&shown)),
-        Some(shown.rows[0].pane),
+        Some(shown.rows()[0].pane),
         "in flight, it may already be on screen"
     );
     let coming = numbered(&["b"], &mut numbering);
@@ -302,14 +302,14 @@ fn a_tap_resolves_against_the_shown_or_coming_board() {
     queue.want(&work, next.clone());
     assert_eq!(
         queue.resolve(&work, tap(&coming)),
-        Some(coming.rows[0].pane),
+        Some(coming.rows()[0].pane),
         "in flight after the wanted board moved on"
     );
     queue.finish(&second, &PageVerdict::Published);
     for (board, label) in [(&coming, "shown"), (&next, "coming")] {
         assert_eq!(
             queue.resolve(&work, tap(board)),
-            Some(board.rows[0].pane),
+            Some(board.rows()[0].pane),
             "{label}"
         );
     }

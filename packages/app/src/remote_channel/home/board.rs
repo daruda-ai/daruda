@@ -43,17 +43,18 @@ pub(super) struct Outcome {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Board {
-    pub rows: Vec<PaneRow>,
+    rows: Vec<PaneRow>,
     /// Panes left out for want of room.
-    pub omitted: usize,
+    omitted: usize,
     /// What the rows' buttons carry, so a tap names this board's row.
-    pub generation: u64,
-    pub outcome: Option<Outcome>,
+    generation: u64,
+    outcome: Option<Outcome>,
 }
 
 impl Board {
-    /// `rows` in listing order, arranged for a page of `capacity` rows.
-    pub(super) fn new(mut rows: Vec<PaneRow>, capacity: usize) -> Self {
+    /// `rows` in listing order, arranged for a page of `capacity` rows, under
+    /// what the person's last tap came to.
+    pub(super) fn new(mut rows: Vec<PaneRow>, capacity: usize, outcome: Option<Outcome>) -> Self {
         // Stable: within a rank, panes keep their listing order.
         rows.sort_by_key(|row| rank(row.shown));
         let omitted = rows.len().saturating_sub(capacity);
@@ -62,8 +63,27 @@ impl Board {
             rows,
             omitted,
             generation: 0,
-            outcome: None,
+            outcome,
         }
+    }
+
+    pub(super) fn rows(&self) -> &[PaneRow] {
+        &self.rows
+    }
+
+    /// Panes left out for want of room.
+    pub(super) fn omitted(&self) -> usize {
+        self.omitted
+    }
+
+    /// What the person's last tap came to, shown atop the rows.
+    pub(super) fn outcome(&self) -> Option<&Outcome> {
+        self.outcome.as_ref()
+    }
+
+    #[cfg(test)]
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Give the rows' buttons the generation `numbering` has for them.
