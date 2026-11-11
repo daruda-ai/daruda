@@ -16,34 +16,38 @@ use daruda_config::remote::RemoteRecipient;
 use gpui::App;
 use std::sync::Arc;
 
-/// Report `pane`'s activity. Panes with no thread yet only remember it, for
-/// the root a later message starts.
-pub(crate) fn pane_activity(pane: PaneRef, activity: PaneActivity, cx: &mut App) {
+/// Report `pane`'s activity, and whether the status it shows changed. Panes
+/// with no thread yet only remember it, for the root a later message starts.
+pub(crate) fn pane_activity(pane: PaneRef, activity: PaneActivity, cx: &mut App) -> bool {
     if !cx.has_global::<RemoteChannels>() {
-        return;
+        return false;
     }
     let threads = &mut cx.global_mut::<RemoteChannels>().threads;
     // Reported on every pulse tick of a busy pane: an unchanged status costs
     // one lookup.
     let Some(shown) = threads.note_activity(pane, activity, now()) else {
-        return;
+        return false;
     };
     threads.want_for_pane(pane, shown);
     if activity == PaneActivity::Closed {
         threads.forget_pane(pane);
     }
     flush(cx);
+    true
 }
 
 /// Give `pane`'s roots its latest name; a root whose name changed is updated.
-pub(crate) fn pane_named(pane: PaneRef, name: &RootName, cx: &mut App) {
+/// Whether the name its roots know changed.
+pub(crate) fn pane_named(pane: PaneRef, name: &RootName, cx: &mut App) -> bool {
     if !cx.has_global::<RemoteChannels>() {
-        return;
+        return false;
     }
-    cx.global_mut::<RemoteChannels>()
+    let renamed = cx
+        .global_mut::<RemoteChannels>()
         .threads
         .rename_pane(pane, name);
     flush(cx);
+    renamed
 }
 
 /// Send every root update that is due now.
@@ -62,23 +66,9 @@ pub(crate) fn retry(cx: &mut App) {
         return;
     }
     let channels = cx.global_mut::<RemoteChannels>();
-    let mut scopes = Vec::new();
-    let mut unsettled = Vec::new();
-    for (id, connection) in &channels.connections {
-        match connection
-            .bot
-            .as_ref()
-            .and_then(|bot| connection.thread_scope(bot))
-        {
-            Some(scope) => scopes.push(scope),
-            // Reconnecting: its identity is not known yet, so keep its roots.
-            _ => unsettled.push(id.clone()),
-        }
-    }
     channels.threads.forget_closed(now());
-    channels
-        .threads
-        .keep_live_scopes(|scope| scopes.contains(scope) || unsettled.contains(&scope.connection));
+    let alive = channels.scope_alive();
+    channels.threads.keep_live_scopes(alive);
     let ready = channels.threads.due_updates(true);
     send(ready, cx);
 }

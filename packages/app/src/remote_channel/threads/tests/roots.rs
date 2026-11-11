@@ -311,3 +311,26 @@ fn a_renamed_pane_shows_its_new_subject_on_the_next_update() {
         Some(named)
     );
 }
+
+/// A rename counts as a change only when a root knew the pane by another
+/// name; the home is told nothing otherwise.
+#[test]
+fn only_a_new_name_counts_as_a_rename() {
+    let mut threads = Threads::load();
+    let pane = pane(12);
+    let claude = conversation("claude", "s1");
+    let named = RootName {
+        title: claude.name.title.clone(),
+        subject: Some("Fix the login bug".into()),
+    };
+    assert!(!threads.rename_pane(pane, &named), "no root names it yet");
+    start_thread(&mut threads, &work(), pane, &claude, "1.1");
+    let cases = [
+        (claude.name.clone(), false, "the name it already has"),
+        (named.clone(), true, "a new subject"),
+        (named, false, "the same subject again"),
+    ];
+    for (name, renamed, label) in cases {
+        assert_eq!(threads.rename_pane(pane, &name), renamed, "{label}");
+    }
+}

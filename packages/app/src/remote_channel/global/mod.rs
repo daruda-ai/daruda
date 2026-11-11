@@ -182,6 +182,25 @@ impl RemoteChannels {
             .map_or(Status::Disabled, |c| c.status)
     }
 
+    /// Whether what was made under a scope may still be served: its
+    /// connection serves that identity now, or is reconnecting and has not
+    /// said which identity yet.
+    pub(crate) fn scope_alive(&self) -> impl Fn(&super::threads::Scope) -> bool + use<> {
+        let mut scopes = Vec::new();
+        let mut unsettled = Vec::new();
+        for (id, connection) in &self.connections {
+            match connection
+                .bot
+                .as_ref()
+                .and_then(|bot| connection.thread_scope(bot))
+            {
+                Some(scope) => scopes.push(scope),
+                None => unsettled.push(id.clone()),
+            }
+        }
+        move |scope| scopes.contains(scope) || unsettled.contains(&scope.connection)
+    }
+
     /// Both the connection generation and live config must still agree.
     pub(crate) fn live<'a>(&'a self, id: &str, cx: &App) -> Option<&'a Connection> {
         let connection = self.connections.get(id)?;

@@ -1,6 +1,6 @@
-//! Drives the pages `publish_queue` owes: takes the person opening a page,
-//! lists the panes with their status and thread links, publishes off the
-//! main thread, and settles what that came to.
+//! Drives the pages `publish_queue` owes: takes the person opening a page
+//! and the panes' changes, lists the panes with their status and thread
+//! links, publishes off the main thread, and settles what that came to.
 
 use super::board::{Board, PaneRow};
 use super::look::HomeLook;
@@ -26,65 +26,119 @@ pub(crate) fn opened(id: &str, user_id: &str, team_id: &str, cx: &mut App) {
         return;
     };
     cx.global_mut::<RemoteChannels>().home.queue.opened(&scope);
-    let mut board = board(&scope, cx);
+    publish_latest(scope, Some(bot), cx);
+}
+
+/// A pane's status or name changed: bring the pages the person is viewing up
+/// to date. Reported from inside a workspace's update, while listing the
+/// panes updates every workspace, so the rebuild waits for the update's end.
+pub(crate) fn changed(cx: &mut App) {
+    if !cx.has_global::<RemoteChannels>()
+        || !cx.global_mut::<RemoteChannels>().home.schedule_rebuild()
+    {
+        return;
+    }
+    cx.defer(rebuild);
+}
+
+/// The retry tick: forget pages no connection can serve any more, then send
+/// boards that wait on a passing failure or on their connection.
+pub(crate) fn retry(cx: &mut App) {
+    if !cx.has_global::<RemoteChannels>() {
+        return;
+    }
+    let channels = cx.global_mut::<RemoteChannels>();
+    let alive = channels.scope_alive();
+    channels.home.queue.keep_scopes(alive);
+    let ready = channels.home.queue.ready(true);
+    send(ready, cx);
+}
+
+/// Build every viewed page anew.
+fn rebuild(cx: &mut App) {
+    if !cx.has_global::<RemoteChannels>() {
+        return;
+    }
+    let home = &mut cx.global_mut::<RemoteChannels>().home;
+    home.start_rebuild();
+    let scopes: Vec<Scope> = home.queue.viewing().cloned().collect();
+    for scope in scopes {
+        // A connection that cannot send now still gets its board; it waits
+        // for the retry tick, and its thread links for a later rebuild.
+        let bot = serving(&scope, cx).map(|(bot, _)| bot);
+        publish_latest(scope, bot, cx);
+    }
+}
+
+/// Ask `scope`'s page to show the panes as they are. Thread links not known
+/// yet are asked of `bot` first, so the board carries their buttons.
+fn publish_latest(scope: Scope, bot: Option<Arc<BotSession>>, cx: &mut App) {
+    let board = linked_board(&scope, cx);
+    let mut unlinked: Vec<String> = board.unlinked().map(str::to_owned).collect();
+    unlinked.sort();
+    unlinked.dedup();
+    let Some(bot) = bot.filter(|_| !unlinked.is_empty()) else {
+        want(&scope, board, cx);
+        return;
+    };
+    cx.spawn(async move |cx| {
+        let credentials = bot.credentials.clone();
+        let channel = scope.conversation.clone();
+        let fetched = cx
+            .background_executor()
+            .spawn(async move {
+                unlinked
+                    .into_iter()
+                    .map(|root| {
+                        let link = slack::home::permalink(&credentials, &channel, &root);
+                        (root, link)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await;
+        cx.update(|cx| {
+            let links = &mut cx.global_mut::<RemoteChannels>().home.links;
+            for (root, link) in fetched {
+                match link {
+                    Ok(link) => {
+                        links.insert((scope.connection.clone(), root), link);
+                    }
+                    // Not remembered: the next build asks again, and the row
+                    // shows no button meanwhile.
+                    Err(error) => crate::remote_channel::log_error(
+                        "Remote home thread link unavailable",
+                        &error,
+                        "remote.home.permalink",
+                    ),
+                }
+            }
+            // Built again: the panes may have changed while the links were
+            // asked for, and the latest board wins.
+            let board = linked_board(&scope, cx);
+            want(&scope, board, cx);
+        });
+    })
+    .detach();
+}
+
+/// The board for `scope`'s page, with the thread links known so far.
+fn linked_board(scope: &Scope, cx: &mut App) -> Board {
+    let mut board = board(scope, cx);
     let home = &cx.global::<RemoteChannels>().home;
     board.link(|root| {
         home.links
             .get(&(scope.connection.clone(), root.to_owned()))
             .cloned()
     });
-    let mut unlinked: Vec<String> = board.unlinked().map(str::to_owned).collect();
-    unlinked.sort();
-    unlinked.dedup();
-    cx.spawn(async move |cx| {
-        if !unlinked.is_empty() {
-            let credentials = bot.credentials.clone();
-            let channel = scope.conversation.clone();
-            let fetched = cx
-                .background_executor()
-                .spawn(async move {
-                    unlinked
-                        .into_iter()
-                        .map(|root| {
-                            let link = slack::home::permalink(&credentials, &channel, &root);
-                            (root, link)
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .await;
-            cx.update(|cx| {
-                let links = &mut cx.global_mut::<RemoteChannels>().home.links;
-                for (root, link) in fetched {
-                    match link {
-                        Ok(link) => {
-                            links.insert((scope.connection.clone(), root), link);
-                        }
-                        // Not remembered: the next opening asks again, and the
-                        // row shows no button meanwhile.
-                        Err(error) => crate::remote_channel::log_error(
-                            "Remote home thread link unavailable",
-                            &error,
-                            "remote.home.permalink",
-                        ),
-                    }
-                }
-                let home = &cx.global::<RemoteChannels>().home;
-                board.link(|root| {
-                    home.links
-                        .get(&(scope.connection.clone(), root.to_owned()))
-                        .cloned()
-                });
-            });
-        }
-        cx.update(|cx| {
-            cx.global_mut::<RemoteChannels>()
-                .home
-                .queue
-                .want(&scope, board);
-            flush(cx);
-        });
-    })
-    .detach();
+    board
+}
+
+fn want(scope: &Scope, board: Board, cx: &mut App) {
+    cx.global_mut::<RemoteChannels>()
+        .home
+        .queue
+        .want(scope, board);
+    flush(cx);
 }
 
 /// The connection's live bot and its thread scope, when `user_id` of
@@ -125,7 +179,11 @@ fn board(scope: &Scope, cx: &mut App) -> Board {
 
 /// Publish every page that is due now.
 fn flush(cx: &mut App) {
-    let ready = cx.global_mut::<RemoteChannels>().home.queue.ready();
+    let ready = cx.global_mut::<RemoteChannels>().home.queue.ready(false);
+    send(ready, cx);
+}
+
+fn send(ready: Vec<Publication>, cx: &mut App) {
     for publication in ready {
         cx.spawn(async move |cx| {
             let serving = cx.update(|cx| serving(&publication.scope, cx));
@@ -174,7 +232,7 @@ fn settle(publication: &Publication, verdict: &PublishVerdict, cx: &mut App) {
             "remote.home.disabled",
         ),
         // Not retried here: a channel that keeps failing would loop. The
-        // person's next opening sends the latest board.
+        // retry tick or the person's next opening sends the latest board.
         (Settled::Retry, PublishVerdict::Transient(reason)) => crate::remote_channel::log_error(
             "Remote home page update will be retried",
             reason,

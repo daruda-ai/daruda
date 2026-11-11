@@ -500,6 +500,7 @@ pub(super) fn spawn(mut receiver: UnboundedReceiver<Pending>, cx: &mut App) {
             cx.update(|cx| {
                 flush_edits(cx);
                 crate::remote_channel::threads::roots::retry(cx);
+                crate::remote_channel::home::driver::retry(cx);
             });
         }
     })

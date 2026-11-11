@@ -29,7 +29,7 @@ impl Workspace {
         let pane = self.run_pane(pane_id);
         view.update(cx, |_, cx| {
             cx.on_release(move |view, cx| {
-                crate::remote_channel::threads::roots::pane_activity(
+                crate::remote_channel::panes::activity(
                     pane_ref,
                     crate::remote_channel::threads::status::PaneActivity::Closed,
                     cx,

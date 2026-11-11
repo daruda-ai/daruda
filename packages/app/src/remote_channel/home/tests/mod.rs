@@ -6,6 +6,7 @@ use crate::remote_channel::threads::Scope;
 use crate::remote_channel::threads::status::ShownStatus;
 
 mod board;
+mod driver;
 mod look;
 mod publish_queue;
 

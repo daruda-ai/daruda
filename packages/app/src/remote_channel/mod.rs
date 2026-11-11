@@ -11,6 +11,7 @@ pub(crate) mod home;
 pub mod keychain;
 pub(crate) mod lock;
 mod pairing;
+pub(crate) mod panes;
 pub(crate) mod runtime;
 pub(crate) mod settings;
 pub(crate) mod threads;

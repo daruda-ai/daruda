@@ -24,7 +24,7 @@ pub(crate) enum Viewer {
 enum Phase {
     InFlight,
     /// Failed for a passing reason, or its connection could not send; sent
-    /// again only on a later trigger.
+    /// again on the retry tick or the person's next opening.
     Waiting,
 }
 
@@ -101,11 +101,23 @@ impl PublishQueue {
         }
     }
 
-    /// The boards to publish now: wanted, not already shown, not in flight
-    /// or waiting.
-    pub(super) fn ready(&mut self) -> Vec<Publication> {
+    /// The connections' pages the person is viewing, under the identity
+    /// each was opened with.
+    pub(super) fn viewing(&self) -> impl Iterator<Item = &Scope> {
+        self.pages
+            .values()
+            .filter(|page| page.viewer == Viewer::Viewing)
+            .map(|page| &page.scope)
+    }
+
+    /// The boards to publish now: wanted, not already shown, not in flight,
+    /// and not waiting unless `retrying`.
+    pub(super) fn ready(&mut self, retrying: bool) -> Vec<Publication> {
         let mut ready = Vec::new();
         for page in self.pages.values_mut() {
+            if retrying && page.phase == Some(Phase::Waiting) {
+                page.phase = None;
+            }
             if page.wanted.is_some() && page.wanted == page.published {
                 page.wanted = None;
             }
@@ -166,6 +178,11 @@ impl PublishQueue {
         if let Some(page) = current(&mut self.pages, &publication.scope) {
             page.phase = Some(Phase::Waiting);
         }
+    }
+
+    /// Forget the pages of scopes no connection can serve any more.
+    pub(super) fn keep_scopes(&mut self, alive: impl Fn(&Scope) -> bool) {
+        self.pages.retain(|_, page| alive(&page.scope));
     }
 
     /// The page `scope`'s connection has under `scope`; another identity's

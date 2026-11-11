@@ -319,7 +319,8 @@ impl Threads {
     /// Give `pane`'s roots its latest name. Every post names them anew; this
     /// carries a subject that arrived since, as it usually does mid-turn, to
     /// roots that would otherwise keep the old one until the next post.
-    pub(super) fn rename_pane(&mut self, pane: PaneRef, name: &RootName) {
+    /// Whether any root's name changed.
+    pub(super) fn rename_pane(&mut self, pane: PaneRef, name: &RootName) -> bool {
         let mut renamed = false;
         for (_, held) in self.names.iter_mut().filter(|((_, held), _)| *held == pane) {
             renamed |= *held != *name;
@@ -328,6 +329,7 @@ impl Threads {
         if renamed && let Some(shown) = self.activity_of(pane) {
             self.want_for_pane(pane, shown);
         }
+        renamed
     }
 
     /// Forget panes closed long enough ago that no root of theirs can still

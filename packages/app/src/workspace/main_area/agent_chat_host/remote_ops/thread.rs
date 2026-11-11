@@ -85,7 +85,7 @@ impl Workspace {
         // settled, so the root it updates carries it.
         if let Some(conversation) = self.remote_conversation(pane_id, cx) {
             let pane = self.remote_pane(pane_id);
-            crate::remote_channel::threads::roots::pane_named(pane, &conversation.name, cx);
+            crate::remote_channel::panes::named(pane, &conversation.name, cx);
         }
         self.report_remote_activity(pane_id, PaneActivity::Ended(ending), cx);
     }
@@ -97,7 +97,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let pane = self.remote_pane(pane_id);
-        crate::remote_channel::threads::roots::pane_activity(pane, activity, cx);
+        crate::remote_channel::panes::activity(pane, activity, cx);
     }
 
     /// `pane_id` as remote channels name it: by window and pane.
