@@ -69,11 +69,14 @@ impl PublishQueue {
         page.resume();
     }
 
-    /// The retry tick: every page lets what waits on a passing failure go
-    /// again once built. Whether any page has something to build for.
-    pub(super) fn retry(&mut self) -> bool {
+    /// The retry tick: each page whose scope `sendable` names lets what
+    /// waits on a passing failure go again once built. A page whose connection cannot send
+    /// keeps waiting, so it costs no rebuild until it can. Whether any page
+    /// has something to build for.
+    pub(super) fn retry(&mut self, sendable: impl Fn(&Scope) -> bool) -> bool {
         self.pages
             .values_mut()
+            .filter(|page| sendable(&page.scope))
             .fold(false, |due, page| page.resume() | due)
     }
 

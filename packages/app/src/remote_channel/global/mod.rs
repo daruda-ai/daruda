@@ -214,6 +214,35 @@ impl RemoteChannels {
         move |scope| scopes.contains(scope) || unsettled.contains(&scope.connection)
     }
 
+    /// Whether what was made under a scope can be sent now: [`Self::sender`]
+    /// names a connection for it. Asked before the retry tick builds or sends
+    /// anything held, so a connection that cannot send costs no work.
+    pub(crate) fn scope_sendable(
+        &self,
+        cx: &App,
+    ) -> impl Fn(&super::threads::Scope) -> bool + use<> {
+        let scopes: Vec<super::threads::Scope> = self
+            .connections
+            .values()
+            .filter_map(|connection| connection.thread_scope(connection.bot.as_ref()?))
+            .filter(|scope| self.sender(scope, cx).is_some())
+            .collect();
+        move |scope| scopes.contains(scope)
+    }
+
+    /// The connection that may send what was made under `scope` now: live,
+    /// able to send, and still serving that identity.
+    pub(crate) fn sender<'a>(
+        &'a self,
+        scope: &super::threads::Scope,
+        cx: &App,
+    ) -> Option<&'a Connection> {
+        let connection = self.live(&scope.connection, cx)?;
+        let bot = connection.bot.as_ref()?;
+        (connection.can_send() && connection.thread_scope(bot).as_ref() == Some(scope))
+            .then_some(connection)
+    }
+
     /// Both the connection generation and live config must still agree.
     pub(crate) fn live<'a>(&'a self, id: &str, cx: &App) -> Option<&'a Connection> {
         let connection = self.connections.get(id)?;

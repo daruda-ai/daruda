@@ -61,7 +61,7 @@ fn a_page_asks_each_thread_link_once_until_a_failure_is_retried() {
         ask(&mut queue, &work, &["1.1", "2.2"]).is_empty(),
         "a failed link waits for a later trigger"
     );
-    assert!(queue.retry(), "the retry tick asks again");
+    assert!(queue.retry(|_| true), "the retry tick asks again");
     assert_eq!(
         ask(&mut queue, &work, &["1.1", "2.2", "3.3"]),
         ["2.2"],

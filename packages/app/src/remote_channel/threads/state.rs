@@ -58,9 +58,14 @@ impl Threads {
 
     // --- Root updates ---------------------------------------------------
 
-    /// The root updates to send now; on the retry tick, also those waiting.
-    pub(super) fn due_updates(&mut self, retrying: bool) -> Vec<RootUpdate> {
-        self.roots.ready(retrying)
+    /// The root updates to send now; those waiting are not among them.
+    pub(super) fn due_updates(&mut self) -> Vec<RootUpdate> {
+        self.roots.ready()
+    }
+
+    /// Let the waiting updates of the scopes `sendable` names be sent again.
+    pub(super) fn resume_updates(&mut self, sendable: impl Fn(&Scope) -> bool) {
+        self.roots.resume(sendable);
     }
 
     /// Record how `update`'s edit went; a root found gone takes its thread

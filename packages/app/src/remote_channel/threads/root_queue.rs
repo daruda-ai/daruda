@@ -41,7 +41,7 @@ pub(super) enum Finished {
     /// Slack refused the edit itself. The thread is kept, so replies in it
     /// still route; the root keeps what it showed.
     Refused,
-    /// Try again on the retry tick.
+    /// Try again on a retry tick.
     Retry,
 }
 
@@ -50,8 +50,8 @@ pub(super) enum Finished {
 enum Phase {
     InFlight,
     /// Failed for a passing reason, or its connection could not send; sent
-    /// again only on the retry tick, so a rate-limited channel is not pressed
-    /// by every other root's change.
+    /// again only on a retry tick its connection can send on, so a
+    /// rate-limited channel is not pressed by every other root's change.
     Waiting,
 }
 
@@ -91,12 +91,22 @@ impl Roots {
             .insert((scope.connection.clone(), root.to_owned()), face);
     }
 
-    /// The updates to send now: wanted, not already shown, not in flight, and
-    /// — unless this is the retry tick — not waiting.
-    pub(super) fn ready(&mut self, retrying: bool) -> Vec<RootUpdate> {
-        if retrying {
-            self.phase.retain(|_, phase| *phase == Phase::InFlight);
-        }
+    /// Let the waiting updates of the scopes `sendable` names go out with
+    /// the next `ready`. One whose connection cannot send now keeps waiting
+    /// rather than being sent only to be held again.
+    pub(super) fn resume(&mut self, sendable: impl Fn(&Scope) -> bool) {
+        let desired = &self.desired;
+        self.phase.retain(|key, phase| {
+            *phase == Phase::InFlight
+                || desired
+                    .get(key)
+                    .is_some_and(|update| !sendable(&update.scope))
+        });
+    }
+
+    /// The updates to send now: wanted, not already shown, not in flight,
+    /// and not waiting.
+    pub(super) fn ready(&mut self) -> Vec<RootUpdate> {
         // A root with an edit in flight is compared once that edit settles:
         // what it will show then is not known yet.
         let (shown, phase) = (&self.shown, &self.phase);
@@ -145,7 +155,7 @@ impl Roots {
         }
     }
 
-    /// Put `update` back to wait for the retry tick: its connection cannot
+    /// Put `update` back to wait for a retry tick: its connection cannot
     /// send right now. Expected while it reconnects, so not a failure.
     pub(super) fn hold(&mut self, update: &RootUpdate) {
         self.phase.insert(update.key(), Phase::Waiting);

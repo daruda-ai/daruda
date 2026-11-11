@@ -21,7 +21,7 @@ fn changes_schedule_one_rebuild_while_a_page_is_viewed() {
 
 /// Status changes reported inside one update rebuild the viewed page once
 /// that update ends, never during it; a connection that cannot send holds
-/// the board, and the retry tick builds the page anew.
+/// the board, and a retry tick it can send on builds the page anew.
 #[gpui::test]
 fn reported_changes_rebuild_a_viewed_page_after_the_update(cx: &mut gpui::TestAppContext) {
     let scope = cx.update(|cx| {
@@ -55,8 +55,76 @@ fn reported_changes_rebuild_a_viewed_page_after_the_update(cx: &mut gpui::TestAp
         assert!(!home.rebuild_pending, "the rebuild ran");
         assert!(home.queue.board(&scope).is_some(), "a board is owed");
         assert!(home.queue.ready().is_empty(), "held, not sent");
-        assert!(home.queue.retry(), "the retry tick builds it anew");
+        assert!(home.queue.retry(|_| true), "a sendable tick builds it anew");
     });
+}
+
+/// The defect this guards: a connection still enabled and paired but unable
+/// to send (its token revoked, its worker failed) had its held page built
+/// anew, every workspace listed, on every retry tick, only for the board to
+/// be held again. The page waits at no cost until the connection can send;
+/// the first tick after that builds it once.
+#[gpui::test]
+fn a_held_page_is_built_anew_only_once_its_connection_can_send(cx: &mut gpui::TestAppContext) {
+    use crate::remote_channel::runtime::Status;
+    use crate::remote_channel::transport::{AppHome, Credentials, PageVerdict, PageView};
+    fn publish(_: &Credentials, _: &str, _: &PageView<'_>) -> PageVerdict {
+        PageVerdict::Published
+    }
+    let _stub = super::super::driver::stub_for_test(AppHome {
+        publish,
+        ..crate::remote_channel::transport::app_home(daruda_config::remote::ChannelKind::Slack)
+            .unwrap()
+    });
+    let (scope, bot) = cx.update(|cx| {
+        let _outgoing = crate::remote_channel::global::tests::setup(cx);
+        let channels = cx.global_mut::<RemoteChannels>();
+        let connection = channels.connections.get_mut("work").unwrap();
+        let bot = connection.bot.clone().unwrap();
+        let scope = connection.thread_scope(&bot).unwrap();
+        // The worker failed: it withdrew the bot, and nothing reconnects.
+        connection.bot = None;
+        connection.status = Status::Failed;
+        let queue = &mut channels.home.queue;
+        queue.opened(&scope);
+        queue.want(&scope, Board::new(Vec::new(), 10, None));
+        let held = queue.ready();
+        queue.hold(&held[0]);
+        (scope, bot)
+    });
+    let rebuilds = |cx: &mut gpui::TestAppContext| {
+        cx.update(|cx| {
+            super::super::driver::retry(cx);
+            cx.global::<RemoteChannels>().home.rebuild_pending
+        })
+    };
+    for tick in 0..3 {
+        assert!(!rebuilds(cx), "tick {tick}: nothing is built");
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let queue = &cx.global::<RemoteChannels>().home.queue;
+            assert!(queue.viewer(&scope).is_some(), "tick {tick}: kept");
+        });
+    }
+    cx.update(|cx| {
+        let connection = cx
+            .global_mut::<RemoteChannels>()
+            .connections
+            .get_mut("work")
+            .unwrap();
+        connection.publish_bot(bot);
+        connection.status = Status::Connected;
+    });
+    assert!(
+        rebuilds(cx),
+        "the first tick it can send on builds the page"
+    );
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let queue = &cx.global::<RemoteChannels>().home.queue;
+        assert!(queue.published(&scope).is_some(), "and publishes it");
+    });
+    assert!(!rebuilds(cx), "resumed once");
 }
 
 /// The defect this guards: a disabled or unpaired connection was taken for

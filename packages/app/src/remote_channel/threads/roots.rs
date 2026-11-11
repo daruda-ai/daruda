@@ -56,21 +56,25 @@ pub(crate) fn flush(cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {
         return;
     }
-    let ready = cx.global_mut::<RemoteChannels>().threads.due_updates(false);
+    let ready = cx.global_mut::<RemoteChannels>().threads.due_updates();
     send(ready, cx);
 }
 
 /// The retry tick: drop updates no connection can make any more, then send
-/// the rest, including those that failed for a passing reason.
+/// the rest, including those that failed for a passing reason or were held.
+/// An update whose connection cannot send now keeps waiting, so a connection
+/// that stays unable to send costs no work on each tick.
 pub(crate) fn retry(cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {
         return;
     }
-    let alive = cx.global::<RemoteChannels>().scope_alive(cx);
+    let channels = cx.global::<RemoteChannels>();
+    let (alive, sendable) = (channels.scope_alive(cx), channels.scope_sendable(cx));
     let channels = cx.global_mut::<RemoteChannels>();
     channels.threads.forget_closed(now());
     channels.threads.keep_live_scopes(alive);
-    let ready = channels.threads.due_updates(true);
+    channels.threads.resume_updates(sendable);
+    let ready = channels.threads.due_updates();
     send(ready, cx);
 }
 
@@ -110,11 +114,11 @@ fn replace(
 /// The session that may edit roots made under `scope`: the connection's live
 /// bot, if it is still the identity that made them.
 fn serving(scope: &Scope, cx: &App) -> Option<(Arc<BotSession>, RemoteRecipient)> {
-    let connection = cx.global::<RemoteChannels>().live(&scope.connection, cx)?;
-    let bot = connection.bot.clone()?;
-    let recipient = connection.config.recipient.clone()?;
-    (connection.can_send() && connection.thread_scope(&bot).as_ref() == Some(scope))
-        .then_some((bot, recipient))
+    let connection = cx.global::<RemoteChannels>().sender(scope, cx)?;
+    Some((
+        connection.bot.clone()?,
+        connection.config.recipient.clone()?,
+    ))
 }
 
 fn settle(update: RootUpdate, result: Result<(), RootFailure>, cx: &mut App) {

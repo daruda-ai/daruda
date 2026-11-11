@@ -262,11 +262,15 @@ fn only_a_viewed_page_takes_a_new_board() {
 }
 
 /// A page whose board failed for a passing reason, or whose connection could
-/// not send, is due a new board on the retry tick, not on an ordinary flush;
-/// the board that waited was built while things stood otherwise, so it is
-/// not sent as it was.
+/// not send, is due a new board on a retry tick its connection can send on,
+/// not on an ordinary flush; the board that waited was built while things
+/// stood otherwise, so it is not sent as it was.
+///
+/// The defect this guards: a connection that stayed unable to send had its
+/// page built anew, the whole listing walked, on every tick, only for the
+/// board to be held again. It keeps waiting, at no cost, until it can send.
 #[test]
-fn a_waiting_page_is_built_anew_on_the_retry_tick() {
+fn a_waiting_page_is_built_anew_on_a_tick_its_connection_can_send_on() {
     let transient = |queue: &mut PublishQueue, publication: &Publication| {
         queue.finish(publication, &PageVerdict::Transient("ratelimited".into()));
     };
@@ -281,9 +285,13 @@ fn a_waiting_page_is_built_anew_on_the_retry_tick() {
         let ready = queue.ready();
         wait(&mut queue, &ready[0]);
         assert!(queue.ready().is_empty(), "{label}: not on a flush");
-        assert!(queue.retry(), "{label}: due on the retry tick");
+        for tick in 0..3 {
+            assert!(!queue.retry(|_| false), "{label}: tick {tick} cannot send");
+        }
+        assert!(queue.ready().is_empty(), "{label}: still waiting");
+        assert!(queue.retry(|scope| *scope == work), "{label}: can send");
         assert!(queue.ready().is_empty(), "{label}: not the old board");
-        assert!(!queue.retry(), "{label}: nothing waits any more");
+        assert!(!queue.retry(|_| true), "{label}: resumed once");
         queue.want(&work, board(&["b"]));
         assert_eq!(sent(&mut queue), [["b"]], "{label}: the page built anew");
     }
@@ -302,7 +310,7 @@ fn a_page_no_connection_serves_is_forgotten() {
     queue.keep_scopes(|scope| *scope == kept);
     assert_eq!(queue.viewer(&gone), None, "forgotten");
     assert_eq!(queue.viewer(&kept), Some(Viewer::Viewing), "kept");
-    queue.retry();
+    queue.retry(|_| true);
     assert!(queue.ready().is_empty(), "nothing sent for the gone page");
 }
 

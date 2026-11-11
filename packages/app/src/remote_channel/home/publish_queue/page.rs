@@ -26,7 +26,8 @@ enum Phase {
     /// The board on its way, which may already be on screen.
     InFlight(Board),
     /// Failed for a passing reason, or its connection could not send; built
-    /// anew on the retry tick or the person's next opening.
+    /// anew on a retry tick its connection can send on, or the person's next
+    /// opening.
     Waiting,
 }
 

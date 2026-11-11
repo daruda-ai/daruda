@@ -56,16 +56,17 @@ pub(crate) fn changed(cx: &mut App) {
 
 /// The retry tick: forget pages no connection can serve any more, then
 /// build anew the pages whose board or thread links wait on a passing
-/// failure or on their connection. The panes have moved on since, so the
-/// board that waited is not sent as it was.
+/// failure or on their connection, once that connection can send. The panes have moved on since,
+/// so the board that waited is not sent as it was.
 pub(crate) fn retry(cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {
         return;
     }
-    let alive = cx.global::<RemoteChannels>().scope_alive(cx);
+    let channels = cx.global::<RemoteChannels>();
+    let (alive, sendable) = (channels.scope_alive(cx), channels.scope_sendable(cx));
     let channels = cx.global_mut::<RemoteChannels>();
     channels.home.queue.keep_scopes(alive);
-    if channels.home.queue.retry() {
+    if channels.home.queue.retry(sendable) {
         changed(cx);
     }
 }
@@ -91,7 +92,8 @@ fn rebuild(cx: &mut App) {
         };
         let board = board(&scope, home.capacity, &listing, cx);
         // A connection that cannot send now still gets its board; it waits
-        // for the retry tick, and so do its thread links.
+        // for a retry tick the connection can send on. Its thread links are
+        // asked on a later rebuild.
         if let Some((bot, ..)) = publish::serving(&scope, cx) {
             links::ask(&scope, home, bot, &board, cx);
         }

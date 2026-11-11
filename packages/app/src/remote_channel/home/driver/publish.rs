@@ -27,7 +27,7 @@ fn flush(cx: &mut App) {
         cx.spawn(async move |cx| {
             let serving = cx.update(|cx| serving(&publication.scope, cx));
             // Expected while the connection reconnects, so not a failure:
-            // the retry tick builds the page anew.
+            // the first retry tick it can send on builds the page anew.
             let Some((bot, home, user_id)) = serving else {
                 cx.update(|cx| {
                     cx.global_mut::<RemoteChannels>()
@@ -55,12 +55,11 @@ fn flush(cx: &mut App) {
 /// channel's app home it writes to, and the person whose page it is: the
 /// connection's live bot, if it can send and is still that identity.
 pub(super) fn serving(scope: &Scope, cx: &App) -> Option<(Arc<BotSession>, AppHome, String)> {
-    let connection = cx.global::<RemoteChannels>().live(&scope.connection, cx)?;
+    let connection = cx.global::<RemoteChannels>().sender(scope, cx)?;
     let home = super::app_home(connection.config.kind)?;
     let bot = connection.bot.clone()?;
     let user_id = connection.config.recipient.as_ref()?.user_id.clone();
-    (connection.can_send() && connection.thread_scope(&bot).as_ref() == Some(scope))
-        .then_some((bot, home, user_id))
+    Some((bot, home, user_id))
 }
 
 fn settle(publication: &Publication, home: AppHome, verdict: &PageVerdict, cx: &mut App) {

@@ -93,13 +93,13 @@ fn a_root_is_edited_once_at_a_time_with_its_latest_face() {
     let working = ShownStatus::Working { since: NOW };
     let done = ShownStatus::Ended(Ending::Completed);
     roots.want(&work(), "t", "1.1".into(), face("title", working));
-    let first = roots.ready(false);
+    let first = roots.ready();
     assert_eq!(first.len(), 1);
-    assert!(roots.ready(false).is_empty(), "in flight");
+    assert!(roots.ready().is_empty(), "in flight");
 
     roots.want(&work(), "t", "1.1".into(), face("title", done));
     assert_eq!(roots.finish(&first[0], &Ok(())), Finished::Shown);
-    let second = roots.ready(false);
+    let second = roots.ready();
     assert_eq!(second.len(), 1);
     assert_eq!(
         second[0].face.shown, done,
@@ -126,12 +126,12 @@ fn a_face_wanted_during_an_edit_is_compared_after_it_lands() {
         let mut roots = Roots::default();
         roots.shown(&work(), "1.1", working.clone());
         roots.want(&work(), "t", "1.1".into(), needs.clone());
-        let sent = roots.ready(false);
+        let sent = roots.ready();
         assert_eq!(sent.len(), 1, "{label}");
         roots.want(&work(), "t", "1.1".into(), later);
-        assert!(roots.ready(false).is_empty(), "{label}: one edit at a time");
+        assert!(roots.ready().is_empty(), "{label}: one edit at a time");
         assert_eq!(roots.finish(&sent[0], &Ok(())), Finished::Shown, "{label}");
-        let next = roots.ready(false);
+        let next = roots.ready();
         assert_eq!(
             next.first().map(|update| update.face.clone()),
             want,
@@ -148,9 +148,15 @@ fn a_new_title_alone_updates_the_root() {
     let done = ShownStatus::Ended(Ending::Completed);
     roots.shown(&work(), "1.1", face("my_project\nClaude", done));
     roots.want(&work(), "t", "1.1".into(), face("my_project\nClaude", done));
-    assert!(roots.ready(false).is_empty(), "already shown");
+    assert!(roots.ready().is_empty(), "already shown");
     roots.want(&work(), "t", "1.1".into(), face("my_project\nCodex", done));
-    assert_eq!(roots.ready(false).len(), 1);
+    assert_eq!(roots.ready().len(), 1);
+}
+
+/// The updates a retry tick sends while every connection can send.
+fn retried(roots: &mut Roots) -> Vec<super::super::root_queue::RootUpdate> {
+    roots.resume(|_| true);
+    roots.ready()
 }
 
 /// The defect this guards: a failed edit was resent on every flush, so a
@@ -160,11 +166,11 @@ fn a_passing_failure_waits_for_the_retry_tick() {
     let mut roots = Roots::default();
     let done = ShownStatus::Ended(Ending::Completed);
     roots.want(&work(), "t", "1.1".into(), face("title", done));
-    let sent = roots.ready(false);
+    let sent = roots.ready();
     let failed = Err(RootFailure::Transient("ratelimited".into()));
     assert_eq!(roots.finish(&sent[0], &failed), Finished::Retry);
-    assert!(roots.ready(false).is_empty(), "not on an ordinary flush");
-    assert_eq!(roots.ready(true).len(), 1, "on the retry tick");
+    assert!(roots.ready().is_empty(), "not on an ordinary flush");
+    assert_eq!(retried(&mut roots).len(), 1, "on the retry tick");
 }
 
 /// Only a missing root lets its wanted face go as gone; a refused edit
@@ -185,9 +191,9 @@ fn a_missing_or_refused_root_is_not_edited_again() {
     for (failure, want) in cases {
         let mut roots = Roots::default();
         roots.want(&work(), "t", "1.1".into(), face("title", done));
-        let sent = roots.ready(true);
+        let sent = retried(&mut roots);
         assert_eq!(roots.finish(&sent[0], &Err(failure)), want);
-        assert!(roots.ready(true).is_empty(), "{want:?}");
+        assert!(retried(&mut roots).is_empty(), "{want:?}");
         assert_eq!(roots.wanted("work", "1.1"), None, "{want:?}");
         roots.want(&work(), "t", "1.1".into(), face("again", done));
         assert_eq!(
@@ -198,17 +204,28 @@ fn a_missing_or_refused_root_is_not_edited_again() {
     }
 }
 
-/// A connection that cannot send right now keeps its update for the retry
-/// tick, without counting it a failure.
+/// A connection that cannot send right now keeps its update, without
+/// counting it a failure, until a retry tick it can send on.
+///
+/// The defect this guards: a connection that stayed unable to send (its
+/// token revoked, its worker failed) had each held update sent again on every
+/// tick, only to be held again. It keeps waiting until the connection can
+/// send, and is then resumed once.
 #[test]
 fn an_update_waits_while_its_connection_cannot_send() {
     let mut roots = Roots::default();
     let done = ShownStatus::Ended(Ending::Completed);
     roots.want(&work(), "t", "1.1".into(), face("title", done));
-    let sent = roots.ready(false);
+    let sent = roots.ready();
     roots.hold(&sent[0]);
-    assert!(roots.ready(false).is_empty(), "not on an ordinary flush");
-    assert_eq!(roots.ready(true).len(), 1, "on the retry tick");
+    assert!(roots.ready().is_empty(), "not on an ordinary flush");
+    for tick in 0..3 {
+        roots.resume(|_| false);
+        assert!(roots.ready().is_empty(), "tick {tick}: cannot send");
+    }
+    roots.resume(|scope| *scope == work());
+    assert_eq!(roots.ready().len(), 1, "the first tick it can send on");
+    assert!(retried(&mut roots).is_empty(), "resumed once: in flight");
 }
 
 /// The defect this guards: a closed pane's status was kept forever under its
