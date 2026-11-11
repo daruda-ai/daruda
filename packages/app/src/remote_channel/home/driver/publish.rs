@@ -7,7 +7,7 @@ use super::super::publish_queue::{Publication, Settled};
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::threads::Scope;
-use crate::remote_channel::transport::{self, AppHome, PageVerdict};
+use crate::remote_channel::transport::{AppHome, PageVerdict};
 use gpui::App;
 use std::sync::Arc;
 
@@ -22,21 +22,12 @@ pub(super) fn want(scope: &Scope, board: Board, cx: &mut App) {
 
 /// Publish every page that is due now.
 fn flush(cx: &mut App) {
-    let ready = cx.global_mut::<RemoteChannels>().home.queue.ready(false);
-    send(ready, cx);
-}
-
-/// Publish every page that is due now, those waiting on a passing failure
-/// or on their connection too.
-pub(super) fn flush_retrying(cx: &mut App) {
-    let ready = cx.global_mut::<RemoteChannels>().home.queue.ready(true);
-    send(ready, cx);
-}
-
-fn send(ready: Vec<Publication>, cx: &mut App) {
+    let ready = cx.global_mut::<RemoteChannels>().home.queue.ready();
     for publication in ready {
         cx.spawn(async move |cx| {
             let serving = cx.update(|cx| serving(&publication.scope, cx));
+            // Expected while the connection reconnects, so not a failure:
+            // the retry tick builds the page anew.
             let Some((bot, home, user_id)) = serving else {
                 cx.update(|cx| {
                     cx.global_mut::<RemoteChannels>()
@@ -60,12 +51,12 @@ fn send(ready: Vec<Publication>, cx: &mut App) {
     }
 }
 
-/// The session that may publish the page made under `scope`, the channel's
-/// app home it writes to, and the person whose page it is: the connection's
-/// live bot, if it is still that identity.
+/// The session that may publish the page made under `scope` now, the
+/// channel's app home it writes to, and the person whose page it is: the
+/// connection's live bot, if it can send and is still that identity.
 pub(super) fn serving(scope: &Scope, cx: &App) -> Option<(Arc<BotSession>, AppHome, String)> {
     let connection = cx.global::<RemoteChannels>().live(&scope.connection, cx)?;
-    let home = transport::app_home(connection.config.kind)?;
+    let home = super::app_home(connection.config.kind)?;
     let bot = connection.bot.clone()?;
     let user_id = connection.config.recipient.as_ref()?.user_id.clone();
     (connection.can_send() && connection.thread_scope(&bot).as_ref() == Some(scope))
@@ -82,17 +73,23 @@ fn settle(publication: &Publication, home: AppHome, verdict: &PageVerdict, cx: &
             "remote.home.disabled",
         ),
         // Not retried here: a channel that keeps failing would loop. The
-        // retry tick or the person's next opening sends the latest board.
+        // retry tick or the person's next opening builds the page anew.
         (Settled::Retry, PageVerdict::Transient(reason)) => crate::remote_channel::log_error(
             "Remote home page update will be retried",
             reason,
             "remote.home.retry",
         ),
-        (Settled::Dropped, PageVerdict::Refused(reason)) => crate::remote_channel::log_error(
-            "Remote home page refused an update",
-            reason,
-            "remote.home.refused",
-        ),
+        // A board wanted while the refused one was on its way differs from
+        // it, so it goes now rather than on the next change; the refused
+        // board itself is not sent again, so this cannot loop.
+        (Settled::Dropped, PageVerdict::Refused(reason)) => {
+            crate::remote_channel::log_error(
+                "Remote home page refused an update",
+                reason,
+                "remote.home.refused",
+            );
+            flush(cx);
+        }
         _ => {}
     }
 }

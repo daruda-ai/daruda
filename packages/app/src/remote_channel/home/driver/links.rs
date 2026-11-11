@@ -1,63 +1,65 @@
-//! Asks for the links that open the threads a page shows, so the board
-//! carries their buttons.
+//! Asks for the links that open the threads a page shows. The board goes out
+//! without the links not known yet; each one that lands builds the viewed
+//! pages again, so the first rows link without waiting for the last.
 
+use super::super::board::Board;
+use super::super::publish_queue::Learned;
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::threads::Scope;
-use crate::remote_channel::transport::AppHome;
+use crate::remote_channel::transport::{AppHome, TransportError};
 use gpui::App;
 use std::sync::Arc;
 
-/// Ask `scope`'s page to show the panes as they are. Thread links not known
-/// yet are asked of `bot` first, so the board carries their buttons.
-pub(super) fn publish_latest(
-    scope: Scope,
-    home: AppHome,
-    bot: Option<Arc<BotSession>>,
-    cx: &mut App,
-) {
-    let board = super::board(&scope, home.capacity, cx);
-    let mut unlinked: Vec<String> = board.unlinked().map(str::to_owned).collect();
-    unlinked.sort();
-    unlinked.dedup();
-    let Some(bot) = bot.filter(|_| !unlinked.is_empty()) else {
-        super::publish::want(&scope, board, cx);
+/// Ask `bot` for the links to the threads `board` shows without one that
+/// `scope`'s page has not asked for yet. One at a time, off the main thread.
+pub(super) fn ask(scope: &Scope, home: AppHome, bot: Arc<BotSession>, board: &Board, cx: &mut App) {
+    let roots = cx
+        .global_mut::<RemoteChannels>()
+        .home
+        .queue
+        .ask_links(scope, board.unlinked());
+    if roots.is_empty() {
         return;
-    };
+    }
+    let scope = scope.clone();
     cx.spawn(async move |cx| {
-        let credentials = bot.credentials.clone();
-        let channel = scope.conversation.clone();
-        let fetched = cx
-            .background_executor()
-            .spawn(async move {
-                unlinked
-                    .into_iter()
-                    .map(|root| {
-                        let link = (home.link)(&credentials, &channel, &root);
-                        (root, link)
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .await;
-        cx.update(|cx| {
-            let home_state = &mut cx.global_mut::<RemoteChannels>().home;
-            for (root, link) in fetched {
-                match link {
-                    Ok(link) => home_state.learn_link(&scope, root, link),
-                    // Not remembered: the next build asks again, and the row
-                    // shows no button meanwhile.
-                    Err(error) => crate::remote_channel::log_error(
-                        "Remote home thread link unavailable",
-                        &error,
-                        "remote.home.permalink",
-                    ),
-                }
+        for root in roots {
+            let credentials = bot.credentials.clone();
+            let channel = scope.conversation.clone();
+            let asked = root.clone();
+            let link = cx
+                .background_executor()
+                .spawn(async move { (home.link)(&credentials, &channel, &asked) })
+                .await;
+            // Another identity's page has replaced this one: its own asks
+            // are its own.
+            if !cx.update(|cx| learn(&scope, &root, link, cx)) {
+                return;
             }
-            // Built again: the panes may have changed while the links were
-            // asked for, and the latest board wins.
-            let board = super::board(&scope, home.capacity, cx);
-            super::publish::want(&scope, board, cx);
-        });
+        }
     })
     .detach();
+}
+
+/// Keep what the link asked for `root` came to. Whether `scope`'s page
+/// still waited for it.
+fn learn(scope: &Scope, root: &str, link: Result<String, TransportError>, cx: &mut App) -> bool {
+    let queue = &mut cx.global_mut::<RemoteChannels>().home.queue;
+    match (
+        queue.learn_link(scope, root, link.as_ref().ok().cloned()),
+        link,
+    ) {
+        (Learned::Stale, _) => return false,
+        (Learned::Known, _) => super::changed(cx),
+        // The row shows no button meanwhile; the retry tick or the person's
+        // next opening asks again, and a repeat failure is not logged again.
+        (Learned::Failed { first: true }, Err(error)) => crate::remote_channel::log_error(
+            "Remote home thread link unavailable",
+            &error,
+            "remote.home.permalink",
+        ),
+        (Learned::Failed { .. }, _) => {}
+    }
+    true
 }

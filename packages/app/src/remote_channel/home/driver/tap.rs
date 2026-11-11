@@ -24,10 +24,7 @@ pub(crate) async fn tapped(id: &str, user_id: &str, team_id: &str, data: &str, c
     cx.update(|cx| {
         // The connection may have gone, or changed identity, while the stop
         // settled; a page made under the old identity is not shown again.
-        let Some((bot, home, now)) = super::serving_person(id, user_id, team_id, cx) else {
-            return;
-        };
-        if now != scope {
+        if super::serving_person(id, user_id, team_id, cx).as_ref() != Some(&scope) {
             return;
         }
         let outcome = text.map(|text| Outcome {
@@ -38,7 +35,8 @@ pub(crate) async fn tapped(id: &str, user_id: &str, team_id: &str, data: &str, c
             .home
             .queue
             .tapped(&scope, outcome);
-        super::links::publish_latest(scope, home, Some(bot), cx);
+        // Built anew, so the person also sees the panes as they are now.
+        super::changed(cx);
     });
 }
 
@@ -52,14 +50,14 @@ fn act(id: &str, user_id: &str, team_id: &str, data: &str, cx: &mut App) -> Opti
     if !cx.has_global::<RemoteChannels>() {
         return None;
     }
-    let (_, _, scope) = super::serving_person(id, user_id, team_id, cx)?;
+    let scope = super::serving_person(id, user_id, team_id, cx)?;
     let tapped = Tap::parse(data).and_then(|tap| {
         let queue = &cx.global::<RemoteChannels>().home.queue;
         Some((queue.resolve(&scope, tap)?, tap.act))
     });
     let target = dispatch::Target::Remote(id.into());
     let acted = match tapped {
-        // The page is rebuilt below, so the person sees what is there now.
+        // The page is built anew, so the person sees what is there now.
         None => Acted::Said(Some(s::remote_channel::home_stale())),
         Some((pane, Act::Select)) => Acted::Said(dispatch::select_live(pane, &target, cx)),
         Some((pane, Act::Stop)) => Acted::Stopping(dispatch::stop_pane(pane, &target, cx)),

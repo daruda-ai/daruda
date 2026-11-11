@@ -1,7 +1,7 @@
-//! What each connection's page should show next, what it shows, and whether
-//! a publish is under way. GPUI-free; `driver` drives it. Like the thread
-//! roots' queue: the latest board wins, and a board the page already shows
-//! is not sent again.
+//! What each connection's page should show next, what it shows, whether a
+//! publish is under way, and the thread links it has learned. GPUI-free;
+//! `driver` drives it. Like the thread roots' queue: the latest board wins,
+//! and a board the page already shows is not sent again.
 
 use super::board::{Board, Outcome};
 use super::token::Tap;
@@ -26,9 +26,32 @@ pub(crate) enum Viewer {
 enum Phase {
     /// The board on its way, which may already be on screen.
     InFlight(Board),
-    /// Failed for a passing reason, or its connection could not send; sent
-    /// again on the retry tick or the person's next opening.
+    /// Failed for a passing reason, or its connection could not send; built
+    /// anew on the retry tick or the person's next opening.
     Waiting,
+}
+
+/// What a page knows of the link to one thread root. A message's link does
+/// not change, so a known one is kept as long as the page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Link {
+    /// Being asked for; the board goes out without it meanwhile.
+    Pending,
+    Known(String),
+    /// The last ask failed; asked again on the retry tick or the person's
+    /// next opening.
+    Failed,
+}
+
+/// What a link that landed came to.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Learned {
+    /// Known now: the page is worth building again.
+    Known,
+    /// Failed; `first` the first time this root failed on this page.
+    Failed { first: bool },
+    /// For a page another identity has replaced since, or no longer asked.
+    Stale,
 }
 
 /// A board on its way to the page of `scope`'s connection.
@@ -48,6 +71,11 @@ struct Page {
     phase: Option<Phase>,
     /// What the person's last tap came to, shown atop every later board.
     outcome: Option<Outcome>,
+    /// The link to each thread root the page's boards have shown.
+    links: HashMap<String, Link>,
+    /// Roots whose link failed on this page, so each failure is reported
+    /// once rather than on every attempt.
+    told_failed: HashSet<String>,
 }
 
 impl Page {
@@ -59,7 +87,23 @@ impl Page {
             published: None,
             phase: None,
             outcome: None,
+            links: HashMap::new(),
+            told_failed: HashSet::new(),
         }
+    }
+
+    /// Give up what waits for a later trigger: a board that could not go out
+    /// is built anew, since the panes have moved on meanwhile, and failed
+    /// links are asked again. Whether there was anything to give up.
+    fn resume(&mut self) -> bool {
+        let waiting = self.phase == Some(Phase::Waiting);
+        if waiting {
+            self.phase = None;
+            self.wanted = None;
+        }
+        let links = self.links.len();
+        self.links.retain(|_, link| *link != Link::Failed);
+        waiting || self.links.len() != links
     }
 }
 
@@ -72,7 +116,8 @@ pub(super) enum Settled {
     Unavailable { first: bool },
     /// Kept for a later trigger.
     Retry,
-    /// Refused; this board is not sent again.
+    /// Refused; this board is not sent again, but a newer one wanted
+    /// meanwhile is sent at once.
     Dropped,
     /// For a page another identity has replaced since.
     Stale,
@@ -87,13 +132,20 @@ pub(super) struct PublishQueue {
 
 impl PublishQueue {
     /// The person opened the page of `scope`'s connection: keep it up to
-    /// date, and let a publish waiting on a passing failure go again.
+    /// date, and let what waits on a passing failure go again once the page
+    /// is built.
     pub(super) fn opened(&mut self, scope: &Scope) {
         let page = self.page(scope);
         page.viewer = Viewer::Viewing;
-        if page.phase == Some(Phase::Waiting) {
-            page.phase = None;
-        }
+        page.resume();
+    }
+
+    /// The retry tick: every page lets what waits on a passing failure go
+    /// again once built. Whether any page has something to build for.
+    pub(super) fn retry(&mut self) -> bool {
+        self.pages
+            .values_mut()
+            .fold(false, |due, page| page.resume() | due)
     }
 
     /// The person tapped a button on the page of `scope`'s connection: it is
@@ -146,13 +198,10 @@ impl PublishQueue {
     }
 
     /// The boards to publish now: wanted, not already shown, not in flight,
-    /// and not waiting unless `retrying`.
-    pub(super) fn ready(&mut self, retrying: bool) -> Vec<Publication> {
+    /// and not waiting.
+    pub(super) fn ready(&mut self) -> Vec<Publication> {
         let mut ready = Vec::new();
         for page in self.pages.values_mut() {
-            if retrying && page.phase == Some(Phase::Waiting) {
-                page.phase = None;
-            }
             // With a publish in flight, what the page will show is not known
             // until it settles; the wanted board is compared then.
             let in_flight = matches!(page.phase, Some(Phase::InFlight(_)));
@@ -214,6 +263,69 @@ impl PublishQueue {
     pub(super) fn hold(&mut self, publication: &Publication) {
         if let Some(page) = current(&mut self.pages, &publication.scope) {
             page.phase = Some(Phase::Waiting);
+        }
+    }
+
+    /// Give `board` the links `scope`'s page knows for its threads.
+    pub(super) fn link(&self, scope: &Scope, board: &mut Board) {
+        let Some(page) = current_ref(&self.pages, scope) else {
+            return;
+        };
+        board.link(|root| match page.links.get(root) {
+            Some(Link::Known(link)) => Some(link.clone()),
+            Some(Link::Pending | Link::Failed) | None => None,
+        });
+    }
+
+    /// The roots among `roots` whose link `scope`'s page has not asked for
+    /// yet, each marked as being asked for now.
+    pub(super) fn ask_links<'a>(
+        &mut self,
+        scope: &Scope,
+        roots: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<String> {
+        let Some(page) = current(&mut self.pages, scope) else {
+            return Vec::new();
+        };
+        let mut asked = Vec::new();
+        for root in roots {
+            if !page.links.contains_key(root) {
+                page.links.insert(root.to_owned(), Link::Pending);
+                asked.push(root.to_owned());
+            }
+        }
+        asked
+    }
+
+    /// The link asked for `root` on `scope`'s page came back as `link`, or
+    /// failed.
+    pub(super) fn learn_link(
+        &mut self,
+        scope: &Scope,
+        root: &str,
+        link: Option<String>,
+    ) -> Learned {
+        let Some(page) = current(&mut self.pages, scope) else {
+            return Learned::Stale;
+        };
+        let Some(entry) = page
+            .links
+            .get_mut(root)
+            .filter(|entry| **entry == Link::Pending)
+        else {
+            return Learned::Stale;
+        };
+        match link {
+            Some(link) => {
+                *entry = Link::Known(link);
+                Learned::Known
+            }
+            None => {
+                *entry = Link::Failed;
+                Learned::Failed {
+                    first: page.told_failed.insert(root.to_owned()),
+                }
+            }
         }
     }
 

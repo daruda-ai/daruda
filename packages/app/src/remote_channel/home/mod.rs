@@ -10,15 +10,11 @@ mod token;
 
 use crate::remote_channel::threads::Scope;
 use board::{Board, PaneRow};
-use std::collections::HashMap;
 
-/// Every connection's page and the thread links it has learned.
+/// Every connection's page, and the numbering their buttons share.
 #[derive(Default)]
 pub(crate) struct Home {
     queue: publish_queue::PublishQueue,
-    /// The link to each thread root, by connection and root. A message's link
-    /// does not change, so it is asked for once a run.
-    links: HashMap<(String, String), String>,
     /// A rebuild of the viewed pages waits for the end of the current
     /// update, so the changes of one frame make one rebuild.
     rebuild_pending: bool,
@@ -43,22 +39,13 @@ impl Home {
     }
 
     /// The board `scope`'s page shows next: `rows` arranged for `capacity`,
-    /// under what the last tap came to, with the thread links known so far,
-    /// and buttons numbered for this board.
+    /// under what the last tap came to, with the thread links the page
+    /// knows, and buttons numbered for this board.
     fn board(&mut self, scope: &Scope, rows: Vec<PaneRow>, capacity: usize) -> Board {
         let mut board = Board::new(rows, capacity, self.queue.outcome(scope).cloned());
-        board.link(|root| {
-            self.links
-                .get(&(scope.connection.clone(), root.to_owned()))
-                .cloned()
-        });
+        self.queue.link(scope, &mut board);
         board.number(&mut self.numbering);
         board
-    }
-
-    /// Keep the link to thread `root` of `scope`'s connection.
-    fn learn_link(&mut self, scope: &Scope, root: String, link: String) {
-        self.links.insert((scope.connection.clone(), root), link);
     }
 }
 

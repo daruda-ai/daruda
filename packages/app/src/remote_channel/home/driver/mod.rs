@@ -1,8 +1,7 @@
 //! Drives the pages `publish_queue` owes. This part takes the person opening
-//! a page and the panes' changes, and lists the panes for the viewed pages;
-//! `tap` acts on a page's buttons, `links` asks for thread links before a
-//! board goes out, and `publish` sends boards off the main thread and
-//! settles what that came to.
+//! a page and the panes' changes, and builds the viewed pages anew; `tap`
+//! acts on a page's buttons, `links` asks for thread links, and `publish`
+//! sends boards off the main thread and settles what that came to.
 
 mod links;
 mod publish;
@@ -11,12 +10,13 @@ mod tap;
 pub(crate) use tap::tapped;
 
 use super::board::{Board, PaneRow};
+use crate::remote_channel::bridge::PaneRef;
+use crate::remote_channel::command::ListingRow;
 use crate::remote_channel::global::RemoteChannels;
-use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::threads::Scope;
 use crate::remote_channel::transport::{self, AppHome};
+use daruda_config::remote::ChannelKind;
 use gpui::App;
-use std::sync::Arc;
 
 /// The paired person, `user_id` of team `team_id`, opened connection `id`'s
 /// page: show it every pane as it is now. Idempotent, so it claims nothing in
@@ -25,16 +25,18 @@ pub(crate) fn opened(id: &str, user_id: &str, team_id: &str, cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {
         return;
     }
-    let Some((bot, home, scope)) = serving_person(id, user_id, team_id, cx) else {
+    let Some(scope) = serving_person(id, user_id, team_id, cx) else {
         return;
     };
     cx.global_mut::<RemoteChannels>().home.queue.opened(&scope);
-    links::publish_latest(scope, home, Some(bot), cx);
+    changed(cx);
 }
 
-/// A pane's status or name changed: bring the pages the person is viewing up
-/// to date. Reported from inside a workspace's update, while listing the
-/// panes updates every workspace, so the rebuild waits for the update's end.
+/// What the person views changed: a pane's status, name or selection, a
+/// pane opened, a tap's result, or a thread link learned. Bring the viewed
+/// pages up to date. Often reported from inside a workspace's update, while
+/// listing the panes updates every workspace, so the rebuild waits for the
+/// update's end.
 pub(crate) fn changed(cx: &mut App) {
     if !cx.has_global::<RemoteChannels>()
         || !cx.global_mut::<RemoteChannels>().home.schedule_rebuild()
@@ -44,8 +46,10 @@ pub(crate) fn changed(cx: &mut App) {
     cx.defer(rebuild);
 }
 
-/// The retry tick: forget pages no connection can serve any more, then send
-/// boards that wait on a passing failure or on their connection.
+/// The retry tick: forget pages no connection can serve any more, then
+/// build anew the pages whose board or thread links wait on a passing
+/// failure or on their connection. The panes have moved on since, so the
+/// board that waited is not sent as it was.
 pub(crate) fn retry(cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {
         return;
@@ -53,7 +57,9 @@ pub(crate) fn retry(cx: &mut App) {
     let channels = cx.global_mut::<RemoteChannels>();
     let alive = channels.scope_alive();
     channels.home.queue.keep_scopes(alive);
-    publish::flush_retrying(cx);
+    if channels.home.queue.retry() {
+        changed(cx);
+    }
 }
 
 /// Build every viewed page anew.
@@ -64,36 +70,38 @@ fn rebuild(cx: &mut App) {
     let home = &mut cx.global_mut::<RemoteChannels>().home;
     home.start_rebuild();
     let scopes: Vec<Scope> = home.queue.viewing().cloned().collect();
+    if scopes.is_empty() {
+        return;
+    }
+    // One listing for every page: it walks, and updates, every workspace.
+    let listing = crate::remote_channel::command::flatten(&crate::control::exec::listing(cx));
     for scope in scopes {
         // Only a removed connection has no page left; the retry tick
         // forgets it.
         let Some(home) = page_of(&scope, cx) else {
             continue;
         };
+        let board = board(&scope, home.capacity, &listing, cx);
         // A connection that cannot send now still gets its board; it waits
-        // for the retry tick, and its thread links for a later rebuild.
-        let bot = publish::serving(&scope, cx).map(|(bot, ..)| bot);
-        links::publish_latest(scope, home, bot, cx);
+        // for the retry tick, and so do its thread links.
+        if let Some((bot, ..)) = publish::serving(&scope, cx) {
+            links::ask(&scope, home, bot, &board, cx);
+        }
+        publish::want(&scope, board, cx);
     }
 }
 
-/// The connection's live bot, its channel's app home and its thread scope,
-/// when `user_id` of `team_id` is its paired person and its page can be
-/// published to now.
-fn serving_person(
-    id: &str,
-    user_id: &str,
-    team_id: &str,
-    cx: &App,
-) -> Option<(Arc<BotSession>, AppHome, Scope)> {
+/// The thread scope of connection `id`, when `user_id` of `team_id` is its
+/// paired person, its channel has a page, and the page can be published to
+/// now.
+fn serving_person(id: &str, user_id: &str, team_id: &str, cx: &App) -> Option<Scope> {
     let connection = cx.global::<RemoteChannels>().live(id, cx)?;
-    let home = transport::app_home(connection.config.kind)?;
+    app_home(connection.config.kind)?;
     if !connection.can_send() || !connection.config.accepts_person(user_id, team_id) {
         return None;
     }
-    let bot = connection.bot.clone()?;
-    let scope = connection.thread_scope(&bot)?;
-    Some((bot, home, scope))
+    let bot = connection.bot.as_ref()?;
+    connection.thread_scope(bot)
 }
 
 /// The app home of the channel `scope`'s connection is on, while the
@@ -103,21 +111,30 @@ fn page_of(scope: &Scope, cx: &App) -> Option<AppHome> {
         .global::<RemoteChannels>()
         .connections
         .get(&scope.connection)?;
-    transport::app_home(connection.config.kind)
+    app_home(connection.config.kind)
 }
 
-/// Every pane `/list` shows, with its status, its thread under `scope`, the
-/// links known so far and whether commands address it, under what the last
-/// tap came to.
-fn board(scope: &Scope, capacity: usize, cx: &mut App) -> Board {
-    let listing = crate::control::exec::listing(cx);
+/// The app home a channel of `kind` has. Tests stand a stub in for the
+/// network on the channels that have one.
+fn app_home(kind: ChannelKind) -> Option<AppHome> {
+    let home = transport::app_home(kind)?;
+    #[cfg(test)]
+    if let Some(stub) = STUB.get() {
+        return Some(stub);
+    }
+    Some(home)
+}
+
+/// Every pane `/list` shows, with its status, its thread under `scope` and
+/// whether commands address it, under what the last tap came to.
+fn board(scope: &Scope, capacity: usize, listing: &[ListingRow], cx: &mut App) -> Board {
     let channels = cx.global_mut::<RemoteChannels>();
-    let selected = channels
+    let selected: Option<PaneRef> = channels
         .connections
         .get(&scope.connection)
         .and_then(|connection| connection.core.command_state().selected());
     let threads = &channels.threads;
-    let rows = crate::remote_channel::command::flatten(&listing)
+    let rows = listing
         .iter()
         .map(|row| PaneRow {
             pane: row.summary.target,
@@ -129,4 +146,30 @@ fn board(scope: &Scope, capacity: usize, cx: &mut App) -> Board {
         })
         .collect();
     channels.home.board(scope, rows, capacity)
+}
+
+/// Ask the links `board` lacks for `scope`'s page, as a rebuild does.
+#[cfg(test)]
+pub(super) fn ask_links_for_test(scope: &Scope, board: &Board, cx: &mut App) {
+    let (bot, home, _) = publish::serving(scope, cx).expect("the connection can send");
+    links::ask(scope, home, bot, board, cx);
+}
+
+#[cfg(test)]
+thread_local! {
+    static STUB: std::cell::Cell<Option<AppHome>> = const { std::cell::Cell::new(None) };
+}
+
+/// Stand `home` in for the channel's app home on this thread until the
+/// guard drops.
+#[cfg(test)]
+pub(crate) fn stub_for_test(home: AppHome) -> impl Drop {
+    struct Unstub;
+    impl Drop for Unstub {
+        fn drop(&mut self) {
+            STUB.set(None);
+        }
+    }
+    STUB.set(Some(home));
+    Unstub
 }

@@ -20,8 +20,8 @@ fn changes_schedule_one_rebuild_while_a_page_is_viewed() {
 }
 
 /// Status changes reported inside one update rebuild the viewed page once
-/// that update ends, never during it; a connection that cannot send keeps
-/// the board for the retry tick.
+/// that update ends, never during it; a connection that cannot send holds
+/// the board, and the retry tick builds the page anew.
 #[gpui::test]
 fn reported_changes_rebuild_a_viewed_page_after_the_update(cx: &mut gpui::TestAppContext) {
     let scope = cx.update(|cx| {
@@ -50,13 +50,13 @@ fn reported_changes_rebuild_a_viewed_page_after_the_update(cx: &mut gpui::TestAp
         }
     });
     cx.run_until_parked();
-    let home = &mut cx.update(|cx| {
+    cx.update(|cx| {
         let home = &mut cx.global_mut::<RemoteChannels>().home;
         assert!(!home.rebuild_pending, "the rebuild ran");
-        home.queue.ready(true)
+        assert!(home.queue.board(&scope).is_some(), "a board is owed");
+        assert!(home.queue.ready().is_empty(), "held, not sent");
+        assert!(home.queue.retry(), "the retry tick builds it anew");
     });
-    assert_eq!(home.len(), 1, "the rebuilt board waits for the retry tick");
-    assert_eq!(home[0].scope, scope);
 }
 
 /// A tap that names a pane no longer open, or a board the page no longer
@@ -130,4 +130,90 @@ fn a_tap_on_a_gone_pane_or_an_old_board_says_so_on_the_page(cx: &mut gpui::TestA
             );
         });
     }
+}
+
+/// Thread links are asked off the main thread while the board goes out
+/// without them. Each that lands is kept and builds the page again; one that
+/// fails leaves its row without a button and is not asked again until the
+/// retry tick.
+#[gpui::test]
+fn thread_links_land_after_the_board_and_build_the_page_again(cx: &mut gpui::TestAppContext) {
+    use crate::remote_channel::transport::{AppHome, Credentials, TransportError};
+    fn link(
+        _: &Credentials,
+        _: &str,
+        root: &str,
+    ) -> crate::remote_channel::transport::Result<String> {
+        match root {
+            "1.1" => Ok("https://x/p1".into()),
+            _ => Err(TransportError::Message("no permalink".into())),
+        }
+    }
+    let _stub = super::super::driver::stub_for_test(AppHome {
+        link,
+        ..crate::remote_channel::transport::app_home(daruda_config::remote::ChannelKind::Slack)
+            .unwrap()
+    });
+    let scope = cx.update(|cx| {
+        let _outgoing = crate::remote_channel::global::tests::setup(cx);
+        let connection = &cx.global::<RemoteChannels>().connections["work"];
+        let scope = connection
+            .thread_scope(connection.bot.as_ref().unwrap())
+            .unwrap();
+        cx.global_mut::<RemoteChannels>().home.queue.opened(&scope);
+        scope
+    });
+    let threaded = |name: &str, root: &str| {
+        let mut row = row(name, None);
+        row.thread = Some(root.into());
+        row
+    };
+    let rows = vec![threaded("a", "1.1"), threaded("b", "2.2")];
+    let linked = |cx: &mut gpui::TestAppContext| {
+        let rows = rows.clone();
+        cx.update(|cx| {
+            let board = cx
+                .global_mut::<RemoteChannels>()
+                .home
+                .board(&scope, rows, 10);
+            let links: Vec<Option<String>> =
+                board.rows().iter().map(|row| row.link.clone()).collect();
+            (board, links)
+        })
+    };
+    let (board, links) = linked(cx);
+    assert_eq!(links, [None, None], "nothing known yet");
+    cx.update(|cx| super::super::driver::ask_links_for_test(&scope, &board, cx));
+    assert!(
+        cx.update(|cx| cx
+            .global_mut::<RemoteChannels>()
+            .home
+            .queue
+            .ask_links(&scope, ["1.1", "2.2"])
+            .is_empty()),
+        "asked once, pending meanwhile"
+    );
+    cx.run_until_parked();
+    let (_, links) = linked(cx);
+    assert_eq!(links, [Some("https://x/p1".to_owned()), None]);
+    assert!(
+        cx.update(|cx| cx
+            .global_mut::<RemoteChannels>()
+            .home
+            .queue
+            .ask_links(&scope, ["2.2"])
+            .is_empty()),
+        "a failed link is not asked again before the retry tick"
+    );
+    cx.update(super::super::driver::retry);
+    cx.update(|cx| {
+        assert_eq!(
+            cx.global_mut::<RemoteChannels>()
+                .home
+                .queue
+                .ask_links(&scope, ["1.1", "2.2"]),
+            ["2.2"],
+            "the retry tick asks a failed link again"
+        )
+    });
 }

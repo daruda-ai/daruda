@@ -4,7 +4,7 @@ use crate::remote_channel::transport::PageVerdict;
 
 fn sent(queue: &mut PublishQueue) -> Vec<Vec<String>> {
     queue
-        .ready(false)
+        .ready()
         .into_iter()
         .map(|publication| {
             publication
@@ -25,29 +25,26 @@ fn an_opened_page_gets_the_latest_board_once() {
     let mut queue = PublishQueue::default();
     queue.want(&work, board(&["early"]));
     assert!(
-        queue.ready(false).is_empty(),
+        queue.ready().is_empty(),
         "not published before it is opened"
     );
     queue.opened(&work);
     queue.want(&work, board(&["a"]));
     queue.want(&work, board(&["b"]));
-    let first = queue.ready(false);
+    let first = queue.ready();
     assert_eq!(first.len(), 1);
     assert_eq!(first[0].board, board(&["b"]), "the latest board wins");
     queue.want(&work, board(&["c"]));
-    assert!(queue.ready(false).is_empty(), "one publish at a time");
+    assert!(queue.ready().is_empty(), "one publish at a time");
     assert_eq!(
         queue.finish(&first[0], &PageVerdict::Published),
         Settled::Published
     );
-    let second = queue.ready(false);
+    let second = queue.ready();
     assert_eq!(second[0].board, board(&["c"]), "what changed meanwhile");
     queue.finish(&second[0], &PageVerdict::Published);
     queue.want(&work, board(&["c"]));
-    assert!(
-        queue.ready(false).is_empty(),
-        "an identical board is skipped"
-    );
+    assert!(queue.ready().is_empty(), "an identical board is skipped");
 }
 
 /// The defect this guards: a board equal to the published one was dropped
@@ -64,13 +61,13 @@ fn a_board_wanted_during_a_publish_is_compared_after_it_lands() {
         let mut queue = PublishQueue::default();
         queue.opened(&work);
         queue.want(&work, board(&["p"]));
-        let first = queue.ready(false);
+        let first = queue.ready();
         queue.finish(&first[0], &PageVerdict::Published);
         queue.want(&work, board(&["a"]));
-        let in_flight = queue.ready(false);
+        let in_flight = queue.ready();
         assert_eq!(in_flight[0].board, board(&["a"]), "{label}");
         queue.want(&work, board(&[later]));
-        assert!(queue.ready(false).is_empty(), "{label}: one at a time");
+        assert!(queue.ready().is_empty(), "{label}: one at a time");
         queue.finish(&in_flight[0], &PageVerdict::Published);
         let want: &[[&str; 1]] = if resent { &[[later]] } else { &[] };
         assert_eq!(sent(&mut queue), want, "{label}");
@@ -85,16 +82,18 @@ fn a_page_turned_off_and_reopened_gets_its_board_again() {
     let mut queue = PublishQueue::default();
     queue.opened(&work);
     queue.want(&work, board(&["a"]));
-    let first = queue.ready(false);
+    let first = queue.ready();
     queue.finish(&first[0], &PageVerdict::Published);
     queue.want(&work, board(&["b"]));
-    let second = queue.ready(false);
+    let second = queue.ready();
     queue.finish(&second[0], &PageVerdict::Off);
     queue.opened(&work);
     queue.want(&work, board(&["a"]));
     assert_eq!(sent(&mut queue), [["a"]]);
 }
 
+/// Whatever the verdict, nothing goes out by itself afterwards: the next
+/// opening builds the page anew, and a board wanted then is sent.
 #[test]
 fn each_verdict_leaves_the_page_as_it_says() {
     let cases = [
@@ -102,43 +101,56 @@ fn each_verdict_leaves_the_page_as_it_says() {
             PageVerdict::Off,
             Settled::Unavailable { first: true },
             Viewer::Unavailable,
-            false,
             "a page turned off stops until opened again",
         ),
         (
             PageVerdict::Transient("ratelimited".into()),
             Settled::Retry,
             Viewer::Viewing,
-            true,
             "passing trouble waits for the next opening",
         ),
         (
             PageVerdict::Refused("invalid_blocks".into()),
             Settled::Dropped,
             Viewer::Viewing,
-            false,
             "a refused board is dropped",
         ),
     ];
-    for (verdict, settled, viewer, resent, label) in cases {
+    for (verdict, settled, viewer, label) in cases {
         let work = scope("work", "bot");
         let mut queue = PublishQueue::default();
         queue.opened(&work);
         queue.want(&work, board(&["a"]));
-        let ready = queue.ready(false);
+        let ready = queue.ready();
         assert_eq!(queue.finish(&ready[0], &verdict), settled, "{label}");
         assert_eq!(queue.viewer(&work), Some(viewer), "{label}");
-        assert!(
-            queue.ready(false).is_empty(),
-            "{label}: nothing sent unasked"
-        );
+        assert!(queue.ready().is_empty(), "{label}: nothing sent unasked");
         queue.opened(&work);
-        assert_eq!(
-            !sent(&mut queue).is_empty(),
-            resent,
-            "{label}: what the next opening sends by itself"
+        assert!(
+            queue.ready().is_empty(),
+            "{label}: the next opening sends nothing by itself"
         );
+        queue.want(&work, board(&["a"]));
+        assert_eq!(sent(&mut queue), [["a"]], "{label}: the page built then");
     }
+}
+
+/// The defect this guards: a board wanted while a refused one was on its
+/// way waited for the next change. It differs from the refused board, so it
+/// goes at once; the refused board itself is not sent again.
+#[test]
+fn a_board_wanted_during_a_refused_publish_goes_at_once() {
+    let work = scope("work", "bot");
+    let mut queue = PublishQueue::default();
+    queue.opened(&work);
+    queue.want(&work, board(&["a"]));
+    let refused = queue.ready();
+    queue.want(&work, board(&["b"]));
+    assert_eq!(
+        queue.finish(&refused[0], &PageVerdict::Refused("invalid_blocks".into())),
+        Settled::Dropped
+    );
+    assert_eq!(sent(&mut queue), [["b"]], "the newer board, not on a retry");
 }
 
 #[test]
@@ -148,7 +160,7 @@ fn a_turned_off_page_is_reported_once_per_connection() {
     for first in [true, false] {
         queue.opened(&work);
         queue.want(&work, board(&["a"]));
-        let ready = queue.ready(false);
+        let ready = queue.ready();
         assert_eq!(
             queue.finish(&ready[0], &PageVerdict::Off),
             Settled::Unavailable { first }
@@ -165,7 +177,7 @@ fn another_identity_starts_a_new_page() {
     let mut queue = PublishQueue::default();
     queue.opened(&old);
     queue.want(&old, board(&["a"]));
-    let in_flight = queue.ready(false);
+    let in_flight = queue.ready();
     queue.want(&new, board(&["b"]));
     assert_eq!(queue.viewer(&new), None, "not opened under the new bot");
     queue.opened(&new);
@@ -178,18 +190,21 @@ fn another_identity_starts_a_new_page() {
     assert_eq!(sent(&mut queue), [["b"]]);
 }
 
-/// A connection that cannot send keeps its board for the next opening.
+/// A board its connection could not send waits; the next opening builds the
+/// page anew rather than sending the board as it was.
 #[test]
-fn a_held_board_waits_for_the_next_opening() {
+fn a_held_board_gives_way_to_the_next_opening() {
     let work = scope("work", "bot");
     let mut queue = PublishQueue::default();
     queue.opened(&work);
     queue.want(&work, board(&["a"]));
-    let ready = queue.ready(false);
+    let ready = queue.ready();
     queue.hold(&ready[0]);
-    assert!(queue.ready(false).is_empty());
+    assert!(queue.ready().is_empty());
     queue.opened(&work);
-    assert_eq!(sent(&mut queue), [["a"]]);
+    assert!(queue.ready().is_empty(), "not the held board");
+    queue.want(&work, board(&["b"]));
+    assert_eq!(sent(&mut queue), [["b"]]);
 }
 
 /// Only a page the person opened is kept up to date as panes change: one
@@ -200,7 +215,7 @@ fn only_a_viewed_page_takes_a_new_board() {
     let turned_off = |queue: &mut PublishQueue| {
         queue.opened(&scope("work", "bot"));
         queue.want(&scope("work", "bot"), board(&["a"]));
-        let ready = queue.ready(false);
+        let ready = queue.ready();
         queue.finish(&ready[0], &PageVerdict::Off);
     };
     type Arrange = fn(&mut PublishQueue);
@@ -219,10 +234,12 @@ fn only_a_viewed_page_takes_a_new_board() {
     }
 }
 
-/// A board that failed for a passing reason, or whose connection could not
-/// send, goes again on the retry tick, not on an ordinary flush.
+/// A page whose board failed for a passing reason, or whose connection could
+/// not send, is due a new board on the retry tick, not on an ordinary flush;
+/// the board that waited was built while things stood otherwise, so it is
+/// not sent as it was.
 #[test]
-fn a_waiting_board_is_resent_on_the_retry_tick() {
+fn a_waiting_page_is_built_anew_on_the_retry_tick() {
     let transient = |queue: &mut PublishQueue, publication: &Publication| {
         queue.finish(publication, &PageVerdict::Transient("ratelimited".into()));
     };
@@ -234,12 +251,14 @@ fn a_waiting_board_is_resent_on_the_retry_tick() {
         let mut queue = PublishQueue::default();
         queue.opened(&work);
         queue.want(&work, board(&["a"]));
-        let ready = queue.ready(false);
+        let ready = queue.ready();
         wait(&mut queue, &ready[0]);
-        assert!(queue.ready(false).is_empty(), "{label}: not on a flush");
-        let retried = queue.ready(true);
-        assert_eq!(retried.len(), 1, "{label}: on the retry tick");
-        assert_eq!(retried[0].board, board(&["a"]), "{label}");
+        assert!(queue.ready().is_empty(), "{label}: not on a flush");
+        assert!(queue.retry(), "{label}: due on the retry tick");
+        assert!(queue.ready().is_empty(), "{label}: not the old board");
+        assert!(!queue.retry(), "{label}: nothing waits any more");
+        queue.want(&work, board(&["b"]));
+        assert_eq!(sent(&mut queue), [["b"]], "{label}: the page built anew");
     }
 }
 
@@ -256,10 +275,8 @@ fn a_page_no_connection_serves_is_forgotten() {
     queue.keep_scopes(|scope| *scope == kept);
     assert_eq!(queue.viewer(&gone), None, "forgotten");
     assert_eq!(queue.viewer(&kept), Some(Viewer::Viewing), "kept");
-    assert!(
-        queue.ready(true).is_empty(),
-        "nothing sent for the gone page"
-    );
+    queue.retry();
+    assert!(queue.ready().is_empty(), "nothing sent for the gone page");
 }
 
 /// A tap resolves against the board on screen or the one on its way there,
@@ -288,7 +305,7 @@ fn a_tap_resolves_against_the_shown_or_coming_board() {
     assert_eq!(queue.viewer(&work), Some(Viewer::Viewing), "a tap opens it");
     assert_eq!(queue.outcome(&work), None);
     queue.want(&work, shown.clone());
-    let publication = queue.ready(false).remove(0);
+    let publication = queue.ready().remove(0);
     assert_eq!(
         queue.resolve(&work, tap(&shown)),
         Some(shown.rows()[0].pane),
@@ -297,7 +314,7 @@ fn a_tap_resolves_against_the_shown_or_coming_board() {
     let coming = numbered(&["b"], &mut numbering);
     queue.want(&work, coming.clone());
     queue.finish(&publication, &PageVerdict::Published);
-    let second = queue.ready(false).remove(0);
+    let second = queue.ready().remove(0);
     let next = numbered(&["c"], &mut numbering);
     queue.want(&work, next.clone());
     assert_eq!(
@@ -321,4 +338,68 @@ fn a_tap_resolves_against_the_shown_or_coming_board() {
     queue.tapped(&work, Some(outcome.clone()));
     queue.tapped(&work, None);
     assert_eq!(queue.outcome(&work), Some(&outcome), "kept until replaced");
+}
+
+/// A page asks once for each thread's link: a pending ask is not repeated,
+/// a known link stays, and a failed one waits for the retry tick or the next
+/// opening. A failure is told once per root; another identity's page asks
+/// anew, and a link landing for the replaced page is stale.
+#[test]
+fn a_page_asks_each_thread_link_once_until_a_failure_is_retried() {
+    use super::super::publish_queue::Learned;
+    let work = scope("work", "bot");
+    let linked = |queue: &PublishQueue, scope| {
+        let mut threaded = row("a", None);
+        threaded.thread = Some("1.1".into());
+        let mut board = Board::new(vec![threaded], 10, None);
+        queue.link(scope, &mut board);
+        board.rows()[0].link.clone()
+    };
+    let mut queue = PublishQueue::default();
+    assert!(
+        queue.ask_links(&work, ["1.1"]).is_empty(),
+        "no page, no ask"
+    );
+    queue.opened(&work);
+    assert_eq!(queue.ask_links(&work, ["1.1", "2.2"]), ["1.1", "2.2"]);
+    assert!(
+        queue.ask_links(&work, ["1.1", "2.2"]).is_empty(),
+        "pending asks are not repeated"
+    );
+    assert_eq!(linked(&queue, &work), None, "pending: no link yet");
+    assert_eq!(
+        queue.learn_link(&work, "1.1", Some("https://x/p1".into())),
+        Learned::Known
+    );
+    assert_eq!(linked(&queue, &work).as_deref(), Some("https://x/p1"));
+    assert_eq!(
+        queue.learn_link(&work, "2.2", None),
+        Learned::Failed { first: true }
+    );
+    assert!(
+        queue.ask_links(&work, ["1.1", "2.2"]).is_empty(),
+        "a failed link waits for a later trigger"
+    );
+    assert!(queue.retry(), "the retry tick asks again");
+    assert_eq!(queue.ask_links(&work, ["1.1", "2.2"]), ["2.2"]);
+    assert_eq!(
+        queue.learn_link(&work, "2.2", None),
+        Learned::Failed { first: false },
+        "told once"
+    );
+    queue.opened(&work);
+    assert_eq!(
+        queue.ask_links(&work, ["2.2"]),
+        ["2.2"],
+        "the next opening asks again"
+    );
+    let other = scope("work", "other");
+    queue.opened(&other);
+    assert_eq!(
+        queue.learn_link(&work, "2.2", Some("https://x/p2".into())),
+        Learned::Stale,
+        "the old identity's page is gone"
+    );
+    assert_eq!(linked(&queue, &other), None, "links do not carry over");
+    assert_eq!(queue.ask_links(&other, ["1.1"]), ["1.1"]);
 }
