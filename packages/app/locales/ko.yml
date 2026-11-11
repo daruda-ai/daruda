@@ -1837,7 +1837,6 @@ remote_channel:
   thread_name_separator: " · "
   thread_detail_separator: " — "
   home_header: "daruda 에이전트"
-  home_row_name: "%{name} (%{agent})%{title}"
   home_status_idle: "대기 중"
   home_more: "표시하지 않은 항목 %{count}개"
   home_open_thread: "스레드 열기"

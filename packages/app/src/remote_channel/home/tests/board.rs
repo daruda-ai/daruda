@@ -3,7 +3,7 @@ use super::*;
 use crate::remote_channel::threads::status::Ending;
 
 fn names(board: &Board) -> Vec<&str> {
-    board.rows().iter().map(|row| row.name.as_str()).collect()
+    board.rows().iter().map(|row| row.agent.as_str()).collect()
 }
 
 /// The listing in short: `#` a heading, `-` a label, `[..]` a run of rows by
@@ -21,7 +21,7 @@ fn outline(board: &Board) -> Vec<String> {
             Part::Rows(rows) => {
                 let names: Vec<&str> = rows
                     .iter()
-                    .map(|&index| board.rows()[index].name.as_str())
+                    .map(|&index| board.rows()[index].agent.as_str())
                     .collect();
                 format!("[{}]", names.join(","))
             }
@@ -133,7 +133,7 @@ fn a_pane_in_the_strip_is_the_same_row_in_its_project() {
         .collect();
     let strip = runs[0][0];
     assert!(runs[1..].iter().any(|rows| rows.contains(&strip)));
-    assert_eq!(board.rows()[strip].name, "w2");
+    assert_eq!(board.rows()[strip].agent, "w2");
 }
 
 /// One window with panes is not named, however many windows there are; no

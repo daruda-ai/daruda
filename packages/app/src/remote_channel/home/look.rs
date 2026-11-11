@@ -27,12 +27,21 @@ pub(super) struct HomeLook {
 enum PartLook {
     Heading(String),
     Label(String),
-    Rows(Vec<usize>),
+    Rows {
+        rows: Vec<usize>,
+        /// The strip's cards sit under no project heading, so they name
+        /// their project themselves.
+        names_project: bool,
+    },
 }
 
 struct RowLook {
-    name: String,
-    subject: Option<String>,
+    /// The conversation's title, else the tab's name, else the agent's.
+    title: String,
+    /// The agent, unless it already is the title.
+    subtitle: Option<String>,
+    /// The subtitle under no project heading: the project, then the agent.
+    strip_subtitle: String,
     emoji: Option<&'static str>,
     status: String,
     link: Option<String>,
@@ -57,22 +66,7 @@ impl HomeLook {
                 )
             }),
             empty: s::control::listing_empty(),
-            parts: board
-                .parts()
-                .into_iter()
-                .map(|part| match part {
-                    Part::NeedsYou => PartLook::Heading(s::remote_channel::home_needs_you()),
-                    Part::Window(number) => {
-                        PartLook::Heading(s::remote_channel::home_window(number))
-                    }
-                    Part::Group(name) | Part::Project(name) => PartLook::Heading(name.to_owned()),
-                    Part::GroupedProject(name) => PartLook::Label(name.to_owned()),
-                    Part::Lane { project, lane } => {
-                        PartLook::Label(s::control::lane_path(project, lane))
-                    }
-                    Part::Rows(rows) => PartLook::Rows(rows.to_vec()),
-                })
-                .collect(),
+            parts: Self::parts_of(board),
             rows: board
                 .rows()
                 .iter()
@@ -82,9 +76,21 @@ impl HomeLook {
                         Some((emoji, label)) => (Some(emoji), label),
                         None => (None, s::remote_channel::home_status_idle()),
                     };
+                    let title = row
+                        .subject
+                        .clone()
+                        .or_else(|| row.tab_name.clone())
+                        .unwrap_or_else(|| row.agent.clone());
+                    let subtitle = (title != row.agent).then(|| row.agent.clone());
                     RowLook {
-                        name: row.name.clone(),
-                        subject: row.subject.clone(),
+                        strip_subtitle: subtitle.iter().fold(row.project.clone(), |text, agent| {
+                            format!(
+                                "{text}{}{agent}",
+                                s::remote_channel::thread_name_separator()
+                            )
+                        }),
+                        subtitle,
+                        title,
                         emoji,
                         status: if row.selected {
                             s::remote_channel::home_status_selected(status)
@@ -114,6 +120,30 @@ impl HomeLook {
         }
     }
 
+    fn parts_of(board: &Board) -> Vec<PartLook> {
+        let mut strip = false;
+        board
+            .parts()
+            .into_iter()
+            .map(|part| match part {
+                Part::NeedsYou => {
+                    strip = true;
+                    PartLook::Heading(s::remote_channel::home_needs_you())
+                }
+                Part::Window(number) => PartLook::Heading(s::remote_channel::home_window(number)),
+                Part::Group(name) | Part::Project(name) => PartLook::Heading(name.to_owned()),
+                Part::GroupedProject(name) => PartLook::Label(name.to_owned()),
+                Part::Lane { project, lane } => {
+                    PartLook::Label(s::control::lane_path(project, lane))
+                }
+                Part::Rows(rows) => PartLook::Rows {
+                    rows: rows.to_vec(),
+                    names_project: std::mem::take(&mut strip),
+                },
+            })
+            .collect()
+    }
+
     pub(super) fn view(&self) -> PageView<'_> {
         let parts = self
             .parts
@@ -121,9 +151,12 @@ impl HomeLook {
             .map(|part| match part {
                 PartLook::Heading(text) => PagePart::Heading(text),
                 PartLook::Label(text) => PagePart::Label(text),
-                PartLook::Rows(rows) => PagePart::Rows(
+                PartLook::Rows {
+                    rows,
+                    names_project,
+                } => PagePart::Rows(
                     rows.iter()
-                        .map(|&index| self.row(&self.rows[index]))
+                        .map(|&index| self.row(&self.rows[index], *names_project))
                         .collect(),
                 ),
             })
@@ -147,10 +180,14 @@ impl HomeLook {
         }
     }
 
-    fn row<'a>(&'a self, row: &'a RowLook) -> PageRow<'a> {
+    fn row<'a>(&'a self, row: &'a RowLook, names_project: bool) -> PageRow<'a> {
         PageRow {
-            name: &row.name,
-            subject: row.subject.as_deref(),
+            title: &row.title,
+            subtitle: if names_project {
+                Some(&row.strip_subtitle)
+            } else {
+                row.subtitle.as_deref()
+            },
             emoji: row.emoji,
             status: &row.status,
             thread: row

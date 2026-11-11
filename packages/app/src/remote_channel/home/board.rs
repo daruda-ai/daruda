@@ -4,17 +4,20 @@
 
 use super::token::{Act, Numbering, Tap};
 use crate::remote_channel::bridge::PaneRef;
-use crate::remote_channel::command::{agent_label, title_suffix};
 use crate::remote_channel::threads::status::ShownStatus;
 use crate::remote_channel::transport::PageBudget;
-use crate::surface::strings as s;
 use crate::workspace::{ArrangedLane, ArrangedProject, ArrangedSection};
 
-/// One pane on the page, named as its thread root names it.
+/// One pane on the page.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PaneRow {
     pub pane: PaneRef,
-    pub name: String,
+    /// The project the pane's worktree belongs to.
+    pub project: String,
+    /// The agent running the pane.
+    pub agent: String,
+    /// The name the person gave the pane's tab.
+    pub tab_name: Option<String>,
     /// What the pane is working on, as its activity bar says.
     pub subject: Option<String>,
     /// `None` while the pane has not reported since daruda started.
@@ -25,14 +28,6 @@ pub(super) struct PaneRow {
     pub link: Option<String>,
     /// The pane the connection's commands address.
     pub selected: bool,
-}
-
-impl PaneRow {
-    /// A pane as `/list` names it, under its worktree's `path`: the name a
-    /// row falls back to when its workspace cannot name the pane.
-    pub(super) fn named(path: &str, summary: &crate::control::result::ChatSummary) -> String {
-        s::remote_channel::home_row_name(path, agent_label(summary), title_suffix(summary))
-    }
 }
 
 /// One window's panes, arranged as its sidebar arranges their projects.

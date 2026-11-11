@@ -17,7 +17,9 @@ mod publish_queue;
 pub(super) fn row(name: &str, shown: Option<ShownStatus>) -> PaneRow {
     PaneRow {
         pane: pane(name.bytes().map(u64::from).sum()),
-        name: name.into(),
+        project: "p".into(),
+        agent: name.into(),
+        tab_name: None,
         subject: None,
         shown,
         thread: None,

@@ -197,12 +197,13 @@ pub(crate) struct PageHelp<'a> {
     pub legend: Vec<(&'a str, &'a str)>,
 }
 
-/// One pane on the page: its name, what it is working on, its status, and
-/// its buttons.
+/// One pane on the page: what its conversation is called, which agent or
+/// project it belongs to, its status, and its buttons.
 pub(crate) struct PageRow<'a> {
-    pub name: &'a str,
-    /// The pane's activity title, when it has one.
-    pub subject: Option<&'a str>,
+    pub title: &'a str,
+    /// What the title leaves unsaid: the agent, and under no project heading
+    /// the project too.
+    pub subtitle: Option<&'a str>,
     /// The status's emoji, by short name, when one is known.
     pub emoji: Option<&'a str>,
     /// The status's words, marked when the pane is the one commands address.

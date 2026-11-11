@@ -17,7 +17,6 @@ use crate::remote_channel::global::{Connection, RemoteChannels};
 use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::threads::Scope;
 use crate::remote_channel::transport::{self, AppHome, PageBudget};
-use crate::surface::strings as s;
 use daruda_config::remote::ChannelKind;
 use gpui::App;
 
@@ -169,20 +168,15 @@ fn board(scope: &Scope, budget: PageBudget, panes: &panes::Panes, cx: &mut App) 
                 .iter()
                 .cloned()
                 .map(|section| {
-                    section.map(&mut |project, lane, summary: ChatSummary| {
+                    section.map(&mut |project, _lane, summary: ChatSummary| {
                         let pane = summary.target;
                         let now = panes.now.get(&pane);
-                        let (name, subject) = match now {
-                            Some(now) => (now.name.title.clone(), now.name.subject.clone()),
-                            None => (
-                                PaneRow::named(&s::control::lane_path(project, lane), &summary),
-                                None,
-                            ),
-                        };
                         PaneRow {
                             pane,
-                            name,
-                            subject,
+                            project: project.to_owned(),
+                            agent: summary.agent_name.clone(),
+                            tab_name: summary.tab_name.clone(),
+                            subject: now.and_then(|now| now.name.subject.clone()),
                             shown: threads.activity_of(pane),
                             thread: threads.root_for(
                                 scope,

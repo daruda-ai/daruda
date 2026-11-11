@@ -11,7 +11,7 @@ fn sent(queue: &mut PublishQueue) -> Vec<Vec<String>> {
                 .board
                 .rows()
                 .iter()
-                .map(|row| row.name.clone())
+                .map(|row| row.agent.clone())
                 .collect()
         })
         .collect()

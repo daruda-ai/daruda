@@ -23,7 +23,7 @@ fn outline(view: &PageView<'_>) -> Vec<String> {
             PagePart::Heading(text) => format!("#{text}"),
             PagePart::Label(text) => format!("-{text}"),
             PagePart::Rows(rows) => {
-                let names: Vec<&str> = rows.iter().map(|row| row.name).collect();
+                let names: Vec<&str> = rows.iter().map(|row| row.title).collect();
                 format!("[{}]", names.join(","))
             }
         })
@@ -59,8 +59,8 @@ fn each_row_reads_its_status_and_links_only_a_known_thread() {
             "https://x/p1"
         ))
     );
-    assert_eq!(asking.subject, Some("Fix the bug"));
-    assert_eq!(quiet.subject, None, "no activity title");
+    assert_eq!(asking.title, "Fix the bug", "the activity title");
+    assert_eq!(quiet.title, "quiet", "no title, no tab name: the agent");
     assert_eq!(quiet.emoji, None);
     assert_eq!(quiet.status, s::remote_channel::home_status_idle());
     assert!(quiet.thread.is_none(), "no link known yet");
@@ -213,4 +213,42 @@ fn headings_and_labels_name_what_follows_under_counts_and_help() {
     let empty = HomeLook::new(&flat(Vec::new()));
     let view = empty.view();
     assert!(view.parts.is_empty() && view.summary.is_none());
+}
+
+/// A card is titled by the conversation, else the tab's name, else the
+/// agent; the agent is its subtitle unless it already is the title. A card
+/// in the strip, under no project heading, names its project first.
+#[test]
+fn a_card_is_titled_by_conversation_tab_or_agent() {
+    let mut subject = row("Claude Code", None);
+    subject.subject = Some("Fix the bug".into());
+    subject.tab_name = Some("review".into());
+    let mut tab = row("Codex", None);
+    tab.tab_name = Some("review".into());
+    let bare = row("Gemini", Some(ShownStatus::NeedsYou { since: 1 }));
+    let mut asking = row("Claude Code", Some(ShownStatus::NeedsYou { since: 1 }));
+    asking.subject = Some("Ask me".into());
+    let page = flat(vec![subject, tab, bare, asking]);
+    let look = HomeLook::new(&page);
+    let view = look.view();
+    let cards: Vec<(&str, Option<&str>)> = every_row(&view)
+        .iter()
+        .map(|row| (row.title, row.subtitle))
+        .collect();
+    let separator = s::remote_channel::thread_name_separator();
+    let strip_agent = format!("p{separator}Claude Code");
+    assert_eq!(
+        cards,
+        [
+            // The strip: project and agent, the project alone when the
+            // agent is the title.
+            ("Gemini", Some("p")),
+            ("Ask me", Some(strip_agent.as_str())),
+            // The project's lane: the agent alone, or nothing.
+            ("Fix the bug", Some("Claude Code")),
+            ("review", Some("Codex")),
+            ("Gemini", None),
+            ("Ask me", Some("Claude Code")),
+        ]
+    );
 }

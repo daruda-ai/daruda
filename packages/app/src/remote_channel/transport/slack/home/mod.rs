@@ -172,8 +172,8 @@ fn heading(text: &str) -> Value {
         {"type": "text", "text": capped(text, TEXT_LIMIT), "style": {"bold": true}}]}]})
 }
 
-/// One pane: its name, its status (the one emoji on the page), what it is
-/// working on, and up to Slack's three buttons a card holds.
+/// One pane: its title and subtitle as written, its status as the body (the
+/// one emoji on the page), and up to Slack's three buttons a card holds.
 fn card(row: &PageRow<'_>, index: usize) -> Value {
     let emoji = row
         .emoji
@@ -181,7 +181,7 @@ fn card(row: &PageRow<'_>, index: usize) -> Value {
         .unwrap_or_default();
     let status = escaped(
         row.status,
-        CARD_TITLE_LIMIT.saturating_sub(emoji.encode_utf16().count()),
+        CARD_BODY_LIMIT.saturating_sub(emoji.encode_utf16().count()),
     );
     let mut buttons = Vec::new();
     if let Some((label, url)) = row.thread {
@@ -197,12 +197,12 @@ fn card(row: &PageRow<'_>, index: usize) -> Value {
     }
     let mut card = json!({
         "type": "card",
-        "title": plain(row.name, CARD_TITLE_LIMIT),
-        "subtitle": mrkdwn(&format!("{emoji}{status}")),
+        "title": plain(row.title, CARD_TITLE_LIMIT),
+        "body": mrkdwn(&format!("{emoji}{status}")),
         "actions": buttons,
     });
-    if let Some(subject) = row.subject {
-        card["body"] = plain(subject, CARD_BODY_LIMIT);
+    if let Some(subtitle) = row.subtitle {
+        card["subtitle"] = plain(subtitle, CARD_TITLE_LIMIT);
     }
     card
 }

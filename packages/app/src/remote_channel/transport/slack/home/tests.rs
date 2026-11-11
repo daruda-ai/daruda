@@ -2,10 +2,10 @@ use super::super::{BUTTON_LABEL_LIMIT, parse};
 use super::*;
 use crate::remote_channel::transport::{IncomingKind, PagePart, PageRow};
 
-fn row<'a>(name: &'a str, emoji: Option<&'a str>, thread: Option<&'a str>) -> PageRow<'a> {
+fn row<'a>(title: &'a str, emoji: Option<&'a str>, thread: Option<&'a str>) -> PageRow<'a> {
     PageRow {
-        name,
-        subject: None,
+        title,
+        subtitle: None,
         emoji,
         status: "Working",
         thread: thread.map(|url| ("Open thread", url)),
@@ -185,20 +185,20 @@ fn an_empty_page_says_so_and_still_helps() {
     assert_eq!(blocks[2]["text"]["text"], "No agent chats are open.");
 }
 
-/// A card names the pane, shows its status with its emoji, says what it
-/// works on, and carries a link only when one is known; Stop only on a
-/// running pane.
+/// A card is titled by the pane's conversation, subtitled by its agent as
+/// plain text, and reads the status with its emoji as its body; it carries a
+/// link only when one is known, Stop only on a running pane.
 #[test]
 fn a_card_shows_one_pane_and_its_buttons() {
     let mut running = row(
-        "app/main (Claude)",
+        "Fix the login bug",
         Some("hourglass_flowing_sand"),
         Some("https://x.slack.com/archives/D1/p1"),
     );
     running.stop = Some(("Stop", "hom:1:0:stop"));
-    running.subject = Some("Fix the login bug");
+    running.subtitle = Some("Claude Code");
     running.status = "Working since 09:30 · Selected";
-    let mut quiet = row("app/fix_bug (Codex)", None, None);
+    let mut quiet = row("Codex", None, None);
     quiet.select = ("Select", "hom:1:1:sel");
     quiet.status = "Idle";
     let blocks = page_blocks(&view(
@@ -210,10 +210,10 @@ fn a_card_shows_one_pane_and_its_buttons() {
         *cards[0],
         json!({
             "type": "card",
-            "title": {"type": "plain_text", "text": "app/main (Claude)", "emoji": false},
-            "subtitle": {"type": "mrkdwn",
+            "title": {"type": "plain_text", "text": "Fix the login bug", "emoji": false},
+            "subtitle": {"type": "plain_text", "text": "Claude Code", "emoji": false},
+            "body": {"type": "mrkdwn",
                 "text": ":hourglass_flowing_sand: Working since 09:30 · Selected"},
-            "body": {"type": "plain_text", "text": "Fix the login bug", "emoji": false},
             "actions": [
                 {"type": "button", "action_id": "home-thread-0",
                     "text": {"type": "plain_text", "text": "Open thread", "emoji": false},
@@ -227,8 +227,9 @@ fn a_card_shows_one_pane_and_its_buttons() {
             ],
         })
     );
-    assert_eq!(cards[1]["subtitle"]["text"], "Idle", "no status, no emoji");
-    assert!(cards[1].get("body").is_none(), "no activity title");
+    assert_eq!(cards[1]["title"]["text"], "Codex");
+    assert_eq!(cards[1]["body"]["text"], "Idle", "no status, no emoji");
+    assert!(cards[1].get("subtitle").is_none(), "the title is the agent");
     assert_eq!(
         cards[1]["actions"],
         json!([{"type": "button", "action_id": "home-select-1",
@@ -275,7 +276,7 @@ fn a_full_page_fits_in_one_view() {
     let full = || {
         let mut row = row("pane", Some("bell"), Some("https://x"));
         row.stop = Some(("Stop", "hom:1:0:stop"));
-        row.subject = Some("subject");
+        row.subtitle = Some("subtitle");
         row
     };
     let runs = budget.cards / CAROUSEL_CARDS;
@@ -309,7 +310,7 @@ fn a_full_page_fits_in_one_view() {
 #[test]
 fn only_statuses_show_emoji() {
     let mut odd = row(":fire: app", Some("bell"), None);
-    odd.subject = Some(":tada: done");
+    odd.subtitle = Some(":tada: done");
     let blocks = page_blocks(&view(
         vec![
             PagePart::Heading(":rocket: *group*"),
@@ -379,11 +380,11 @@ fn walk(value: &Value, visit: &mut impl FnMut(&Value)) {
 #[test]
 fn long_texts_are_capped() {
     let name = "n".repeat(CARD_TITLE_LIMIT + 10);
-    let subject = "s".repeat(CARD_BODY_LIMIT + 10);
-    let status = "<".repeat(CARD_TITLE_LIMIT);
+    let subtitle = "s".repeat(CARD_TITLE_LIMIT + 10);
+    let status = "<".repeat(CARD_BODY_LIMIT);
     let label = "l".repeat(100);
     let mut long = row(&name, Some("bell"), Some("https://x"));
-    long.subject = Some(&subject);
+    long.subtitle = Some(&subtitle);
     long.status = &status;
     long.thread = Some((&label, "https://x"));
     let header = "h".repeat(200);
@@ -394,23 +395,37 @@ fn long_texts_are_capped() {
     assert_eq!(length(&blocks[0]["text"]["text"]), HEADER_LIMIT);
     let card = cards(&blocks)[0];
     assert_eq!(length(&card["title"]["text"]), CARD_TITLE_LIMIT);
-    assert_eq!(length(&card["body"]["text"]), CARD_BODY_LIMIT);
-    let subtitle = card["subtitle"]["text"].as_str().unwrap();
+    assert_eq!(length(&card["subtitle"]["text"]), CARD_TITLE_LIMIT);
+    let body = card["body"]["text"].as_str().unwrap();
+    assert!(body.encode_utf16().count() <= CARD_BODY_LIMIT, "{body}");
     assert!(
-        subtitle.encode_utf16().count() <= CARD_TITLE_LIMIT,
-        "{subtitle}"
-    );
-    assert!(
-        subtitle
-            .trim_start_matches(":bell: ")
+        body.trim_start_matches(":bell: ")
             .split_inclusive(';')
             .all(|piece| piece == "&lt;"),
-        "escaped whole: {subtitle}"
+        "escaped whole: {body}"
     );
     assert_eq!(
         length(&card["actions"][0]["text"]["text"]),
         BUTTON_LABEL_LIMIT
     );
+}
+
+/// A subtitle is plain text: a shortcode in it stays text, and a card
+/// without one has no subtitle at all.
+#[test]
+fn a_subtitle_is_plain_text_and_optional() {
+    let mut strip = row("Fix the bug", None, None);
+    strip.subtitle = Some("app · Claude Code");
+    let blocks = page_blocks(&view(
+        vec![PagePart::Rows(vec![strip, row("Codex", None, None)])],
+        None,
+    ));
+    let cards = cards(&blocks);
+    assert_eq!(
+        cards[0]["subtitle"],
+        json!({"type": "plain_text", "text": "app · Claude Code", "emoji": false})
+    );
+    assert!(cards[1].get("subtitle").is_none());
 }
 
 #[test]

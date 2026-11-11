@@ -217,9 +217,7 @@ impl CommandState {
 
 mod render;
 
-pub(crate) use render::{
-    RenderedReply, agent_label, render, render_error, render_parse_error, title_suffix,
-};
+pub(crate) use render::{RenderedReply, render, render_error, render_parse_error};
 
 /// What the poll loop should do with a parsed command.
 pub(crate) enum Resolution {
