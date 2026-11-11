@@ -176,6 +176,9 @@ welcome:
 
 # Menus — top-level names
 menu:
+  cut: "Cut"
+  undo: "Undo"
+  redo: "Redo"
   tray_show: "Open daruda"
   tray_check_updates: "Check for updates"
   export_diagnostics: "Export diagnostics…"
@@ -514,6 +517,21 @@ task:
 
 # File viewer
 file_viewer:
+  input_versioned_selection: "Selection from %{source}:"
+  input_unsaved_selection: "Unsaved selection:"
+  input_selection_snapshot: "Selection captured when added:"
+  input_diff_selection: "Diff selection in %{path} (%{source}):\nold lines %{old}; new lines %{new}"
+  input_diff_rename: "%{from} -> %{to}; renamed from %{path}"
+  add_file_to_input: "Send file to agent"
+  add_selection_to_input: "Send selection to agent"
+  send_to: "Send to %{name}"
+  send_to_agent: "Send to agent"
+  send_to_input_hint: "Add the reference to %{name}'s input."
+  input_unavailable: "Select a local input pane before adding a file reference."
+  input_answer_bound: "Use the input for a prompt before adding a file reference."
+  input_reference_answer_refused: "Remove file references before using this draft as an answer."
+  input_source_changed: "The file selection changed. Select it again."
+  input_selection_too_large: "The selection is too large. Add the file reference instead."
   binary: "Binary file"
   # The one way out of the binary placeholder: hand the file to the OS.
   btn_open_with_default_app: "Open with Default App"
@@ -790,6 +808,9 @@ modal:
 
 # Bottom dock
 bottom_dock:
+  input_pane_number: "%{name} (%{n})"
+  input_queue: "Queue"
+  input_recipient: "Input to %{name}"
   macro_auto_enter: "Press Enter after sending"
   macro_display_as_icon: "Display as icon (square tile)"
   macro_edit_title: "Edit Macro"

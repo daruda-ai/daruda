@@ -162,7 +162,10 @@ async fn selecting_a_split_session_updates_the_input_owner_and_tab_focus(cx: &mu
             assert_eq!(ws.input_dock.owner, Some(first));
             assert_eq!(ws.input_dock.input.read(cx).value().as_str(), "first draft");
             assert_eq!(
-                ws.input_dock.drafts.get(&second).map(String::as_str),
+                ws.input_dock
+                    .drafts
+                    .get(&second)
+                    .map(|draft| draft.text().as_ref()),
                 Some("second draft")
             );
             assert_eq!(ws.active_tab_mut().unwrap().last_focused_pane, first);

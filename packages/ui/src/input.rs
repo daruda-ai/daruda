@@ -17,8 +17,11 @@ use gpui_component::{Disableable as _, Sizable as _};
 
 pub use gpui_component::input::Paste as InputPaste;
 pub use gpui_component::input::{
-    CompletionProvider, EditorState, InputEvent, InputState, Rope, RopeExt, TextDecoration,
-    TextareaState,
+    CompletionProvider, EditorState, InlineToken, InlineTokenClickEvent, InputContent, InputEvent,
+    InputState, Rope, RopeExt, TextDecoration, TextareaState,
+};
+pub use gpui_component::input::{
+    Cut as InputCut, Redo as InputRedo, SelectAll as InputSelectAll, Undo as InputUndo,
 };
 /// Field actions a host can intercept in the capture phase, before the
 /// field's own handling (the composer's submit, history and mode keys).
@@ -475,6 +478,28 @@ pub fn input_with_action_grow_font<T: InputTabSpec>(
         InputGrowMode::AutoGrow => inner,
     };
     input_with_action_layout(state, action, cx, tab, grow_mode, inner)
+}
+
+/// Auto-growing composer with atomic inline references. The host owns each
+/// reference's identity and activation; the field owns editing and selection.
+pub fn input_with_inline_references<T: InputTabSpec>(
+    state: &impl TextState,
+    action: impl IntoElement,
+    cx: &App,
+    tab: T,
+    font: &daruda_config::font::InputFontConfig,
+    on_click: impl Fn(&InlineTokenClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let inner = composer_input(state, cx)
+        .font_family(SharedString::from(font.family.clone()))
+        .text_size(px(font.size))
+        .line_height(px(font.row_height()))
+        .token(|context, _, _| {
+            gpui_component::input::InputToken::new(context)
+                .icon(crate::icons::icon(crate::icons::FILE_VIEWER))
+        })
+        .on_token_click(on_click);
+    input_with_action_layout(state, action, cx, tab, InputGrowMode::AutoGrow, inner)
 }
 
 fn input_with_action_layout<T: InputTabSpec>(

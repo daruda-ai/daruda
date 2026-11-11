@@ -327,6 +327,8 @@ actions!(
         /// Save the focused file-view pane to disk. Wired to `cmd-s` in
         /// the `FileViewer` focus scope.
         SaveFilePane,
+        AddFileToInput,
+        AddSelectionToInput,
         /// Open a fresh Agent chat (ACP) pane in a new tab at the active
         /// lane. Wired from `new_agent_chat`; keybinding via
         /// `[keybindings] new_agent_chat`.

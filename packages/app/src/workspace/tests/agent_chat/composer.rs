@@ -921,7 +921,7 @@ async fn path_paste_and_drop_use_references_or_fall_back_to_text(cx: &mut TestAp
                 ws.input_dock
                     .drafts
                     .get(&pane_id)
-                    .is_some_and(|draft| draft.contains("binary.dat"))
+                    .is_some_and(|draft| draft.text().contains("binary.dat"))
             );
             ws.set_focused_pane(pane_id, window, cx);
             assert!(ws.input_dock.input.read(cx).value().contains("binary.dat"));

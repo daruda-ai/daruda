@@ -23,10 +23,12 @@ pub(in crate::workspace) type WorkspaceMenuOp =
 pub(in crate::workspace) enum MenuItemSpec {
     Enabled {
         label: SharedString,
+        icon: Option<Box<crate::ui::Icon>>,
         activate: Activate,
     },
     Disabled {
         label: SharedString,
+        icon: Option<Box<crate::ui::Icon>>,
         reason: Option<SharedString>,
     },
 }
@@ -64,13 +66,33 @@ pub(in crate::workspace) fn item(
     state: ItemState,
     activate: Activate,
 ) -> MenuEntry {
+    menu_item(label.into(), None, state, activate)
+}
+
+pub(in crate::workspace) fn icon_item(
+    label: impl Into<SharedString>,
+    icon: crate::ui::Icon,
+    state: ItemState,
+    activate: Activate,
+) -> MenuEntry {
+    menu_item(label.into(), Some(Box::new(icon)), state, activate)
+}
+
+fn menu_item(
+    label: SharedString,
+    icon: Option<Box<crate::ui::Icon>>,
+    state: ItemState,
+    activate: Activate,
+) -> MenuEntry {
     match state {
         ItemState::Enabled => MenuEntry::Item(MenuItemSpec::Enabled {
-            label: label.into(),
+            label,
+            icon,
             activate,
         }),
         ItemState::Disabled(reason) => MenuEntry::Item(MenuItemSpec::Disabled {
-            label: label.into(),
+            label,
+            icon,
             reason,
         }),
     }
@@ -84,6 +106,7 @@ pub(in crate::workspace) fn disabled_item(
 ) -> MenuEntry {
     MenuEntry::Item(MenuItemSpec::Disabled {
         label: label.into(),
+        icon: None,
         reason,
     })
 }

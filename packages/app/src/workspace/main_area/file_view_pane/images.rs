@@ -67,6 +67,7 @@ impl FileContent {
         window: Option<&mut Window>,
         cx: &mut Context<Workspace>,
     ) {
+        self.selection_action = None;
         self.release_images(window, cx);
         self.images = MdImages::from_rasters(rasters);
         self.view.set_content(content);
@@ -92,6 +93,7 @@ impl FileContent {
         cx: &mut Context<Workspace>,
     ) -> Option<bool> {
         let needs_reload = self.view.begin_mode_change(mode)?;
+        self.selection_action = None;
         if needs_reload {
             self.release_images(window, cx);
         }
@@ -114,6 +116,7 @@ impl FileContent {
         mut window: Option<&mut Window>,
         cx: &mut Context<Workspace>,
     ) {
+        self.selection_action = None;
         let released = std::mem::take(&mut self.images);
         if released.0.is_empty() {
             return;

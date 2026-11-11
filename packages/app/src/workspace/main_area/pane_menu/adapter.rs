@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{ClipboardItem, Context, Entity, FocusHandle, WeakEntity, Window};
 
 use crate::ui::{PopupMenu, PopupMenuItem};
@@ -74,26 +75,39 @@ fn append_entry(
 }
 
 fn popup_item(spec: MenuItemSpec, workspace: WeakEntity<Workspace>) -> PopupMenuItem {
-    match spec {
-        MenuItemSpec::Disabled { label, reason } => {
+    let (item, icon) = match spec {
+        MenuItemSpec::Disabled {
+            label,
+            reason,
+            icon,
+        } => {
             let item = PopupMenuItem::new(label).disabled(true);
-            match reason {
+            let item = match reason {
                 Some(reason) => item.tooltip(reason),
                 None => item,
-            }
+            };
+            (item, icon)
         }
-        MenuItemSpec::Enabled { label, activate } => match activate {
-            Activate::Op(op) => PopupMenuItem::new(label).on_click(move |_, window, app| {
-                if let Some(entity) = workspace.upgrade() {
-                    entity.update(app, |ws, cx| op(ws, window, cx));
+        MenuItemSpec::Enabled {
+            label,
+            activate,
+            icon,
+        } => (
+            match activate {
+                Activate::Op(op) => PopupMenuItem::new(label).on_click(move |_, window, app| {
+                    if let Some(entity) = workspace.upgrade() {
+                        entity.update(app, |ws, cx| op(ws, window, cx));
+                    }
+                }),
+                Activate::Action(action) => PopupMenuItem::new(label).action(action),
+                Activate::Clipboard(text) => {
+                    PopupMenuItem::new(label).on_click(move |_, _window, app| {
+                        app.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                    })
                 }
-            }),
-            Activate::Action(action) => PopupMenuItem::new(label).action(action),
-            Activate::Clipboard(text) => {
-                PopupMenuItem::new(label).on_click(move |_, _window, app| {
-                    app.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                })
-            }
-        },
-    }
+            },
+            icon,
+        ),
+    };
+    item.when_some(icon, |item, icon| item.icon(*icon))
 }

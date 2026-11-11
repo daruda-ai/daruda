@@ -46,10 +46,8 @@ impl Workspace {
     /// input: routes into the view, which echoes the prompt locally, forwards it
     /// over the session, and marks a turn in flight. A `Some(task)` makes the
     /// chat report when the prompt reaches the wire or is dropped unsent.
-    /// A refusal is toasted rather than swallowed: the composer clears on a
-    /// handled submit, so silence would look like the prompt was accepted.
-    /// The text is not restored — reaching the cap by hand means ten prompts
-    /// are already waiting, and the next turn frees a slot.
+    /// Refusals are toasted, and the returned dispatch lets the composer
+    /// retain its draft when delivery is refused.
     pub(in crate::workspace) fn send_agent_task_prompt_text(
         &mut self,
         pane_id: PaneId,
@@ -276,11 +274,12 @@ impl Workspace {
         let Some(text) = found else {
             return;
         };
+        let content = self.queued_composer_content(pane_id, id, &text);
         // Pull the text into the composer, cursor at end (mirrors
         // `do_history_navigate`). Separate `entity.update` from the view update
         // below — never nest two updates on entities in one call.
         self.input_dock.input.update(cx, |s, cx_state| {
-            s.set_value(&text, window, cx_state);
+            s.set_value(content, window, cx_state);
             s.move_cursor_to_end(cx_state);
         });
         view.update(cx, |v, cx| v.begin_edit(id, cx));
@@ -347,7 +346,9 @@ impl Workspace {
         if self.input_dock.input.read(cx).value().is_empty() {
             return;
         }
-        let focused = self.active_runtime().focused_pane_id;
+        let Some(focused) = self.bottom_input_pane() else {
+            return;
+        };
         if let Some(view) = self.agent_chat_view(focused).cloned() {
             view.update(cx, |v, cx| v.disarm_resume(cx));
         }

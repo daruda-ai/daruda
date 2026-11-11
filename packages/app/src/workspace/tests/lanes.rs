@@ -562,7 +562,10 @@ fn input_draft_is_per_pane(cx: &mut TestAppContext) {
             );
             // The saved draft for pane 0 must be in the map.
             assert_eq!(
-                ws.input_dock.drafts.get(&pane0).map(String::as_str),
+                ws.input_dock
+                    .drafts
+                    .get(&pane0)
+                    .map(|draft| draft.text().as_ref()),
                 Some("draft-a"),
                 "pane 0 draft must be persisted on focus away"
             );
@@ -582,7 +585,10 @@ fn input_draft_is_per_pane(cx: &mut TestAppContext) {
                 "pane 0 draft must be restored on focus back"
             );
             assert_eq!(
-                ws.input_dock.drafts.get(&pane1).map(String::as_str),
+                ws.input_dock
+                    .drafts
+                    .get(&pane1)
+                    .map(|draft| draft.text().as_ref()),
                 Some("draft-b"),
                 "pane 1 draft must be persisted on focus away"
             );
@@ -666,7 +672,10 @@ fn input_draft_round_trips_across_panes_and_cleans_up(cx: &mut TestAppContext) {
                 "pane B shows its own (empty) draft"
             );
             assert_eq!(
-                ws.input_dock.drafts.get(&pane_a).map(String::as_str),
+                ws.input_dock
+                    .drafts
+                    .get(&pane_a)
+                    .map(|draft| draft.text().as_ref()),
                 Some("foo"),
                 "pane A draft persisted on focus away"
             );
@@ -719,7 +728,10 @@ fn input_draft_round_trips_across_panes_and_cleans_up(cx: &mut TestAppContext) {
             let pane_b = ws.active_runtime().focused_pane_id;
             assert_ne!(pane_b, file_id);
             assert_eq!(
-                ws.input_dock.drafts.get(&pane_a).map(String::as_str),
+                ws.input_dock
+                    .drafts
+                    .get(&pane_a)
+                    .map(|draft| draft.text().as_ref()),
                 Some("foobar"),
                 "edit made while a non-input pane held focus saves to owner A"
             );
@@ -734,7 +746,10 @@ fn input_draft_round_trips_across_panes_and_cleans_up(cx: &mut TestAppContext) {
             ws.activate_tab(0, window, cx);
             assert_eq!(ws.input_dock.owner, Some(pane_a));
             assert_eq!(
-                ws.input_dock.drafts.get(&pane_a).map(String::as_str),
+                ws.input_dock
+                    .drafts
+                    .get(&pane_a)
+                    .map(|draft| draft.text().as_ref()),
                 Some("foobar"),
                 "pane A has a stored draft before close"
             );

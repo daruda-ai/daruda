@@ -10,6 +10,10 @@
 
 pub(in crate::workspace) mod composer_ops;
 mod config_chip;
+mod context_ops;
+mod history;
+pub(in crate::workspace) use context_ops::QueuedDraft;
+pub(in crate::workspace) use history::InputHistory;
 pub(in crate::workspace) mod input_dock;
 pub(super) mod macro_edit_modal;
 pub(super) mod macro_key;
@@ -19,6 +23,7 @@ pub(in crate::workspace) mod question_binding_ops;
 pub(in crate::workspace) mod question_keys_ops;
 mod question_strip;
 pub(super) mod queue_strip;
+pub(in crate::workspace) mod recipient_ops;
 pub(in crate::workspace) mod slash_command;
 pub(in crate::workspace) mod tab_strip;
 pub(super) mod terminal_input;
@@ -64,16 +69,14 @@ pub(in crate::workspace) fn render_body(
     snap: &BottomDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> AnyElement {
-    if snap.agent_cli_snapshot.is_some() {
-        return terminal_input::render_body(snap, cx);
-    }
-    if snap.terminal_input_visible {
+    if snap.terminal_input_visible || snap.agent_cli_snapshot.is_some() {
         let input = terminal_input::render_body(snap, cx);
         // The queued-prompt strip, then the question strip (if any), sit ABOVE
         // the input panel; all stack in a full-height column so the input keeps
         // its `flex_1` growth and the fixed-height strips ride on top.
-        let strips: Vec<AnyElement> = queue_strip::render(snap, cx)
+        let strips: Vec<AnyElement> = tab_strip::render_recipients(snap, cx)
             .into_iter()
+            .chain(queue_strip::render(snap, cx))
             .chain(question_strip::render(snap, cx))
             .collect();
         if strips.is_empty() {

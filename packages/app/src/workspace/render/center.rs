@@ -89,6 +89,7 @@ pub(super) fn render_center_content(
         .tabs
         .get(ws.active_runtime().active_tab_index)
     {
+        let file_send = ws.file_send_action();
         let actual_has_splits = tab.layout.leaf_count() > 1;
         if let Some(zoomed_id) = ws.main_area.zoomed_pane_id {
             if tab.layout.pane_ids().contains(&zoomed_id) {
@@ -102,6 +103,7 @@ pub(super) fn render_center_content(
                     None,
                     ws.main_area.pane_drop_hover,
                     dragged_divider,
+                    &file_send,
                     cx,
                 )
             } else {
@@ -114,6 +116,7 @@ pub(super) fn render_center_content(
                     ws.main_area.zoomed_pane_id,
                     ws.main_area.pane_drop_hover,
                     dragged_divider,
+                    &file_send,
                     cx,
                 )
             }
@@ -127,6 +130,7 @@ pub(super) fn render_center_content(
                 None,
                 ws.main_area.pane_drop_hover,
                 dragged_divider,
+                &file_send,
                 cx,
             )
         }

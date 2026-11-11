@@ -25,6 +25,15 @@ sections here before authoring wrappers or changing a vendored widget.
 
 ## Wrapper module layout
 
+`input_with_inline_references` is the auto-growing, font-configurable composer
+variant with native atomic file tokens and a host-owned activation callback.
+`InputContent` preserves text and token spans across draft swaps; `InlineToken`
+carries a host-defined identity, plain-text fallback and compact label.
+
+Input editing actions (`InputCut`, `InputPaste`, `InputSelectAll`,
+`InputUndo`, `InputRedo`) are facade exports for host-owned editor menus. Set the
+source editor's action context so menu focus does not retarget the action.
+
 Wrapper files only — preserved daruda widgets are listed in the
 [app UI reference](../app/src/REFERENCE.md#ui).
 
@@ -134,8 +143,9 @@ owns authoring labels, stacked fields, validation and footer bands.
 owns viewport sizing; set `PanelLimits.chrome` to the actual outer insets.
 
 Composers go through `input_with_action_grow` or `InputPanel`, whose text
-metrics share one internal factory. The bottom dock alone opts into
-`input_with_action_grow_font`, passing its `font.input` settings explicitly;
+metrics share one internal factory. The bottom dock opts into
+`input_with_inline_references`, passing `font.input` and its reference callback;
+font-only hosts can use `input_with_action_grow_font`. In both cases,
 standard fields and the Git commit `InputPanel` retain their own metrics. Prose and code editors use the editor
 factories and keep their configured font, line height and row/scroll behavior.
 `scripts/lint-input-factories.sh` prevents raw construction in other packages;

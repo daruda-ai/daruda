@@ -30,7 +30,9 @@ impl Workspace {
             window,
             cx,
         );
-        let pane = self.active_runtime().focused_pane_id;
+        let Some(pane) = self.bottom_input_pane() else {
+            return;
+        };
         if let Some(view) = self.agent_chat_view(pane).cloned() {
             let result = view.update(cx, |view, cx| view.seed_attachment_draft_for_shot(cx));
             if let Err(error) = result {
@@ -52,7 +54,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let pane = self.active_runtime().focused_pane_id;
+        let Some(pane) = self.bottom_input_pane() else {
+            return;
+        };
         // An answer is text only: a bound composer takes dropped paths as text.
         if let Some(view) = self
             .agent_chat_view(pane)
@@ -86,7 +90,9 @@ impl Workspace {
         if self.focused_question_bound(cx) {
             return;
         }
-        let pane = self.active_runtime().focused_pane_id;
+        let Some(pane) = self.bottom_input_pane() else {
+            return;
+        };
         let Some(view) = self.agent_chat_view(pane).cloned() else {
             return;
         };
@@ -125,7 +131,9 @@ impl Workspace {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let pane = self.active_runtime().focused_pane_id;
+        let Some(pane) = self.bottom_input_pane() else {
+            return false;
+        };
         let Some(view) = self.agent_chat_view(pane).cloned() else {
             return false;
         };
@@ -196,11 +204,16 @@ impl Workspace {
                         } else {
                             // Preserve the original pane's draft if focus changed during loading.
                             let text = ws.shell_quoted_paths(&fallback_paths);
-                            let draft = ws.input_dock.drafts.entry(pane).or_default();
-                            if !draft.is_empty() {
-                                draft.push(' ');
-                            }
-                            draft.push_str(&text);
+                            let draft = ws
+                                .input_dock
+                                .drafts
+                                .entry(pane)
+                                .or_insert_with(|| crate::ui::InputContent::new(""));
+                            let separator = if draft.text().is_empty() { "" } else { " " };
+                            *draft = super::super::file_context::append_text(
+                                draft,
+                                &format!("{separator}{text}"),
+                            );
                         }
                         LogWriter::log(
                             ErrorReport::new("Attachment paths inserted as text")
@@ -246,7 +259,7 @@ impl Workspace {
         text: String,
         cx: &mut Context<Self>,
     ) -> Option<bool> {
-        let pane = self.active_runtime().focused_pane_id;
+        let pane = self.bottom_input_pane()?;
         let view = self.agent_chat_view(pane)?.clone();
         if view.read(cx).draft_attachments().is_empty() {
             return None;

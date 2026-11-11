@@ -10,7 +10,6 @@ use gpui::{Context, Window};
 
 use super::input_dock::SlashMenu;
 use super::slash_command::{slash_match, with_builtin_clear};
-use crate::ui::RopeExt as _;
 use crate::workspace::Workspace;
 
 /// Which way ↑/↓ walks the lane's input history.
@@ -24,7 +23,10 @@ impl Workspace {
     /// Recompute the slash-command list from the composer's text and cursor.
     /// Only an Agent chat pane advertises commands.
     pub(in crate::workspace) fn refresh_slash_menu(&mut self, cx: &mut Context<Self>) {
-        let focused = self.active_runtime().focused_pane_id;
+        let Some(focused) = self.bottom_input_pane() else {
+            self.input_dock.slash = None;
+            return;
+        };
         let matched = self
             .agent_chat_view(focused)
             .filter(|_| !self.focused_question_bound(cx))
@@ -59,7 +61,9 @@ impl Workspace {
             self.accept_slash_item(None, window, cx);
             return true;
         }
-        let focused = self.active_runtime().focused_pane_id;
+        let Some(focused) = self.bottom_input_pane() else {
+            return false;
+        };
         let submits = action.secondary
             || (!action.shift
                 && self.is_agent_chat_pane(focused)
@@ -81,7 +85,9 @@ impl Workspace {
             self.question_escape(cx);
             return true;
         }
-        let focused = self.active_runtime().focused_pane_id;
+        let Some(focused) = self.bottom_input_pane() else {
+            return false;
+        };
         self.cancel_agent_turn_if_active(focused, cx)
     }
 
@@ -141,7 +147,9 @@ impl Workspace {
         if self.focused_question_bound(cx) {
             return false;
         }
-        let focused = self.active_runtime().focused_pane_id;
+        let Some(focused) = self.bottom_input_pane() else {
+            return false;
+        };
         self.cycle_agent_mode(focused, cx)
     }
 
@@ -168,14 +176,11 @@ impl Workspace {
         let token = menu.matched.token;
         self.input_dock.input.update(cx, |state, cx_state| {
             let text = state.value();
-            let Some((head, tail)) = text.get(..token.start).zip(text.get(token.end..)) else {
+            if text.get(token.clone()).is_none() {
                 return;
-            };
-            let next = format!("{head}{}{tail}", item.insert);
-            let cursor = token.start + item.insert.len();
-            state.set_value(next, window, cx_state);
-            let position = state.text().offset_to_position(cursor);
-            state.set_cursor_position(position, window, cx_state);
+            }
+            state.set_selected_range(token, cx_state);
+            state.replace(item.insert.clone(), window, cx_state);
         });
         self.complete_slash_command(item.name, window, cx);
     }

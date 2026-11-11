@@ -28,6 +28,16 @@ pub(in crate::workspace) struct PaletteEntry {
 /// default page (General) so an empty-arg keybinding still works.
 pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
     PaletteEntry {
+        id: "add_file_to_input",
+        label: s::file_viewer::add_file_to_input,
+        shortcut: "",
+    },
+    PaletteEntry {
+        id: "add_selection_to_input",
+        label: s::file_viewer::add_selection_to_input,
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "open_flow_history",
         label: s::flow::run_history_title,
         shortcut: "",

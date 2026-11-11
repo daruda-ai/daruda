@@ -349,7 +349,7 @@ impl Workspace {
                 if self.input_dock.owner == Some(id) {
                     self.input_dock
                         .drafts
-                        .insert(id, self.input_dock.input.read(cx).value().to_string());
+                        .insert(id, self.input_dock.input.read(cx).content());
                     self.input_dock.owner = None;
                     self.input_dock
                         .input

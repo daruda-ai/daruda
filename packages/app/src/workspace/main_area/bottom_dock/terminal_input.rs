@@ -29,43 +29,22 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     let ws_for_external = snap.workspace.clone();
     let ws_for_paste = snap.workspace.clone();
     let workspace = snap.workspace.clone();
-    // Input edit shortcuts are handled by gpui_component's `"Input"` context.
-    // Mid-turn agent panes show Stop; otherwise the button sends input.
-    // DESIGN.md: Submit button — height 28px, radius md (6px). The primary / danger
-    // factory applies the accent / danger background; height and radius are pinned
-    // here to match the spec's fixed heights table (Button: 28px) and radius scale
-    // (md: 6px), overriding `Button::small()`'s 24px default.
-    // A bound question outranks Stop: the turn is busy only because it waits
-    // on this answer, so the button sends it.
     let answering = snap.question.as_ref().is_some_and(|q| q.composer.bound);
-    let submit = match snap.agent_stop_pane.filter(|_| !answering) {
-        Some(pane_id) => {
-            crate::ui::button_danger("send", crate::surface::strings::common::btn_stop())
-                .h(px(theme::BUTTON_HEIGHT))
-                .rounded(px(theme::RADIUS_MD))
-                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                    if let Some(ws) = workspace.upgrade() {
-                        ws.update(cx, |ws, cx| ws.cancel_agent_turn(pane_id, cx));
-                    }
-                }))
-        }
-        None => crate::ui::button_primary(
-            "send",
-            if answering {
-                crate::surface::strings::bottom_dock::question_send()
-            } else {
-                crate::surface::strings::common::btn_submit()
-            },
-        )
+    let submit_label = if answering {
+        crate::surface::strings::bottom_dock::question_send()
+    } else if snap.agent_stop_pane.is_some() {
+        crate::surface::strings::bottom_dock::input_queue()
+    } else {
+        crate::surface::strings::common::btn_submit()
+    };
+    let submit = crate::ui::button_primary("send", submit_label)
         .when(answering, |button| button.ghost())
-        .h(px(theme::BUTTON_HEIGHT))
-        .rounded(px(theme::RADIUS_MD))
+        .disabled(snap.input_recipient.is_none())
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.send_terminal_input(window, cx));
             }
-        })),
-    };
+        }));
     let submit = submit.debug_selector(|| "composer-submit".into());
     // When the focused pane is an Agent chat pane, selector chips sit to the
     // left of the Submit button (all in the input's right-hand action column):
@@ -74,6 +53,39 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
     // carries `None`, so only Submit shows. Selecting dispatches through
     // `Workspace::set_agent_mode` / `set_agent_config_option` (one-way data flow).
     let mut chips: Vec<AnyElement> = Vec::new();
+    if let Some((_, label)) = snap
+        .input_recipients
+        .iter()
+        .find(|(id, _)| Some(*id) == snap.input_recipient)
+    {
+        chips.push(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(px(theme::FONT_SIZE_SM))
+                .text_color(theme::current(cx).text_muted)
+                .child(crate::surface::strings::bottom_dock::input_recipient(label))
+                .into_any_element(),
+        );
+    } else if snap.input_recipient.is_none()
+        && let [(id, label)] = snap.input_recipients.as_slice()
+    {
+        let id = *id;
+        let ws = snap.workspace.clone();
+        chips.push(
+            crate::ui::button_compact(
+                "input-select-recipient",
+                crate::surface::strings::bottom_dock::input_recipient(label),
+            )
+            .debug_selector(|| "input-select-recipient".into())
+            .on_click(move |_, window, cx| {
+                if let Some(ws) = ws.upgrade() {
+                    ws.update(cx, |ws, cx| ws.select_bottom_input_pane(id, window, cx));
+                }
+            })
+            .into_any_element(),
+        );
+    }
     let expand = match snap.composer_expand {
         ComposerExpand::Hidden => None,
         ComposerExpand::Expand => Some((
@@ -131,10 +143,23 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
             );
         }
     }
+    if let Some(pane) = snap.agent_stop_pane.filter(|_| !answering) {
+        let ws = snap.workspace.clone();
+        chips.push(
+            crate::ui::button_compact("composer-stop", crate::surface::strings::common::btn_stop())
+                .on_click(move |_, _, cx| {
+                    if let Some(ws) = ws.upgrade() {
+                        ws.update(cx, |ws, cx| ws.cancel_agent_turn(pane, cx));
+                    }
+                })
+                .into_any_element(),
+        );
+    }
     let action: AnyElement = if chips.is_empty() {
         submit.into_any_element()
     } else {
         let mut row = div()
+            .min_w_0()
             .flex()
             .flex_row()
             .items_center()
@@ -148,6 +173,7 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
         None => action,
         Some(toggle) => div()
             .flex_1()
+            .min_w_0()
             .flex()
             .flex_row()
             .items_center()
@@ -187,13 +213,22 @@ pub(super) fn render_body(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> 
                 .flex_1()
                 .min_h_0()
                 .flex()
-                .child(crate::ui::input_with_action_grow_font(
+                .child(crate::ui::input_with_inline_references(
                     &state,
                     action,
                     cx,
                     0_isize,
-                    crate::ui::InputGrowMode::AutoGrow,
                     &snap.input_font,
+                    {
+                        let ws = snap.workspace.clone();
+                        move |event, window, cx| {
+                            if let Some(ws) = ws.upgrade() {
+                                ws.update(cx, |ws, cx| {
+                                    ws.open_input_reference(event.token(), window, cx)
+                                });
+                            }
+                        }
+                    },
                 )),
         );
     if let Some((pane, names)) = &snap.attachment_draft

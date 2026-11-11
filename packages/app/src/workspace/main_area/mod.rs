@@ -10,6 +10,7 @@ pub(in crate::workspace) mod agent_chat_host;
 pub(in crate::workspace) mod bottom_dock;
 pub(in crate::workspace) mod clipboard_paste_ops;
 pub(in crate::workspace) mod context;
+pub(in crate::workspace) mod file_context;
 pub(in crate::workspace) mod file_pane_ops;
 pub(in crate::workspace) mod file_save_ops;
 pub(in crate::workspace) mod file_view_pane;
@@ -226,6 +227,7 @@ pub(in crate::workspace) fn render_layout(
     // The divider being held, if one is — its cursor has to reach past the
     // few pixels it occupies, since a drag is what pulls the pointer off them.
     dragged_divider: Option<PaneId>,
+    file_send: &file_context::FileSendAction,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     match layout {
@@ -292,7 +294,7 @@ pub(in crate::workspace) fn render_layout(
                     .when_some(pane.content.wrapper_focus_handle(), |d, fh| {
                         d.track_focus(fh)
                     })
-                    .child(render_pane_file_viewer(id, f, cx)),
+                    .child(render_pane_file_viewer(id, f, file_send, cx)),
                 self::pane::PaneContent::AgentChat(ac) => div()
                     .flex()
                     .flex_col()
@@ -414,6 +416,7 @@ pub(in crate::workspace) fn render_layout(
                     zoomed_pane_id,
                     drop_target,
                     dragged_divider,
+                    file_send,
                     cx,
                 );
                 let ratio = ratios[i];

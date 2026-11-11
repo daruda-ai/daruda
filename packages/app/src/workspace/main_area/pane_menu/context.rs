@@ -13,7 +13,7 @@ use daruda_content::link_target::{LinkTarget, LocalKind};
 /// Upper bound on a selection routed to another pane. Mirrors iTerm2's
 /// `kMaxSelectedTextLengthForCustomActions` — past this the composer stalls
 /// and the user almost certainly did not mean to send it.
-pub(super) const SEND_SELECTION_LIMIT: usize = 64 * 1024;
+pub(in crate::workspace) const SEND_SELECTION_LIMIT: usize = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PaneRole {

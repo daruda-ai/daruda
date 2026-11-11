@@ -167,6 +167,7 @@ fn mode_button_group(
 pub(super) fn render_file_viewer_toolbar(
     pane_id: PaneId,
     fv: &PaneFileView,
+    send: &crate::workspace::main_area::file_context::FileSendAction,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let t = theme::current(cx);
@@ -257,6 +258,7 @@ pub(super) fn render_file_viewer_toolbar(
                         .and_then(|root| abs_pathbuf.strip_prefix(root).ok())
                         .map(|p| p.to_string_lossy().to_string())
                         .unwrap_or_else(|| path_for_menu.to_string_lossy().to_string());
+                    let send = ws.read(cx).file_send_action();
 
                     menu.item(ws_popup_clipboard_item(
                         strings::file_viewer::copy_abs_path(),
@@ -266,6 +268,17 @@ pub(super) fn render_file_viewer_toolbar(
                         strings::file_viewer::copy_rel_path(),
                         rel_path,
                     ))
+                    .separator()
+                    .item(
+                        crate::ui::PopupMenuItem::new(send.label)
+                            .icon(send.icon)
+                            .tooltip(send.tooltip)
+                            .on_click(move |_, window, app| {
+                                ws.update(app, |ws, cx| {
+                                    ws.add_file_reference(pane_id, false, window, cx)
+                                });
+                            }),
+                    )
                 }),
         )
         .child(
@@ -313,6 +326,19 @@ pub(super) fn render_file_viewer_toolbar(
                 } else {
                     toolbar_toggle_spacer().into_any_element()
                 })
+                .child(
+                    crate::ui::button_chip_on_surface(
+                        "file-add-to-input",
+                        send.label.clone(),
+                        &surface,
+                        cx,
+                    )
+                    .icon(send.icon.clone())
+                    .tooltip(send.tooltip.clone())
+                    .on_click(cx.listener(move |ws, _, window, cx| {
+                        ws.add_file_reference(pane_id, false, window, cx)
+                    })),
+                )
                 .child(mode_button_group(
                     pane_id,
                     controls.mode_options,

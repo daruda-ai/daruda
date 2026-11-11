@@ -165,6 +165,7 @@ pub(crate) enum ScreenshotScenario {
     /// menu length, edge-flip and the keybinding column — none of which any
     /// unit test can see.
     PaneContextMenu,
+    FileInput(super::main_area::file_context::FileInputShot),
     /// Open the mermaid diagram lightbox with a wide (two-subgraph) sample —
     /// the only way to eyeball the clamp/scroll behavior a unit test can
     /// only assert numerically.
@@ -637,6 +638,9 @@ pub(crate) fn drive(
                     });
                 }
             });
+        }
+        ScreenshotScenario::FileInput(shot) => {
+            workspace.update(cx, |ws, cx| ws.open_file_input_for_shot(shot, window, cx));
         }
         ScreenshotScenario::PaneContextMenu => {
             workspace.update(cx, |ws, cx| {

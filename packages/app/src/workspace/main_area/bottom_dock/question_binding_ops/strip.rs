@@ -155,6 +155,9 @@ impl Workspace {
         } else {
             self.focus_pane_on_click(pane, window, cx);
         }
+        if self.refuse_question_references(pane, cx) {
+            return;
+        }
         let was_bound = view
             .read(cx)
             .question_composer()
@@ -206,6 +209,9 @@ impl Workspace {
         else {
             return;
         };
+        if self.refuse_question_references(pane, cx) {
+            return;
+        }
         let typed = self.pane_composer_text(pane, cx).trim().to_owned();
         if !typed.is_empty() {
             let taken = !self.question_swap_pending(pane, &question)
@@ -257,7 +263,7 @@ impl Workspace {
     /// The held prompt, when it is `pane`'s and that pane holds the
     /// composer: the send that follows reads the composer itself.
     fn take_blocked_prompt(&mut self, pane: PaneId) -> Option<BlockedPrompt> {
-        if self.active_runtime().focused_pane_id != pane {
+        if self.bottom_input_pane() != Some(pane) {
             return None;
         }
         self.input_dock

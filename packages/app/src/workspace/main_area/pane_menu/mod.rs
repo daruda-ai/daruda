@@ -25,4 +25,4 @@ mod ops;
 mod sections;
 pub(in crate::workspace) mod spec;
 
-pub(in crate::workspace) use context::ResourceRightClick;
+pub(in crate::workspace) use context::{ResourceRightClick, SEND_SELECTION_LIMIT};

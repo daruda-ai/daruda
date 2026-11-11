@@ -202,17 +202,14 @@ impl Workspace {
                 self.mutate_durable(cx, |_, _| {});
             }
         }
-        // Refresh placeholder when the active mode changed or
-        // modes became available (Connected). Only fires for
-        // the focused pane to avoid redundant work on parked
-        // lane vieself.
+        // Refresh only the input recipient, including while its chat is
+        // hidden behind a file. Other panes must not change the placeholder.
         let mode_after = view
             .read(cx)
             .session_config()
             .current_mode_id()
             .map(str::to_string);
-        let focused_id = self.active_runtime().focused_pane_id;
-        if mode_before != mode_after && focused_id == pane_id {
+        if mode_before != mode_after && self.bottom_input_pane() == Some(pane_id) {
             self.refresh_terminal_input_placeholder(cx);
         }
         if is_connected && view.read(cx).is_read_only() {

@@ -248,13 +248,29 @@ impl Workspace {
         let focus_handle = cx.focus_handle();
         let language = crate::ui::highlighter::language_for_extension(path.extension_str());
         let editor_state = cx.new(|cx_state| {
-            crate::ui::EditorState::new(window, cx_state)
+            let mut state = crate::ui::EditorState::new(window, cx_state)
                 .soft_wrap(false)
-                .language(language)
+                .language(language);
+            state.set_context_menu_enabled(false);
+            state
         });
+        let owner = self.active;
+        let editor_subscription = cx.observe(&editor_state, move |ws, _, cx| {
+            ws.reconcile_file_selection_action(owner, pane_id, cx);
+        });
+        let editor_changes = cx.subscribe(
+            &editor_state,
+            move |ws, _, event: &crate::ui::InputEvent, cx| {
+                if matches!(event, crate::ui::InputEvent::Change) {
+                    ws.file_selection_source_changed(owner, pane_id, cx);
+                }
+            },
+        );
         Pane {
             id: pane_id,
             content: PaneContent::File(FileContent {
+                selection_action: None,
+                _editor_subscriptions: [editor_subscription, editor_changes],
                 view: PaneFileView::loading(origin, path, source, live_status, view_mode),
                 scroll_handle: gpui::ScrollHandle::new(),
                 search_input,

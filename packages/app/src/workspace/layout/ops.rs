@@ -109,8 +109,15 @@ impl Workspace {
             AGENT_QUESTION_STRIP_H, AGENT_QUESTION_STRIP_NARROW_H, AGENT_QUEUE_STRIP_OUTER_MAX_H,
             BUTTON_HEIGHT, GAP_SM,
         };
-        let mut reserved = 0.0;
-        if let Some(view) = self.agent_chat_view(self.active_runtime().focused_pane_id) {
+        let mut reserved = if self.bottom_input_tabs().len() > 1 {
+            crate::ui::theme::TAB_BAR_HEIGHT
+        } else {
+            0.0
+        };
+        if let Some(view) = self
+            .bottom_input_pane()
+            .and_then(|id| self.agent_chat_view(id))
+        {
             let view = view.read(cx);
             if !view.draft_attachments().is_empty() {
                 reserved += BUTTON_HEIGHT + GAP_SM;
@@ -535,6 +542,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.dismiss_file_selection_action(cx);
         // Preserve the focus that existed before the first menu in this deploy
         // slot. Replacing an already-open menu must not remember the old menu's
         // transient handle as the place to return to.

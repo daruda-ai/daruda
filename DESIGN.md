@@ -1068,6 +1068,13 @@ background: surface-1
 padding:    sm (8px)
 ```
 
+During file review, Input retains the last input-capable pane's draft. With
+multiple recipients, a separate tab row inside Input switches only that draft;
+the file and its scroll stay in place. These tabs use the existing tab metrics,
+overflow menu, and active underline. They have no close or create controls.
+The selected recipient also owns the queue, questions, attachments and session
+controls. A busy agent has Queue and a separate Stop action.
+
 - Textarea:
   ```
   background:    surface-3
@@ -1406,6 +1413,22 @@ default foreground — colouring them is line noise, not signal.
 ---
 
 ## File Viewer (FileViewPane)
+
+The toolbar's Send to {agent name} action shows the recipient's agent icon and
+inserts the file path into the existing bottom Input. Right-click and completed
+code selections offer the same named action and icon. The recipient follows the
+selected bottom input; terminal recipients use their title and terminal icon.
+These actions retain the file, edit the current recipient's draft and focus
+Input. They do not submit. Input shows an atomic inline reference with a file
+icon, filename and line range. The selected code is captured separately and
+expanded only on submission, so later edits cannot change the original context.
+Clicking a reference restores its file version and source or diff position.
+Pane drafts, queue editing and input
+history preserve the compact reference and its captured content together.
+Drafts containing file references stay as prompts when an answer is requested;
+the references must be removed before the draft can answer a question.
+Diff selections name old/new lines and their source; preview block positions
+never masquerade as source line numbers.
 
 ```
 background:      canvas (#010102)   ← same as terminal pane

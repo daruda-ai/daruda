@@ -202,6 +202,9 @@ impl Workspace {
                     this.pick_flow_row(*index, window, cx)
                 }),
             ))
+            .children(crate::workspace::main_area::file_context::selection_action(
+                self, cx,
+            ))
             // Imperative PopupMenu deploy overlay. `PopupMenu` already
             // dismisses itself on outside click / Escape / confirmed click
             // (see `PopupMenuDeploy`'s dismiss subscription); the callback

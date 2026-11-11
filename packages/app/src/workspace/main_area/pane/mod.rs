@@ -116,6 +116,8 @@ pub(in crate::workspace) struct TerminalContent {
 /// without sharing state. The data shape (`PaneFileView`) stays
 /// GPUI-free; the renderer reads it and produces the element.
 pub(in crate::workspace) struct FileContent {
+    pub(in crate::workspace) selection_action: Option<super::file_context::FileSelectionAction>,
+    pub(super) _editor_subscriptions: [Subscription; 2],
     pub(in crate::workspace) view: PaneFileView,
     /// Body scroll handle. Reset to a fresh handle whenever the view
     /// mode changes so the body always starts at the top.

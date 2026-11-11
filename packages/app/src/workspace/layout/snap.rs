@@ -312,6 +312,11 @@ pub(in crate::workspace) struct SlashMenuView {
 
 #[derive(PartialEq)]
 pub(in crate::workspace) struct BottomDockSnapshot {
+    pub input_recipients: Vec<(
+        crate::workspace::main_area::pane_tree::PaneId,
+        gpui::SharedString,
+    )>,
+    pub input_recipient: Option<crate::workspace::main_area::pane_tree::PaneId>,
     pub agent_cli_snapshot: Option<CliSnapshot>,
     pub terminal_input_visible: bool,
     pub active_tab_id: Option<daruda_store::panels::TabId>,
@@ -327,15 +332,12 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     pub bottom_dock_size: f32,
     pub terminal_input: gpui::Entity<crate::ui::TextareaState>,
     pub input_font: daruda_config::font::InputFontConfig,
-    /// Set when the focused pane is an Agent chat pane with a turn in
-    /// flight. Carries that pane's id so the bottom-input submit button
-    /// renders "Stop" and routes its click to `cancel_agent_turn(pane)`
-    /// instead of `send_terminal_input`. `None` for every other focus
-    /// state (terminal focus, idle agent pane), where the button is "Send".
+    /// The input recipient while busy: renders Queue plus a separate Stop
+    /// control. Questions bound to the input take precedence over Queue.
     pub agent_stop_pane: Option<crate::workspace::main_area::pane_tree::PaneId>,
     /// Names only: image payloads never enter render snapshots.
     pub attachment_draft: Option<(crate::workspace::main_area::pane_tree::PaneId, Vec<String>)>,
-    /// Set when the focused pane is an Agent chat pane that advertises session
+    /// Set when the input recipient is an Agent chat pane that advertises session
     /// modes. Carries that pane's id + its mode state so the bottom-input
     /// renders the mode chip to the left of the Submit button. `None` for a
     /// terminal-pane focus (or an agent pane the adapter gave no modes), where
@@ -344,7 +346,7 @@ pub(in crate::workspace) struct BottomDockSnapshot {
         crate::workspace::main_area::pane_tree::PaneId,
         daruda_acp::ModeStateView,
     )>,
-    /// Set when the focused pane is an Agent chat pane advertising select config
+    /// Set when the input recipient is an Agent chat pane advertising select config
     /// options of the Model / ThoughtLevel category. Carries the pane id + those
     /// options so the bottom input renders a chip per option (model, effort)
     /// beside the Submit button. `None` for a terminal-pane focus or an agent
@@ -353,20 +355,20 @@ pub(in crate::workspace) struct BottomDockSnapshot {
         crate::workspace::main_area::pane_tree::PaneId,
         Vec<daruda_acp::ConfigOptionView>,
     )>,
-    /// Set when the focused pane is an Agent chat pane with a non-empty prompt
+    /// Set when the input recipient is an Agent chat pane with a non-empty prompt
     /// queue. Carries the pane id + the queued prompts (in FIFO order) so the
     /// bottom dock renders the queued-prompt strip above the input and routes
     /// each removal / clear-all back to that pane. `None` for a terminal-pane
     /// focus, an agent pane with an empty queue, or the Landing state — the
     /// strip is then not rendered.
     pub queued_prompts: Option<QueuedPromptsSnapshot>,
-    /// The focused agent pane's open question; the strip and the submit
+    /// The input agent pane's open question; the strip and the submit
     /// button's "Answer" label read it. `None` without one.
     pub question: Option<QuestionStripSnapshot>,
     pub composer_expand: ComposerExpand,
     /// The slash-command list open over the composer.
     pub slash_menu: Option<SlashMenuView>,
-    /// Shell flavour of the focused pane's PTY. Drives drag-and-drop path
+    /// Shell flavour of the input recipient's PTY. Drives drag-and-drop path
     /// quoting in the terminal input — Posix backslash/single-quote rules,
     /// fish, PowerShell, and cmd.exe all differ.
     pub shell: daruda_core::shell::quote::Shell,
@@ -393,7 +395,7 @@ pub(in crate::workspace) struct RightDockSnapshot {
     /// order. Empty when no provider is signed in, which the renderer replaces
     /// with a single notice.
     pub usage: Vec<UsageSectionSnapshot>,
-    /// The focused pane's agent domain. `Exactly(recipe)` scopes the tab to
+    /// The input recipient's agent domain. `Exactly(recipe)` scopes the tab to
     /// one section automatically; `Any`/`Unsupported` (terminal, unresolved
     /// agent) falls back to `usage_domain_override` + a switcher. Computed
     /// once per snapshot build by `AccountDomain::for_pane` and reused here

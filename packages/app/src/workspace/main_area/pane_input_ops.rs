@@ -174,16 +174,22 @@ impl Workspace {
                     self.agent_empty_submit(pane_id, window, cx);
                     return true;
                 }
+                let local_command = input.task.is_none()
+                    && matches!(
+                        daruda_chat::slash_dispatch::classify_slash(trimmed),
+                        daruda_chat::slash_dispatch::SlashDispatch::Local(_)
+                    );
                 let dispatch =
                     self.send_agent_task_prompt_text(pane_id, trimmed.to_string(), input.task, cx);
                 self.bump_activity(pane_id);
-                matches!(
-                    dispatch,
-                    Some(
-                        daruda_chat::view::PromptDispatch::SentNow
-                            | daruda_chat::view::PromptDispatch::Queued
+                (local_command && dispatch.is_none())
+                    || matches!(
+                        dispatch,
+                        Some(
+                            daruda_chat::view::PromptDispatch::SentNow
+                                | daruda_chat::view::PromptDispatch::Queued
+                        )
                     )
-                )
             } else {
                 // Non-submit: place the text in the shared bottom-dock
                 // input (where an agent-chat pane routes typing) without

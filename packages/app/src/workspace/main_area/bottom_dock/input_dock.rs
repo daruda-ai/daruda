@@ -32,15 +32,11 @@ pub(in crate::workspace) struct InputDock {
     /// When true, the bottom dock shows the built-in "Input" panel instead
     /// of the active macro tab.
     pub(in crate::workspace) visible: bool,
-    /// Per-pane unsent draft text, keyed by the input-capable pane
-    /// (Terminal / AgentChat) the text was typed for. Swapped in/out by
-    /// `set_focused_pane` on every focus change: the outgoing pane's text is
-    /// saved to `owner` and the incoming pane's draft is restored. Empty
-    /// strings are never stored — `remove` is used instead to avoid leaking
-    /// entries for empty drafts or closed panes.
-    pub(in crate::workspace) drafts: HashMap<PaneId, String>,
+    /// Per-pane unsent text and reference snapshots, swapped by recipient
+    /// binding. Empty drafts and closed panes are removed rather than retained.
+    pub(in crate::workspace) drafts: HashMap<PaneId, crate::ui::InputContent>,
     /// The input-capable pane whose draft is currently visible in `input` —
-    /// the last-focused Terminal / AgentChat pane. Draft saves key off this
+    /// the last-focused or explicitly selected Terminal / AgentChat pane. Draft saves key off this
     /// rather than the outgoing `focused_pane_id`, so text typed while a
     /// non-input pane (File / TaskEdit) held focus still saves to the pane it
     /// was meant for on the next input-pane focus. `None` until the first

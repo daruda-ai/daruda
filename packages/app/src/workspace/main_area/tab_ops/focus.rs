@@ -44,22 +44,10 @@ impl Workspace {
         // text and owner in place. The `input_owner != Some(id)` guard matters
         // because `InputState::set_value` resets selection/scroll even for
         // identical text, which would jump the cursor mid-edit.
-        if self.pane_consumes_bottom_input(id) && self.input_dock.owner != Some(id) {
-            let current = self.input_dock.input.read(cx).value().to_string();
-            if let Some(owner) = self.input_dock.owner {
-                if current.is_empty() {
-                    self.input_dock.drafts.remove(&owner);
-                } else {
-                    self.input_dock.drafts.insert(owner, current);
-                }
-            }
-            let incoming = self.input_dock.drafts.get(&id).cloned().unwrap_or_default();
-            let terminal_input = self.input_dock.input.clone();
-            terminal_input.update(cx, |state, cx_state| {
-                state.set_value(&incoming, window, cx_state);
-            });
-            self.input_dock.owner = Some(id);
+        if self.active_runtime().focused_pane_id != id {
+            self.dismiss_file_selection_action(cx);
         }
+        self.bind_bottom_input(id, window, cx);
         self.active_runtime_mut().focused_pane_id = id;
         cx.notify();
         // Re-evaluate inactive-pane dim (focused pane goes full color, former
@@ -94,6 +82,9 @@ impl Workspace {
 
     pub(in crate::workspace) fn forget_pane_input_draft(&mut self, pane_id: PaneId) {
         self.input_dock.drafts.remove(&pane_id);
+        for state in self.lane_scoped.values_mut() {
+            state.queued_drafts.retain(|(pane, _), _| *pane != pane_id);
+        }
         self.input_dock.question.forget_pane(pane_id);
         if self.input_dock.owner == Some(pane_id) {
             self.input_dock.owner = None;

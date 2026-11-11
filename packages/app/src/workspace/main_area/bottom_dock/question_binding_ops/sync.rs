@@ -18,7 +18,6 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let focused = self.active_runtime().focused_pane_id;
         let has_text = !self.input_dock.input.read(cx).value().is_empty();
         let gained_text = has_text && !self.input_dock.question.composer_has_text;
         self.input_dock.question.composer_has_text = has_text;
@@ -32,7 +31,9 @@ impl Workspace {
                 v.clear_question_highlight(question.question_id, cx)
             });
         }
-        self.follow_bound_field(focused, window, cx);
+        if let Some(pane) = self.bottom_input_pane() {
+            self.follow_bound_field(pane, window, cx);
+        }
         self.sync_composer_hints(cx);
         // Snapshot after the steps above that may move the question.
         let question = self.focused_question(cx);
@@ -92,7 +93,7 @@ impl Workspace {
                 self.input_dock
                     .drafts
                     .get(&pane)
-                    .is_none_or(|draft| draft.trim().is_empty())
+                    .is_none_or(|draft| draft.text().trim().is_empty())
             };
             view.update(cx, |v, cx| v.set_composer_hint_empty(empty, cx));
         }
@@ -146,6 +147,9 @@ impl Workspace {
             self.input_dock.question.bound.insert(pane, now);
             return;
         }
+        if self.refuse_question_references(pane, cx) {
+            return;
+        }
         let typed = self.pane_composer_text(pane, cx).trim().to_owned();
         // A field that takes no text refuses it. The text then has no home,
         // so the record stays on the old field: Enter cannot make it the new
@@ -194,7 +198,7 @@ impl Workspace {
             self.input_dock
                 .drafts
                 .get(&pane)
-                .cloned()
+                .map(|draft| draft.text().to_string())
                 .unwrap_or_default()
         }
     }
@@ -218,7 +222,7 @@ impl Workspace {
             if text.is_empty() {
                 self.input_dock.drafts.remove(&pane);
             } else {
-                self.input_dock.drafts.insert(pane, text.to_owned());
+                self.input_dock.drafts.insert(pane, text.into());
             }
             // A saved draft changes outside `sync_composer_hints`, so its
             // hint follows here.

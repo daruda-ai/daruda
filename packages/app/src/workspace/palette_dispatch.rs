@@ -70,6 +70,8 @@ impl Workspace {
 
         if let Some(id) = action_id {
             match id {
+                "add_file_to_input" => self.add_focused_file_to_input(false, window, cx),
+                "add_selection_to_input" => self.add_focused_file_to_input(true, window, cx),
                 "new_tab" => self.on_new_tab(&NewTab, window, cx),
                 "new_task" => self.on_new_task(&NewTask, window, cx),
                 "new_agent_chat" => self.on_open_agent_chat(&OpenAgentChat, window, cx),

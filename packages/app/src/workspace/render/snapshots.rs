@@ -232,103 +232,60 @@ impl Workspace {
             .unwrap_or_default();
         let shell = self.quoting_shell();
         let bottom_dock_size = self.bottom_dock_display_size(cx);
-        // When the focused pane is an Agent chat pane that is busy (a turn in
-        // flight OR a background subagent still running), the bottom-input
-        // button toggles to "Stop" and cancels that pane's activity instead of
-        // sending. `None` in every other state.
-        //
-        // Reading the `AgentChatView` entity here registers it in the
-        // Workspace window's `tracked_entities`, so the bottom-dock snapshot
-        // (and the Stop/Send button) refreshes when `is_busy()` flips.
-        // This does NOT widen the scroll-repaint cost: the embedded view is an
-        // element-tree descendant of the Workspace, so its `cx.notify()`
-        // already marks the Workspace dirty via ancestor propagation
-        // (`mark_view_dirty`) regardless of this read — and that propagation
-        // walks ancestors only, so sibling docks / terminals stay cached.
-        let focused_id = self.active_runtime().focused_pane_id;
-        let agent_stop_pane = self
-            .active_runtime()
-            .panes
-            .iter()
-            .find(|p| p.id == focused_id)
-            .and_then(|p| p.agent_chat_view())
-            .filter(|view| view.read(cx).is_busy())
-            .map(|_| focused_id);
-        // The mode chip shows in the bottom input only when the focused pane is
-        // an Agent chat pane that advertises modes — independent of the pane's
-        // busy state, so the mode can be set before the first prompt. A
-        // terminal-pane focus yields `None` (the input is shared across pane
-        // kinds, so the chip must stay agent-only).
-        let agent_mode = self
-            .active_runtime()
-            .panes
-            .iter()
-            .find(|p| p.id == focused_id)
-            .and_then(|p| p.agent_chat_view())
-            .and_then(|view| view.read(cx).session_config().mode_for_chip().cloned())
-            .map(|m| (focused_id, m));
-        // Config-option chips: same focused-agent-pane gate as the mode chip,
-        // sourced from `config_options` (which never carries mode — `daruda_acp`
-        // folds that into `agent_mode` above). This is deliberately not an
-        // allowlist of known categories: whatever a given agent advertises
-        // (Model, ThoughtLevel, ModelConfig, a future protocol category, …)
-        // rides the same generic `config_chip` UI without daruda needing to
-        // special-case it per agent — the only trim is the user's own
-        // description-matched hide list (see `config_options_for_chips`).
-        // `None` when the focused pane is not an agent pane or no option
-        // survives the trim.
-        let agent_config_options = self
-            .active_runtime()
-            .panes
-            .iter()
-            .find(|p| p.id == focused_id)
-            .and_then(|p| p.agent_chat_view())
-            .map(|view| {
-                view.read(cx)
-                    .session_config()
-                    .config_options_for_chips(&self.mirrors.hidden_config_option_descriptions)
+        // Every input control is staged from the same recipient, including
+        // while a file pane owns main-area focus.
+        let input_controls_visible = self.input_dock.visible || self.focused_file_view().is_none();
+        let agent = self
+            .bottom_input_pane()
+            .filter(|_| input_controls_visible)
+            .and_then(|id| self.agent_chat_view(id).map(|view| (id, view)));
+        let agent_stop_pane = agent
+            .filter(|(_, view)| view.read(cx).is_busy())
+            .map(|(id, _)| id);
+        let agent_mode = agent.and_then(|(id, view)| {
+            view.read(cx)
+                .session_config()
+                .mode_for_chip()
+                .cloned()
+                .map(|m| (id, m))
+        });
+        let agent_config_options = agent.and_then(|(id, view)| {
+            let options = view
+                .read(cx)
+                .session_config()
+                .config_options_for_chips(&self.mirrors.hidden_config_option_descriptions);
+            (!options.is_empty()).then_some((id, options))
+        });
+        let queued_prompts = agent.and_then(|(id, view)| {
+            let view = view.read(cx);
+            let editing = view.queue().editing();
+            let prompts: Vec<_> = view
+                .queue()
+                .in_strip_order()
+                .map(|(q, paused)| crate::workspace::layout::QueuedPromptView {
+                    id: q.id(),
+                    text: daruda_chat::view::display_prompt(
+                        self.queued_composer_content(id, q.id(), q.text()).text(),
+                        q.attachments(),
+                    ),
+                    editing: editing == Some(q.id()),
+                    paused,
+                })
+                .collect();
+            (!prompts.is_empty()).then_some(crate::workspace::layout::QueuedPromptsSnapshot {
+                pane_id: id,
+                prompts,
+                resume_armed: view.resume_armed(),
             })
-            .filter(|opts| !opts.is_empty())
-            .map(|opts| (focused_id, opts));
-        // Queued prompts of the focused agent pane, projected for the
-        // queued-prompt strip. Same focused-agent-pane gate as the mode chip;
-        // `None` when not an agent pane or the queue is empty (strip hidden).
-        let queued_prompts = self
-            .active_runtime()
-            .panes
-            .iter()
-            .find(|p| p.id == focused_id)
-            .and_then(|p| p.agent_chat_view())
-            .map(|view| {
-                let view = view.read(cx);
-                let queue = view.queue();
-                let editing = queue.editing();
-                let out: Vec<_> = queue
-                    .in_strip_order()
-                    .map(|(q, paused)| crate::workspace::layout::QueuedPromptView {
-                        id: q.id(),
-                        text: daruda_chat::view::display_prompt(q.text(), q.attachments()),
-                        editing: editing == Some(q.id()),
-                        paused,
-                    })
-                    .collect();
-                (out, view.resume_armed())
-            })
-            .filter(|(q, _)| !q.is_empty())
-            .map(
-                |(prompts, resume_armed)| crate::workspace::layout::QueuedPromptsSnapshot {
-                    pane_id: focused_id,
-                    prompts,
-                    resume_armed,
-                },
-            );
+        });
         BottomDockSnapshot {
-            attachment_draft: self
-                .agent_chat_view(focused_id)
-                .filter(|v| !v.read(cx).is_read_only())
-                .map(|v| {
+            input_recipients: self.bottom_input_tabs(),
+            input_recipient: self.bottom_input_pane(),
+            attachment_draft: agent
+                .filter(|(_, v)| !v.read(cx).is_read_only())
+                .map(|(id, v)| {
                     (
-                        focused_id,
+                        id,
                         v.read(cx)
                             .draft_attachments()
                             .iter()
@@ -336,15 +293,15 @@ impl Workspace {
                             .collect(),
                     )
                 }),
-            agent_cli_snapshot: self.agent_chat_view(focused_id).and_then(|view| {
+            agent_cli_snapshot: agent.and_then(|(id, view)| {
                 let v = view.read(cx);
                 let run = v.mirrored_run()?;
                 Some(crate::workspace::layout::snap::CliSnapshot {
-                    pane_id: focused_id,
+                    pane_id: id,
                     process: self.cli_run_process(run, cx),
                     end_reason: run
                         .resolve(cx.global::<crate::runs::GlobalTasks>().book())
-                        .and_then(|run| run.cli_session_end.as_ref())
+                        .and_then(|r| r.cli_session_end.as_ref())
                         .map(|end| end.reason),
                     loading: v.status().is_connecting(),
                 })
@@ -361,7 +318,9 @@ impl Workspace {
             agent_mode,
             agent_config_options,
             queued_prompts,
-            question: self.question_strip_snapshot(cx),
+            question: input_controls_visible
+                .then(|| self.question_strip_snapshot(cx))
+                .flatten(),
             composer_expand: self.composer_expand(cx),
             slash_menu: self.input_dock.slash.as_ref().map(|menu| {
                 crate::workspace::layout::SlashMenuView {

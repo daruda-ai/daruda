@@ -50,16 +50,34 @@ fn seed_history_state(ws: &mut Workspace, target: LaneRef) {
     let history = &mut ws.lane_scoped_mut(target).input_history;
     history.push("older command");
     history.push("newer command");
-    assert_eq!(history.prev("unfinished draft"), Some("newer command"));
+    assert_eq!(
+        history
+            .prev("unfinished draft")
+            .map(|content| content.text().to_string()),
+        Some("newer command".into())
+    );
 }
 
 fn assert_history_state_retained(ws: &mut Workspace, target: LaneRef) {
     let history = &mut ws.lane_scoped.get_mut(&target).unwrap().input_history;
     assert!(history.has_entries());
     assert!(history.is_navigating());
-    assert_eq!(history.forward(), Some("unfinished draft"));
-    assert_eq!(history.prev("another draft"), Some("newer command"));
-    assert_eq!(history.prev("newer command"), Some("older command"));
+    assert_eq!(
+        history.forward().map(|content| content.text().to_string()),
+        Some("unfinished draft".into())
+    );
+    assert_eq!(
+        history
+            .prev("another draft")
+            .map(|content| content.text().to_string()),
+        Some("newer command".into())
+    );
+    assert_eq!(
+        history
+            .prev("newer command")
+            .map(|content| content.text().to_string()),
+        Some("older command".into())
+    );
 }
 
 fn assert_git_state_retained(ws: &Workspace, target: LaneRef) {

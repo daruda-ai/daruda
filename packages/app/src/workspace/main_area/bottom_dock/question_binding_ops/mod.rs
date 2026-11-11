@@ -105,8 +105,36 @@ impl QuestionMarks {
 }
 
 impl Workspace {
+    pub(super) fn refuse_question_references(
+        &mut self,
+        pane: PaneId,
+        cx: &mut gpui::Context<Self>,
+    ) -> bool {
+        let has_references = if self.input_dock.owner == Some(pane) {
+            !self.input_dock.input.read(cx).tokens().is_empty()
+        } else {
+            self.input_dock
+                .drafts
+                .get(&pane)
+                .is_some_and(|draft| !draft.tokens().is_empty())
+        };
+        if has_references {
+            self.report_error(
+                daruda_store::observability::error_report::ErrorReport::new(
+                    crate::surface::strings::file_viewer::input_reference_answer_refused(),
+                )
+                .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
+                .dedup(format!("question.references.{pane}"))
+                .at(file!(), line!())
+                .build(),
+                cx,
+            );
+        }
+        has_references
+    }
+
     pub(super) fn focused_question(&self, cx: &App) -> Option<(PaneId, QuestionComposer)> {
-        let pane = self.active_runtime().focused_pane_id;
+        let pane = self.bottom_input_pane()?;
         let view = self.agent_chat_view(pane)?.read(cx);
         if view.is_read_only() {
             return None;

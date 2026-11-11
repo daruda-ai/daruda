@@ -86,6 +86,9 @@ impl Workspace {
             QuestionKey::NextField => true,
             QuestionKey::PrevField => false,
         };
+        if self.refuse_question_references(pane, cx) {
+            return true;
+        }
         let text = self.input_dock.input.read(cx).value().to_string();
         let typed = !text.trim().is_empty();
         if typed && self.question_swap_pending(pane, &question) {

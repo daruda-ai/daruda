@@ -74,6 +74,7 @@ impl Workspace {
         // The orchestrator belongs to no worktree, so it does not follow the
         // user into the next one — a tab that trailed every switch would read
         // as content of whichever lane it landed in. The chip puts it back.
+        self.dismiss_file_selection_action(cx);
         self.close_orchestrator_tab_for_lane_change(window, cx);
         // Leaving the active lane abandons any pending amend (the prefill
         // belongs to the lane we're leaving). No-op when not amending.

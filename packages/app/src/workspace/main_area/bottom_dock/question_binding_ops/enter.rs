@@ -27,6 +27,9 @@ impl Workspace {
         let Some(view) = self.agent_chat_view(pane).cloned() else {
             return false;
         };
+        if question.bound && self.refuse_question_references(pane, cx) {
+            return true;
+        }
         let typed = text.trim();
         if typed.is_empty() && question.bound {
             // An empty Enter chooses the card's highlighted row; the parked
@@ -109,7 +112,9 @@ impl Workspace {
     fn drop_submit_line_break(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.input_dock.input.read(cx).value() != text {
             self.input_dock.input.update(cx, |state, cx| {
-                state.set_value(text, window, cx);
+                let end = state.value().len();
+                state.set_selected_range(text.len()..end, cx);
+                state.replace("", window, cx);
                 state.move_cursor_to_end(cx);
             });
         }

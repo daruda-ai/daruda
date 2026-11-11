@@ -42,6 +42,7 @@ ADAPTER="$PANE/view/list_sync.rs"
 STRUCTURAL_ALLOW=(
     "$PANE/view/session_ops.rs" # settle_stop_marker (remove+push), teardown (clear)
     "$PANE/view/seed_ops.rs" # seed
+    "$PANE/view/transcript_cut.rs" # tail cuts prune fold keys and per-item records
 )
 
 status=0

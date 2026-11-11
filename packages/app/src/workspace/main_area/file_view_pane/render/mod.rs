@@ -31,11 +31,11 @@ use crate::workspace::main_area::pane_tree::PaneId;
 pub(in crate::workspace) fn render_pane_file_viewer(
     pane_id: PaneId,
     fc: &FileContent,
+    file_send: &crate::workspace::main_area::file_context::FileSendAction,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let FileContent {
         view: fv,
-        images,
         editor_state,
         scroll_handle,
         search_input,
@@ -104,17 +104,9 @@ pub(in crate::workspace) fn render_pane_file_viewer(
                 .left_0()
                 .right_0()
                 .h(toolbar_h)
-                .child(render_file_viewer_toolbar(pane_id, fv, cx)),
+                .child(render_file_viewer_toolbar(pane_id, fv, file_send, cx)),
         )
-        .child(render_file_viewer_body(
-            fv,
-            images,
-            &editor_state,
-            scroll_handle,
-            toolbar_h,
-            px(0.),
-            cx,
-        ))
+        .child(render_file_viewer_body(pane_id, fc, toolbar_h, px(0.), cx))
         .children(scrollbar)
         .children(search_panel)
 }

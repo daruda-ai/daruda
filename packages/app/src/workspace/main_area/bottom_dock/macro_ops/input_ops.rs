@@ -95,10 +95,26 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let raw = self.input_dock.input.read(cx).value().to_string();
+        let content = self.input_dock.input.read(cx).content();
+        let shell = self
+            .bottom_input_pane()
+            .filter(|id| !self.is_agent_chat_pane(*id))
+            .map(|_| self.quoting_shell());
+        let raw = crate::workspace::main_area::file_context::prompt_text(&content, shell);
         let trimmed = raw.trim_end_matches(['\n', '\r']);
+        let before = self.composer_queue_state(cx);
+        if let Some(recipient) = self.bottom_input_pane()
+            && self.active_runtime().focused_pane_id != recipient
+            && (!trimmed.is_empty()
+                || self
+                    .agent_chat_view(recipient)
+                    .is_some_and(|v| !v.read(cx).draft_attachments().is_empty()))
+        {
+            self.maybe_connect_agent_chat(recipient, cx);
+        }
         if let Some(accepted) = self.send_attached_composer_if_any(trimmed.to_owned(), cx) {
             if accepted {
+                self.remember_queued_composer(before, &content, trimmed, cx);
                 if let Some(owner) = self.input_dock.owner {
                     self.input_dock.drafts.remove(&owner);
                 }
@@ -114,7 +130,9 @@ impl Workspace {
             // agent pane reads it, as a gesture. No history entry and no
             // `set_value` — that emits `Change` even for identical text, which
             // would disarm the gesture this very Enter just armed.
-            let focused = self.active_runtime().focused_pane_id;
+            let Some(focused) = self.bottom_input_pane() else {
+                return;
+            };
             if self.is_agent_chat_pane(focused) {
                 self.agent_empty_submit(focused, window, cx);
             }
@@ -128,20 +146,12 @@ impl Workspace {
         let history_text = trimmed.trim().to_owned();
         self.lane_scoped_mut(lane_ref)
             .input_history
-            .push(&history_text);
-        // Submitted text is no longer a draft — drop the saved entry for
-        // the pane whose text is visible (`input_owner`) so returning to
-        // it after send shows an empty input.
-        if let Some(owner) = self.input_dock.owner {
-            self.input_dock.drafts.remove(&owner);
-        }
-        // Route through the single pane-delivery funnel. It branches on the
-        // focused pane's kind: a Terminal receives the bytes (embedded `\n` →
-        // `\r`, trailing `\r` on submit — identical to the former inline
-        // path), an Agent chat pane submits the text as an ACP turn. `trimmed`
-        // already dropped trailing `\n`/`\r`, so the funnel adds exactly one
-        // submitting `\r` for terminals.
-        self.deliver_text_to_focused_pane(
+            .push_content(&history_text, &content);
+        let Some(recipient) = self.bottom_input_pane() else {
+            return;
+        };
+        if !self.deliver_text_to_pane(
+            recipient,
             PaneTextInput {
                 body: trimmed.to_string(),
                 intent: PaneTextIntent::Command { submit: true },
@@ -149,7 +159,11 @@ impl Workspace {
             },
             window,
             cx,
-        );
+        ) {
+            return;
+        }
+        self.remember_queued_composer(before, &content, trimmed.trim(), cx);
+        self.input_dock.drafts.remove(&recipient);
         self.input_dock
             .input
             .update(cx, |s, cx_state| s.set_value("", window, cx_state));
@@ -169,7 +183,7 @@ impl Workspace {
         if matches!(
             dir,
             crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Up
-        ) && self.focused_agent_last_queued(cx).is_some()
+        ) && self.input_agent_last_queued(cx).is_some()
         {
             return true;
         }
@@ -201,11 +215,11 @@ impl Workspace {
     ///
     /// `None` too while the composer answers a question: a queued prompt
     /// pulled in would be sent as the answer.
-    fn focused_agent_last_queued(&self, cx: &App) -> Option<(PaneId, PromptId)> {
+    fn input_agent_last_queued(&self, cx: &App) -> Option<(PaneId, PromptId)> {
         if self.focused_question_bound(cx) {
             return None;
         }
-        let focused = self.active_runtime().focused_pane_id;
+        let focused = self.bottom_input_pane()?;
         let view = self.agent_chat_view(focused)?;
         let id = view.read(cx).queue().last_prompt_id()?;
         Some((focused, id))
@@ -220,7 +234,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let current = self.input_dock.input.read(cx).value().to_string();
+        let current = self.input_dock.input.read(cx).content();
         // ↑ in an EMPTY composer, with a non-empty queue on the focused agent
         // pane, pulls the most-recent queued prompt into the composer for
         // editing instead of recalling input history. A non-empty composer,
@@ -229,8 +243,8 @@ impl Workspace {
         if matches!(
             dir,
             crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Up
-        ) && current.is_empty()
-            && let Some((pane_id, id)) = self.focused_agent_last_queued(cx)
+        ) && current.text().is_empty()
+            && let Some((pane_id, id)) = self.input_agent_last_queued(cx)
         {
             self.begin_edit_queued_prompt(pane_id, id, window, cx);
             return;
@@ -239,17 +253,17 @@ impl Workspace {
         let buf = &mut self.lane_scoped_mut(lane_ref).input_history;
         let new_text = match dir {
             crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Up => {
-                buf.prev(&current).map(str::to_owned)
+                buf.prev(current)
             }
             crate::workspace::main_area::bottom_dock::composer_ops::HistoryDir::Down => {
-                buf.forward().map(str::to_owned)
+                buf.forward()
             }
         };
         let Some(new_text) = new_text else {
             return;
         };
         self.input_dock.input.update(cx, |s, cx_state| {
-            s.set_value(&new_text, window, cx_state);
+            s.set_value(new_text, window, cx_state);
             // Move cursor to end so the user can append/edit immediately —
             // shell history convention (bash/zsh/fish). `set_value` on a
             // multi-line state clears the selection to 0..0 (cursor at start).
@@ -275,7 +289,9 @@ impl Workspace {
     ) {
         // Resolve the command kind to a plain bool first so the `&self`/`cx`
         // read borrow ends before the `&mut self` `send_terminal_input` call.
-        let focused = self.active_runtime().focused_pane_id;
+        let Some(focused) = self.bottom_input_pane() else {
+            return;
+        };
         let is_no_input = self
             .agent_chat_view(focused)
             .and_then(|v| {

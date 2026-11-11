@@ -38,6 +38,9 @@ const NAME_AGENT_CATALOG_EDITOR: &str = "agent-catalog-editor";
 /// that would resolve to Native, so the layout is reviewable off its platform.
 const NAME_CLIENT_CHROME: &str = "client-chrome";
 /// CLI token for the pane context-menu scenario.
+const NAME_FILE_INPUT_SELECTION: &str = "file-input-selection";
+const NAME_FILE_INPUT_MENU: &str = "file-input-menu";
+const NAME_FILE_INPUT_INSERTED: &str = "file-input-inserted";
 const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
 /// CLI token for the mermaid-diagram lightbox scenario.
 const NAME_MERMAID_LIGHTBOX: &str = "mermaid-lightbox";
@@ -290,6 +293,15 @@ impl ScreenshotScenario {
             NAME_AGENT_CATALOG_EDITOR => {
                 Some(Self::AgentCatalogEditor(daruda_settings::EditorShot::Fold))
             }
+            NAME_FILE_INPUT_SELECTION => Some(Self::FileInput(
+                super::super::main_area::file_context::FileInputShot::Selection,
+            )),
+            NAME_FILE_INPUT_MENU => Some(Self::FileInput(
+                super::super::main_area::file_context::FileInputShot::Menu,
+            )),
+            NAME_FILE_INPUT_INSERTED => Some(Self::FileInput(
+                super::super::main_area::file_context::FileInputShot::Inserted,
+            )),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             NAME_MERMAID_LIGHTBOX => Some(Self::MermaidLightbox),
             NAME_FLOW_GRAPH => Some(Self::FlowGraph),

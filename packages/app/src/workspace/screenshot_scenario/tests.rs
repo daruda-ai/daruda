@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn file_input_tokens_select_the_requested_interaction_state() {
+    use crate::workspace::main_area::file_context::FileInputShot;
+    for (name, state) in [
+        ("file-input-selection", FileInputShot::Selection),
+        ("file-input-menu", FileInputShot::Menu),
+        ("file-input-inserted", FileInputShot::Inserted),
+    ] {
+        assert_eq!(
+            ScreenshotScenario::from_cli_name(name),
+            Some(ScreenshotScenario::FileInput(state)),
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn unknown_name_maps_to_none() {
     assert_eq!(ScreenshotScenario::from_cli_name("nope"), None);
     assert_eq!(ScreenshotScenario::from_cli_name(""), None);

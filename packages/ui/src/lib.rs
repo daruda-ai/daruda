@@ -98,11 +98,13 @@ pub use form_helpers::{
 };
 pub use group_box::{GroupBox, GroupBoxVariants, group_box};
 pub use input::{
-    CompletionProvider, EditorState, FieldState, InputEnter, InputEscape, InputEvent,
-    InputGrowMode, InputIndent, InputMoveDown, InputMoveUp, InputOutdent, InputPaste, InputState,
-    Rope, RopeExt, TextDecoration, TextState, TextareaState, cursor_display_row, form_input, input,
+    CompletionProvider, EditorState, FieldState, InlineToken, InlineTokenClickEvent, InputContent,
+    InputCut, InputEnter, InputEscape, InputEvent, InputGrowMode, InputIndent, InputMoveDown,
+    InputMoveUp, InputOutdent, InputPaste, InputRedo, InputSelectAll, InputState, InputUndo, Rope,
+    RopeExt, TextDecoration, TextState, TextareaState, cursor_display_row, form_input, input,
     input_on, input_with_action, input_with_action_grow, input_with_action_grow_font,
-    readonly_form_input, readonly_input, search_input, search_input_on,
+    input_with_inline_references, readonly_form_input, readonly_input, search_input,
+    search_input_on,
 };
 pub use input_panel::{
     InputPanel, InputPanelEvent, InputPanelLayout, PanelAction, PanelActionVariant,

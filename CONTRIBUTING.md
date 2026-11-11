@@ -622,6 +622,7 @@ after settle and forces a repaint before capture.
 | Area | Example scenarios and capture intent |
 |---|---|
 | Overlays | `command-palette`, `error-modal`, `toast`, `pane-context-menu`, `mermaid-lightbox` |
+| File review | `file-input-selection`, `file-input-menu`, `file-input-inserted` seed file references and the Input recipient tabs |
 | Navigation | `lane-switcher` seeds an overflowing label; `landing` empties the restored workspace |
 | Settings | `settings[:<section-slug>]`, `settings-error`, `settings-search` |
 | Agent catalog | `agent-catalog-expanded`, `agent-catalog-editor[:<fold\|filter\|range>]` |

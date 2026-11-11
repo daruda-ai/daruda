@@ -270,15 +270,17 @@ impl Workspace {
             QuestionPlaceholder::Note => return s::bottom_dock::question_placeholder_note(),
             QuestionPlaceholder::Prompt => {}
         }
-        let focused_id = self.active_runtime().focused_pane_id;
-        let is_agent = self.is_agent_chat_pane(focused_id);
+        let focused_id = self.bottom_input_pane();
+        let is_agent = focused_id.is_some_and(|id| self.is_agent_chat_pane(id));
         let mode_name: Option<String> = if is_agent {
-            self.agent_chat_view(focused_id).and_then(|v| {
-                v.read(cx)
-                    .session_config()
-                    .current_mode_name()
-                    .map(str::to_string)
-            })
+            focused_id
+                .and_then(|id| self.agent_chat_view(id))
+                .and_then(|v| {
+                    v.read(cx)
+                        .session_config()
+                        .current_mode_name()
+                        .map(str::to_string)
+                })
         } else {
             None
         };

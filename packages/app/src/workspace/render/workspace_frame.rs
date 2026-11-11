@@ -201,6 +201,19 @@ impl Workspace {
 
         let workspace_root = self
             .frame_root(key_ctx, cx)
+            .on_action(
+                cx.listener(|ws, _: &crate::workspace::AddFileToInput, window, cx| {
+                    ws.add_focused_file_to_input(false, window, cx)
+                }),
+            )
+            .on_action(cx.listener(
+                |ws, _: &crate::workspace::AddSelectionToInput, window, cx| {
+                    ws.add_focused_file_to_input(true, window, cx)
+                },
+            ))
+            .capture_key_down(cx.listener(|ws, event: &KeyDownEvent, _, cx| {
+                ws.dismiss_file_action_on_escape(event, cx)
+            }))
             // Search actions — context-gated via KeyBinding context strings in main.rs.
             .on_action(cx.listener(|this, _: &SaveFilePane, window, cx| {
                 this.save_focused_file_pane(window, cx);

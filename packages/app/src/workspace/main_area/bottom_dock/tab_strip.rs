@@ -176,6 +176,38 @@ fn builtin_input_tab() -> Tab {
     tab(surface_strings::bottom_dock::input_tab_label())
 }
 
+/// Input-pane tabs leave the file on screen and swap only the shared draft.
+pub(super) fn render_recipients(
+    snap: &BottomDockSnapshot,
+    _cx: &mut Context<Dock>,
+) -> Option<AnyElement> {
+    if snap.input_recipients.len() < 2 {
+        return None;
+    }
+    let ids: Vec<_> = snap.input_recipients.iter().map(|(id, _)| *id).collect();
+    let selected = ids.iter().position(|id| Some(*id) == snap.input_recipient);
+    let ws = snap.workspace.clone();
+    Some(
+        tab_bar("input-pane-tabs")
+            .w_full()
+            .flex_shrink_0()
+            .menu(true)
+            .when_some(selected, |bar, index| bar.selected_index(index))
+            .children(snap.input_recipients.iter().map(|(id, label)| {
+                let id = *id;
+                tab(label.clone()).debug_selector(move || format!("input-recipient-{id}"))
+            }))
+            .on_click(move |index, window, cx| {
+                if let Some(id) = ids.get(*index).copied()
+                    && let Some(ws) = ws.upgrade()
+                {
+                    ws.update(cx, |ws, cx| ws.select_bottom_input_pane(id, window, cx));
+                }
+            })
+            .into_any_element(),
+    )
+}
+
 /// Row-preset chip rendered next to `[+]` in the TabBar suffix. Shows
 /// the nearest preset to the current dock height (e.g. `2`) and opens
 /// a dropdown listing the three presets, with the active one checked.

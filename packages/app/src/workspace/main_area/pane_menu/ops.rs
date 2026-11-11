@@ -14,6 +14,17 @@ use super::context::{
 use super::sections::compose;
 
 impl Workspace {
+    pub(in crate::workspace::main_area) fn file_pane_shared_menu_entries(
+        &mut self,
+        pane: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<super::spec::MenuEntry> {
+        self.begin_pane_menu(pane, None, window, cx)
+            .map(|context| compose(&context))
+            .unwrap_or_default()
+    }
+
     /// Called by a resource card on a right press, ahead of the pane's own
     /// handler that opens the menu.
     pub(in crate::workspace) fn record_resource_right_click(&mut self, click: ResourceRightClick) {
@@ -27,6 +38,15 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .active_runtime()
+            .panes
+            .iter()
+            .any(|p| p.id == pane_id && p.file_view().is_some())
+        {
+            self.open_file_reference_menu(pane_id, position, window, cx);
+            return;
+        }
         let click = self.take_pane_click_info(pane_id, position, window, cx);
         self.open_pane_context_menu_with_click(pane_id, position, click, window, cx);
     }

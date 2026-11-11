@@ -41,7 +41,7 @@ pub(in crate::workspace) const FILE_VIEWER_VIRTUAL_OVERSCAN: usize = 8;
 /// Which snapshot of a file a pane shows — and, in Changes mode, what its
 /// diff compares. Part of a file pane's identity: the same path opened from
 /// two sources is two panes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(in crate::workspace) enum DiffSource {
     /// The file on disk; its diff is index → working tree.
     WorkingTree,

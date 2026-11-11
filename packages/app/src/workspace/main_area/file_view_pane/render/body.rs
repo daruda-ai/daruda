@@ -12,24 +12,25 @@ use super::markdown::render_md_body;
 use super::virtual_list::virtual_range;
 use crate::surface::strings;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::images::MdImages;
 use crate::workspace::main_area::file_view_pane::{
     CharSelection, FILE_VIEWER_MAX_BYTES, FILE_VIEWER_VIRTUAL_OVERSCAN, FileViewMode,
-    PaneFileContent, PaneFileView, VisualRow,
+    PaneFileContent, VisualRow,
 };
 
 /// Scrollable body area: routes to the appropriate renderer by content type and mode.
 /// Absolutely positioned between `top_offset` and `bottom_offset` so Taffy gives it a
 /// definite, bounded height — required for overflow_y_scroll to compute scroll_max > 0.
 pub(super) fn render_file_viewer_body(
-    fv: &PaneFileView,
-    images: &MdImages,
-    editor_state: &gpui::Entity<crate::ui::EditorState>,
-    scroll_handle: &gpui::ScrollHandle,
+    pane_id: crate::workspace::main_area::pane_tree::PaneId,
+    file: &crate::workspace::main_area::pane::FileContent,
     top_offset: gpui::Pixels,
     bottom_offset: gpui::Pixels,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
+    let fv = &file.view;
+    let images = &file.images;
+    let editor_state = &file.editor_state;
+    let scroll_handle = &file.scroll_handle;
     let char_selection = fv.selection_drag.char_selection().cloned();
     let hide_unchanged = fv.hide_unchanged;
     let search_state: Option<(&[usize], Option<usize>)> = fv.search.as_ref().map(|s| {
@@ -43,6 +44,17 @@ pub(super) fn render_file_viewer_body(
     let editor_font_size = theme::editor_font_size(cx);
 
     let frame = div()
+        .on_mouse_down(
+            gpui::MouseButton::Left,
+            cx.listener(|ws, _, _, cx| ws.dismiss_file_selection_action(cx)),
+        )
+        .on_scroll(cx.listener(|ws, _, _, cx| ws.dismiss_file_selection_action(cx)))
+        .on_mouse_up(
+            gpui::MouseButton::Left,
+            cx.listener(move |ws, event: &gpui::MouseUpEvent, window, cx| {
+                ws.schedule_file_selection_action(pane_id, event.position, window, cx)
+            }),
+        )
         .absolute()
         .top(top_offset)
         .left_0()
