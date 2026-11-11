@@ -2634,8 +2634,26 @@ remote_channel:
   home_select: "Select"
   # Button that stops a running pane, as `/stop` does.
   home_stop: "Stop"
-  # Beside the name of the pane the connection's commands address.
-  home_selected: "(selected)"
+  # A pane's status on that page when it is the pane the connection's
+  # commands address.
+  home_status_selected: "%{status} · Selected"
+  # Counts on that page of every open pane, the ones the page has no room
+  # for included.
+  home_summary: "Working %{working} · Needs you %{needs_you} · Total %{total}"
+  # Heading over the panes that are working or waiting for the person.
+  home_group_running: "Running"
+  # Heading over every other pane.
+  home_group_others: "Other panes"
+  # Heading of the usage help at the foot of that page.
+  home_help_title: "How to use"
+  # Usage help lines, in Markdown: commands in code spans, as the person
+  # types them in the paired conversation.
+  home_help_thread: "Reply in a pane's thread to talk to that agent."
+  home_help_select: "*%{select}* a pane, or send `!use 2`, and your messages outside threads, and `!stop`, go to it."
+  home_help_commands: "Commands: `!list` lists the panes · `!use 2` selects pane 2 · `!stop` stops the selected pane · `!brief` counts what runs."
+  # The working status in the page's key to the status emoji, without the
+  # time a pane's own status names.
+  home_legend_working: "Working"
   # What the person's last tap on the page came to, with the local time.
   home_result: "%{time} · %{text}"
   # A tapped button belonged to a page that has since changed.

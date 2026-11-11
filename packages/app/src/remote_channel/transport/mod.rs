@@ -140,25 +140,45 @@ pub(crate) struct AppHome {
 /// What a page shows, in the order it shows it.
 pub(crate) struct PageView<'a> {
     pub header: &'a str,
+    /// How many panes are open and how many run, when any are.
+    pub summary: Option<&'a str>,
     /// What the person's last tap came to, under the header.
     pub outcome: Option<&'a str>,
-    /// Said in place of the rows when there are none.
+    /// Said in place of the groups when there are no panes.
     pub empty: &'a str,
-    pub rows: Vec<PageRow<'a>>,
+    /// The panes, under their groups' headings; a group without panes is
+    /// left out.
+    pub groups: Vec<PageGroup<'a>>,
     /// The line that counts the rows left out, when some were.
     pub more: Option<&'a str>,
+    /// How to use the page and the conversation, at its foot.
+    pub help: PageHelp<'a>,
 }
 
-/// One pane on the page, read as its thread root reads: its name, what it
-/// is working on, its status, and its buttons under all three.
+/// Panes shown together under one heading.
+pub(crate) struct PageGroup<'a> {
+    pub title: &'a str,
+    pub rows: Vec<PageRow<'a>>,
+}
+
+/// The usage help at the foot of a page.
+pub(crate) struct PageHelp<'a> {
+    pub title: &'a str,
+    /// One instruction each, in Markdown: commands in code spans.
+    pub lines: Vec<&'a str>,
+    /// Each kind of status: its emoji, by short name, and its label.
+    pub legend: Vec<(&'a str, &'a str)>,
+}
+
+/// One pane on the page: its name, what it is working on, its status, and
+/// its buttons.
 pub(crate) struct PageRow<'a> {
     pub name: &'a str,
     /// The pane's activity title, when it has one.
     pub subject: Option<&'a str>,
-    /// The mark beside the status of the pane commands address.
-    pub selected: Option<&'a str>,
     /// The status's emoji, by short name, when one is known.
     pub emoji: Option<&'a str>,
+    /// The status's words, marked when the pane is the one commands address.
     pub status: &'a str,
     /// The button's label and the link to the pane's thread.
     pub thread: Option<(&'a str, &'a str)>,

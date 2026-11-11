@@ -44,9 +44,19 @@ pub(super) struct Outcome {
     pub text: String,
 }
 
+/// How many panes are open and how many of them run, the ones a page has no
+/// room for included.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Counts {
+    pub working: usize,
+    pub needs_you: usize,
+    pub total: usize,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Board {
     rows: Vec<PaneRow>,
+    counts: Counts,
     /// Panes left out for want of room.
     omitted: usize,
     /// What the rows' buttons carry, so a tap names this board's row.
@@ -60,10 +70,22 @@ impl Board {
     pub(super) fn new(mut rows: Vec<PaneRow>, capacity: usize, outcome: Option<Outcome>) -> Self {
         // Stable: within a rank, panes keep their listing order.
         rows.sort_by_key(|row| rank(row.shown));
+        let counts = Counts {
+            working: rows
+                .iter()
+                .filter(|row| matches!(row.shown, Some(ShownStatus::Working { .. })))
+                .count(),
+            needs_you: rows
+                .iter()
+                .filter(|row| matches!(row.shown, Some(ShownStatus::NeedsYou { .. })))
+                .count(),
+            total: rows.len(),
+        };
         let omitted = rows.len().saturating_sub(capacity);
         rows.truncate(capacity);
         Self {
             rows,
+            counts,
             omitted,
             generation: 0,
             outcome,
@@ -72,6 +94,10 @@ impl Board {
 
     pub(super) fn rows(&self) -> &[PaneRow] {
         &self.rows
+    }
+
+    pub(super) fn counts(&self) -> Counts {
+        self.counts
     }
 
     /// Panes left out for want of room.

@@ -1,12 +1,11 @@
 use super::super::{BUTTON_LABEL_LIMIT, parse};
 use super::*;
-use crate::remote_channel::transport::{IncomingKind, PageRow};
+use crate::remote_channel::transport::{IncomingKind, PageGroup, PageRow};
 
 fn row<'a>(name: &'a str, emoji: Option<&'a str>, thread: Option<&'a str>) -> PageRow<'a> {
     PageRow {
         name,
         subject: None,
-        selected: None,
         emoji,
         status: "Working",
         thread: thread.map(|url| ("Open thread", url)),
@@ -15,18 +14,138 @@ fn row<'a>(name: &'a str, emoji: Option<&'a str>, thread: Option<&'a str>) -> Pa
     }
 }
 
-fn view<'a>(rows: Vec<PageRow<'a>>, more: Option<&'a str>) -> PageView<'a> {
+const LEGEND: [(&str, &str); 2] = [("hourglass_flowing_sand", "Working"), ("bell", "Needs you")];
+
+fn view<'a>(groups: Vec<PageGroup<'a>>, more: Option<&'a str>) -> PageView<'a> {
     PageView {
         header: "Agents",
+        summary: Some("Working 1 · Needs you 0 · Total 2"),
         outcome: None,
         empty: "No agent chats are open.",
-        rows,
+        groups,
         more,
+        help: PageHelp {
+            title: "How to use",
+            lines: vec!["Reply in a thread.", "Commands: `!list` · `!stop`"],
+            legend: LEGEND.to_vec(),
+        },
     }
 }
 
+fn group<'a>(title: &'a str, rows: Vec<PageRow<'a>>) -> PageGroup<'a> {
+    PageGroup { title, rows }
+}
+
+fn types(blocks: &[Value]) -> Vec<&str> {
+    blocks
+        .iter()
+        .map(|block| block["type"].as_str().unwrap())
+        .collect()
+}
+
+/// Every card of the view, in order.
+fn cards(blocks: &[Value]) -> Vec<&Value> {
+    blocks
+        .iter()
+        .filter(|block| block["type"] == "carousel")
+        .flat_map(|block| block["elements"].as_array().unwrap())
+        .collect()
+}
+
+/// Header, counts, divider, each group's heading over its carousel, the
+/// rows left out, divider, help, and the status key, in that order.
 #[test]
-fn a_page_lists_each_pane_with_its_status_and_buttons() {
+fn a_page_is_laid_out_header_groups_then_help() {
+    let mut running = row("app/main (Claude)", Some("hourglass_flowing_sand"), None);
+    running.stop = Some(("Stop", "hom:1:0:stop"));
+    let quiet = row("app/fix_bug (Codex)", None, None);
+    let page = view(
+        vec![
+            group("Running", vec![running]),
+            group("Other panes", vec![quiet]),
+        ],
+        Some("2 more not shown"),
+    );
+    let payload = publish_payload("U1", &page);
+    assert_eq!(payload["user_id"], "U1");
+    assert_eq!(payload["view"]["type"], "home");
+    let blocks = payload["view"]["blocks"].as_array().unwrap();
+    assert_eq!(
+        types(blocks),
+        [
+            "header", "context", "divider", "section", "carousel", "section", "carousel",
+            "context", "divider", "section", "context"
+        ]
+    );
+    assert_eq!(blocks[0]["text"]["text"], "Agents");
+    assert_eq!(
+        blocks[1]["elements"][0]["text"],
+        "Working 1 · Needs you 0 · Total 2"
+    );
+    assert_eq!(
+        blocks[3]["text"],
+        json!({"type": "mrkdwn", "text": "*Running*"})
+    );
+    assert_eq!(
+        blocks[4]["elements"][0]["title"]["text"],
+        "app/main (Claude)"
+    );
+    assert_eq!(blocks[5]["text"]["text"], "*Other panes*");
+    assert_eq!(
+        blocks[6]["elements"][0]["title"]["text"],
+        "app/fix_bug (Codex)"
+    );
+    assert_eq!(blocks[7]["elements"][0]["text"], "2 more not shown");
+    assert_eq!(
+        blocks[9]["text"]["text"],
+        "*How to use*\n• Reply in a thread.\n• Commands: `!list` · `!stop`"
+    );
+    // The key is built from the statuses the page was handed.
+    assert_eq!(
+        blocks[10]["elements"],
+        json!([
+            {"type": "mrkdwn", "text": ":hourglass_flowing_sand: Working"},
+            {"type": "mrkdwn", "text": ":bell: Needs you"},
+        ])
+    );
+}
+
+/// A tap's result follows the counts; a group without panes is not given
+/// a heading.
+#[test]
+fn a_tap_result_follows_the_counts_and_only_filled_groups_show() {
+    let mut page = view(vec![group("Other panes", vec![row("a", None, None)])], None);
+    page.outcome = Some("09:30 · Stopped");
+    let blocks = page_blocks(&page);
+    assert_eq!(
+        types(&blocks)[..6],
+        [
+            "header", "context", "context", "divider", "section", "carousel"
+        ]
+    );
+    assert_eq!(blocks[2]["elements"][0]["text"], "09:30 · Stopped");
+    assert_eq!(blocks[4]["text"]["text"], "*Other panes*");
+}
+
+#[test]
+fn an_empty_page_says_so_and_still_helps() {
+    let mut page = view(Vec::new(), None);
+    page.summary = None;
+    let blocks = page_blocks(&page);
+    assert_eq!(
+        types(&blocks),
+        [
+            "header", "divider", "section", "divider", "section", "context"
+        ]
+    );
+    assert_eq!(blocks[2]["text"]["text"], "No agent chats are open.");
+}
+
+/// A card names the pane, shows its status with its emoji, says what it
+/// works on, and carries a link only when one is known; Stop only on a
+/// running pane.
+#[test]
+fn a_card_shows_one_pane_and_its_buttons() {
     let mut running = row(
         "app/main (Claude)",
         Some("hourglass_flowing_sand"),
@@ -34,127 +153,203 @@ fn a_page_lists_each_pane_with_its_status_and_buttons() {
     );
     running.stop = Some(("Stop", "hom:1:0:stop"));
     running.subject = Some("Fix the login bug");
+    running.status = "Working since 09:30 · Selected";
     let mut quiet = row("app/fix_bug (Codex)", None, None);
     quiet.select = ("Select", "hom:1:1:sel");
-    quiet.selected = Some("(selected)");
-    let payload = publish_payload("U1", &view(vec![running, quiet], Some("…and 2 more")));
-    assert_eq!(payload["user_id"], "U1");
-    assert_eq!(payload["view"]["type"], "home");
-    let blocks = payload["view"]["blocks"].as_array().unwrap();
-    assert_eq!(blocks[0]["type"], "header");
-    assert_eq!(blocks[0]["text"]["text"], "Agents");
-    assert_eq!(blocks[1]["type"], "divider", "no tap, no result line");
-    // Read as the pane's thread root reads: bold name, subject, status.
+    quiet.status = "Idle";
+    let blocks = page_blocks(&view(
+        vec![
+            group("Running", vec![running]),
+            group("Other panes", vec![quiet]),
+        ],
+        None,
+    ));
+    let cards = cards(&blocks);
     assert_eq!(
-        blocks[2]["elements"][0]["elements"],
-        json!([
-            {"type": "text", "text": "app/main (Claude)", "style": {"bold": true}},
-            {"type": "text", "text": "\nFix the login bug"},
-            {"type": "text", "text": "\n"},
-            {"type": "emoji", "name": "hourglass_flowing_sand"},
-            {"type": "text", "text": " Working"},
-        ])
+        *cards[0],
+        json!({
+            "type": "card",
+            "title": {"type": "plain_text", "text": "app/main (Claude)", "emoji": false},
+            "subtitle": {"type": "mrkdwn",
+                "text": ":hourglass_flowing_sand: Working since 09:30 · Selected"},
+            "body": {"type": "plain_text", "text": "Fix the login bug", "emoji": false},
+            "actions": [
+                {"type": "button", "action_id": "home-thread-0",
+                    "text": {"type": "plain_text", "text": "Open thread", "emoji": false},
+                    "url": "https://x.slack.com/archives/D1/p1"},
+                {"type": "button", "action_id": "home-select-0",
+                    "text": {"type": "plain_text", "text": "Select", "emoji": false},
+                    "value": "hom:1:0:sel"},
+                {"type": "button", "action_id": "home-stop-0",
+                    "text": {"type": "plain_text", "text": "Stop", "emoji": false},
+                    "value": "hom:1:0:stop"},
+            ],
+        })
     );
-    let buttons = blocks[3]["elements"].as_array().unwrap();
-    assert_eq!(buttons[0]["url"], "https://x.slack.com/archives/D1/p1");
-    assert_eq!(buttons[0]["text"]["text"], "Open thread");
-    assert!(buttons[0].get("value").is_none(), "a link carries no token");
-    assert_eq!(buttons[1]["value"], "hom:1:0:sel");
-    assert_eq!(buttons[1]["text"]["text"], "Select");
-    assert_eq!(buttons[2]["value"], "hom:1:0:stop");
-    assert_eq!(buttons[2]["text"]["text"], "Stop");
-    // No subject: two lines, the selected pane marked on its status line.
+    assert_eq!(cards[1]["subtitle"]["text"], "Idle", "no status, no emoji");
+    assert!(cards[1].get("body").is_none(), "no activity title");
     assert_eq!(
-        blocks[4]["elements"][0]["elements"],
-        json!([
-            {"type": "text", "text": "app/fix_bug (Codex)", "style": {"bold": true}},
-            {"type": "text", "text": "\n"},
-            {"type": "text", "text": "Working"},
-            {"type": "text", "text": " (selected)", "style": {"italic": true}},
-        ]),
-        "no emoji without a status"
+        cards[1]["actions"],
+        json!([{"type": "button", "action_id": "home-select-1",
+            "text": {"type": "plain_text", "text": "Select", "emoji": false},
+            "value": "hom:1:1:sel"}]),
+        "no link known, nothing to stop"
     );
-    let buttons = blocks[5]["elements"].as_array().unwrap();
-    assert_eq!(buttons.len(), 1, "no thread link, nothing to stop");
-    assert_eq!(buttons[0]["value"], "hom:1:1:sel");
-    assert_eq!(
-        blocks[6]["elements"][0]["elements"][0]["text"],
-        "…and 2 more"
-    );
-    assert_eq!(blocks.len(), 7);
-    let action_ids: std::collections::HashSet<_> = blocks
+}
+
+/// Slack holds ten cards to a carousel: 23 panes in one group take three.
+#[test]
+fn a_group_is_split_into_carousels_of_ten() {
+    let rows = (0..23).map(|_| row("pane", None, None)).collect();
+    let blocks = page_blocks(&view(vec![group("Other panes", rows)], None));
+    let sizes: Vec<usize> = blocks
         .iter()
-        .filter_map(|block| block["elements"].as_array())
-        .flatten()
-        .filter_map(|element| element["action_id"].as_str())
+        .filter(|block| block["type"] == "carousel")
+        .map(|block| block["elements"].as_array().unwrap().len())
         .collect();
-    assert_eq!(action_ids.len(), 4, "every button has its own action id");
+    assert_eq!(sizes, [10, 10, 3]);
+    let ids: Vec<&str> = cards(&blocks)
+        .iter()
+        .map(|card| card["actions"][0]["action_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids[0], "home-select-0");
+    assert_eq!(ids[22], "home-select-22", "numbered on across carousels");
 }
 
-#[test]
-fn a_tap_result_sits_between_the_header_and_the_rows() {
-    let mut page = view(Vec::new(), None);
-    page.outcome = Some("09:30 · Stopped");
-    let blocks = page_blocks(&page);
-    assert_eq!(blocks[0]["type"], "header");
-    assert_eq!(
-        blocks[1]["elements"][0]["elements"][0]["text"],
-        "09:30 · Stopped"
-    );
-    assert_eq!(blocks[2]["type"], "divider");
-}
-
-#[test]
-fn an_empty_page_says_so() {
-    let payload = publish_payload("U1", &view(Vec::new(), None));
-    let blocks = payload["view"]["blocks"].as_array().unwrap();
-    assert_eq!(blocks.len(), 3);
-    assert_eq!(
-        blocks[2]["elements"][0]["elements"][0]["text"],
-        "No agent chats are open."
-    );
-}
-
-/// A full page, every row with all three buttons, a result line, and
-/// the rows left out counted, stays within Slack's 100 blocks.
+/// A full page, split between both groups, every row with all three
+/// buttons, a result line, and the rows left out counted, stays within
+/// Slack's 100 blocks; every button keeps its own action id.
 #[test]
 fn a_full_page_fits_in_one_view() {
-    let rows = (0..ROW_CAPACITY)
-        .map(|_| {
-            let mut row = row("pane", Some("bell"), Some("https://x"));
-            row.stop = Some(("Stop", "hom:1:0:stop"));
-            row.selected = Some("(selected)");
-            row.subject = Some("subject");
-            row
-        })
-        .collect();
-    let mut page = view(rows, Some("more"));
+    let full = || {
+        let mut row = row("pane", Some("bell"), Some("https://x"));
+        row.stop = Some(("Stop", "hom:1:0:stop"));
+        row.subject = Some("subject");
+        row
+    };
+    let split = ROW_CAPACITY / 2 + 1;
+    let running = (0..split).map(|_| full()).collect();
+    let others = (split..ROW_CAPACITY).map(|_| full()).collect();
+    let mut page = view(
+        vec![group("Running", running), group("Other panes", others)],
+        Some("more"),
+    );
     page.outcome = Some("09:30 · Stopped");
-    let count = publish_payload("U1", &page)["view"]["blocks"]
-        .as_array()
-        .unwrap()
-        .len();
-    assert!(count <= 100, "{count} blocks");
+    let blocks = page_blocks(&page);
+    assert!(blocks.len() <= 100, "{} blocks", blocks.len());
+    let cards = cards(&blocks);
+    assert_eq!(cards.len(), ROW_CAPACITY);
+    assert!(
+        cards
+            .iter()
+            .all(|card| card["actions"].as_array().unwrap().len() <= 3)
+    );
+    let action_ids: std::collections::HashSet<_> = cards
+        .iter()
+        .flat_map(|card| card["actions"].as_array().unwrap())
+        .filter_map(|button| button["action_id"].as_str())
+        .collect();
+    assert_eq!(action_ids.len(), ROW_CAPACITY * 3);
 }
 
+/// Only a status shows an emoji: a shortcode in a pane's name, its subject
+/// or daruda's own texts stays text, and no mrkdwn text but a card's status
+/// and the status key carries one.
+#[test]
+fn only_statuses_show_emoji() {
+    let mut odd = row(":fire: app", Some("bell"), None);
+    odd.subject = Some(":tada: done");
+    let blocks = page_blocks(&view(vec![group("Running", vec![odd])], None));
+    let mut shown = Vec::new();
+    walk(&Value::from(blocks.clone()), &mut |text: &Value| {
+        if text["type"] == "plain_text" {
+            assert_eq!(text["emoji"], false, "{text}");
+        } else if text["type"] == "mrkdwn" {
+            let body = text["text"].as_str().unwrap();
+            if has_shortcode(body) {
+                shown.push(body.to_owned());
+            }
+        }
+    });
+    assert_eq!(
+        shown,
+        [
+            ":bell: Working",
+            ":hourglass_flowing_sand: Working",
+            ":bell: Needs you"
+        ]
+    );
+}
+
+/// Whether `text` holds a `:name:` emoji shortcode.
+fn has_shortcode(text: &str) -> bool {
+    text.split(':')
+        .skip(1)
+        .collect::<Vec<_>>()
+        .split_last()
+        .is_some_and(|(_, inner)| {
+            inner.iter().any(|name| {
+                !name.is_empty()
+                    && name.chars().all(|ch| {
+                        ch.is_ascii_lowercase() || ch.is_ascii_digit() || "_+-".contains(ch)
+                    })
+            })
+        })
+}
+
+/// Calls `visit` on every text object in `value`.
+fn walk(value: &Value, visit: &mut impl FnMut(&Value)) {
+    match value {
+        Value::Object(map) => {
+            if map.contains_key("text")
+                && map
+                    .get("type")
+                    .is_some_and(|kind| kind == "plain_text" || kind == "mrkdwn")
+            {
+                visit(value);
+            }
+            map.values().for_each(|child| walk(child, visit));
+        }
+        Value::Array(items) => items.iter().for_each(|child| walk(child, visit)),
+        _ => {}
+    }
+}
+
+/// Texts are cut whole characters at a time to Slack's caps, and mrkdwn's
+/// reserved characters are escaped within them.
 #[test]
 fn long_texts_are_capped() {
-    let name = "n".repeat(TEXT_LIMIT + 10);
-    let mut long = row(&name, None, Some("https://x"));
+    let name = "n".repeat(CARD_TITLE_LIMIT + 10);
+    let subject = "s".repeat(CARD_BODY_LIMIT + 10);
+    let status = "<".repeat(CARD_TITLE_LIMIT);
     let label = "l".repeat(100);
+    let mut long = row(&name, Some("bell"), Some("https://x"));
+    long.subject = Some(&subject);
+    long.status = &status;
     long.thread = Some((&label, "https://x"));
     let header = "h".repeat(200);
-    let mut page = view(vec![long], None);
+    let mut page = view(vec![group("Running", vec![long])], None);
     page.header = &header;
     let blocks = page_blocks(&page);
-    let length = |value: &Value| value.as_str().unwrap().chars().count();
+    let length = |value: &Value| value.as_str().unwrap().encode_utf16().count();
     assert_eq!(length(&blocks[0]["text"]["text"]), HEADER_LIMIT);
-    assert_eq!(
-        length(&blocks[2]["elements"][0]["elements"][0]["text"]),
-        TEXT_LIMIT
+    let card = cards(&blocks)[0];
+    assert_eq!(length(&card["title"]["text"]), CARD_TITLE_LIMIT);
+    assert_eq!(length(&card["body"]["text"]), CARD_BODY_LIMIT);
+    let subtitle = card["subtitle"]["text"].as_str().unwrap();
+    assert!(
+        subtitle.encode_utf16().count() <= CARD_TITLE_LIMIT,
+        "{subtitle}"
+    );
+    assert!(
+        subtitle
+            .trim_start_matches(":bell: ")
+            .split_inclusive(';')
+            .all(|piece| piece == "&lt;"),
+        "escaped whole: {subtitle}"
     );
     assert_eq!(
-        length(&blocks[3]["elements"][0]["text"]["text"]),
+        length(&card["actions"][0]["text"]["text"]),
         BUTTON_LABEL_LIMIT
     );
 }

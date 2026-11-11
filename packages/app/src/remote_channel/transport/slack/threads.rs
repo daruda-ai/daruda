@@ -35,7 +35,6 @@ impl RootView<'_> {
             status: self.status.map(|(emoji, label)| StatusLine {
                 emoji: Some(emoji),
                 label,
-                mark: None,
             }),
         }
         .elements();

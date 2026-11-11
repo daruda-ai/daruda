@@ -1,6 +1,5 @@
-//! A pane as Slack shows it wherever it names one: its thread root and its
-//! app home row read alike — the name in bold, what it is working on below,
-//! then its status. One builder for both, so the two cannot drift.
+//! A pane as its thread root shows it: the name in bold, what it is working
+//! on below, then its status.
 
 use super::SECTION_LIMIT;
 use crate::remote_channel::transport::chunks;
@@ -18,8 +17,6 @@ pub(super) struct StatusLine<'a> {
     /// Slack emoji name, when the state has one.
     pub emoji: Option<&'a str>,
     pub label: &'a str,
-    /// Set apart after the label in italics: the pane commands address.
-    pub mark: Option<&'a str>,
 }
 
 impl PaneLines<'_> {
@@ -39,9 +36,6 @@ impl PaneLines<'_> {
                     elements.push(text(&format!(" {}", status.label)));
                 }
                 None => elements.push(text(status.label)),
-            }
-            if let Some(mark) = status.mark {
-                elements.push(json!({"type": "text", "text": capped(&format!(" {mark}")), "style": {"italic": true}}));
             }
         }
         elements
@@ -67,17 +61,16 @@ mod tests {
     /// pane without a subject or a status reads on fewer lines.
     #[test]
     fn a_pane_reads_name_subject_then_status() {
-        let status = |emoji, mark| StatusLine {
+        let status = |emoji| StatusLine {
             emoji,
             label: "Working",
-            mark,
         };
         let cases = [
             (
                 PaneLines {
                     title: "app · Claude",
                     subject: Some("Fix the bug"),
-                    status: Some(status(Some("hourglass"), Some("(selected)"))),
+                    status: Some(status(Some("hourglass"))),
                 },
                 json!([
                     {"type": "text", "text": "app · Claude", "style": {"bold": true}},
@@ -85,7 +78,6 @@ mod tests {
                     {"type": "text", "text": "\n"},
                     {"type": "emoji", "name": "hourglass"},
                     {"type": "text", "text": " Working"},
-                    {"type": "text", "text": " (selected)", "style": {"italic": true}},
                 ]),
                 "every line",
             ),
@@ -93,7 +85,7 @@ mod tests {
                 PaneLines {
                     title: "app · Claude",
                     subject: None,
-                    status: Some(status(None, None)),
+                    status: Some(status(None)),
                 },
                 json!([
                     {"type": "text", "text": "app · Claude", "style": {"bold": true}},

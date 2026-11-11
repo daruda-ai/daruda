@@ -69,6 +69,26 @@ impl ShownStatus {
         }
     }
 
+    /// Every kind of status once, as a key to its emoji: the emoji and words
+    /// [`Self::view`] shows, but working without the time it began.
+    pub(crate) fn legend() -> Vec<(&'static str, String)> {
+        [
+            Self::Working { since: 0 },
+            Self::NeedsYou { since: 0 },
+            Self::Ended(Ending::Completed),
+            Self::Ended(Ending::Failed),
+            Self::Ended(Ending::Stopped),
+            Self::Ended(Ending::OverageStopped),
+            Self::Closed,
+        ]
+        .into_iter()
+        .map(|status| match (status, status.view()) {
+            (Self::Working { .. }, (emoji, _)) => (emoji, s::remote_channel::home_legend_working()),
+            (_, view) => view,
+        })
+        .collect()
+    }
+
     /// The Slack emoji name and the words the root shows. Emoji names, not
     /// characters: a character such as U+23F9 renders as a plain glyph
     /// without a variation selector, while a name renders as Slack's art.

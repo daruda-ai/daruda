@@ -2,10 +2,10 @@
 //! panes. Other transports have none; callers ask
 //! [`crate::remote_channel::transport::app_home`] before using this.
 
-use super::pane_lines::{PaneLines, StatusLine};
 use super::{API, Credentials, UpdateVerdict, verdict};
 use crate::remote_channel::transport::{
-    AppHome, HomeEvent, HomeEventKind, LinkFailure, PageVerdict, PageView, chunks, http,
+    AppHome, HomeEvent, HomeEventKind, LinkFailure, PageHelp, PageRow, PageVerdict, PageView,
+    chunks, http,
 };
 use serde_json::{Value, json};
 
@@ -17,13 +17,22 @@ pub(crate) const APP_HOME: AppHome = AppHome {
     off_hint: "Turn on the Home tab in the Slack app's App Home settings",
 };
 
-/// The rows one page holds. Slack takes at most 100 blocks in a view: three
-/// above the rows (header, the line a tap's result takes, divider), two per
-/// row (its text, and one actions block for all its buttons), and one for
-/// the rows left out.
-const ROW_CAPACITY: usize = 48;
+/// The rows one page holds, of Slack's 100 blocks a view: 10 fixed (header,
+/// summary, result, 2 dividers, 2 group headings, rows left out, help, key),
+/// and N rows over two groups take at most ceil(N / 10) + 1 carousels: 11 at
+/// 100 rows, 21 blocks in all. Blocks alone would allow 890; 100 keeps the
+/// payload and the page a person scrolls through modest.
+const ROW_CAPACITY: usize = 100;
+/// Slack's cap on the cards of one carousel.
+const CAROUSEL_CARDS: usize = 10;
+/// Slack's cap on the elements of one context block.
+const CONTEXT_ELEMENTS: usize = 10;
 /// Slack's cap on a header's text.
 const HEADER_LIMIT: usize = 150;
+/// Slack's cap on a card's title and on its subtitle.
+const CARD_TITLE_LIMIT: usize = 150;
+/// Slack's cap on a card's body.
+const CARD_BODY_LIMIT: usize = 200;
 /// The cap this adapter keeps every other text to, as its messages do.
 const TEXT_LIMIT: usize = super::SECTION_LIMIT;
 /// The code `views.publish` answers with while the app's Home tab is off.
@@ -102,69 +111,135 @@ fn parse_home_tap(envelope: &Value) -> Option<HomeEvent> {
     })
 }
 
-/// The view's blocks: a header, the last tap's result, then each pane's
-/// text over its buttons.
+/// The view's blocks: a header over the counts and the last tap's result,
+/// each group's panes as carousels of cards, then the usage help. Only a
+/// pane's status shows an emoji: every text of daruda's or the person's is
+/// written with shortcodes left as typed.
 fn page_blocks(view: &PageView<'_>) -> Vec<Value> {
-    let mut blocks = vec![
-        json!({"type": "header", "text": {"type": "plain_text", "text": capped(view.header, HEADER_LIMIT)}}),
-    ];
-    if let Some(outcome) = view.outcome {
-        blocks.push(text_block(vec![plain(outcome)]));
+    let mut blocks = vec![json!({"type": "header", "text": plain(view.header, HEADER_LIMIT)})];
+    for line in [view.summary, view.outcome].into_iter().flatten() {
+        blocks.push(json!({"type": "context", "elements": [plain(line, TEXT_LIMIT)]}));
     }
     blocks.push(json!({"type": "divider"}));
-    if view.rows.is_empty() {
-        blocks.push(text_block(vec![plain(view.empty)]));
+    if view.groups.is_empty() {
+        blocks.push(json!({"type": "section", "text": plain(view.empty, TEXT_LIMIT)}));
     }
-    for (index, row) in view.rows.iter().enumerate() {
-        // Read as the pane's thread root reads, so the two name it alike.
-        let lines = PaneLines {
-            title: row.name,
-            subject: row.subject,
-            status: Some(StatusLine {
-                emoji: row.emoji,
-                label: row.status,
-                mark: row.selected,
-            }),
-        };
-        blocks.push(text_block(lines.elements()));
-        let mut buttons = Vec::new();
-        if let Some((label, url)) = row.thread {
-            buttons.push(json!({
-                "type": "button", "action_id": format!("home-thread-{index}"),
-                "text": {"type": "plain_text", "text": capped(label, super::BUTTON_LABEL_LIMIT)},
-                "url": url,
-            }));
+    // Action ids are unique across the view: numbered on through the groups.
+    let mut index = 0;
+    for group in &view.groups {
+        blocks.push(json!({"type": "section",
+            "text": mrkdwn(&format!("*{}*", escaped(group.title, TEXT_LIMIT - 2)))}));
+        for cards in group.rows.chunks(CAROUSEL_CARDS) {
+            let elements: Vec<Value> = cards
+                .iter()
+                .map(|row| {
+                    index += 1;
+                    card(row, index - 1)
+                })
+                .collect();
+            blocks.push(json!({"type": "carousel", "elements": elements}));
         }
-        buttons.push(value_button(format!("home-select-{index}"), row.select));
-        if let Some(stop) = row.stop {
-            buttons.push(value_button(format!("home-stop-{index}"), stop));
-        }
-        blocks.push(json!({"type": "actions", "elements": buttons}));
     }
     if let Some(more) = view.more {
-        blocks.push(text_block(vec![plain(more)]));
+        blocks.push(json!({"type": "context", "elements": [plain(more, TEXT_LIMIT)]}));
     }
+    blocks.push(json!({"type": "divider"}));
+    blocks.extend(help_blocks(&view.help));
     blocks
+}
+
+/// One pane: its name, its status (the one emoji on the page), what it is
+/// working on, and up to Slack's three buttons a card holds.
+fn card(row: &PageRow<'_>, index: usize) -> Value {
+    let emoji = row
+        .emoji
+        .map(|name| format!(":{name}: "))
+        .unwrap_or_default();
+    let status = escaped(
+        row.status,
+        CARD_TITLE_LIMIT.saturating_sub(emoji.encode_utf16().count()),
+    );
+    let mut buttons = Vec::new();
+    if let Some((label, url)) = row.thread {
+        buttons.push(json!({
+            "type": "button", "action_id": format!("home-thread-{index}"),
+            "text": plain(label, super::BUTTON_LABEL_LIMIT),
+            "url": url,
+        }));
+    }
+    buttons.push(value_button(format!("home-select-{index}"), row.select));
+    if let Some(stop) = row.stop {
+        buttons.push(value_button(format!("home-stop-{index}"), stop));
+    }
+    let mut card = json!({
+        "type": "card",
+        "title": plain(row.name, CARD_TITLE_LIMIT),
+        "subtitle": mrkdwn(&format!("{emoji}{status}")),
+        "actions": buttons,
+    });
+    if let Some(subject) = row.subject {
+        card["body"] = plain(subject, CARD_BODY_LIMIT);
+    }
+    card
+}
+
+/// The usage help as one section of lines, then the key to the status
+/// emoji in a context block, one element per status.
+fn help_blocks(help: &PageHelp<'_>) -> [Value; 2] {
+    let mut text = format!("*{}*", escaped(help.title, TEXT_LIMIT));
+    for line in &help.lines {
+        text.push_str("\n• ");
+        text.push_str(&escaped(line, TEXT_LIMIT));
+    }
+    let legend: Vec<Value> = help
+        .legend
+        .iter()
+        .take(CONTEXT_ELEMENTS)
+        .map(|(emoji, label)| mrkdwn(&format!(":{emoji}: {}", escaped(label, TEXT_LIMIT))))
+        .collect();
+    [
+        json!({"type": "section", "text": mrkdwn(&capped(&text, TEXT_LIMIT))}),
+        json!({"type": "context", "elements": legend}),
+    ]
 }
 
 /// A button whose tap comes back to daruda carrying `value`.
 fn value_button(action_id: String, (label, value): (&str, &str)) -> Value {
     json!({
         "type": "button", "action_id": action_id,
-        "text": {"type": "plain_text", "text": capped(label, super::BUTTON_LABEL_LIMIT)},
+        "text": plain(label, super::BUTTON_LABEL_LIMIT),
         "value": value,
     })
 }
 
-/// A rich_text block, so a pane's name is shown literally: a `_` or `*` in
-/// it stays itself.
-fn text_block(elements: Vec<Value>) -> Value {
-    json!({"type": "rich_text", "elements": [
-        {"type": "rich_text_section", "elements": elements}]})
+/// Text shown as written: a `:name:` in a pane's name stays text.
+fn plain(text: &str, limit: usize) -> Value {
+    json!({"type": "plain_text", "text": capped(text, limit), "emoji": false})
 }
 
-fn plain(text: &str) -> Value {
-    json!({"type": "text", "text": capped(text, TEXT_LIMIT)})
+fn mrkdwn(text: &str) -> Value {
+    json!({"type": "mrkdwn", "text": text})
+}
+
+/// `text` with the three characters mrkdwn reserves escaped, cut whole
+/// characters at a time so the escaped text stays within `limit`.
+fn escaped(text: &str, limit: usize) -> String {
+    let mut result = String::new();
+    let mut size = 0;
+    for ch in text.chars() {
+        let piece = match ch {
+            '&' => "&amp;".to_owned(),
+            '<' => "&lt;".to_owned(),
+            '>' => "&gt;".to_owned(),
+            _ => ch.to_string(),
+        };
+        size += piece.encode_utf16().count();
+        if size > limit {
+            break;
+        }
+        result.push_str(&piece);
+    }
+    result
 }
 
 fn capped(text: &str, limit: usize) -> String {
