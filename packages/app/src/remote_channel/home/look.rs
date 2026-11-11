@@ -4,7 +4,7 @@
 use super::board::Board;
 use super::token::Act;
 use crate::remote_channel::threads::status::ShownStatus;
-use crate::remote_channel::transport::slack::home::{HomeView, RowView};
+use crate::remote_channel::transport::{PageRow, PageView};
 use crate::surface::strings as s;
 
 pub(super) struct HomeLook {
@@ -72,15 +72,15 @@ impl HomeLook {
         }
     }
 
-    pub(super) fn view(&self) -> HomeView<'_> {
-        HomeView {
+    pub(super) fn view(&self) -> PageView<'_> {
+        PageView {
             header: &self.header,
             outcome: self.outcome.as_deref(),
             empty: &self.empty,
             rows: self
                 .rows
                 .iter()
-                .map(|row| RowView {
+                .map(|row| PageRow {
                     name: &row.name,
                     selected: row.selected.then_some(self.selected.as_str()),
                     emoji: row.emoji,

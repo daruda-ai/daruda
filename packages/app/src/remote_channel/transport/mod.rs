@@ -122,10 +122,68 @@ pub(crate) fn pane_threads(kind: ChannelKind) -> bool {
     matches!(kind, ChannelKind::Slack)
 }
 
-/// Whether `kind` has a page of the app's own on which daruda can show its
-/// panes. Asked before using a transport's home API.
-pub(crate) fn app_home(kind: ChannelKind) -> bool {
-    matches!(kind, ChannelKind::Slack)
+/// The page of the app's own on which daruda shows its panes, on channels
+/// that have one: how many rows it holds and how to write to it.
+#[derive(Clone, Copy)]
+pub(crate) struct AppHome {
+    /// The rows one page holds.
+    pub capacity: usize,
+    /// Show the view as person `user_id`'s page, replacing what it showed.
+    pub publish: fn(&Credentials, &str, &PageView<'_>) -> PageVerdict,
+    /// The link that opens message `message_id` of `conversation_id`: a
+    /// thread's root opens its thread.
+    pub link: fn(&Credentials, &str, &str) -> Result<String>,
+    /// What turns the page back on once the channel says it is off.
+    pub off_hint: &'static str,
+}
+
+/// What a page shows, in the order it shows it.
+pub(crate) struct PageView<'a> {
+    pub header: &'a str,
+    /// What the person's last tap came to, under the header.
+    pub outcome: Option<&'a str>,
+    /// Said in place of the rows when there are none.
+    pub empty: &'a str,
+    pub rows: Vec<PageRow<'a>>,
+    /// The line that counts the rows left out, when some were.
+    pub more: Option<&'a str>,
+}
+
+/// One pane on the page: its name, its status below, its buttons under both.
+pub(crate) struct PageRow<'a> {
+    pub name: &'a str,
+    /// The mark beside the name of the pane commands address.
+    pub selected: Option<&'a str>,
+    /// The status's emoji, by short name, when one is known.
+    pub emoji: Option<&'a str>,
+    pub status: &'a str,
+    /// The button's label and the link to the pane's thread.
+    pub thread: Option<(&'a str, &'a str)>,
+    /// The select button's label and value.
+    pub select: (&'a str, &'a str),
+    /// The stop button's label and value, when the pane can be stopped.
+    pub stop: Option<(&'a str, &'a str)>,
+}
+
+/// How publishing a page went.
+#[derive(Debug)]
+pub(crate) enum PageVerdict {
+    Published,
+    /// The channel has the page turned off: none takes a view until it is on.
+    Off,
+    /// Rate limits, timeouts, server trouble: may pass.
+    Transient(String),
+    /// The channel refused this view: credentials, scopes, or the payload.
+    Refused(String),
+}
+
+/// The page of the app's own `kind` has, if any. The one question asked
+/// before showing panes there.
+pub(crate) fn app_home(kind: ChannelKind) -> Option<AppHome> {
+    match kind {
+        ChannelKind::Slack => Some(slack::home::APP_HOME),
+        ChannelKind::Discord => None,
+    }
 }
 
 pub fn edit(

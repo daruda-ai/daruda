@@ -1,6 +1,6 @@
 use super::super::publish_queue::{Publication, PublishQueue, Settled, Viewer};
 use super::*;
-use crate::remote_channel::transport::slack::home::PublishVerdict;
+use crate::remote_channel::transport::PageVerdict;
 
 fn sent(queue: &mut PublishQueue) -> Vec<Vec<String>> {
     queue
@@ -37,12 +37,12 @@ fn an_opened_page_gets_the_latest_board_once() {
     queue.want(&work, board(&["c"]));
     assert!(queue.ready(false).is_empty(), "one publish at a time");
     assert_eq!(
-        queue.finish(&first[0], &PublishVerdict::Published),
+        queue.finish(&first[0], &PageVerdict::Published),
         Settled::Published
     );
     let second = queue.ready(false);
     assert_eq!(second[0].board, board(&["c"]), "what changed meanwhile");
-    queue.finish(&second[0], &PublishVerdict::Published);
+    queue.finish(&second[0], &PageVerdict::Published);
     queue.want(&work, board(&["c"]));
     assert!(
         queue.ready(false).is_empty(),
@@ -65,20 +65,20 @@ fn a_board_wanted_during_a_publish_is_compared_after_it_lands() {
         queue.opened(&work);
         queue.want(&work, board(&["p"]));
         let first = queue.ready(false);
-        queue.finish(&first[0], &PublishVerdict::Published);
+        queue.finish(&first[0], &PageVerdict::Published);
         queue.want(&work, board(&["a"]));
         let in_flight = queue.ready(false);
         assert_eq!(in_flight[0].board, board(&["a"]), "{label}");
         queue.want(&work, board(&[later]));
         assert!(queue.ready(false).is_empty(), "{label}: one at a time");
-        queue.finish(&in_flight[0], &PublishVerdict::Published);
+        queue.finish(&in_flight[0], &PageVerdict::Published);
         let want: &[[&str; 1]] = if resent { &[[later]] } else { &[] };
         assert_eq!(sent(&mut queue), want, "{label}");
     }
 }
 
-/// Slack may not keep the old view across the tab going off and on, so the
-/// board published before is sent again once the page is opened.
+/// The channel may not keep the old view across the page going off and on,
+/// so the board published before is sent again once the page is opened.
 #[test]
 fn a_page_turned_off_and_reopened_gets_its_board_again() {
     let work = scope("work", "bot");
@@ -86,10 +86,10 @@ fn a_page_turned_off_and_reopened_gets_its_board_again() {
     queue.opened(&work);
     queue.want(&work, board(&["a"]));
     let first = queue.ready(false);
-    queue.finish(&first[0], &PublishVerdict::Published);
+    queue.finish(&first[0], &PageVerdict::Published);
     queue.want(&work, board(&["b"]));
     let second = queue.ready(false);
-    queue.finish(&second[0], &PublishVerdict::Disabled);
+    queue.finish(&second[0], &PageVerdict::Off);
     queue.opened(&work);
     queue.want(&work, board(&["a"]));
     assert_eq!(sent(&mut queue), [["a"]]);
@@ -99,21 +99,21 @@ fn a_page_turned_off_and_reopened_gets_its_board_again() {
 fn each_verdict_leaves_the_page_as_it_says() {
     let cases = [
         (
-            PublishVerdict::Disabled,
+            PageVerdict::Off,
             Settled::Unavailable { first: true },
             Viewer::Unavailable,
             false,
             "a page turned off stops until opened again",
         ),
         (
-            PublishVerdict::Transient("ratelimited".into()),
+            PageVerdict::Transient("ratelimited".into()),
             Settled::Retry,
             Viewer::Viewing,
             true,
             "passing trouble waits for the next opening",
         ),
         (
-            PublishVerdict::Refused("invalid_blocks".into()),
+            PageVerdict::Refused("invalid_blocks".into()),
             Settled::Dropped,
             Viewer::Viewing,
             false,
@@ -150,7 +150,7 @@ fn a_turned_off_page_is_reported_once_per_connection() {
         queue.want(&work, board(&["a"]));
         let ready = queue.ready(false);
         assert_eq!(
-            queue.finish(&ready[0], &PublishVerdict::Disabled),
+            queue.finish(&ready[0], &PageVerdict::Off),
             Settled::Unavailable { first }
         );
     }
@@ -171,7 +171,7 @@ fn another_identity_starts_a_new_page() {
     queue.opened(&new);
     assert_eq!(queue.viewer(&old), None, "the old page is forgotten");
     assert_eq!(
-        queue.finish(&in_flight[0], &PublishVerdict::Published),
+        queue.finish(&in_flight[0], &PageVerdict::Published),
         Settled::Stale
     );
     queue.want(&new, board(&["b"]));
@@ -201,7 +201,7 @@ fn only_a_viewed_page_takes_a_new_board() {
         queue.opened(&scope("work", "bot"));
         queue.want(&scope("work", "bot"), board(&["a"]));
         let ready = queue.ready(false);
-        queue.finish(&ready[0], &PublishVerdict::Disabled);
+        queue.finish(&ready[0], &PageVerdict::Off);
     };
     type Arrange = fn(&mut PublishQueue);
     let cases: [(&str, Arrange, bool); 3] = [
@@ -224,10 +224,7 @@ fn only_a_viewed_page_takes_a_new_board() {
 #[test]
 fn a_waiting_board_is_resent_on_the_retry_tick() {
     let transient = |queue: &mut PublishQueue, publication: &Publication| {
-        queue.finish(
-            publication,
-            &PublishVerdict::Transient("ratelimited".into()),
-        );
+        queue.finish(publication, &PageVerdict::Transient("ratelimited".into()));
     };
     let held = |queue: &mut PublishQueue, publication: &Publication| queue.hold(publication);
     type Wait = fn(&mut PublishQueue, &Publication);
@@ -299,7 +296,7 @@ fn a_tap_resolves_against_the_shown_or_coming_board() {
     );
     let coming = numbered(&["b"], &mut numbering);
     queue.want(&work, coming.clone());
-    queue.finish(&publication, &PublishVerdict::Published);
+    queue.finish(&publication, &PageVerdict::Published);
     let second = queue.ready(false).remove(0);
     let next = numbered(&["c"], &mut numbering);
     queue.want(&work, next.clone());
@@ -308,7 +305,7 @@ fn a_tap_resolves_against_the_shown_or_coming_board() {
         Some(coming.rows[0].pane),
         "in flight after the wanted board moved on"
     );
-    queue.finish(&second, &PublishVerdict::Published);
+    queue.finish(&second, &PageVerdict::Published);
     for (board, label) in [(&coming, "shown"), (&next, "coming")] {
         assert_eq!(
             queue.resolve(&work, tap(board)),

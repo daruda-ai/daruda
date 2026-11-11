@@ -236,7 +236,7 @@ pub fn start(
                     emit(WorkerPayload::Incoming(incoming))
                 };
                 // The page names a person but no conversation; only the paired
-                // person's opening reaches the foreground.
+                // person's openings and taps reach the foreground.
                 let publish_home = |event: HomeEvent| {
                     if !config.accepts_person(&event.user_id, &event.team_id) {
                         return true;

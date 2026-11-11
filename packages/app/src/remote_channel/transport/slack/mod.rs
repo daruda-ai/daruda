@@ -1,8 +1,8 @@
 //! Slack Web API and Socket Mode adapter.
 
 use super::{
-    Credentials, HomeEvent, HomeEventKind, Incoming, IncomingKind, Message, Result, SentPart,
-    TransportError, chunks, http, socket,
+    Credentials, HomeEvent, Incoming, IncomingKind, Message, Result, SentPart, TransportError,
+    chunks, http, socket,
 };
 use crate::remote_channel::cards::EditFailure;
 use daruda_config::remote::RemoteRecipient;
@@ -86,7 +86,7 @@ pub fn session(
         if let Some(id) = envelope["envelope_id"].as_str() {
             socket::send(&mut socket, &json!({"envelope_id": id}))?;
         }
-        if let Some(home) = parse_home(&envelope) {
+        if let Some(home) = home::parse_home(&envelope) {
             if !publish_home(home) {
                 break;
             }
@@ -99,73 +99,6 @@ pub fn session(
         }
     }
     Ok(())
-}
-
-/// The person opening the app's Home tab, or tapping a button on it. An
-/// opening is read from `payload.event` like a message; Slack's documents
-/// disagree on that wrapping, so a parsed event, and any other event type
-/// left unread, is traced to confirm it live.
-fn parse_home(envelope: &Value) -> Option<HomeEvent> {
-    use crate::remote_channel::trace;
-    if envelope["type"] == "interactive" {
-        return parse_home_tap(envelope);
-    }
-    if envelope["type"] != "events_api" {
-        return None;
-    }
-    let payload = &envelope["payload"];
-    let event = &payload["event"];
-    let kind = event["type"].as_str().unwrap_or_default();
-    if kind != "app_home_opened" {
-        if kind != "message" {
-            trace::delivery("slack.event.unread", || {
-                format!(
-                    "event.type={kind:?} payload.type={:?}",
-                    payload["type"].as_str().unwrap_or_default()
-                )
-            });
-        }
-        return None;
-    }
-    let tab = event["tab"].as_str().unwrap_or_default();
-    trace::delivery("slack.home.opened", || {
-        format!(
-            "tab={tab:?} event_id={}",
-            trace::opt(payload["event_id"].as_str())
-        )
-    });
-    // The Messages tab is the paired conversation's own screen, not the page.
-    if tab != "home" {
-        return None;
-    }
-    Some(HomeEvent {
-        event_id: payload["event_id"].as_str()?.to_owned(),
-        user_id: event["user"].as_str()?.to_owned(),
-        team_id: payload["team_id"].as_str()?.to_owned(),
-        kind: HomeEventKind::Opened,
-    })
-}
-
-/// A button tapped on the Home tab. Such a tap names no conversation or
-/// message, and `team` is null for an org-wide install, so the person's own
-/// `team_id` names the team. A link button carries no value: Slack opens the
-/// link itself, and the acknowledgment already sent is all it needs.
-fn parse_home_tap(envelope: &Value) -> Option<HomeEvent> {
-    let payload = &envelope["payload"];
-    if payload["type"] != "block_actions"
-        || payload["container"]["type"] != "view"
-        || payload["view"]["type"] != "home"
-    {
-        return None;
-    }
-    Some(HomeEvent {
-        event_id: envelope["envelope_id"].as_str()?.to_owned(),
-        user_id: payload["user"]["id"].as_str()?.to_owned(),
-        team_id: payload["user"]["team_id"].as_str()?.to_owned(),
-        kind: HomeEventKind::Tap {
-            data: payload["actions"][0]["value"].as_str()?.to_owned(),
-        },
-    })
 }
 
 fn parse(envelope: &Value) -> Option<Incoming> {
@@ -406,14 +339,14 @@ pub fn edit(
     ))
 }
 
-/// What a `chat.update` reply says of the edit. Shared by a card's
-/// settlement and a thread root's status, which differ only in what a
-/// refusal means to them.
+/// What Slack says of a write that replaces what it shows: `chat.update`
+/// for a card's settlement or a thread root's status, `views.publish` for
+/// the app home. They differ only in what a refusal means to them.
 enum UpdateVerdict {
     Updated,
     /// May pass: rate limits, server trouble, a reply that names no code.
     Transient(String),
-    /// Slack refused this edit; `code` when it named one.
+    /// Slack refused this write; `code` when it named one.
     Refused {
         code: Option<String>,
         reason: String,

@@ -1,6 +1,6 @@
 //! One retained command pump per connection; worker status never waits on I/O.
 
-use super::{ClaimResult, Command, RemoteChannels, Served, live_generation, serve_command};
+use super::{ClaimResult, QueuedCommand, RemoteChannels, Served, live_generation, serve_command};
 use crate::remote_channel::{
     runtime::{WorkerEvent, WorkerPayload},
     transport,
@@ -17,7 +17,7 @@ use std::{
 };
 
 enum Work {
-    Command(Command),
+    Command(QueuedCommand),
     Reopened(std::sync::Arc<super::BotSession>),
 }
 
@@ -74,7 +74,9 @@ pub(super) fn serve_events<F: Future<Output = ClaimResult> + 'static>(
                     });
                     Work::Reopened(bot)
                 }
-                WorkerPayload::Incoming(incoming) => Work::Command(Command::Incoming(incoming)),
+                WorkerPayload::Incoming(incoming) => {
+                    Work::Command(QueuedCommand::Incoming(incoming))
+                }
                 WorkerPayload::Home(home) => {
                     crate::remote_channel::trace::delivery("home.received", || {
                         format!("connection={} event_id={}", event.id, home.event_id)
@@ -96,7 +98,7 @@ pub(super) fn serve_events<F: Future<Output = ClaimResult> + 'static>(
                         // Acts on a pane, so it is claimed and kept in order
                         // with the connection's other commands.
                         transport::HomeEventKind::Tap { .. } => {
-                            Work::Command(Command::HomeTap(home))
+                            Work::Command(QueuedCommand::HomeTap(home))
                         }
                     }
                 }

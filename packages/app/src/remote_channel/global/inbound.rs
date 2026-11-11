@@ -171,7 +171,7 @@ pub(super) fn spawn(receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) {
 
 /// One command a connection serves in arrival order: from the paired
 /// conversation, or a tap on the app's own page.
-enum Command {
+enum QueuedCommand {
     Incoming(transport::Incoming),
     HomeTap(transport::HomeEvent),
 }
@@ -180,19 +180,19 @@ enum Command {
 enum Served {
     Done,
     /// Its claim must be retried on a reopened inbox.
-    Retry(Command),
+    Retry(QueuedCommand),
 }
 
 async fn serve_command<F: Future<Output = ClaimResult>>(
     id: &str,
     generation: uuid::Uuid,
-    command: Command,
+    command: QueuedCommand,
     claim: &impl Fn(&InboxStore, ChannelKey, InboxId) -> F,
     cx: &mut gpui::AsyncApp,
 ) -> Served {
     match command {
-        Command::Incoming(incoming) => serve(id, generation, incoming, claim, cx).await,
-        Command::HomeTap(tap) => serve_home_tap(id, generation, tap, claim, cx).await,
+        QueuedCommand::Incoming(incoming) => serve(id, generation, incoming, claim, cx).await,
+        QueuedCommand::HomeTap(tap) => serve_home_tap(id, generation, tap, claim, cx).await,
     }
 }
 
@@ -209,7 +209,7 @@ async fn serve_home_tap<F: Future<Output = ClaimResult>>(
     match claim_incoming(id, generation, &tap.event_id, claim, cx).await {
         Claimed::Ready(_) => {}
         Claimed::Skip => return Served::Done,
-        Claimed::Retry => return Served::Retry(Command::HomeTap(tap)),
+        Claimed::Retry => return Served::Retry(QueuedCommand::HomeTap(tap)),
     }
     if let transport::HomeEventKind::Tap { data } = &tap.kind {
         crate::remote_channel::home::driver::tapped(id, &tap.user_id, &tap.team_id, data, cx).await;
@@ -228,7 +228,7 @@ async fn serve<F: Future<Output = ClaimResult>>(
     let bot = match claim_incoming(id, generation, &incoming.event_id, claim, cx).await {
         Claimed::Ready(bot) => bot,
         Claimed::Skip => return Served::Done,
-        Claimed::Retry => return Served::Retry(Command::Incoming(incoming)),
+        Claimed::Retry => return Served::Retry(QueuedCommand::Incoming(incoming)),
     };
     let pairing = cx.update(|cx| {
         if !live_session(id, generation, &bot, cx) {

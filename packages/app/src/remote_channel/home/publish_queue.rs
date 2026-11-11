@@ -7,7 +7,7 @@ use super::board::{Board, Outcome};
 use super::token::Tap;
 use crate::remote_channel::bridge::PaneRef;
 use crate::remote_channel::threads::Scope;
-use crate::remote_channel::transport::slack::home::PublishVerdict;
+use crate::remote_channel::transport::PageVerdict;
 use std::collections::{HashMap, HashSet};
 
 /// Whether the person has a page daruda should keep up to date.
@@ -174,25 +174,21 @@ impl PublishQueue {
     }
 
     /// Record how `publication` went.
-    pub(super) fn finish(
-        &mut self,
-        publication: &Publication,
-        verdict: &PublishVerdict,
-    ) -> Settled {
+    pub(super) fn finish(&mut self, publication: &Publication, verdict: &PageVerdict) -> Settled {
         let Some(page) = current(&mut self.pages, &publication.scope) else {
             return Settled::Stale;
         };
         page.phase = None;
         match verdict {
-            PublishVerdict::Published => {
+            PageVerdict::Published => {
                 page.published = Some(publication.board.clone());
                 Settled::Published
             }
-            PublishVerdict::Disabled => {
+            PageVerdict::Off => {
                 page.viewer = Viewer::Unavailable;
                 page.wanted = None;
-                // Slack may not keep the old view across the tab going off
-                // and on, so the next opening publishes again.
+                // The channel may not keep the old view across the page
+                // going off and on, so the next opening publishes again.
                 page.published = None;
                 Settled::Unavailable {
                     first: self
@@ -200,11 +196,11 @@ impl PublishQueue {
                         .insert(publication.scope.connection.clone()),
                 }
             }
-            PublishVerdict::Transient(_) => {
+            PageVerdict::Transient(_) => {
                 page.phase = Some(Phase::Waiting);
                 Settled::Retry
             }
-            PublishVerdict::Refused(_) => {
+            PageVerdict::Refused(_) => {
                 if page.wanted.as_ref() == Some(&publication.board) {
                     page.wanted = None;
                 }
