@@ -107,6 +107,39 @@ fn a_root_is_edited_once_at_a_time_with_its_latest_face() {
     );
 }
 
+/// The defect this guards: a face equal to the shown one was dropped while
+/// another edit was in flight, so the root kept the in-flight face once it
+/// landed. What is wanted is compared with what the root shows after the edit.
+#[test]
+fn a_face_wanted_during_an_edit_is_compared_after_it_lands() {
+    let working = face("title", ShownStatus::Working { since: NOW });
+    let needs = face("title", ShownStatus::NeedsYou { since: NOW });
+    let cases = [
+        (
+            working.clone(),
+            Some(working.clone()),
+            "back to what was shown",
+        ),
+        (needs.clone(), None, "the face already in flight"),
+    ];
+    for (later, want, label) in cases {
+        let mut roots = Roots::default();
+        roots.shown(&work(), "1.1", working.clone());
+        roots.want(&work(), "t", "1.1".into(), needs.clone());
+        let sent = roots.ready(false);
+        assert_eq!(sent.len(), 1, "{label}");
+        roots.want(&work(), "t", "1.1".into(), later);
+        assert!(roots.ready(false).is_empty(), "{label}: one edit at a time");
+        assert_eq!(roots.finish(&sent[0], &Ok(())), Finished::Shown, "{label}");
+        let next = roots.ready(false);
+        assert_eq!(
+            next.first().map(|update| update.face.clone()),
+            want,
+            "{label}"
+        );
+    }
+}
+
 /// The defect this guards: only the status was compared, so a new title
 /// at an unchanged status never reached the root.
 #[test]

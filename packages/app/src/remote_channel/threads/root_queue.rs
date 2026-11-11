@@ -97,9 +97,12 @@ impl Roots {
         if retrying {
             self.phase.retain(|_, phase| *phase == Phase::InFlight);
         }
-        let shown = &self.shown;
-        self.desired
-            .retain(|key, update| shown.get(key) != Some(&update.face));
+        // A root with an edit in flight is compared once that edit settles:
+        // what it will show then is not known yet.
+        let (shown, phase) = (&self.shown, &self.phase);
+        self.desired.retain(|key, update| {
+            phase.get(key) == Some(&Phase::InFlight) || shown.get(key) != Some(&update.face)
+        });
         let ready: Vec<_> = self
             .desired
             .iter()
