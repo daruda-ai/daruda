@@ -9,6 +9,7 @@ use crate::remote_channel::threads::status::ShownStatus;
 mod board;
 mod driver;
 mod look;
+mod page_links;
 mod publish_queue;
 
 pub(super) fn row(name: &str, shown: Option<ShownStatus>) -> PaneRow {

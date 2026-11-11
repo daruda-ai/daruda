@@ -55,8 +55,10 @@ fn learn(
     cx: &mut App,
 ) -> bool {
     let queue = &mut cx.global_mut::<RemoteChannels>().home.queue;
-    match (queue.learn_link(scope, epoch, root, &link), link) {
-        (Learned::Stale, _) => return false,
+    let Some(learned) = queue.learn_link(scope, epoch, root, &link) else {
+        return false;
+    };
+    match (learned, link) {
         (Learned::Known, _) => super::changed(cx),
         // The row shows no button meanwhile; the retry tick or the person's
         // next opening asks again, and a repeat failure is not logged again.
