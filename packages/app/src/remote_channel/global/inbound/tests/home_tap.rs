@@ -209,23 +209,177 @@ async fn a_home_tap_acts_while_its_connection_cannot_send(cx: &mut TestAppContex
 
 /// Serve a tap on "work"'s page as the connection's queue does, claim first.
 async fn tap(generation: uuid::Uuid, event_id: &str, data: &str, cx: &mut TestAppContext) {
+    let paired = Tapper {
+        generation,
+        user_id: "user",
+        team_id: "scope",
+    };
+    tap_as(
+        paired,
+        event_id,
+        data,
+        &crate::runs::RunsHost::claim_inbound,
+        cx,
+    )
+    .await;
+}
+
+/// Who a tap comes from: the person and team the event names, and the
+/// worker that delivered it.
+#[derive(Clone, Copy)]
+struct Tapper<'a> {
+    generation: uuid::Uuid,
+    user_id: &'a str,
+    team_id: &'a str,
+}
+
+/// [`tap`] from `tapper`, claimed through `claim`.
+async fn tap_as<F: std::future::Future<Output = ClaimResult>>(
+    tapper: Tapper<'_>,
+    event_id: &str,
+    data: &str,
+    claim: &impl Fn(&InboxStore, ChannelKey, InboxId) -> F,
+    cx: &mut TestAppContext,
+) {
     let event = transport::HomeEvent {
         event_id: event_id.into(),
-        user_id: "user".into(),
-        team_id: "scope".into(),
+        user_id: tapper.user_id.into(),
+        team_id: tapper.team_id.into(),
         kind: transport::HomeEventKind::Tap { data: data.into() },
     };
     let mut app = cx.to_async();
-    let served = serve_home_tap(
-        "work",
-        generation,
-        event,
-        &crate::runs::RunsHost::claim_inbound,
-        &mut app,
-    )
-    .await;
+    let served = serve_home_tap("work", tapper.generation, event, claim, &mut app).await;
     assert!(matches!(served, Served::Done), "the claim is durable");
     cx.run_until_parked();
+}
+
+/// Only the paired person's tap, delivered by the worker and served by the
+/// bot running now, acts. Another person's or team's tap is claimed as
+/// their message would be, so a redelivery is not weighed again, and does
+/// nothing; one from an old worker is not even claimed; one that reaches
+/// the page after its bot was replaced does nothing either. None opens the
+/// page or leaves a result on it.
+#[gpui::test]
+async fn a_home_tap_from_anyone_but_the_paired_person_does_nothing(cx: &mut TestAppContext) {
+    use std::{cell::RefCell, rc::Rc};
+    cx.executor().allow_parking();
+    let fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let pane = fixture.pane_ref(cx);
+    let root = tempfile::tempdir().unwrap();
+    let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
+    let (generation, scope) = cx.update(|cx| {
+        let generation = install_connection("work", bot.clone(), cx);
+        crate::remote_channel::home::driver::opened("work", "user", "scope", cx);
+        let scope = cx.global::<RemoteChannels>().connections["work"]
+            .thread_scope(&bot)
+            .unwrap();
+        (generation, scope)
+    });
+    cx.run_until_parked();
+    let select = cx
+        .update(|cx| {
+            cx.global::<RemoteChannels>()
+                .home
+                .button_for_test(&scope, pane, false)
+        })
+        .expect("every pane can be selected");
+    let claimed = Rc::new(RefCell::new(Vec::<String>::new()));
+    let record = {
+        let claimed = claimed.clone();
+        move |inbox: &InboxStore, channel, id: InboxId| {
+            if let InboxId::Opaque(event) = &id {
+                claimed.borrow_mut().push(event.clone());
+            }
+            crate::runs::RunsHost::claim_inbound(inbox, channel, id)
+        }
+    };
+    let selected = |cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            cx.global::<RemoteChannels>().connections["work"]
+                .core
+                .command_state()
+                .selected()
+        })
+    };
+    let outcome = |cx: &mut TestAppContext| {
+        cx.update(|cx| cx.global::<RemoteChannels>().home.outcome_for_test(&scope))
+    };
+    let cases = [
+        (
+            "another person",
+            Tapper {
+                generation,
+                user_id: "stranger",
+                team_id: "scope",
+            },
+            true,
+        ),
+        (
+            "another team",
+            Tapper {
+                generation,
+                user_id: "user",
+                team_id: "elsewhere",
+            },
+            true,
+        ),
+        (
+            "an old worker",
+            Tapper {
+                generation: uuid::Uuid::new_v4(),
+                user_id: "user",
+                team_id: "scope",
+            },
+            false,
+        ),
+    ];
+    for (label, tapper, claims) in cases {
+        claimed.borrow_mut().clear();
+        tap_as(tapper, label, &select, &record, cx).await;
+        let want: &[&str] = if claims { &[label] } else { &[] };
+        assert_eq!(*claimed.borrow(), want, "{label}: as a message is");
+        assert_eq!(selected(cx), None, "{label}: nothing selected");
+        assert_eq!(outcome(cx), None, "{label}: no result on the page");
+    }
+
+    // The same button, tapped by the paired person through the bot running
+    // now, acts: the cases above are refused for who sent them.
+    let tapped = |bot: Arc<BotSession>, cx: &mut TestAppContext| {
+        let select = select.clone();
+        let mut app = cx.to_async();
+        async move {
+            crate::remote_channel::home::driver::tapped(
+                "work", generation, &bot, "user", "scope", &select, &mut app,
+            )
+            .await;
+        }
+    };
+    tapped(bot.clone(), cx).await;
+    cx.run_until_parked();
+    assert_eq!(selected(cx), Some(pane), "the paired person's tap acts");
+    let shown = outcome(cx);
+    assert!(shown.is_some(), "and its result heads the page");
+    cx.update(|cx| {
+        RemoteChannels::select("work", None, cx);
+    });
+
+    // Claimed by the bot that served then, and acted on once another
+    // serves: the claiming bot no longer runs the connection.
+    cx.update(|cx| {
+        cx.global_mut::<RemoteChannels>()
+            .connections
+            .get_mut("work")
+            .unwrap()
+            .publish_bot(crate::remote_channel::global::tests::ready_bot());
+    });
+    tapped(bot.clone(), cx).await;
+    cx.run_until_parked();
+    assert_eq!(selected(cx), None, "a replaced bot's tap selects nothing");
+    assert_eq!(outcome(cx), shown, "and leaves no result on the page");
+
+    cx.update(|cx| cx.global_mut::<RemoteChannels>().connections.clear());
+    drop(bot);
+    wait_release(root.path());
 }
 
 /// A tap whose claim failed is held, not dropped: the reopened inbox claims
