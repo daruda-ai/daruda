@@ -59,6 +59,32 @@ fn reported_changes_rebuild_a_viewed_page_after_the_update(cx: &mut gpui::TestAp
     });
 }
 
+/// The defect this guards: a disabled or unpaired connection was taken for
+/// one reconnecting, so its page was kept and built anew on every retry
+/// tick, only to wait again. Only a connection that will serve again keeps
+/// its page.
+#[gpui::test]
+fn the_retry_tick_keeps_a_page_only_for_a_connection_that_serves_again(
+    cx: &mut gpui::TestAppContext,
+) {
+    use crate::remote_channel::global::tests::{Lapse, lapse};
+    for how in [Lapse::Reconnecting, Lapse::Disabled, Lapse::Unpaired] {
+        cx.update(|cx| {
+            let _outgoing = crate::remote_channel::global::tests::setup(cx);
+            let connection = &cx.global::<RemoteChannels>().connections["work"];
+            let scope = connection
+                .thread_scope(connection.bot.as_ref().unwrap())
+                .unwrap();
+            cx.global_mut::<RemoteChannels>().home.queue.opened(&scope);
+            lapse("work", how, cx);
+            super::super::driver::retry(cx);
+            let home = &cx.global::<RemoteChannels>().home;
+            assert_eq!(home.queue.viewer(&scope).is_some(), how.kept(), "{how:?}");
+        });
+        cx.run_until_parked();
+    }
+}
+
 /// A tap that names a pane no longer open, or a board the page no longer
 /// shows, is answered on the page: the gone pane in `/stop`'s words, the
 /// old board by showing the panes as they are now.

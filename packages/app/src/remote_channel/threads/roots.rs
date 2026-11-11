@@ -66,9 +66,9 @@ pub(crate) fn retry(cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {
         return;
     }
+    let alive = cx.global::<RemoteChannels>().scope_alive(cx);
     let channels = cx.global_mut::<RemoteChannels>();
     channels.threads.forget_closed(now());
-    let alive = channels.scope_alive();
     channels.threads.keep_live_scopes(alive);
     let ready = channels.threads.due_updates(true);
     send(ready, cx);

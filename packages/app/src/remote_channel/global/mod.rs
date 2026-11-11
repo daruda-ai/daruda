@@ -192,8 +192,10 @@ impl RemoteChannels {
 
     /// Whether what was made under a scope may still be served: its
     /// connection serves that identity now, or is reconnecting and has not
-    /// said which identity yet.
-    pub(crate) fn scope_alive(&self) -> impl Fn(&super::threads::Scope) -> bool + use<> {
+    /// said which identity yet. A connection without a bot that is disabled,
+    /// out of step with the settings, or unpaired is not reconnecting: no
+    /// bot will arrive to serve what waits, so it is dropped.
+    pub(crate) fn scope_alive(&self, cx: &App) -> impl Fn(&super::threads::Scope) -> bool + use<> {
         let mut scopes = Vec::new();
         let mut unsettled = Vec::new();
         for (id, connection) in &self.connections {
@@ -203,7 +205,10 @@ impl RemoteChannels {
                 .and_then(|bot| connection.thread_scope(bot))
             {
                 Some(scope) => scopes.push(scope),
-                None => unsettled.push(id.clone()),
+                None if connection.config.recipient.is_some() && self.live(id, cx).is_some() => {
+                    unsettled.push(id.clone())
+                }
+                None => {}
             }
         }
         move |scope| scopes.contains(scope) || unsettled.contains(&scope.connection)

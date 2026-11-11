@@ -64,6 +64,52 @@ pub(crate) fn setup(cx: &mut App) -> futures::channel::mpsc::UnboundedReceiver<P
     receiver
 }
 
+/// How connection `id` stops serving the identity it had.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Lapse {
+    /// The worker reconnects: still enabled and paired, it serves again.
+    Reconnecting,
+    /// The person turned the channel off.
+    Disabled,
+    /// The person unpaired the channel.
+    Unpaired,
+}
+
+impl Lapse {
+    /// Whether what was made under the old identity waits for the
+    /// connection rather than being dropped.
+    pub(crate) fn kept(self) -> bool {
+        matches!(self, Self::Reconnecting)
+    }
+}
+
+/// Leave connection `id` as `lapse` does: a settings change goes through
+/// `reconcile`, as the settings observer runs it.
+pub(crate) fn lapse(id: &str, lapse: Lapse, cx: &mut App) {
+    let mut config = SettingsStore::global(cx).user().clone();
+    let channel = config
+        .remote
+        .channels
+        .iter_mut()
+        .find(|channel| channel.id == id)
+        .unwrap();
+    match lapse {
+        Lapse::Reconnecting => {
+            cx.global_mut::<RemoteChannels>()
+                .connections
+                .get_mut(id)
+                .unwrap()
+                .revoke_bot();
+            return;
+        }
+        Lapse::Disabled => channel.enabled = false,
+        Lapse::Unpaired => channel.recipient = None,
+    }
+    cx.global_mut::<SettingsStore>()
+        .set_user_for_testing(config);
+    reconcile(cx);
+}
+
 fn ping() -> BridgePing {
     BridgePing {
         pane: super::super::bridge::PaneRef {

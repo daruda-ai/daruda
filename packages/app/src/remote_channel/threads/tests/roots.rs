@@ -322,6 +322,40 @@ fn reported_activity_reaches_the_panes_root_until_it_closes(cx: &mut gpui::TestA
     });
 }
 
+/// The defect this guards: a disabled or unpaired connection was taken for
+/// one reconnecting, so its root updates were sent and held again on every
+/// retry tick. Only a connection that will serve again keeps them.
+#[gpui::test]
+fn the_retry_tick_keeps_root_updates_only_for_a_connection_that_serves_again(
+    cx: &mut gpui::TestAppContext,
+) {
+    use crate::remote_channel::global::tests::{Lapse, lapse};
+    for how in [Lapse::Reconnecting, Lapse::Disabled, Lapse::Unpaired] {
+        cx.update(|cx| {
+            let _outgoing = crate::remote_channel::global::tests::setup(cx);
+            let channels = cx.global_mut::<RemoteChannels>();
+            let connection = &channels.connections["work"];
+            let scope = connection
+                .thread_scope(connection.bot.as_ref().unwrap())
+                .unwrap();
+            let pane = pane(5);
+            start_thread(
+                &mut channels.threads,
+                &scope,
+                pane,
+                &conversation("claude", "s1"),
+                "1.1",
+            );
+            lapse("work", how, cx);
+            super::super::roots::pane_activity(pane, PaneActivity::Working, cx);
+            super::super::roots::retry(cx);
+            let wanted = cx.global::<RemoteChannels>().threads.wanted("work", "1.1");
+            assert_eq!(wanted.is_some(), how.kept(), "{how:?}");
+        });
+        cx.run_until_parked();
+    }
+}
+
 /// The subject a pane's conversation gets mid-turn reaches its root with the
 /// turn's end, the update that root gets next.
 #[test]

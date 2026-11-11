@@ -62,8 +62,8 @@ pub(crate) fn retry(cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {
         return;
     }
+    let alive = cx.global::<RemoteChannels>().scope_alive(cx);
     let channels = cx.global_mut::<RemoteChannels>();
-    let alive = channels.scope_alive();
     channels.home.queue.keep_scopes(alive);
     if channels.home.queue.retry() {
         changed(cx);
@@ -120,7 +120,7 @@ fn person_scope(
 /// which identity yet.
 fn identity_holds(scope: &Scope, cx: &App) -> bool {
     let channels = cx.global::<RemoteChannels>();
-    channels.live(&scope.connection, cx).is_some() && (channels.scope_alive())(scope)
+    channels.live(&scope.connection, cx).is_some() && (channels.scope_alive(cx))(scope)
 }
 
 /// The app home of the channel `scope`'s connection is on, while the
