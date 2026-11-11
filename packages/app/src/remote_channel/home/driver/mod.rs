@@ -4,6 +4,7 @@
 //! sends boards off the main thread and settles what that came to.
 
 mod links;
+mod panes;
 mod publish;
 mod tap;
 
@@ -14,10 +15,11 @@ use crate::remote_channel::bridge::PaneRef;
 use crate::remote_channel::command::ListingRow;
 use crate::remote_channel::global::{Connection, RemoteChannels};
 use crate::remote_channel::runtime::BotSession;
-use crate::remote_channel::threads::Scope;
+use crate::remote_channel::threads::{ConversationKey, Scope};
 use crate::remote_channel::transport::{self, AppHome};
 use daruda_config::remote::ChannelKind;
 use gpui::App;
+use std::collections::HashMap;
 
 /// The paired person, `user_id` of team `team_id`, opened connection `id`'s
 /// page: show it every pane as it is now. Idempotent, so it claims nothing in
@@ -84,13 +86,14 @@ fn rebuild(cx: &mut App) {
     }
     // One listing for every page: it walks, and updates, every workspace.
     let listing = crate::remote_channel::command::flatten(&crate::control::exec::listing(cx));
+    let conversations = panes::conversations(&listing, cx);
     for scope in scopes {
         // Only a removed connection has no page left; the retry tick
         // forgets it.
         let Some(home) = page_of(&scope, cx) else {
             continue;
         };
-        let board = board(&scope, home.capacity, &listing, cx);
+        let board = board(&scope, home.capacity, &listing, &conversations, cx);
         // A connection that cannot send now still gets its board; it waits
         // for a retry tick the connection can send on. Its thread links are
         // asked on a later rebuild.
@@ -146,9 +149,16 @@ fn app_home(kind: ChannelKind) -> Option<AppHome> {
     Some(home)
 }
 
-/// Every pane `/list` shows, with its status, its thread under `scope` and
+/// Every pane `/list` shows, with its status, its thread under `scope` —
+/// found by the conversation each is in now, from `conversations` — and
 /// whether commands address it, under what the last tap came to.
-fn board(scope: &Scope, capacity: usize, listing: &[ListingRow], cx: &mut App) -> Board {
+fn board(
+    scope: &Scope,
+    capacity: usize,
+    listing: &[ListingRow],
+    conversations: &HashMap<PaneRef, ConversationKey>,
+    cx: &mut App,
+) -> Board {
     let channels = cx.global_mut::<RemoteChannels>();
     let selected: Option<PaneRef> = channels
         .connections
@@ -161,7 +171,11 @@ fn board(scope: &Scope, capacity: usize, listing: &[ListingRow], cx: &mut App) -
             pane: row.summary.target,
             name: PaneRow::named(row),
             shown: threads.activity_of(row.summary.target),
-            thread: threads.root_of_pane(scope, row.summary.target),
+            thread: threads.root_for(
+                scope,
+                row.summary.target,
+                conversations.get(&row.summary.target),
+            ),
             link: None,
             selected: selected == Some(row.summary.target),
         })

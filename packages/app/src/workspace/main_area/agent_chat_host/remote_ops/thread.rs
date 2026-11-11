@@ -16,12 +16,10 @@ impl Workspace {
         pane_id: PaneId,
         cx: &Context<Self>,
     ) -> Option<PaneConversation> {
+        let key = self.remote_key(pane_id, cx)?;
         let view = self.agent_chat_view(pane_id)?.read(cx);
         Some(PaneConversation {
-            key: ConversationKey {
-                agent: view.agent_id().to_owned(),
-                session: view.session_id()?.to_owned(),
-            },
+            key,
             agent_name: view.agent_name().to_owned(),
             name: RootName {
                 // One line: a thread list shows a root's first line only.
@@ -30,6 +28,16 @@ impl Workspace {
                     .replace('\n', &s::remote_channel::thread_name_separator()),
                 subject: view.activity_title().map(str::to_owned),
             },
+        })
+    }
+
+    /// The conversation the pane is in now: what its thread is found by.
+    /// `None` until the agent has established a session.
+    pub(crate) fn remote_key(&self, pane_id: PaneId, cx: &App) -> Option<ConversationKey> {
+        let view = self.agent_chat_view(pane_id)?.read(cx);
+        Some(ConversationKey {
+            agent: view.agent_id().to_owned(),
+            session: view.session_id()?.to_owned(),
         })
     }
 

@@ -343,11 +343,21 @@ impl Threads {
         self.closed.retain(|_, at| now - *at < CLOSED_KEPT_SECS);
     }
 
-    /// The root of the thread `pane` last posted in on `scope`'s connection,
-    /// if it was made under `scope`. Read-only: nothing is touched or saved.
-    pub(crate) fn root_of_pane(&self, scope: &Scope, pane: PaneRef) -> Option<String> {
-        let key = self.last.get(&(scope.connection.clone(), pane))?;
-        Some(self.book.for_conversation(scope, key)?.root.clone())
+    /// The root of the thread `pane` speaks in on `scope`'s connection, as a
+    /// post of its would be placed: `current`'s, the conversation the pane is
+    /// in now, else that of the one it last posted from, which its next post
+    /// continues. Read-only: nothing is touched or saved.
+    pub(crate) fn root_for(
+        &self,
+        scope: &Scope,
+        pane: PaneRef,
+        current: Option<&ConversationKey>,
+    ) -> Option<String> {
+        let last = self.last.get(&(scope.connection.clone(), pane));
+        let record = current
+            .and_then(|key| self.book.for_conversation(scope, key))
+            .or_else(|| last.and_then(|key| self.book.for_conversation(scope, key)))?;
+        Some(record.root.clone())
     }
 
     /// Whether `key` has a thread of its own in `scope`.

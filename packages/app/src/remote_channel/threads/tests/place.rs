@@ -112,12 +112,13 @@ fn only_an_outcome_surfaces_from_a_thread() {
     }
 }
 
-/// The home page links a pane to the thread it last posted in, and only
-/// under the identity that made it.
+/// The home page links a pane to the thread of the conversation it is in
+/// now, and only under the identity that made it.
 #[test]
 fn a_pane_names_the_root_of_its_thread_in_its_scope() {
     let mut threads = Threads::load();
     let speaker = pane(7);
+    let (s1, s2) = (key("claude", "s1"), key("claude", "s2"));
     start_thread(
         &mut threads,
         &work(),
@@ -126,19 +127,75 @@ fn a_pane_names_the_root_of_its_thread_in_its_scope() {
         "1.1",
     );
     let cases = [
-        (work(), speaker, Some("1.1"), "the pane's own thread"),
-        (scope("work", "other", "D1"), speaker, None, "another bot"),
+        (
+            work(),
+            speaker,
+            Some(&s1),
+            Some("1.1"),
+            "the pane's own thread",
+        ),
+        (
+            work(),
+            speaker,
+            None,
+            Some("1.1"),
+            "no session yet: the thread its next post continues",
+        ),
+        (
+            work(),
+            speaker,
+            Some(&s2),
+            Some("1.1"),
+            "a new conversation that has not posted: the thread it continues",
+        ),
+        (
+            scope("work", "other", "D1"),
+            speaker,
+            Some(&s1),
+            None,
+            "another bot",
+        ),
         (
             scope("home", "bot", "D1"),
             speaker,
+            Some(&s1),
             None,
             "another connection",
         ),
-        (work(), pane(8), None, "a pane that never posted"),
+        (work(), pane(8), None, None, "a pane that never posted"),
     ];
-    for (scope, pane, want, label) in cases {
+    for (scope, pane, current, want, label) in cases {
         assert_eq!(
-            threads.root_of_pane(&scope, pane).as_deref(),
+            threads.root_for(&scope, pane, current).as_deref(),
+            want,
+            "{label}"
+        );
+    }
+}
+
+/// The defect this guards: after a restart this run knew a pane's thread only
+/// once the pane posted again, so a pane that resumed a conversation with a
+/// thread showed no link to it. The conversation the pane is in now finds its
+/// thread by itself.
+#[test]
+fn a_resumed_conversation_finds_its_thread_before_the_pane_posts() {
+    let mut threads = Threads::load();
+    let resumed = key("claude", "s1");
+    // A previous run left this thread; this run has seen no post.
+    threads.remember(&work(), "t1".into(), resumed.clone(), "1.1".into(), NOW);
+    let pane = pane(5);
+    let cases = [
+        (
+            Some(&resumed),
+            Some("1.1"),
+            "the resumed conversation's thread",
+        ),
+        (Some(&key("claude", "s9")), None, "another conversation"),
+        (None, None, "no session, and no post this run"),
+    ];
+    for (current, want, label) in cases {
+        assert_eq!(
+            threads.root_for(&work(), pane, current).as_deref(),
             want,
             "{label}"
         );
