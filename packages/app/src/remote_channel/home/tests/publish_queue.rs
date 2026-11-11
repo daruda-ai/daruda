@@ -219,3 +219,55 @@ fn a_page_no_connection_serves_is_forgotten() {
         "nothing sent for the gone page"
     );
 }
+
+/// A tap resolves against the board on screen or the one on its way there,
+/// and only under the identity that opened the page. Tapping opens the page
+/// and keeps the result for every later board.
+#[test]
+fn a_tap_resolves_against_the_shown_or_coming_board() {
+    use super::super::board::Outcome;
+    use super::super::token::{Act, Numbering, Tap};
+    let work = scope("work", "bot");
+    let mut numbering = Numbering::default();
+    let numbered = |names: &[&str], numbering: &mut Numbering| {
+        let mut board = board(names);
+        board.number(numbering);
+        board
+    };
+    let tap = |board: &Board| Tap {
+        generation: board.generation,
+        index: 0,
+        act: Act::Select,
+    };
+    let mut queue = PublishQueue::default();
+    let shown = numbered(&["a"], &mut numbering);
+    assert_eq!(queue.resolve(&work, tap(&shown)), None, "no page yet");
+    queue.tapped(&work, None);
+    assert_eq!(queue.viewer(&work), Some(Viewer::Viewing), "a tap opens it");
+    assert_eq!(queue.outcome(&work), None);
+    queue.want(&work, shown.clone());
+    let publication = queue.ready(false).remove(0);
+    assert_eq!(
+        queue.resolve(&work, tap(&shown)),
+        Some(shown.rows[0].pane),
+        "in flight, it may already be on screen"
+    );
+    let coming = numbered(&["b"], &mut numbering);
+    queue.want(&work, coming.clone());
+    queue.finish(&publication, &PublishVerdict::Published);
+    for (board, label) in [(&shown, "shown"), (&coming, "coming")] {
+        assert_eq!(
+            queue.resolve(&work, tap(board)),
+            Some(board.rows[0].pane),
+            "{label}"
+        );
+    }
+    assert_eq!(queue.resolve(&scope("work", "other"), tap(&shown)), None);
+    let outcome = Outcome {
+        at: 1,
+        text: "Selected".into(),
+    };
+    queue.tapped(&work, Some(outcome.clone()));
+    queue.tapped(&work, None);
+    assert_eq!(queue.outcome(&work), Some(&outcome), "kept until replaced");
+}

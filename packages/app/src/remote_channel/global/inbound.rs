@@ -169,11 +169,52 @@ pub(super) fn spawn(receiver: UnboundedReceiver<WorkerEvent>, cx: &mut App) {
     serve_events(receiver, crate::runs::RunsHost::claim_inbound, cx);
 }
 
+/// One command a connection serves in arrival order: from the paired
+/// conversation, or a tap on the app's own page.
+enum Command {
+    Incoming(transport::Incoming),
+    HomeTap(transport::HomeEvent),
+}
+
 /// What serving one command came to.
 enum Served {
     Done,
     /// Its claim must be retried on a reopened inbox.
-    Retry(transport::Incoming),
+    Retry(Command),
+}
+
+async fn serve_command<F: Future<Output = ClaimResult>>(
+    id: &str,
+    generation: uuid::Uuid,
+    command: Command,
+    claim: &impl Fn(&InboxStore, ChannelKey, InboxId) -> F,
+    cx: &mut gpui::AsyncApp,
+) -> Served {
+    match command {
+        Command::Incoming(incoming) => serve(id, generation, incoming, claim, cx).await,
+        Command::HomeTap(tap) => serve_home_tap(id, generation, tap, claim, cx).await,
+    }
+}
+
+/// Claim a tap on the page and carry it out. Claimed like a command because
+/// a stop must not run twice when the gateway delivers the tap again; what
+/// it came to is shown on the page, never sent to the conversation.
+async fn serve_home_tap<F: Future<Output = ClaimResult>>(
+    id: &str,
+    generation: uuid::Uuid,
+    tap: transport::HomeEvent,
+    claim: &impl Fn(&InboxStore, ChannelKey, InboxId) -> F,
+    cx: &mut gpui::AsyncApp,
+) -> Served {
+    match claim_incoming(id, generation, &tap.event_id, claim, cx).await {
+        Claimed::Ready(_) => {}
+        Claimed::Skip => return Served::Done,
+        Claimed::Retry => return Served::Retry(Command::HomeTap(tap)),
+    }
+    if let transport::HomeEventKind::Tap { data } = &tap.kind {
+        crate::remote_channel::home::driver::tapped(id, &tap.user_id, &tap.team_id, data, cx).await;
+    }
+    Served::Done
 }
 
 /// Claim one command and carry it out.
@@ -187,7 +228,7 @@ async fn serve<F: Future<Output = ClaimResult>>(
     let bot = match claim_incoming(id, generation, &incoming.event_id, claim, cx).await {
         Claimed::Ready(bot) => bot,
         Claimed::Skip => return Served::Done,
-        Claimed::Retry => return Served::Retry(incoming),
+        Claimed::Retry => return Served::Retry(Command::Incoming(incoming)),
     };
     let pairing = cx.update(|cx| {
         if !live_session(id, generation, &bot, cx) {

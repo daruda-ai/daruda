@@ -101,11 +101,15 @@ pub fn session(
     Ok(())
 }
 
-/// The person opening the app's Home tab. Read from `payload.event` like a
-/// message; Slack's documents disagree on that wrapping, so a parsed event,
-/// and any other event type left unread, is traced to confirm it live.
+/// The person opening the app's Home tab, or tapping a button on it. An
+/// opening is read from `payload.event` like a message; Slack's documents
+/// disagree on that wrapping, so a parsed event, and any other event type
+/// left unread, is traced to confirm it live.
 fn parse_home(envelope: &Value) -> Option<HomeEvent> {
     use crate::remote_channel::trace;
+    if envelope["type"] == "interactive" {
+        return parse_home_tap(envelope);
+    }
     if envelope["type"] != "events_api" {
         return None;
     }
@@ -139,6 +143,28 @@ fn parse_home(envelope: &Value) -> Option<HomeEvent> {
         user_id: event["user"].as_str()?.to_owned(),
         team_id: payload["team_id"].as_str()?.to_owned(),
         kind: HomeEventKind::Opened,
+    })
+}
+
+/// A button tapped on the Home tab. Such a tap names no conversation or
+/// message, and `team` is null for an org-wide install, so the person's own
+/// `team_id` names the team. A link button carries no value: Slack opens the
+/// link itself, and the acknowledgment already sent is all it needs.
+fn parse_home_tap(envelope: &Value) -> Option<HomeEvent> {
+    let payload = &envelope["payload"];
+    if payload["type"] != "block_actions"
+        || payload["container"]["type"] != "view"
+        || payload["view"]["type"] != "home"
+    {
+        return None;
+    }
+    Some(HomeEvent {
+        event_id: envelope["envelope_id"].as_str()?.to_owned(),
+        user_id: payload["user"]["id"].as_str()?.to_owned(),
+        team_id: payload["user"]["team_id"].as_str()?.to_owned(),
+        kind: HomeEventKind::Tap {
+            data: payload["actions"][0]["value"].as_str()?.to_owned(),
+        },
     })
 }
 

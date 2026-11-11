@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 
 /// The rows one page holds. Slack takes at most 100 blocks in a view: three
 /// above the rows (header, the line a tap's result takes, divider), two per
-/// row, and one for the rows left out.
+/// row (its text, and one actions block for all its buttons), and one for
+/// the rows left out.
 pub(crate) const ROW_CAPACITY: usize = 48;
 /// Slack's cap on a header's text.
 const HEADER_LIMIT: usize = 150;
@@ -20,6 +21,8 @@ const NOT_ENABLED: &str = "not_enabled";
 /// What a page shows, in the order it shows it.
 pub(crate) struct HomeView<'a> {
     pub header: &'a str,
+    /// What the person's last tap came to, under the header.
+    pub outcome: Option<&'a str>,
     /// Said in place of the rows when there are none.
     pub empty: &'a str,
     pub rows: Vec<RowView<'a>>,
@@ -27,30 +30,43 @@ pub(crate) struct HomeView<'a> {
     pub more: Option<&'a str>,
 }
 
-/// One pane on the page: its name in bold, its status below.
+/// One pane on the page: its name in bold, its status below, its buttons
+/// under both.
 pub(crate) struct RowView<'a> {
     pub name: &'a str,
+    /// The mark beside the name of the pane commands address.
+    pub selected: Option<&'a str>,
     /// The status's Slack emoji name, when one is known.
     pub emoji: Option<&'a str>,
     pub status: &'a str,
     /// The button's label and the link to the pane's thread.
     pub thread: Option<(&'a str, &'a str)>,
+    /// The select button's label and value.
+    pub select: (&'a str, &'a str),
+    /// The stop button's label and value, when the pane can be stopped.
+    pub stop: Option<(&'a str, &'a str)>,
 }
 
 impl HomeView<'_> {
     fn blocks(&self) -> Vec<Value> {
         let mut blocks = vec![
             json!({"type": "header", "text": {"type": "plain_text", "text": capped(self.header, HEADER_LIMIT)}}),
-            json!({"type": "divider"}),
         ];
+        if let Some(outcome) = self.outcome {
+            blocks.push(text_block(vec![plain(outcome)]));
+        }
+        blocks.push(json!({"type": "divider"}));
         if self.rows.is_empty() {
             blocks.push(text_block(vec![plain(self.empty)]));
         }
         for (index, row) in self.rows.iter().enumerate() {
             let mut elements = vec![
                 json!({"type": "text", "text": capped(row.name, TEXT_LIMIT), "style": {"bold": true}}),
-                json!({"type": "text", "text": "\n"}),
             ];
+            if let Some(selected) = row.selected {
+                elements.push(json!({"type": "text", "text": capped(&format!(" {selected}"), TEXT_LIMIT), "style": {"italic": true}}));
+            }
+            elements.push(json!({"type": "text", "text": "\n"}));
             if let Some(emoji) = row.emoji {
                 elements.push(json!({"type": "emoji", "name": emoji}));
                 elements.push(plain(&format!(" {}", row.status)));
@@ -58,19 +74,34 @@ impl HomeView<'_> {
                 elements.push(plain(row.status));
             }
             blocks.push(text_block(elements));
+            let mut buttons = Vec::new();
             if let Some((label, url)) = row.thread {
-                blocks.push(json!({"type": "actions", "elements": [{
+                buttons.push(json!({
                     "type": "button", "action_id": format!("home-thread-{index}"),
                     "text": {"type": "plain_text", "text": capped(label, super::BUTTON_LABEL_LIMIT)},
                     "url": url,
-                }]}));
+                }));
             }
+            buttons.push(value_button(format!("home-select-{index}"), row.select));
+            if let Some(stop) = row.stop {
+                buttons.push(value_button(format!("home-stop-{index}"), stop));
+            }
+            blocks.push(json!({"type": "actions", "elements": buttons}));
         }
         if let Some(more) = self.more {
             blocks.push(text_block(vec![plain(more)]));
         }
         blocks
     }
+}
+
+/// A button whose tap comes back to daruda carrying `value`.
+fn value_button(action_id: String, (label, value): (&str, &str)) -> Value {
+    json!({
+        "type": "button", "action_id": action_id,
+        "text": {"type": "plain_text", "text": capped(label, super::BUTTON_LABEL_LIMIT)},
+        "value": value,
+    })
 }
 
 /// A rich_text block, so a pane's name is shown literally: a `_` or `*` in
@@ -167,15 +198,19 @@ mod tests {
     fn row<'a>(name: &'a str, emoji: Option<&'a str>, thread: Option<&'a str>) -> RowView<'a> {
         RowView {
             name,
+            selected: None,
             emoji,
             status: "Working",
             thread: thread.map(|url| ("Open thread", url)),
+            select: ("Select", "hom:1:0:sel"),
+            stop: None,
         }
     }
 
     fn view<'a>(rows: Vec<RowView<'a>>, more: Option<&'a str>) -> HomeView<'a> {
         HomeView {
             header: "Agents",
+            outcome: None,
             empty: "No agent chats are open.",
             rows,
             more,
@@ -183,27 +218,23 @@ mod tests {
     }
 
     #[test]
-    fn a_page_lists_each_pane_with_its_status_and_thread_link() {
-        let payload = publish_payload(
-            "U1",
-            &view(
-                vec![
-                    row(
-                        "app/main (Claude)",
-                        Some("hourglass_flowing_sand"),
-                        Some("https://x.slack.com/archives/D1/p1"),
-                    ),
-                    row("app/fix_bug (Codex)", None, None),
-                ],
-                Some("…and 2 more"),
-            ),
+    fn a_page_lists_each_pane_with_its_status_and_buttons() {
+        let mut running = row(
+            "app/main (Claude)",
+            Some("hourglass_flowing_sand"),
+            Some("https://x.slack.com/archives/D1/p1"),
         );
+        running.stop = Some(("Stop", "hom:1:0:stop"));
+        let mut quiet = row("app/fix_bug (Codex)", None, None);
+        quiet.select = ("Select", "hom:1:1:sel");
+        quiet.selected = Some("(selected)");
+        let payload = publish_payload("U1", &view(vec![running, quiet], Some("…and 2 more")));
         assert_eq!(payload["user_id"], "U1");
         assert_eq!(payload["view"]["type"], "home");
         let blocks = payload["view"]["blocks"].as_array().unwrap();
         assert_eq!(blocks[0]["type"], "header");
         assert_eq!(blocks[0]["text"]["text"], "Agents");
-        assert_eq!(blocks[1]["type"], "divider");
+        assert_eq!(blocks[1]["type"], "divider", "no tap, no result line");
         let first = &blocks[2]["elements"][0]["elements"];
         assert_eq!(first[0]["text"], "app/main (Claude)");
         assert_eq!(first[0]["style"]["bold"], true);
@@ -212,17 +243,48 @@ mod tests {
             json!({"type": "emoji", "name": "hourglass_flowing_sand"})
         );
         assert_eq!(first[3]["text"], " Working");
-        let button = &blocks[3]["elements"][0];
-        assert_eq!(button["url"], "https://x.slack.com/archives/D1/p1");
-        assert_eq!(button["text"]["text"], "Open thread");
-        assert!(button.get("value").is_none(), "a link carries no token");
+        let buttons = blocks[3]["elements"].as_array().unwrap();
+        assert_eq!(buttons[0]["url"], "https://x.slack.com/archives/D1/p1");
+        assert_eq!(buttons[0]["text"]["text"], "Open thread");
+        assert!(buttons[0].get("value").is_none(), "a link carries no token");
+        assert_eq!(buttons[1]["value"], "hom:1:0:sel");
+        assert_eq!(buttons[1]["text"]["text"], "Select");
+        assert_eq!(buttons[2]["value"], "hom:1:0:stop");
+        assert_eq!(buttons[2]["text"]["text"], "Stop");
         let second = &blocks[4]["elements"][0]["elements"];
-        assert_eq!(second[2]["text"], "Working", "no emoji without a status");
         assert_eq!(
-            blocks[5]["elements"][0]["elements"][0]["text"],
+            second[1]["text"], " (selected)",
+            "the selected pane is marked"
+        );
+        assert_eq!(second[3]["text"], "Working", "no emoji without a status");
+        let buttons = blocks[5]["elements"].as_array().unwrap();
+        assert_eq!(buttons.len(), 1, "no thread link, nothing to stop");
+        assert_eq!(buttons[0]["value"], "hom:1:1:sel");
+        assert_eq!(
+            blocks[6]["elements"][0]["elements"][0]["text"],
             "…and 2 more"
         );
-        assert_eq!(blocks.len(), 6, "a pane without a thread has no button");
+        assert_eq!(blocks.len(), 7);
+        let action_ids: std::collections::HashSet<_> = blocks
+            .iter()
+            .filter_map(|block| block["elements"].as_array())
+            .flatten()
+            .filter_map(|element| element["action_id"].as_str())
+            .collect();
+        assert_eq!(action_ids.len(), 4, "every button has its own action id");
+    }
+
+    #[test]
+    fn a_tap_result_sits_between_the_header_and_the_rows() {
+        let mut page = view(Vec::new(), None);
+        page.outcome = Some("09:30 · Stopped");
+        let blocks = page.blocks();
+        assert_eq!(blocks[0]["type"], "header");
+        assert_eq!(
+            blocks[1]["elements"][0]["elements"][0]["text"],
+            "09:30 · Stopped"
+        );
+        assert_eq!(blocks[2]["type"], "divider");
     }
 
     #[test]
@@ -236,16 +298,25 @@ mod tests {
         );
     }
 
-    /// A full page, every row with a link and the rows left out counted,
-    /// still leaves the result line its block under Slack's 100.
+    /// A full page, every row with all three buttons, a result line, and
+    /// the rows left out counted, stays within Slack's 100 blocks.
     #[test]
     fn a_full_page_fits_in_one_view() {
         let rows = (0..ROW_CAPACITY)
-            .map(|_| row("pane", Some("bell"), Some("https://x")))
+            .map(|_| {
+                let mut row = row("pane", Some("bell"), Some("https://x"));
+                row.stop = Some(("Stop", "hom:1:0:stop"));
+                row.selected = Some("(selected)");
+                row
+            })
             .collect();
-        let payload = publish_payload("U1", &view(rows, Some("more")));
-        let count = payload["view"]["blocks"].as_array().unwrap().len();
-        assert!(count < 100, "{count} blocks");
+        let mut page = view(rows, Some("more"));
+        page.outcome = Some("09:30 · Stopped");
+        let count = publish_payload("U1", &page)["view"]["blocks"]
+            .as_array()
+            .unwrap()
+            .len();
+        assert!(count <= 100, "{count} blocks");
     }
 
     #[test]

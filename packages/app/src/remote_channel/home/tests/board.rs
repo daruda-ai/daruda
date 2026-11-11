@@ -64,3 +64,34 @@ fn rows_take_the_links_known_for_their_threads() {
     assert_eq!(board.rows[2].link, None, "a pane without a thread");
     assert_eq!(board.unlinked().collect::<Vec<_>>(), ["2.2"]);
 }
+
+/// A tap names the row of the board it was shown on: another generation, or
+/// a row past the end, names nothing.
+#[test]
+fn a_tap_resolves_only_against_its_own_board() {
+    use super::super::token::{Act, Numbering, Tap};
+    let mut board = Board::new(vec![row("a", None), row("b", None)], 10);
+    let mut numbering = Numbering::default();
+    board.number(&mut numbering);
+    let generation = board.generation;
+    let tap = |generation, index| Tap {
+        generation,
+        index,
+        act: Act::Stop,
+    };
+    let cases = [
+        (tap(generation, 1), Some(board.rows[1].pane), "its own row"),
+        (tap(generation.wrapping_sub(1), 1), None, "an older board"),
+        (tap(generation, 2), None, "past the last row"),
+    ];
+    for (tap, want, label) in cases {
+        assert_eq!(board.resolve(tap), want, "{label}");
+    }
+    assert_eq!(
+        Tap::parse(&board.token(1, Act::Select)),
+        Some(Tap {
+            act: Act::Select,
+            ..tap(generation, 1)
+        })
+    );
+}

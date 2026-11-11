@@ -1,6 +1,6 @@
 //! One retained command pump per connection; worker status never waits on I/O.
 
-use super::{ClaimResult, RemoteChannels, Served, live_generation, serve};
+use super::{ClaimResult, Command, RemoteChannels, Served, live_generation, serve_command};
 use crate::remote_channel::{
     runtime::{WorkerEvent, WorkerPayload},
     transport,
@@ -17,7 +17,7 @@ use std::{
 };
 
 enum Work {
-    Incoming(transport::Incoming),
+    Command(Command),
     Reopened(std::sync::Arc<super::BotSession>),
 }
 
@@ -74,24 +74,31 @@ pub(super) fn serve_events<F: Future<Output = ClaimResult> + 'static>(
                     });
                     Work::Reopened(bot)
                 }
-                WorkerPayload::Incoming(incoming) => Work::Incoming(incoming),
-                // A refresh, safe to repeat, so it skips the inbox claim and
-                // the connection's command queue.
+                WorkerPayload::Incoming(incoming) => Work::Command(Command::Incoming(incoming)),
                 WorkerPayload::Home(home) => {
                     crate::remote_channel::trace::delivery("home.received", || {
                         format!("connection={} event_id={}", event.id, home.event_id)
                     });
-                    cx.update(|cx| match home.kind {
+                    match home.kind {
+                        // A refresh, safe to repeat, so it skips the inbox
+                        // claim and the connection's command queue.
                         transport::HomeEventKind::Opened => {
-                            crate::remote_channel::home::driver::opened(
-                                &event.id,
-                                &home.user_id,
-                                &home.team_id,
-                                cx,
-                            );
+                            cx.update(|cx| {
+                                crate::remote_channel::home::driver::opened(
+                                    &event.id,
+                                    &home.user_id,
+                                    &home.team_id,
+                                    cx,
+                                )
+                            });
+                            continue;
                         }
-                    });
-                    continue;
+                        // Acts on a pane, so it is claimed and kept in order
+                        // with the connection's other commands.
+                        transport::HomeEventKind::Tap { .. } => {
+                            Work::Command(Command::HomeTap(home))
+                        }
+                    }
                 }
             };
             let queue = queues.entry(event.id.clone()).or_insert_with(|| {
@@ -130,7 +137,7 @@ fn spawn_connection<F: Future<Output = ClaimResult> + 'static>(
         let mut waiting_for_inbox = false;
         while let Some(work) = receiver.next().await {
             match work {
-                Work::Incoming(incoming) => held.push_back(incoming),
+                Work::Command(command) => held.push_back(command),
                 Work::Reopened(bot) => {
                     // A reconnect may have queued this wake before a claim
                     // failed. Only the writer currently serving the connection
@@ -144,11 +151,11 @@ fn spawn_connection<F: Future<Output = ClaimResult> + 'static>(
             if waiting_for_inbox {
                 continue;
             }
-            while let Some(incoming) = held.pop_front() {
-                if let Served::Retry(incoming) =
-                    serve(&id, generation, incoming, claim.as_ref(), cx).await
+            while let Some(command) = held.pop_front() {
+                if let Served::Retry(command) =
+                    serve_command(&id, generation, command, claim.as_ref(), cx).await
                 {
-                    held.push_front(incoming);
+                    held.push_front(command);
                     waiting_for_inbox = true;
                     break;
                 }

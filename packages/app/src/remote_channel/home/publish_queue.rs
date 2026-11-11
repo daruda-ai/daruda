@@ -3,7 +3,9 @@
 //! roots' queue: the latest board wins, and a board the page already shows
 //! is not sent again.
 
-use super::board::Board;
+use super::board::{Board, Outcome};
+use super::token::Tap;
+use crate::remote_channel::bridge::PaneRef;
 use crate::remote_channel::threads::Scope;
 use crate::remote_channel::transport::slack::home::PublishVerdict;
 use std::collections::{HashMap, HashSet};
@@ -43,6 +45,8 @@ struct Page {
     /// What the page shows now, as far as this run knows.
     published: Option<Board>,
     phase: Option<Phase>,
+    /// What the person's last tap came to, shown atop every later board.
+    outcome: Option<Outcome>,
 }
 
 impl Page {
@@ -53,6 +57,7 @@ impl Page {
             wanted: None,
             published: None,
             phase: None,
+            outcome: None,
         }
     }
 }
@@ -88,6 +93,30 @@ impl PublishQueue {
         if page.phase == Some(Phase::Waiting) {
             page.phase = None;
         }
+    }
+
+    /// The person tapped a button on the page of `scope`'s connection: it is
+    /// in view, and shows what the tap came to from now on, if anything.
+    pub(super) fn tapped(&mut self, scope: &Scope, outcome: Option<Outcome>) {
+        self.opened(scope);
+        if let Some(outcome) = outcome {
+            self.page(scope).outcome = Some(outcome);
+        }
+    }
+
+    /// What the last tap on `scope`'s page came to.
+    pub(super) fn outcome(&self, scope: &Scope) -> Option<&Outcome> {
+        current_ref(&self.pages, scope)?.outcome.as_ref()
+    }
+
+    /// The pane `tap` names on `scope`'s page: on the board it shows, or on
+    /// the one on its way there, which may already be on screen.
+    pub(super) fn resolve(&self, scope: &Scope, tap: Tap) -> Option<PaneRef> {
+        let page = current_ref(&self.pages, scope)?;
+        [&page.published, &page.wanted]
+            .into_iter()
+            .flatten()
+            .find_map(|board| board.resolve(tap))
     }
 
     /// Ask the page of `scope`'s connection to show `board`, if the person
@@ -198,6 +227,13 @@ impl PublishQueue {
         page
     }
 
+    /// The board `scope`'s page is about to show, or else shows.
+    #[cfg(test)]
+    pub(super) fn board(&self, scope: &Scope) -> Option<&Board> {
+        let page = current_ref(&self.pages, scope)?;
+        page.wanted.as_ref().or(page.published.as_ref())
+    }
+
     #[cfg(test)]
     pub(super) fn viewer(&self, scope: &Scope) -> Option<Viewer> {
         self.pages
@@ -211,5 +247,11 @@ impl PublishQueue {
 fn current<'a>(pages: &'a mut HashMap<String, Page>, scope: &Scope) -> Option<&'a mut Page> {
     pages
         .get_mut(&scope.connection)
+        .filter(|page| page.scope == *scope)
+}
+
+fn current_ref<'a>(pages: &'a HashMap<String, Page>, scope: &Scope) -> Option<&'a Page> {
+    pages
+        .get(&scope.connection)
         .filter(|page| page.scope == *scope)
 }

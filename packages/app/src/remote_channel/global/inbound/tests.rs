@@ -1268,3 +1268,5 @@ fn a_thread_reply_answers_the_panes_live_question(cx: &mut TestAppContext) {
         );
     });
 }
+
+mod home_tap;

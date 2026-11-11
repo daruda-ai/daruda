@@ -9,7 +9,7 @@ use crate::surface::strings as s;
 use gpui::App;
 
 mod command;
-pub(crate) use command::stop_pane;
+pub(crate) use command::{select_live, stop_pane};
 pub(crate) mod target;
 pub(crate) use target::Aimed;
 use target::{dispatch_to_workspace, permission_feedback};

@@ -1841,6 +1841,11 @@ remote_channel:
   home_status_idle: "대기 중"
   home_more: "…외 %{count}개 더"
   home_open_thread: "스레드 열기"
+  home_select: "선택"
+  home_stop: "중지"
+  home_selected: "(선택됨)"
+  home_result: "%{time} · %{text}"
+  home_stale: "지난 화면의 버튼입니다. 지금 페이지에 현재 상태를 다시 표시했습니다."
 
 library:
   toggle_needs_project: "Claude 활성화 상태는 프로젝트별입니다. 로컬 프로젝트를 열어 변경하세요."

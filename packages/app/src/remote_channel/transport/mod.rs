@@ -48,6 +48,8 @@ pub struct HomeEvent {
 pub enum HomeEventKind {
     /// The person opened the page: show it the panes as they are now.
     Opened,
+    /// The person tapped a button on the page that carries `data`.
+    Tap { data: String },
 }
 
 pub type Message = PreparedPing;

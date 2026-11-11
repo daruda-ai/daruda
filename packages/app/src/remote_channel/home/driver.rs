@@ -2,9 +2,11 @@
 //! and the panes' changes, lists the panes with their status and thread
 //! links, publishes off the main thread, and settles what that came to.
 
-use super::board::{Board, PaneRow};
+use super::board::{Board, Outcome, PaneRow};
 use super::look::HomeLook;
 use super::publish_queue::{Publication, Settled};
+use super::token::{Act, Tap};
+use crate::remote_channel::dispatch::{self, Effect};
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::threads::Scope;
@@ -12,7 +14,8 @@ use crate::remote_channel::transport::{
     self,
     slack::{self, home::PublishVerdict},
 };
-use gpui::App;
+use crate::surface::strings as s;
+use gpui::{App, AsyncApp};
 use std::sync::Arc;
 
 /// The paired person, `user_id` of team `team_id`, opened connection `id`'s
@@ -27,6 +30,73 @@ pub(crate) fn opened(id: &str, user_id: &str, team_id: &str, cx: &mut App) {
     };
     cx.global_mut::<RemoteChannels>().home.queue.opened(&scope);
     publish_latest(scope, Some(bot), cx);
+}
+
+/// The paired person tapped the button carrying `data` on connection `id`'s
+/// page, and the tap is claimed. Select or stop the pane it names, as `/use`
+/// and `/stop` would, and show what that came to on the page itself: the
+/// conversation is not where the person is looking.
+pub(crate) async fn tapped(id: &str, user_id: &str, team_id: &str, data: &str, cx: &mut AsyncApp) {
+    let Some((scope, acted)) = cx.update(|cx| act(id, user_id, team_id, data, cx)) else {
+        return;
+    };
+    let text = match acted {
+        Acted::Said(text) => text,
+        Acted::Stopping(effect) => said(effect.settled().await),
+    };
+    cx.update(|cx| {
+        // The connection may have gone, or changed identity, while the stop
+        // settled; a page made under the old identity is not shown again.
+        let Some((bot, now)) = serving_person(id, user_id, team_id, cx) else {
+            return;
+        };
+        if now != scope {
+            return;
+        }
+        let outcome = text.map(|text| Outcome {
+            at: chrono::Utc::now().timestamp(),
+            text,
+        });
+        cx.global_mut::<RemoteChannels>()
+            .home
+            .queue
+            .tapped(&scope, outcome);
+        publish_latest(scope, Some(bot), cx);
+    });
+}
+
+/// What a tap did at once, or the stop it started.
+enum Acted {
+    Said(Option<String>),
+    Stopping(Effect),
+}
+
+fn act(id: &str, user_id: &str, team_id: &str, data: &str, cx: &mut App) -> Option<(Scope, Acted)> {
+    if !cx.has_global::<RemoteChannels>() {
+        return None;
+    }
+    let (_, scope) = serving_person(id, user_id, team_id, cx)?;
+    let tapped = Tap::parse(data).and_then(|tap| {
+        let queue = &cx.global::<RemoteChannels>().home.queue;
+        Some((queue.resolve(&scope, tap)?, tap.act))
+    });
+    let target = dispatch::Target::Remote(id.into());
+    let acted = match tapped {
+        // The page is rebuilt below, so the person sees what is there now.
+        None => Acted::Said(Some(s::remote_channel::home_stale())),
+        Some((pane, Act::Select)) => Acted::Said(dispatch::select_live(pane, &target, cx)),
+        Some((pane, Act::Stop)) => Acted::Stopping(dispatch::stop_pane(pane, &target, cx)),
+    };
+    Some((scope, acted))
+}
+
+/// The words a settled effect has for the person, if any.
+fn said(effect: Effect) -> Option<String> {
+    match effect {
+        Effect::Reply(reply) => Some(reply.text),
+        Effect::Feedback { label, .. } => Some(label),
+        Effect::None | Effect::Later(_) => None,
+    }
 }
 
 /// A pane's status or name changed: bring the pages the person is viewing up
@@ -161,20 +231,32 @@ fn serving_person(
     Some((bot, scope))
 }
 
-/// Every pane `/list` shows, with its status and its thread under `scope`.
+/// Every pane `/list` shows, with its status, its thread under `scope` and
+/// whether commands address it, under what the last tap came to.
 fn board(scope: &Scope, cx: &mut App) -> Board {
     let listing = crate::control::exec::listing(cx);
-    let threads = &cx.global::<RemoteChannels>().threads;
+    let channels = cx.global::<RemoteChannels>();
+    let threads = &channels.threads;
+    let selected = channels
+        .connections
+        .get(&scope.connection)
+        .and_then(|connection| connection.core.command_state().selected());
     let rows = crate::remote_channel::command::flatten(&listing)
         .iter()
         .map(|row| PaneRow {
+            pane: row.summary.target,
             name: PaneRow::named(row),
             shown: threads.activity_of(row.summary.target),
             thread: threads.root_of_pane(scope, row.summary.target),
             link: None,
+            selected: selected == Some(row.summary.target),
         })
         .collect();
-    Board::new(rows, slack::home::ROW_CAPACITY)
+    let mut board = Board::new(rows, slack::home::ROW_CAPACITY);
+    let home = &mut cx.global_mut::<RemoteChannels>().home;
+    board.outcome = home.queue.outcome(scope).cloned();
+    board.number(&mut home.numbering);
+    board
 }
 
 /// Publish every page that is due now.

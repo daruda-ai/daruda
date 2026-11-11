@@ -220,10 +220,33 @@ pub(crate) fn render_outcome(
 /// Point the target at `pane` and produce the toast naming it. A tap is the
 /// same act as `/use <n>`, so it goes through the same render funnel.
 pub(crate) fn select_target(pane: PaneRef, target: &super::Target, cx: &mut App) -> Option<String> {
+    let summary = target.state(cx)?.summary_for(pane);
+    select(pane, summary, target, cx)
+}
+
+/// Point the target at `pane` for a page that shows the panes open now
+/// rather than the `/list` table: the pane is named as it is now, and one
+/// closed since is reported gone, as a message addressed to it is.
+pub(crate) fn select_live(pane: PaneRef, target: &super::Target, cx: &mut App) -> Option<String> {
+    let listing = crate::control::exec::listing(cx);
+    let live = command::flatten(&listing)
+        .into_iter()
+        .find(|row| row.summary.target == pane);
+    match live {
+        Some(row) => select(pane, Some(row.summary), target, cx),
+        None => report_target_gone(pane, target, cx).map(|reply| reply.text),
+    }
+}
+
+fn select(
+    pane: PaneRef,
+    summary: Option<crate::control::result::ChatSummary>,
+    target: &super::Target,
+    cx: &mut App,
+) -> Option<String> {
     trace::state("target.selected", || format!("pane={}", trace::pane(pane)));
     let state = target.state(cx)?;
     state.select(Some(pane));
-    let summary = state.summary_for(pane);
     Some(
         command::render(
             &Ok(ControlResult::Selected { target: summary }),

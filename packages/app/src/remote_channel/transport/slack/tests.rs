@@ -204,3 +204,65 @@ fn opening_the_home_tab_is_read_from_the_event_and_nothing_else_is() {
     assert!(parse(&message).is_some(), "a message still parses as one");
     assert!(parse(&opened("home")).is_none(), "the page is no message");
 }
+
+/// A Home-tab `block_actions` payload as Slack sends it: a view container,
+/// no channel, message or response URL, and a null `team` on an org install.
+fn home_tap(action: Value) -> Value {
+    json!({"type":"interactive", "envelope_id":"env-7", "payload":{
+        "type":"block_actions",
+        "user":{"id":"U1", "username":"woo", "name":"woo", "team_id":"T1"},
+        "api_app_id":"A1", "token":"x", "trigger_id":"1.2.3",
+        "container":{"type":"view", "view_id":"V1"},
+        "team":null,
+        "enterprise":{"id":"E1", "name":"org"},
+        "is_enterprise_install":true,
+        "view":{"id":"V1", "type":"home", "team_id":"T1", "app_id":"A1",
+            "bot_id":"B1", "blocks":[], "state":{"values":{}}, "hash":"h"},
+        "actions":[action],
+    }})
+}
+
+/// A tap on a page button names the person, their own team and the value;
+/// a link button is Slack's to open; a tap on a message stays a callback.
+#[test]
+fn a_home_tap_is_read_apart_from_a_message_tap() {
+    let tapped = parse_home(&home_tap(json!({"action_id":"home-stop-0", "block_id":"b",
+        "type":"button", "value":"hom:7:0:stop", "action_ts":"1.2"})))
+    .expect("a page button");
+    assert_eq!(
+        (
+            tapped.event_id.as_str(),
+            tapped.user_id.as_str(),
+            tapped.team_id.as_str()
+        ),
+        ("env-7", "U1", "T1")
+    );
+    assert!(matches!(tapped.kind, HomeEventKind::Tap { data } if data == "hom:7:0:stop"));
+
+    let link = home_tap(json!({"action_id":"home-thread-0", "block_id":"b",
+        "type":"button", "url":"https://x", "action_ts":"1.2"}));
+    assert!(
+        parse_home(&link).is_none(),
+        "a link button carries no value"
+    );
+    assert!(parse(&link).is_none(), "nor is it a message callback");
+
+    let mut modal = home_tap(json!({"type":"button", "value":"hom:7:0:stop"}));
+    modal["payload"]["view"]["type"] = json!("modal");
+    assert!(
+        parse_home(&modal).is_none(),
+        "only the Home tab is the page"
+    );
+
+    let message = json!({"type":"interactive", "envelope_id":"e1", "payload":{
+        "type":"block_actions", "user":{"id":"U2"}, "channel":{"id":"D1"}, "team":{"id":"T1"},
+        "container":{"type":"message", "message_ts":"12.34"},
+        "message":{"ts":"12.34", "text":"permission"}, "actions":[{"value":"opaque-token"}]
+    }});
+    assert!(
+        parse_home(&message).is_none(),
+        "a message tap is no page tap"
+    );
+    let callback = parse(&message).expect("a message tap");
+    assert!(matches!(callback.kind, IncomingKind::Callback { data, .. } if data == "opaque-token"));
+}

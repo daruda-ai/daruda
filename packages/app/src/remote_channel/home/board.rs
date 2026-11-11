@@ -1,6 +1,8 @@
 //! What a page lists: the panes, the ones the person is needed by or that are
 //! working first, cut to what the page has room for. GPUI-free.
 
+use super::token::{Act, Numbering, Tap};
+use crate::remote_channel::bridge::PaneRef;
 use crate::remote_channel::command::{ListingRow, agent_label, title_suffix};
 use crate::remote_channel::threads::status::ShownStatus;
 use crate::surface::strings as s;
@@ -8,6 +10,7 @@ use crate::surface::strings as s;
 /// One pane on the page.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PaneRow {
+    pub pane: PaneRef,
     pub name: String,
     /// `None` while the pane has not reported since daruda started.
     pub shown: Option<ShownStatus>,
@@ -15,6 +18,8 @@ pub(super) struct PaneRow {
     pub thread: Option<String>,
     /// The link that opens that thread, once known.
     pub link: Option<String>,
+    /// The pane the connection's commands address.
+    pub selected: bool,
 }
 
 impl PaneRow {
@@ -28,11 +33,22 @@ impl PaneRow {
     }
 }
 
+/// What the person's last tap on the page came to, and when.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Outcome {
+    /// Unix seconds.
+    pub at: i64,
+    pub text: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Board {
     pub rows: Vec<PaneRow>,
     /// Panes left out for want of room.
     pub omitted: usize,
+    /// What the rows' buttons carry, so a tap names this board's row.
+    pub generation: u64,
+    pub outcome: Option<Outcome>,
 }
 
 impl Board {
@@ -42,7 +58,34 @@ impl Board {
         rows.sort_by_key(|row| rank(row.shown));
         let omitted = rows.len().saturating_sub(capacity);
         rows.truncate(capacity);
-        Self { rows, omitted }
+        Self {
+            rows,
+            omitted,
+            generation: 0,
+            outcome: None,
+        }
+    }
+
+    /// Give the rows' buttons the generation `numbering` has for them.
+    pub(super) fn number(&mut self, numbering: &mut Numbering) {
+        self.generation = numbering.number(self.rows.iter().map(|row| row.pane).collect());
+    }
+
+    /// The value of row `index`'s button for `act`.
+    pub(super) fn token(&self, index: usize, act: Act) -> String {
+        Tap {
+            generation: self.generation,
+            index,
+            act,
+        }
+        .token()
+    }
+
+    /// The pane `tap` names, when it was made for this board.
+    pub(super) fn resolve(&self, tap: Tap) -> Option<PaneRef> {
+        (tap.generation == self.generation)
+            .then(|| self.rows.get(tap.index).map(|row| row.pane))
+            .flatten()
     }
 
     /// The thread roots shown without a link yet.

@@ -30,6 +30,10 @@ impl<M: Eq + std::hash::Hash + Clone> Default for RoutingCore<M> {
 }
 
 impl<M: Eq + std::hash::Hash + Clone> RoutingCore<M> {
+    pub fn command_state(&self) -> &crate::remote_channel::command::CommandState {
+        &self.command_state
+    }
+
     pub fn command_state_mut(&mut self) -> &mut crate::remote_channel::command::CommandState {
         &mut self.command_state
     }
