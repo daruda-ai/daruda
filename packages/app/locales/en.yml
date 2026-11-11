@@ -2626,7 +2626,7 @@ remote_channel:
   # The status of a pane that has not worked since daruda started.
   home_status_idle: "Idle"
   # Counts the panes the page has no room for.
-  home_more: "…and %{count} more panes"
+  home_more: "%{count} more not shown"
   # Button that opens a pane's thread in the paired conversation.
   home_open_thread: "Open thread"
   # Button that makes a pane the one the connection's commands address, as
