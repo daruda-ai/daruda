@@ -341,7 +341,8 @@ pub fn edit(
 
 /// What Slack says of a write that replaces what it shows: `chat.update`
 /// for a card's settlement or a thread root's status, `views.publish` for
-/// the app home. They differ only in what a refusal means to them.
+/// the app home. They differ only in what a refusal means to them. The app
+/// home's `chat.getPermalink` read is classified the same way.
 enum UpdateVerdict {
     Updated,
     /// May pass: rate limits, server trouble, a reply that names no code.

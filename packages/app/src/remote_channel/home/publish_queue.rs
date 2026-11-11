@@ -7,7 +7,7 @@ use super::board::{Board, Outcome};
 use super::token::Tap;
 use crate::remote_channel::bridge::PaneRef;
 use crate::remote_channel::threads::Scope;
-use crate::remote_channel::transport::PageVerdict;
+use crate::remote_channel::transport::{LinkFailure, PageVerdict};
 use std::collections::{HashMap, HashSet};
 
 /// Whether the person has a page daruda should keep up to date.
@@ -38,9 +38,12 @@ enum Link {
     /// Being asked for; the board goes out without it meanwhile.
     Pending,
     Known(String),
-    /// The last ask failed; asked again on the retry tick or the person's
-    /// next opening.
+    /// The last ask failed for a passing reason; asked again on the retry
+    /// tick or the person's next opening.
     Failed,
+    /// The channel refused to link this root: not asked again for this page,
+    /// since the same ask would be refused again.
+    Refused,
 }
 
 /// What a link that landed came to.
@@ -48,8 +51,11 @@ enum Link {
 pub(super) enum Learned {
     /// Known now: the page is worth building again.
     Known,
-    /// Failed; `first` the first time this root failed on this page.
+    /// Failed for a passing reason; `first` the first time this root failed
+    /// on this page.
     Failed { first: bool },
+    /// Refused: the row goes without a link for as long as the page.
+    Refused,
     /// For a page another identity has replaced since, or no longer asked.
     Stale,
 }
@@ -93,8 +99,8 @@ impl Page {
     }
 
     /// Give up what waits for a later trigger: a board that could not go out
-    /// is built anew, since the panes have moved on meanwhile, and failed
-    /// links are asked again. Whether there was anything to give up.
+    /// is built anew, since the panes have moved on meanwhile, and links that
+    /// failed for a passing reason are asked again. Whether there was anything to give up.
     fn resume(&mut self) -> bool {
         let waiting = self.phase == Some(Phase::Waiting);
         if waiting {
@@ -273,7 +279,7 @@ impl PublishQueue {
         };
         board.link(|root| match page.links.get(root) {
             Some(Link::Known(link)) => Some(link.clone()),
-            Some(Link::Pending | Link::Failed) | None => None,
+            Some(Link::Pending | Link::Failed | Link::Refused) | None => None,
         });
     }
 
@@ -303,7 +309,7 @@ impl PublishQueue {
         &mut self,
         scope: &Scope,
         root: &str,
-        link: Option<String>,
+        link: &Result<String, LinkFailure>,
     ) -> Learned {
         let Some(page) = current(&mut self.pages, scope) else {
             return Learned::Stale;
@@ -316,15 +322,19 @@ impl PublishQueue {
             return Learned::Stale;
         };
         match link {
-            Some(link) => {
-                *entry = Link::Known(link);
+            Ok(link) => {
+                *entry = Link::Known(link.clone());
                 Learned::Known
             }
-            None => {
+            Err(LinkFailure::Transient(_)) => {
                 *entry = Link::Failed;
                 Learned::Failed {
                     first: page.told_failed.insert(root.to_owned()),
                 }
+            }
+            Err(LinkFailure::Refused(_)) => {
+                *entry = Link::Refused;
+                Learned::Refused
             }
         }
     }

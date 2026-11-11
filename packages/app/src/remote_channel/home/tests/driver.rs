@@ -164,18 +164,15 @@ fn a_tap_on_a_gone_pane_or_an_old_board_says_so_on_the_page(cx: &mut gpui::TestA
 /// Thread links are asked off the main thread while the board goes out
 /// without them. Each that lands is kept and builds the page again; one that
 /// fails leaves its row without a button and is not asked again until the
-/// retry tick.
+/// retry tick, and one the channel refused is not asked again at all.
 #[gpui::test]
 fn thread_links_land_after_the_board_and_build_the_page_again(cx: &mut gpui::TestAppContext) {
-    use crate::remote_channel::transport::{AppHome, Credentials, TransportError};
-    fn link(
-        _: &Credentials,
-        _: &str,
-        root: &str,
-    ) -> crate::remote_channel::transport::Result<String> {
+    use crate::remote_channel::transport::{AppHome, Credentials, LinkFailure};
+    fn link(_: &Credentials, _: &str, root: &str) -> Result<String, LinkFailure> {
         match root {
             "1.1" => Ok("https://x/p1".into()),
-            _ => Err(TransportError::Message("no permalink".into())),
+            "2.2" => Err(LinkFailure::Transient("ratelimited".into())),
+            _ => Err(LinkFailure::Refused("message_not_found".into())),
         }
     }
     let _stub = super::super::driver::stub_for_test(AppHome {
@@ -197,7 +194,11 @@ fn thread_links_land_after_the_board_and_build_the_page_again(cx: &mut gpui::Tes
         row.thread = Some(root.into());
         row
     };
-    let rows = vec![threaded("a", "1.1"), threaded("b", "2.2")];
+    let rows = vec![
+        threaded("a", "1.1"),
+        threaded("b", "2.2"),
+        threaded("c", "3.3"),
+    ];
     let linked = |cx: &mut gpui::TestAppContext| {
         let rows = rows.clone();
         cx.update(|cx| {
@@ -211,20 +212,20 @@ fn thread_links_land_after_the_board_and_build_the_page_again(cx: &mut gpui::Tes
         })
     };
     let (board, links) = linked(cx);
-    assert_eq!(links, [None, None], "nothing known yet");
+    assert_eq!(links, [None, None, None], "nothing known yet");
     cx.update(|cx| super::super::driver::ask_links_for_test(&scope, &board, cx));
     assert!(
         cx.update(|cx| cx
             .global_mut::<RemoteChannels>()
             .home
             .queue
-            .ask_links(&scope, ["1.1", "2.2"])
+            .ask_links(&scope, ["1.1", "2.2", "3.3"])
             .is_empty()),
         "asked once, pending meanwhile"
     );
     cx.run_until_parked();
     let (_, links) = linked(cx);
-    assert_eq!(links, [Some("https://x/p1".to_owned()), None]);
+    assert_eq!(links, [Some("https://x/p1".to_owned()), None, None]);
     assert!(
         cx.update(|cx| cx
             .global_mut::<RemoteChannels>()
@@ -240,9 +241,9 @@ fn thread_links_land_after_the_board_and_build_the_page_again(cx: &mut gpui::Tes
             cx.global_mut::<RemoteChannels>()
                 .home
                 .queue
-                .ask_links(&scope, ["1.1", "2.2"]),
+                .ask_links(&scope, ["1.1", "2.2", "3.3"]),
             ["2.2"],
-            "the retry tick asks a failed link again"
+            "the retry tick asks a failed link again, not a refused one"
         )
     });
 }

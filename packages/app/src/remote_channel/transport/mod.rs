@@ -132,7 +132,7 @@ pub(crate) struct AppHome {
     pub publish: fn(&Credentials, &str, &PageView<'_>) -> PageVerdict,
     /// The link that opens message `message_id` of `conversation_id`: a
     /// thread's root opens its thread.
-    pub link: fn(&Credentials, &str, &str) -> Result<String>,
+    pub link: fn(&Credentials, &str, &str) -> std::result::Result<String, LinkFailure>,
     /// What turns the page back on once the channel says it is off.
     pub off_hint: &'static str,
 }
@@ -175,6 +175,24 @@ pub(crate) enum PageVerdict {
     Transient(String),
     /// The channel refused this view: credentials, scopes, or the payload.
     Refused(String),
+}
+
+/// Why the link to a message could not be had.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum LinkFailure {
+    /// Rate limits, timeouts, server trouble: may pass.
+    Transient(String),
+    /// The channel refused to link this message: credentials, scopes, or a
+    /// message it does not know. Asking again meets the same answer.
+    Refused(String),
+}
+
+impl std::fmt::Display for LinkFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transient(reason) | Self::Refused(reason) => f.write_str(reason),
+        }
+    }
 }
 
 /// The page of the app's own `kind` has, if any. The one question asked

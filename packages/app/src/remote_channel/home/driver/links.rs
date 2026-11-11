@@ -7,7 +7,7 @@ use super::super::publish_queue::Learned;
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::threads::Scope;
-use crate::remote_channel::transport::{AppHome, TransportError};
+use crate::remote_channel::transport::{AppHome, LinkFailure};
 use gpui::App;
 use std::sync::Arc;
 
@@ -44,12 +44,9 @@ pub(super) fn ask(scope: &Scope, home: AppHome, bot: Arc<BotSession>, board: &Bo
 
 /// Keep what the link asked for `root` came to. Whether `scope`'s page
 /// still waited for it.
-fn learn(scope: &Scope, root: &str, link: Result<String, TransportError>, cx: &mut App) -> bool {
+fn learn(scope: &Scope, root: &str, link: Result<String, LinkFailure>, cx: &mut App) -> bool {
     let queue = &mut cx.global_mut::<RemoteChannels>().home.queue;
-    match (
-        queue.learn_link(scope, root, link.as_ref().ok().cloned()),
-        link,
-    ) {
+    match (queue.learn_link(scope, root, &link), link) {
         (Learned::Stale, _) => return false,
         (Learned::Known, _) => super::changed(cx),
         // The row shows no button meanwhile; the retry tick or the person's
@@ -57,9 +54,15 @@ fn learn(scope: &Scope, root: &str, link: Result<String, TransportError>, cx: &m
         (Learned::Failed { first: true }, Err(error)) => crate::remote_channel::log_error(
             "Remote home thread link unavailable",
             &error,
-            "remote.home.permalink",
+            "remote.home.link",
         ),
-        (Learned::Failed { .. }, _) => {}
+        // Never asked again for this page, so told once.
+        (Learned::Refused, Err(error)) => crate::remote_channel::log_error(
+            "Remote home thread link refused",
+            &error,
+            "remote.home.link.refused",
+        ),
+        (Learned::Failed { .. } | Learned::Refused, _) => {}
     }
     true
 }

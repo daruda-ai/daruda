@@ -2,9 +2,9 @@
 //! panes. Other transports have none; callers ask
 //! [`crate::remote_channel::transport::app_home`] before using this.
 
-use super::{API, Credentials, Result, TransportError, UpdateVerdict, refusal, verdict};
+use super::{API, Credentials, UpdateVerdict, verdict};
 use crate::remote_channel::transport::{
-    AppHome, HomeEvent, HomeEventKind, PageVerdict, PageView, chunks, http,
+    AppHome, HomeEvent, HomeEventKind, LinkFailure, PageVerdict, PageView, chunks, http,
 };
 use serde_json::{Value, json};
 
@@ -187,7 +187,7 @@ fn publish_payload(user_id: &str, view: &PageView<'_>) -> Value {
     json!({"user_id": user_id, "view": {"type": "home", "blocks": page_blocks(view)}})
 }
 
-fn publish_verdict(response: std::result::Result<Value, http::Failure>) -> PageVerdict {
+fn publish_verdict(response: Result<Value, http::Failure>) -> PageVerdict {
     match verdict("views.publish", response) {
         UpdateVerdict::Updated => PageVerdict::Published,
         UpdateVerdict::Transient(reason) => PageVerdict::Transient(reason),
@@ -200,29 +200,41 @@ fn publish_verdict(response: std::result::Result<Value, http::Failure>) -> PageV
 
 /// The link that opens message `message_ts` of `channel`: a thread's root
 /// opens its thread.
-fn permalink(credentials: &Credentials, channel: &str, message_ts: &str) -> Result<String> {
+fn permalink(
+    credentials: &Credentials,
+    channel: &str,
+    message_ts: &str,
+) -> Result<String, LinkFailure> {
     // A read method: Slack takes its arguments in the query, not as JSON.
     let url = url::Url::parse_with_params(
         &format!("{API}/chat.getPermalink"),
         &[("channel", channel), ("message_ts", message_ts)],
     )
-    .map_err(|_| TransportError::Message("Slack permalink request is invalid".into()))?;
-    let response = http::request(
+    .map_err(|_| LinkFailure::Refused("Slack permalink request is invalid".into()))?;
+    permalink_of(http::request_with_status(
         "GET",
         url.as_str(),
         Some(&format!("Bearer {}", credentials.bot)),
         &Value::Null,
-    )?;
-    permalink_of(&response)
+    ))
 }
 
-fn permalink_of(response: &Value) -> Result<String> {
-    if let Some(code) = refusal(response) {
-        return Err(TransportError::Message(format!(
-            "Slack chat.getPermalink failed: {code}"
-        )));
+/// Read the link from a `chat.getPermalink` reply, telling a refusal of this
+/// message from trouble that may pass as Slack's writes do.
+fn permalink_of(response: Result<Value, http::Failure>) -> Result<String, LinkFailure> {
+    let link = response
+        .as_ref()
+        .ok()
+        .and_then(|value| http::required(value, "permalink").ok())
+        .map(str::to_owned);
+    match verdict("chat.getPermalink", response) {
+        // A reply without the link names no refusal, like one without a code.
+        UpdateVerdict::Updated => link.ok_or_else(|| {
+            LinkFailure::Transient("Slack chat.getPermalink reply is missing permalink".into())
+        }),
+        UpdateVerdict::Transient(reason) => Err(LinkFailure::Transient(reason)),
+        UpdateVerdict::Refused { reason, .. } => Err(LinkFailure::Refused(reason)),
     }
-    Ok(http::required(response, "permalink")?.to_owned())
 }
 
 #[cfg(test)]

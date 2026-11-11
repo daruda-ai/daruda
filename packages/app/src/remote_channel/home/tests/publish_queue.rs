@@ -341,12 +341,15 @@ fn a_tap_resolves_against_the_shown_or_coming_board() {
 }
 
 /// A page asks once for each thread's link: a pending ask is not repeated,
-/// a known link stays, and a failed one waits for the retry tick or the next
-/// opening. A failure is told once per root; another identity's page asks
-/// anew, and a link landing for the replaced page is stale.
+/// a known link stays, a failed one waits for the retry tick or the next
+/// opening, and a refused one is not asked again. A failure is told once per
+/// root; another identity's page asks anew, and a link landing for the
+/// replaced page is stale.
 #[test]
 fn a_page_asks_each_thread_link_once_until_a_failure_is_retried() {
     use super::super::publish_queue::Learned;
+    use crate::remote_channel::transport::LinkFailure;
+    let failed = Err(LinkFailure::Transient("ratelimited".into()));
     let work = scope("work", "bot");
     let linked = |queue: &PublishQueue, scope| {
         let mut threaded = row("a", None);
@@ -361,19 +364,30 @@ fn a_page_asks_each_thread_link_once_until_a_failure_is_retried() {
         "no page, no ask"
     );
     queue.opened(&work);
-    assert_eq!(queue.ask_links(&work, ["1.1", "2.2"]), ["1.1", "2.2"]);
+    assert_eq!(
+        queue.ask_links(&work, ["1.1", "2.2", "3.3"]),
+        ["1.1", "2.2", "3.3"]
+    );
     assert!(
-        queue.ask_links(&work, ["1.1", "2.2"]).is_empty(),
+        queue.ask_links(&work, ["1.1", "2.2", "3.3"]).is_empty(),
         "pending asks are not repeated"
+    );
+    assert_eq!(
+        queue.learn_link(
+            &work,
+            "3.3",
+            &Err(LinkFailure::Refused("message_not_found".into()))
+        ),
+        Learned::Refused
     );
     assert_eq!(linked(&queue, &work), None, "pending: no link yet");
     assert_eq!(
-        queue.learn_link(&work, "1.1", Some("https://x/p1".into())),
+        queue.learn_link(&work, "1.1", &Ok("https://x/p1".into())),
         Learned::Known
     );
     assert_eq!(linked(&queue, &work).as_deref(), Some("https://x/p1"));
     assert_eq!(
-        queue.learn_link(&work, "2.2", None),
+        queue.learn_link(&work, "2.2", &failed),
         Learned::Failed { first: true }
     );
     assert!(
@@ -381,22 +395,26 @@ fn a_page_asks_each_thread_link_once_until_a_failure_is_retried() {
         "a failed link waits for a later trigger"
     );
     assert!(queue.retry(), "the retry tick asks again");
-    assert_eq!(queue.ask_links(&work, ["1.1", "2.2"]), ["2.2"]);
     assert_eq!(
-        queue.learn_link(&work, "2.2", None),
+        queue.ask_links(&work, ["1.1", "2.2", "3.3"]),
+        ["2.2"],
+        "but not for a refused link"
+    );
+    assert_eq!(
+        queue.learn_link(&work, "2.2", &failed),
         Learned::Failed { first: false },
         "told once"
     );
     queue.opened(&work);
     assert_eq!(
-        queue.ask_links(&work, ["2.2"]),
+        queue.ask_links(&work, ["2.2", "3.3"]),
         ["2.2"],
-        "the next opening asks again"
+        "the next opening asks again, but not for a refused link"
     );
     let other = scope("work", "other");
     queue.opened(&other);
     assert_eq!(
-        queue.learn_link(&work, "2.2", Some("https://x/p2".into())),
+        queue.learn_link(&work, "2.2", &Ok("https://x/p2".into())),
         Learned::Stale,
         "the old identity's page is gone"
     );

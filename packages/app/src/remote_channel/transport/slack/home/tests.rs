@@ -174,18 +174,54 @@ fn a_publish_reply_is_classified_by_what_it_says_of_the_page() {
     }
 }
 
+/// A permalink is read from the reply. A refusal of this message is told
+/// apart from trouble that may pass, so the page stops asking only for the
+/// former.
 #[test]
 fn a_permalink_is_read_from_the_reply_or_refused_by_code() {
-    let link = permalink_of(&json!({"ok": true, "permalink": "https://x/p1"}));
-    assert_eq!(link.unwrap(), "https://x/p1");
-    let refused = permalink_of(&json!({"ok": false, "error": "message_not_found"}));
-    assert!(
-        refused
-            .unwrap_err()
-            .to_string()
-            .contains("message_not_found")
-    );
-    assert!(permalink_of(&json!({"ok": true})).is_err(), "no link");
+    use crate::remote_channel::transport::LinkFailure;
+    let transient = |reason: &str| Err(LinkFailure::Transient(reason.into()));
+    let refused = |reason: &str| Err(LinkFailure::Refused(reason.into()));
+    let cases = [
+        (
+            Ok(json!({"ok": true, "permalink": "https://x/p1"})),
+            Ok("https://x/p1".to_owned()),
+            "the link",
+        ),
+        (
+            Ok(json!({"ok": false, "error": "message_not_found"})),
+            refused("Slack chat.getPermalink failed: message_not_found"),
+            "a message Slack does not know",
+        ),
+        (
+            Ok(json!({"ok": false, "error": "ratelimited"})),
+            transient("Slack chat.getPermalink failed: ratelimited"),
+            "a documented passing code",
+        ),
+        (
+            Ok(json!({"ok": false})),
+            transient("Slack chat.getPermalink failed: unknown_error"),
+            "a refusal that names no code",
+        ),
+        (
+            Ok(json!({"ok": true})),
+            transient("Slack chat.getPermalink reply is missing permalink"),
+            "a reply without the link",
+        ),
+        (
+            Err(http::Failure::Status(503)),
+            transient("Remote API returned HTTP 503"),
+            "server trouble",
+        ),
+        (
+            Err(http::Failure::Status(403)),
+            refused("Remote API returned HTTP 403"),
+            "a status that will not pass",
+        ),
+    ];
+    for (response, want, label) in cases {
+        assert_eq!(permalink_of(response), want, "{label}");
+    }
 }
 
 /// Opening the Home tab names the person and team; the Messages tab and
