@@ -144,3 +144,114 @@ async fn tap(generation: uuid::Uuid, event_id: &str, data: &str, cx: &mut TestAp
     assert!(matches!(served, Served::Done), "the claim is durable");
     cx.run_until_parked();
 }
+
+/// A tap whose claim failed is held, not dropped: the reopened inbox claims
+/// it again ahead of the message queued behind it, and it is then served.
+#[gpui::test]
+async fn a_home_tap_whose_claim_failed_is_served_first_on_the_reopened_inbox(
+    cx: &mut TestAppContext,
+) {
+    use crate::surface::strings as s;
+    use std::{cell::RefCell, rc::Rc};
+
+    cx.executor().allow_parking();
+    let root = tempfile::tempdir().unwrap();
+    let first = open_bot(root.path(), || Ok(InboxSeed::default()));
+    let generation = cx.update(|cx| install_connection("work", first.clone(), cx));
+    cx.update(|cx| run_worker("work", cx));
+    let attempts = Rc::new(RefCell::new(Vec::<String>::new()));
+    let recorded = attempts.clone();
+    let (events, receiver) = futures::channel::mpsc::unbounded();
+    cx.update(|cx| {
+        serve_events(
+            receiver,
+            move |inbox: &InboxStore, channel, id| {
+                let event = match &id {
+                    InboxId::Opaque(event) => event.clone(),
+                    InboxId::Monotonic(update) => update.to_string(),
+                };
+                let fail = recorded.borrow().is_empty();
+                recorded.borrow_mut().push(event);
+                if fail {
+                    futures::future::Either::Left(std::future::ready(Err(CommitError::Io(
+                        std::io::Error::other("temporary storage failure"),
+                    ))))
+                } else {
+                    futures::future::Either::Right(inbox.claim(channel, id))
+                }
+            },
+            cx,
+        )
+    });
+
+    // A button no board carries: served, it says the page was stale.
+    events
+        .unbounded_send(WorkerEvent {
+            id: "work".into(),
+            generation,
+            payload: WorkerPayload::Home(transport::HomeEvent {
+                event_id: "tap".into(),
+                user_id: "user".into(),
+                team_id: "scope".into(),
+                kind: transport::HomeEventKind::Tap {
+                    data: "hom:0:0:stop".into(),
+                },
+            }),
+        })
+        .unwrap();
+    events
+        .unbounded_send(from("stranger", "after", generation))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        *attempts.borrow(),
+        ["tap"],
+        "a later command must not be claimed ahead of a held tap"
+    );
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    assert!(reopen_requested("work", cx));
+
+    drop(first);
+    let reopened = open_bot(root.path(), || panic!("recovery must not reimport"));
+    // As the worker reports a reopened session: ready, then connecting, so
+    // the page may be published to again.
+    for payload in [
+        WorkerPayload::Ready(reopened.clone()),
+        WorkerPayload::Status(crate::remote_channel::runtime::Status::Connecting),
+    ] {
+        events
+            .unbounded_send(WorkerEvent {
+                id: "work".into(),
+                generation,
+                payload,
+            })
+            .unwrap();
+    }
+    // A real claim completes on the inbox's writer thread, outside the
+    // executor, so parking alone does not mean the backlog has drained.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while attempts.borrow().len() < 3 && std::time::Instant::now() < deadline {
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(*attempts.borrow(), ["tap", "tap", "after"]);
+    let said = cx.update(|cx| {
+        let channels = cx.global::<RemoteChannels>();
+        let scope = channels.connections["work"]
+            .thread_scope(&reopened)
+            .unwrap();
+        channels.home.outcome_for_test(&scope)
+    });
+    assert_eq!(
+        said,
+        Some(s::remote_channel::home_stale()),
+        "the held tap was served once claimed"
+    );
+    cx.update(|cx| cx.global_mut::<RemoteChannels>().connections.clear());
+    drop(events);
+    cx.run_until_parked();
+    drop(reopened);
+    wait_release(root.path());
+}
