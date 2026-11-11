@@ -1,8 +1,8 @@
 //! Slack Web API and Socket Mode adapter.
 
 use super::{
-    Credentials, Incoming, IncomingKind, Message, Result, SentPart, TransportError, chunks, http,
-    socket,
+    Credentials, HomeEvent, HomeEventKind, Incoming, IncomingKind, Message, Result, SentPart,
+    TransportError, chunks, http, socket,
 };
 use crate::remote_channel::cards::EditFailure;
 use daruda_config::remote::RemoteRecipient;
@@ -64,6 +64,7 @@ pub fn session(
     credentials: &Credentials,
     stop: &AtomicBool,
     mut publish: impl FnMut(Incoming) -> bool,
+    mut publish_home: impl FnMut(HomeEvent) -> bool,
     ready: impl FnOnce(),
 ) -> Result<()> {
     let app = credentials
@@ -85,6 +86,12 @@ pub fn session(
         if let Some(id) = envelope["envelope_id"].as_str() {
             socket::send(&mut socket, &json!({"envelope_id": id}))?;
         }
+        if let Some(home) = parse_home(&envelope) {
+            if !publish_home(home) {
+                break;
+            }
+            continue;
+        }
         if let Some(incoming) = parse(&envelope)
             && !publish(incoming)
         {
@@ -92,6 +99,47 @@ pub fn session(
         }
     }
     Ok(())
+}
+
+/// The person opening the app's Home tab. Read from `payload.event` like a
+/// message; Slack's documents disagree on that wrapping, so a parsed event,
+/// and any other event type left unread, is traced to confirm it live.
+fn parse_home(envelope: &Value) -> Option<HomeEvent> {
+    use crate::remote_channel::trace;
+    if envelope["type"] != "events_api" {
+        return None;
+    }
+    let payload = &envelope["payload"];
+    let event = &payload["event"];
+    let kind = event["type"].as_str().unwrap_or_default();
+    if kind != "app_home_opened" {
+        if kind != "message" {
+            trace::delivery("slack.event.unread", || {
+                format!(
+                    "event.type={kind:?} payload.type={:?}",
+                    payload["type"].as_str().unwrap_or_default()
+                )
+            });
+        }
+        return None;
+    }
+    let tab = event["tab"].as_str().unwrap_or_default();
+    trace::delivery("slack.home.opened", || {
+        format!(
+            "tab={tab:?} event_id={}",
+            trace::opt(payload["event_id"].as_str())
+        )
+    });
+    // The Messages tab is the paired conversation's own screen, not the page.
+    if tab != "home" {
+        return None;
+    }
+    Some(HomeEvent {
+        event_id: payload["event_id"].as_str()?.to_owned(),
+        user_id: event["user"].as_str()?.to_owned(),
+        team_id: payload["team_id"].as_str()?.to_owned(),
+        kind: HomeEventKind::Opened,
+    })
 }
 
 fn parse(envelope: &Value) -> Option<Incoming> {
@@ -346,14 +394,20 @@ enum UpdateVerdict {
     },
 }
 
-/// Classify a `chat.update` reply. Slack refuses with HTTP 200 and an error
-/// code; an HTTP error status means the request never reached the method.
+/// Classify a `chat.update` reply.
 fn update_verdict(response: std::result::Result<Value, http::Failure>) -> UpdateVerdict {
+    verdict("chat.update", response)
+}
+
+/// Classify a reply to a write that replaces what Slack shows. Slack refuses
+/// with HTTP 200 and an error code; an HTTP error status means the request
+/// never reached the method.
+fn verdict(method: &str, response: std::result::Result<Value, http::Failure>) -> UpdateVerdict {
     match response {
         Ok(value) => match refusal(&value) {
             None => UpdateVerdict::Updated,
             Some(code) => {
-                let reason = format!("Slack chat.update failed: {code}");
+                let reason = format!("Slack {method} failed: {code}");
                 // A reply without a code says nothing about the request.
                 let named = value["error"].is_string();
                 if named && !TRANSIENT_REFUSALS.contains(&code.as_str()) {
@@ -392,6 +446,7 @@ fn update_result(
     }
 }
 
+pub(crate) mod home;
 pub(crate) mod threads;
 
 #[cfg(test)]

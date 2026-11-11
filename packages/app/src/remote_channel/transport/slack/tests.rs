@@ -169,3 +169,38 @@ fn a_message_says_who_else_reads_its_conversation() {
         );
     }
 }
+
+/// Opening the Home tab names the person and team; the Messages tab and
+/// ordinary messages are not the page.
+#[test]
+fn opening_the_home_tab_is_read_from_the_event_and_nothing_else_is() {
+    let opened = |tab: &str| {
+        json!({"type":"events_api", "payload":{"event_id":"Ev3", "team_id":"T1",
+            "event":{"type":"app_home_opened", "user":"U1", "channel":"D1", "tab":tab}}})
+    };
+    let home = parse_home(&opened("home")).expect("the Home tab is the page");
+    assert_eq!(
+        (
+            home.event_id.as_str(),
+            home.user_id.as_str(),
+            home.team_id.as_str()
+        ),
+        ("Ev3", "U1", "T1")
+    );
+    assert!(matches!(home.kind, HomeEventKind::Opened));
+    let message = json!({"type":"events_api", "payload":{"event_id":"Ev1", "team_id":"T1",
+        "event":{"type":"message", "user":"U1", "channel":"D1", "text":"hi"}}});
+    let cases = [
+        (opened("messages"), "the Messages tab"),
+        (message.clone(), "a message"),
+        (
+            json!({"type":"interactive", "payload":{"type":"block_actions"}}),
+            "a tap",
+        ),
+    ];
+    for (envelope, label) in cases {
+        assert!(parse_home(&envelope).is_none(), "{label}");
+    }
+    assert!(parse(&message).is_some(), "a message still parses as one");
+    assert!(parse(&opened("home")).is_none(), "the page is no message");
+}

@@ -35,7 +35,7 @@ pub(crate) struct ListingRow {
 
 /// Depth-first walk in listing order — the same order `record_listing`
 /// flattens, so an ordinal here and an ordinal there name the same pane.
-fn flatten(listing: &Listing) -> Vec<ListingRow> {
+pub(crate) fn flatten(listing: &Listing) -> Vec<ListingRow> {
     listing
         .windows
         .iter()
@@ -217,7 +217,9 @@ impl CommandState {
 
 mod render;
 
-pub(crate) use render::{RenderedReply, render, render_error, render_parse_error};
+pub(crate) use render::{
+    RenderedReply, agent_label, render, render_error, render_parse_error, title_suffix,
+};
 
 /// What the poll loop should do with a parsed command.
 pub(crate) enum Resolution {

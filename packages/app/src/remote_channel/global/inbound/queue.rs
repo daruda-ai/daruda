@@ -75,6 +75,24 @@ pub(super) fn serve_events<F: Future<Output = ClaimResult> + 'static>(
                     Work::Reopened(bot)
                 }
                 WorkerPayload::Incoming(incoming) => Work::Incoming(incoming),
+                // A refresh, safe to repeat, so it skips the inbox claim and
+                // the connection's command queue.
+                WorkerPayload::Home(home) => {
+                    crate::remote_channel::trace::delivery("home.received", || {
+                        format!("connection={} event_id={}", event.id, home.event_id)
+                    });
+                    cx.update(|cx| match home.kind {
+                        transport::HomeEventKind::Opened => {
+                            crate::remote_channel::home::driver::opened(
+                                &event.id,
+                                &home.user_id,
+                                &home.team_id,
+                                cx,
+                            );
+                        }
+                    });
+                    continue;
+                }
             };
             let queue = queues.entry(event.id.clone()).or_insert_with(|| {
                 let (sender, receiver) = unbounded();

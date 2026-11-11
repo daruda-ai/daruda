@@ -2,7 +2,7 @@
 
 use super::{
     keychain, lock,
-    transport::{self, Credentials, Incoming},
+    transport::{self, Credentials, HomeEvent, Incoming},
 };
 use daruda_config::remote::{ChannelConfig, ChannelKind};
 use futures::channel::mpsc::UnboundedSender;
@@ -57,6 +57,8 @@ pub enum WorkerPayload {
     Ready(Arc<BotSession>),
     Status(Status),
     Incoming(Incoming),
+    /// The paired person did something on the app's own page.
+    Home(HomeEvent),
 }
 
 /// What the foreground asks of a running worker. The blocking transport
@@ -233,13 +235,25 @@ pub fn start(
                     }
                     emit(WorkerPayload::Incoming(incoming))
                 };
+                // The page names a person but no conversation; only the paired
+                // person's opening reaches the foreground.
+                let publish_home = |event: HomeEvent| {
+                    if !config.accepts_person(&event.user_id, &event.team_id) {
+                        return true;
+                    }
+                    emit(WorkerPayload::Home(event))
+                };
                 let ready = || {
                     emit(WorkerPayload::Status(Status::Connected));
                 };
                 let result = match config.kind {
-                    ChannelKind::Slack => {
-                        transport::slack::session(&credentials, interrupt, publish, ready)
-                    }
+                    ChannelKind::Slack => transport::slack::session(
+                        &credentials,
+                        interrupt,
+                        publish,
+                        publish_home,
+                        ready,
+                    ),
                     ChannelKind::Discord => {
                         gateway.session(&credentials, interrupt, publish, ready)
                     }

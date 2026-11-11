@@ -47,3 +47,28 @@ fn duplicate_ids_and_invalid_credential_keys_are_rejected() {
         .is_err()
     );
 }
+
+/// Opening the app's page names a person but no conversation: only the
+/// paired person on an enabled channel is accepted, in any conversation.
+#[test]
+fn a_person_is_accepted_by_user_and_scope_alone() {
+    let mut channel = ChannelConfig::new("work".into(), ChannelKind::Slack);
+    channel.recipient = Some(RemoteRecipient {
+        user_id: "U1".into(),
+        conversation_id: "D1".into(),
+        scope_id: "T1".into(),
+        conversation_kind: ConversationKind::Unknown,
+    });
+    assert!(!channel.accepts_person("U1", "T1"), "a disabled channel");
+    channel.enabled = true;
+    let cases = [
+        ("U1", "T1", true, "the paired person"),
+        ("U2", "T1", false, "another member of the team"),
+        ("U1", "T2", false, "the same id in another team"),
+    ];
+    for (user, scope, want, label) in cases {
+        assert_eq!(channel.accepts_person(user, scope), want, "{label}");
+    }
+    channel.recipient = None;
+    assert!(!channel.accepts_person("U1", "T1"), "an unpaired channel");
+}

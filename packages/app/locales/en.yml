@@ -2619,6 +2619,16 @@ remote_channel:
   thread_name_separator: " · "
   # Joins a thread root's name, subject and status in its notification text.
   thread_detail_separator: " — "
+  # Heading of the app's own Slack page that lists every agent pane.
+  home_header: "daruda agents"
+  # A pane on that page as `/list` names it: worktree, agent, then title.
+  home_row_name: "%{name} (%{agent})%{title}"
+  # The status of a pane that has not worked since daruda started.
+  home_status_idle: "Idle"
+  # Counts the panes the page has no room for.
+  home_more: "…and %{count} more panes"
+  # Button that opens a pane's thread in the paired conversation.
+  home_open_thread: "Open thread"
 
 library:
   toggle_needs_project: "Claude enablement is per project. Open a local project to change it."

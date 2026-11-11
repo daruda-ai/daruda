@@ -262,7 +262,7 @@ impl Threads {
 
     // --- Pane activity ----------------------------------------------------
 
-    pub(super) fn activity_of(&self, pane: PaneRef) -> Option<ShownStatus> {
+    pub(crate) fn activity_of(&self, pane: PaneRef) -> Option<ShownStatus> {
         match self.closed.contains_key(&pane) {
             true => Some(ShownStatus::Closed),
             false => self.activity.get(&pane).copied(),
@@ -334,6 +334,13 @@ impl Threads {
     /// be posting.
     pub(super) fn forget_closed(&mut self, now: i64) {
         self.closed.retain(|_, at| now - *at < CLOSED_KEPT_SECS);
+    }
+
+    /// The root of the thread `pane` last posted in on `scope`'s connection,
+    /// if it was made under `scope`. Read-only: nothing is touched or saved.
+    pub(crate) fn root_of_pane(&self, scope: &Scope, pane: PaneRef) -> Option<String> {
+        let key = self.last.get(&(scope.connection.clone(), pane))?;
+        Some(self.book.for_conversation(scope, key)?.root.clone())
     }
 
     /// Whether `key` has a thread of its own in `scope`.

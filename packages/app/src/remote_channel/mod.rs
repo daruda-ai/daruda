@@ -7,6 +7,7 @@ pub(crate) mod command;
 pub(crate) mod delivery;
 pub(crate) mod dispatch;
 pub mod global;
+pub(crate) mod home;
 pub mod keychain;
 pub(crate) mod lock;
 mod pairing;

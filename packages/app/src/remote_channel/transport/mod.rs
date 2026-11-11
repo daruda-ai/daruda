@@ -36,6 +36,20 @@ pub enum IncomingKind {
     },
 }
 
+/// Something the person did on the app's own page rather than in the paired
+/// conversation. Names the person, never a conversation.
+pub struct HomeEvent {
+    pub event_id: String,
+    pub user_id: String,
+    pub team_id: String,
+    pub kind: HomeEventKind,
+}
+
+pub enum HomeEventKind {
+    /// The person opened the page: show it the panes as they are now.
+    Opened,
+}
+
 pub type Message = PreparedPing;
 
 /// One message a send posted: its id, the text it shows, and whether it
@@ -103,6 +117,12 @@ pub fn send_recording(
 /// Whether `kind` gives each pane a thread of its own. The one question asked
 /// before using a transport's thread API; other channels post at the top.
 pub(crate) fn pane_threads(kind: ChannelKind) -> bool {
+    matches!(kind, ChannelKind::Slack)
+}
+
+/// Whether `kind` has a page of the app's own on which daruda can show its
+/// panes. Asked before using a transport's home API.
+pub(crate) fn app_home(kind: ChannelKind) -> bool {
     matches!(kind, ChannelKind::Slack)
 }
 

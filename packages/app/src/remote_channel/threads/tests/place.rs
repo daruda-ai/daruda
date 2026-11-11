@@ -111,3 +111,36 @@ fn only_an_outcome_surfaces_from_a_thread() {
         );
     }
 }
+
+/// The home page links a pane to the thread it last posted in, and only
+/// under the identity that made it.
+#[test]
+fn a_pane_names_the_root_of_its_thread_in_its_scope() {
+    let mut threads = Threads::load();
+    let speaker = pane(7);
+    start_thread(
+        &mut threads,
+        &work(),
+        speaker,
+        &conversation("claude", "s1"),
+        "1.1",
+    );
+    let cases = [
+        (work(), speaker, Some("1.1"), "the pane's own thread"),
+        (scope("work", "other", "D1"), speaker, None, "another bot"),
+        (
+            scope("home", "bot", "D1"),
+            speaker,
+            None,
+            "another connection",
+        ),
+        (work(), pane(8), None, "a pane that never posted"),
+    ];
+    for (scope, pane, want, label) in cases {
+        assert_eq!(
+            threads.root_of_pane(&scope, pane).as_deref(),
+            want,
+            "{label}"
+        );
+    }
+}

@@ -38,6 +38,13 @@ impl RemoteRecipient {
             && self.conversation_id == other.conversation_id
             && self.scope_id == other.scope_id
     }
+
+    /// Whether `user_id` in `scope_id` is the paired person, wherever they
+    /// are: an event outside any conversation, such as opening the app's own
+    /// page, names no conversation to match.
+    pub fn same_person(&self, user_id: &str, scope_id: &str) -> bool {
+        self.user_id == user_id && self.scope_id == scope_id
+    }
 }
 
 /// Who besides the person reads a conversation daruda posts to.
@@ -101,6 +108,16 @@ impl ChannelConfig {
                 .recipient
                 .as_ref()
                 .is_some_and(|recipient| recipient.same_party(sender))
+    }
+
+    /// [`Self::accepts`] for an event that names a person but no
+    /// conversation.
+    pub fn accepts_person(&self, user_id: &str, scope_id: &str) -> bool {
+        self.enabled
+            && self
+                .recipient
+                .as_ref()
+                .is_some_and(|recipient| recipient.same_person(user_id, scope_id))
     }
 }
 

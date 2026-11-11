@@ -259,6 +259,7 @@ fn install_connection_with_queue(
         outbound,
         applied: None,
         threads: crate::remote_channel::threads::state::Threads::load(),
+        home: Default::default(),
     });
     super::super::reconcile(cx);
     let connection = cx

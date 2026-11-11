@@ -1836,6 +1836,11 @@ remote_channel:
   thread_stop_button: "멈추기"
   thread_name_separator: " · "
   thread_detail_separator: " — "
+  home_header: "daruda 에이전트"
+  home_row_name: "%{name} (%{agent})%{title}"
+  home_status_idle: "대기 중"
+  home_more: "…외 %{count}개 더"
+  home_open_thread: "스레드 열기"
 
 library:
   toggle_needs_project: "Claude 활성화 상태는 프로젝트별입니다. 로컬 프로젝트를 열어 변경하세요."

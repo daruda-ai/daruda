@@ -490,7 +490,7 @@ fn bare_label(summary: &ChatSummary) -> String {
 
 /// The agent a row names, with the tab's name beside it when the user gave
 /// one — two chats in one worktree otherwise read alike.
-fn agent_label(summary: &ChatSummary) -> String {
+pub(crate) fn agent_label(summary: &ChatSummary) -> String {
     match &summary.tab_name {
         Some(tab) => s::control::agent_with_tab(&summary.agent_name, tab),
         None => summary.agent_name.clone(),
