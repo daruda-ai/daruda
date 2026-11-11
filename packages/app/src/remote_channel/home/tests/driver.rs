@@ -136,7 +136,7 @@ fn the_retry_tick_keeps_a_page_only_for_a_connection_that_serves_again(
     cx: &mut gpui::TestAppContext,
 ) {
     use crate::remote_channel::global::tests::{Lapse, lapse};
-    for how in [Lapse::Reconnecting, Lapse::Disabled, Lapse::Unpaired] {
+    for how in Lapse::ALL {
         cx.update(|cx| {
             let _outgoing = crate::remote_channel::global::tests::setup(cx);
             let connection = &cx.global::<RemoteChannels>().connections["work"];

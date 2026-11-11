@@ -73,13 +73,27 @@ pub(crate) enum Lapse {
     Disabled,
     /// The person unpaired the channel.
     Unpaired,
+    /// The person's credentials were rewritten: the connection restarts with
+    /// the same recipient, and serves again.
+    CredentialRewrite,
+    /// The channel was paired with another conversation: it reconnects, but
+    /// never to serve the old one again.
+    Repaired,
 }
 
 impl Lapse {
+    pub(crate) const ALL: [Self; 5] = [
+        Self::Reconnecting,
+        Self::Disabled,
+        Self::Unpaired,
+        Self::CredentialRewrite,
+        Self::Repaired,
+    ];
+
     /// Whether what was made under the old identity waits for the
     /// connection rather than being dropped.
     pub(crate) fn kept(self) -> bool {
-        matches!(self, Self::Reconnecting)
+        matches!(self, Self::Reconnecting | Self::CredentialRewrite)
     }
 }
 
@@ -102,8 +116,19 @@ pub(crate) fn lapse(id: &str, lapse: Lapse, cx: &mut App) {
                 .revoke_bot();
             return;
         }
+        Lapse::CredentialRewrite => {
+            let config = channel.clone();
+            RemoteChannels::suspend(config, cx);
+            RemoteChannels::restart(id, cx);
+            return;
+        }
         Lapse::Disabled => channel.enabled = false,
         Lapse::Unpaired => channel.recipient = None,
+        Lapse::Repaired => {
+            if let Some(recipient) = &mut channel.recipient {
+                recipient.conversation_id = "another".into();
+            }
+        }
     }
     cx.global_mut::<SettingsStore>()
         .set_user_for_testing(config);
@@ -581,4 +606,27 @@ fn presence_announcements_preserve_targets_and_use_each_connections_presence_set
             );
         }
     });
+}
+
+/// The defect this guards: a connection paired with another conversation
+/// kept, while it reconnected, what was made for the old one, which no bot
+/// serves again. Only a connection that will serve the same conversation
+/// again keeps it.
+#[gpui::test]
+fn a_reconnecting_connection_keeps_only_its_current_conversation(cx: &mut gpui::TestAppContext) {
+    for how in Lapse::ALL {
+        cx.update(|cx| {
+            let _outgoing = setup(cx);
+            let connection = &cx.global::<RemoteChannels>().connections["work"];
+            let scope = connection
+                .thread_scope(connection.bot.as_ref().unwrap())
+                .unwrap();
+            lapse("work", how, cx);
+            let alive = cx.global::<RemoteChannels>().scope_alive(cx);
+            assert_eq!(alive(&scope), how.kept(), "{how:?}");
+            let sendable = cx.global::<RemoteChannels>().scope_sendable(cx);
+            assert!(!sendable(&scope), "{how:?}: nothing serves it yet");
+        });
+        cx.run_until_parked();
+    }
 }

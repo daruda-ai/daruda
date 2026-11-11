@@ -195,6 +195,10 @@ impl RemoteChannels {
     /// said which identity yet. A connection without a bot that is disabled,
     /// out of step with the settings, or unpaired is not reconnecting: no
     /// bot will arrive to serve what waits, so it is dropped.
+    ///
+    /// A reconnecting connection keeps only what was made for the
+    /// conversation it is paired with now: the bot it reconnects as is not
+    /// known yet, but a replaced recipient is, and no bot serves the old one.
     pub(crate) fn scope_alive(&self, cx: &App) -> impl Fn(&super::threads::Scope) -> bool + use<> {
         let mut scopes = Vec::new();
         let mut unsettled = Vec::new();
@@ -205,13 +209,21 @@ impl RemoteChannels {
                 .and_then(|bot| connection.thread_scope(bot))
             {
                 Some(scope) => scopes.push(scope),
-                None if connection.config.recipient.is_some() && self.live(id, cx).is_some() => {
-                    unsettled.push(id.clone())
+                None => {
+                    if let (Some(recipient), Some(_)) =
+                        (&connection.config.recipient, self.live(id, cx))
+                    {
+                        unsettled.push((id.clone(), recipient.conversation_id.clone()));
+                    }
                 }
-                None => {}
             }
         }
-        move |scope| scopes.contains(scope) || unsettled.contains(&scope.connection)
+        move |scope| {
+            scopes.contains(scope)
+                || unsettled.iter().any(|(id, conversation)| {
+                    *id == scope.connection && *conversation == scope.conversation
+                })
+        }
     }
 
     /// Whether what was made under a scope can be sent now: [`Self::sender`]
