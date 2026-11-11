@@ -216,8 +216,8 @@ fn headings_and_labels_name_what_follows_under_counts_and_help() {
 }
 
 /// A card is titled by the conversation, else the tab's name, else the
-/// agent; the agent is its subtitle unless it already is the title. A card
-/// in the strip, under no project heading, names its project first.
+/// agent; its subtitle keeps the agent and tab name without repeating its
+/// title. A card under no project heading names its project first.
 #[test]
 fn a_card_is_titled_by_conversation_tab_or_agent() {
     let mut subject = row("Claude Code", None);
@@ -228,6 +228,7 @@ fn a_card_is_titled_by_conversation_tab_or_agent() {
     let bare = row("Gemini", Some(ShownStatus::NeedsYou { since: 1 }));
     let mut asking = row("Claude Code", Some(ShownStatus::NeedsYou { since: 1 }));
     asking.subject = Some("Ask me".into());
+    asking.tab_name = Some("triage".into());
     let page = flat(vec![subject, tab, bare, asking]);
     let look = HomeLook::new(&page);
     let view = look.view();
@@ -236,7 +237,9 @@ fn a_card_is_titled_by_conversation_tab_or_agent() {
         .map(|row| (row.title, row.subtitle))
         .collect();
     let separator = s::remote_channel::thread_name_separator();
-    let strip_agent = format!("p{separator}Claude Code");
+    let named_subject = s::control::agent_with_tab("Claude Code", "review");
+    let named_asking = s::control::agent_with_tab("Claude Code", "triage");
+    let strip_agent = format!("p{separator}{named_asking}");
     assert_eq!(
         cards,
         [
@@ -244,11 +247,103 @@ fn a_card_is_titled_by_conversation_tab_or_agent() {
             // agent is the title.
             ("Gemini", Some("p")),
             ("Ask me", Some(strip_agent.as_str())),
-            // The project's lane: the agent alone, or nothing.
-            ("Fix the bug", Some("Claude Code")),
+            // The project's lane: keep the tab when the title does not name it.
+            ("Fix the bug", Some(named_subject.as_str())),
             ("review", Some("Codex")),
             ("Gemini", None),
-            ("Ask me", Some("Claude Code")),
+            ("Ask me", Some(named_asking.as_str())),
         ]
     );
+}
+
+/// Identical conversation titles must not hide the names that distinguish
+/// two tabs running the same agent, in the strip or their project.
+#[test]
+fn named_tabs_stay_distinct_with_the_same_conversation_title() {
+    let page = flat(
+        ["review", "implement"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, tab)| {
+                let mut row = row("Claude Code", Some(ShownStatus::NeedsYou { since: 1 }));
+                row.pane = pane(index as u64);
+                row.subject = Some("Fix the bug".into());
+                row.tab_name = Some(tab.into());
+                row
+            })
+            .collect(),
+    );
+    let look = HomeLook::new(&page);
+    let view = look.view();
+    let rows = every_row(&view);
+    assert_eq!(rows.len(), 4, "each pane in the strip and its project");
+    for cards in rows.as_chunks::<2>().0 {
+        assert_eq!(cards[0].title, cards[1].title);
+        assert_ne!(cards[0].subtitle, cards[1].subtitle);
+        for (card, tab) in cards.iter().zip(["review", "implement"]) {
+            let subtitle = card.subtitle.expect("a named tab has a subtitle");
+            assert!(subtitle.contains(tab), "{tab}: {subtitle}");
+            assert!(subtitle.contains("Claude Code"), "{tab}: {subtitle}");
+        }
+    }
+}
+
+/// No panes and panes all omitted need different messages, including when
+/// a project exceeds Slack's real card or block budget.
+#[test]
+fn an_omitted_listing_does_not_say_no_chats_are_open() {
+    let budget =
+        crate::remote_channel::transport::app_home(daruda_config::remote::ChannelKind::Slack)
+            .unwrap()
+            .budget;
+    let cases = [
+        (0, budget, s::control::listing_empty(), "no panes"),
+        (
+            budget.cards + 1,
+            budget,
+            s::remote_channel::home_empty_omitted(),
+            "too many cards",
+        ),
+        (
+            1,
+            PageBudget {
+                blocks: 1,
+                ..budget
+            },
+            s::remote_channel::home_empty_omitted(),
+            "no room for a project and its cards",
+        ),
+    ];
+    for (total, budget, expected, label) in cases {
+        let rows = (0..total)
+            .map(|index| row(&format!("pane-{index}"), None))
+            .collect();
+        let board = Board::new(
+            vec![window(
+                1,
+                vec![alone(project("p", vec![lane("main", rows)]))],
+            )],
+            budget,
+            None,
+        );
+        let look = HomeLook::new(&board);
+        let view = look.view();
+        assert!(view.parts.is_empty(), "{label}");
+        assert_eq!(view.empty, expected, "{label}");
+        if total == 0 {
+            assert!(view.summary.is_none() && view.more.is_none(), "{label}");
+        } else {
+            assert_eq!(
+                view.summary,
+                Some(s::remote_channel::home_summary(0, 0, total).as_str()),
+                "{label}"
+            );
+            assert_eq!(
+                view.more,
+                Some(s::remote_channel::home_more(total).as_str()),
+                "{label}"
+            );
+            assert_ne!(view.empty, s::control::listing_empty(), "{label}");
+        }
+    }
 }

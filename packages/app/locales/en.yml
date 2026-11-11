@@ -2620,7 +2620,9 @@ remote_channel:
   # Joins a thread root's name, subject and status in its notification text.
   thread_detail_separator: " — "
   # Heading of the app's own Slack page that lists every agent pane.
-  home_header: "daruda agents"
+  home_header: "Daruda for Slack"
+  # The listing is empty because no whole project fits the page's limits.
+  home_empty_omitted: "No agent chats fit on this page. Send !list to see the list."
   # The status of a pane that has not worked since daruda started.
   home_status_idle: "Idle"
   # Counts the panes the page has no room for.

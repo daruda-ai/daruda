@@ -38,9 +38,9 @@ enum PartLook {
 struct RowLook {
     /// The conversation's title, else the tab's name, else the agent's.
     title: String,
-    /// The agent, unless it already is the title.
+    /// The agent and tab name, omitting either if it already is the title.
     subtitle: Option<String>,
-    /// The subtitle under no project heading: the project, then the agent.
+    /// The subtitle under no project heading: the project, then the pane's.
     strip_subtitle: String,
     emoji: Option<&'static str>,
     status: String,
@@ -65,7 +65,11 @@ impl HomeLook {
                     &outcome.text,
                 )
             }),
-            empty: s::control::listing_empty(),
+            empty: if counts.total == 0 {
+                s::control::listing_empty()
+            } else {
+                s::remote_channel::home_empty_omitted()
+            },
             parts: Self::parts_of(board),
             rows: board
                 .rows()
@@ -81,7 +85,17 @@ impl HomeLook {
                         .clone()
                         .or_else(|| row.tab_name.clone())
                         .unwrap_or_else(|| row.agent.clone());
-                    let subtitle = (title != row.agent).then(|| row.agent.clone());
+                    let agent = (title != row.agent).then_some(row.agent.as_str());
+                    let tab = row
+                        .tab_name
+                        .as_deref()
+                        .filter(|tab| *tab != title && *tab != row.agent);
+                    let subtitle = match (agent, tab) {
+                        (Some(agent), Some(tab)) => Some(s::control::agent_with_tab(agent, tab)),
+                        (Some(agent), None) => Some(agent.to_owned()),
+                        (None, Some(tab)) => Some(tab.to_owned()),
+                        (None, None) => None,
+                    };
                     RowLook {
                         strip_subtitle: subtitle.iter().fold(row.project.clone(), |text, agent| {
                             format!(
