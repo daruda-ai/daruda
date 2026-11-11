@@ -418,16 +418,10 @@ impl AgentChatView {
             }
             TranscriptFate::Keep => {}
             TranscriptFate::KeepThrough(ix) => {
-                // Read against the whole transcript before it is cut: a key
-                // past `ix` names an item the replayed tail will reuse.
-                let items = &self.items;
-                self.fold.retain_overrides(|key| {
-                    super::super::agent_chat_helpers::fold_key_index(key, items)
-                        .is_some_and(|at| at <= ix)
-                });
-                self.items.truncate(ix + 1);
-                self.overage_stop_markers.retain(|&marker| marker <= ix);
-                self.activity.turn_records.retain(|&record, _| record <= ix);
+                self.truncate_transcript(ix + 1);
+                // The anchors name the turn being read, which the replayed
+                // tail rebuilds from scratch.
+                self.fold.release_anchors();
             }
         }
         let dropped = self.queue.discard_all();
@@ -492,9 +486,7 @@ impl AgentChatView {
         if resume.is_none() {
             // The failed connect being retried says nothing about the
             // conversation above it.
-            while matches!(self.items.last(), Some(ChatItem::Failure(_))) {
-                self.items.pop();
-            }
+            self.drop_trailing_items(|item| matches!(item, ChatItem::Failure(_)));
         }
         self.rebuild_rows();
         self.begin_connect(resume, cx);

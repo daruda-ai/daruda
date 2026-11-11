@@ -413,10 +413,12 @@ pub struct AgentChatView {
     /// Conversation render model, in arrival order. The event pump
     /// appends/folds into this; the renderer reads it.
     //
-    // INVARIANT: `FoldKey::Assistant`/`Thinking` and the per-message markdown
-    // selection ids are keyed by item index; valid only because `items` is
-    // append-only. Removing/reordering items would require clearing
-    // `FoldState` and would break markdown selection identity.
+    // INVARIANT: fold keys and anchors, turn records, stop markers and the
+    // per-message markdown selection ids are keyed by item index. Items are
+    // cut only from the tail, through `transcript_cut`, which drops every
+    // record past the cut; removing from the middle would shift them all.
+    // `settle_stop_marker`'s move of the stop marker is the one exception,
+    // and documents what it remaps.
     pub(super) items: Vec<ChatItem>,
     pub(super) host_cards: crate::host_cards::HostCards,
     pub(super) host_cards_scroll: ScrollHandle,
@@ -662,6 +664,7 @@ mod session_ops;
 mod shot_ops;
 #[cfg(any(test, feature = "test-support"))]
 mod test_hooks;
+mod transcript_cut;
 
 impl AgentChatView {
     /// Where `link` points as this pane's session sees it: against its local

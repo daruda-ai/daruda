@@ -243,18 +243,36 @@ impl FoldState {
         self.set_expanded(key, expanded, ctx);
     }
 
-    /// Keep only the overrides `keep` accepts. The held response and settled
-    /// prompt are anchors into the turn being read, which a caller dropping
-    /// part of the transcript invalidates either way.
-    pub(super) fn retain_overrides(&mut self, mut keep: impl FnMut(&FoldKey) -> bool) {
-        self.overrides.retain(|key, _| keep(key));
-        self.held_response = None;
-        self.settled_prompt = None;
+    /// Forget what names an item at or past `len`, as the transcript is cut
+    /// there; `index_of` resolves a key against the transcript *before* the
+    /// cut, and a key it cannot place names nothing worth keeping. An anchor
+    /// still naming a kept item survives: the person goes on reading what
+    /// remains, and dropping the settled prompt would unfold every prompt
+    /// above the cut. A caller about to rebuild that turn releases them
+    /// ([`Self::release_anchors`]).
+    pub(super) fn truncate(&mut self, len: usize, index_of: impl Fn(&FoldKey) -> Option<usize>) {
+        self.overrides
+            .retain(|key, _| index_of(key).is_some_and(|ix| ix < len));
+        self.held_response = self.held_response.filter(|&ix| ix < len);
+        // Every prompt before a cut settled prompt had settled too.
+        self.settled_prompt = self.settled_prompt.and_then(|ix| {
+            if ix < len {
+                Some(ix)
+            } else {
+                len.checked_sub(1)
+            }
+        });
     }
 
     pub(super) fn clear_overrides(&mut self) {
         self.overrides.clear();
         // The anchors are item indices, invalid once the conversation is dropped.
+        self.release_anchors();
+    }
+
+    /// Drop the held response and settled prompt — anchors into the turn being
+    /// read, which a caller replacing that turn invalidates.
+    pub(super) fn release_anchors(&mut self) {
         self.held_response = None;
         self.settled_prompt = None;
     }
@@ -755,6 +773,39 @@ mod tests {
         assert!(state.is_expanded(&FoldKey::Response(4), FoldContext::past(false)));
         state.hold_response(None);
         assert!(!state.is_expanded(&FoldKey::Response(4), FoldContext::past(false)));
+    }
+
+    /// A cut forgets what named the dropped items, and only that: the anchors
+    /// on what remains keep the rows the person is reading folded as they were.
+    #[test]
+    fn a_cut_forgets_only_what_named_the_dropped_items() {
+        let index_of = |key: &FoldKey| match key {
+            FoldKey::Response(ix) | FoldKey::UserPrompt(ix) => Some(*ix),
+            _ => None,
+        };
+        let ctx = FoldContext::past(false);
+        let mut state = FoldState::default();
+        state.set_all([FoldKey::Response(1), FoldKey::Response(3)], true);
+        state.hold_response(Some(1));
+        state.settle_prompts_through(0);
+
+        state.truncate(3, index_of);
+
+        assert!(state.is_expanded(&FoldKey::Response(1), ctx), "kept item");
+        assert!(
+            !state.is_expanded(&FoldKey::Response(3), ctx),
+            "the dropped item's override must not reach a later item at its index"
+        );
+        assert!(
+            !state.is_expanded(&FoldKey::UserPrompt(0), FoldContext::last(false)),
+            "a settled prompt above the cut stays folded"
+        );
+
+        state.truncate(1, index_of);
+        assert!(
+            !state.is_expanded(&FoldKey::Response(1), ctx),
+            "the hold on a dropped response goes with it"
+        );
     }
 
     #[test]
