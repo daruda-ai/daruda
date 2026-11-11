@@ -1,36 +1,20 @@
 //! Lanes view — list of lanes plus a section header. Rendered
 //! into the left dock when `left_dock_view == Lanes`.
 //!
-//! Top-level rows interleave groups and ungrouped projects by their
-//! shared `tab_order` pool. A group's member projects render only
-//! when the group is expanded.
+//! Top-level rows follow [`project_order::arrange`]. A group's member
+//! projects render only when the group is expanded.
 
 use crate::ui::theme;
 use gpui::{AnyElement, Context, IntoElement, div, prelude::*, px};
 
 use crate::surface::strings as surface_strings;
-use crate::workspace::layout::{Dock, GroupSnapshot, LeftDockSnapshot, ProjectSnapshot};
+use crate::workspace::layout::{Dock, LeftDockSnapshot, ProjectSnapshot};
+use crate::workspace::project_order::{self, GroupKey, ProjectKey, TopRow};
 
 use super::rows::{
     git_badge_for, group_header_row, non_git_placeholder, project_header_row, section_header,
     worktree_row,
 };
-
-/// Top-level entry rendered in the lanes tree. Groups carry their
-/// member projects so the renderer can expand or hide them together.
-enum TopRow<'a> {
-    Group(&'a GroupSnapshot, Vec<&'a ProjectSnapshot>),
-    UngroupedProject(&'a ProjectSnapshot),
-}
-
-impl<'a> TopRow<'a> {
-    fn tab_order(&self) -> u32 {
-        match self {
-            TopRow::Group(g, _) => g.tab_order,
-            TopRow::UngroupedProject(p) => p.tab_order,
-        }
-    }
-}
 
 /// Render the Lanes view body.
 pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> AnyElement {
@@ -57,25 +41,7 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     let active_project = snap.active.project;
     let active_lane = snap.active.lane;
 
-    // Build the interleaved top-level row list. Member projects keep
-    // their own `tab_order` so the order inside an expanded group is
-    // stable.
-    let mut top_rows: Vec<TopRow<'_>> = Vec::with_capacity(snap.groups.len() + snap.projects.len());
-    for g in &snap.groups {
-        let mut members: Vec<&ProjectSnapshot> = snap
-            .projects
-            .iter()
-            .filter(|p| p.group_id == Some(g.id))
-            .collect();
-        members.sort_by_key(|p| p.tab_order);
-        top_rows.push(TopRow::Group(g, members));
-    }
-    for p in &snap.projects {
-        if p.group_id.is_none() {
-            top_rows.push(TopRow::UngroupedProject(p));
-        }
-    }
-    top_rows.sort_by_key(|r| r.tab_order());
+    let top_rows = top_rows(snap);
 
     let scroll_handle = snap.lanes_scroll_handle.clone();
     let mut roots = div()
@@ -87,16 +53,17 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
         .overflow_y_scroll()
         .track_scroll(&scroll_handle);
 
-    for row in &top_rows {
+    for row in top_rows {
         match row {
-            TopRow::Group(group, members) => {
+            TopRow::Group { group, members } => {
+                let group = &snap.groups[group];
                 let header = group_header_row(group, snap, cx).into_any_element();
                 let members_block = {
                     let mut inner = div().flex().flex_col().w_full();
                     if !group.is_collapsed {
                         for project in members {
                             inner = inner.child(grouped_project_block(
-                                project,
+                                &snap.projects[project],
                                 active_project,
                                 active_lane,
                                 snap,
@@ -113,8 +80,14 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
                 ));
             }
             TopRow::UngroupedProject(project) => {
-                let inner = ungrouped_project_block(project, active_project, active_lane, snap, cx)
-                    .into_any_element();
+                let inner = ungrouped_project_block(
+                    &snap.projects[project],
+                    active_project,
+                    active_lane,
+                    snap,
+                    cx,
+                )
+                .into_any_element();
                 roots = roots.child(super::tree::project(inner));
             }
         }
@@ -138,6 +111,29 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
     );
 
     body.into_any_element()
+}
+
+/// The tree's top-level rows, by index into `snap.groups` and
+/// `snap.projects`, in the order every project-arranging surface shares:
+/// the expanded tree and the collapsed rail.
+pub(in crate::workspace::left_dock) fn top_rows(snap: &LeftDockSnapshot) -> Vec<TopRow> {
+    let groups: Vec<GroupKey> = snap
+        .groups
+        .iter()
+        .map(|g| GroupKey {
+            id: g.id,
+            tab_order: g.tab_order,
+        })
+        .collect();
+    let projects: Vec<ProjectKey> = snap
+        .projects
+        .iter()
+        .map(|p| ProjectKey {
+            group: p.group_id,
+            tab_order: p.tab_order,
+        })
+        .collect();
+    project_order::arrange(&groups, &projects)
 }
 
 /// Scrollbar thumb for the project tree; a track press or a thumb drag
@@ -265,4 +261,75 @@ fn empty_state(cx: &mut Context<Dock>) -> impl IntoElement {
             surface_strings::projects::empty_state(),
         ))
         .child(cta)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TopRow, top_rows};
+
+    /// The tree's top rows, read from the staged snapshot, are the
+    /// workspace's shared order: groups and ungrouped projects interleaved
+    /// by `tab_order`, a group's members by their own, a collapsed group
+    /// still listing its members and an empty one keeping its row.
+    #[gpui::test]
+    fn the_tree_arranges_the_snapshot_in_the_shared_order(cx: &mut gpui::TestAppContext) {
+        let root = std::env::temp_dir().join("daruda-left-dock-top-rows");
+        let (_, workspace) = crate::workspace::tests::build_workspace_with(
+            cx,
+            &daruda_config::Config::default(),
+            Some(daruda_store::project::Project::from_path(root.join("a"))),
+        );
+        workspace.update(cx, |ws, cx| {
+            for name in ["b", "c", "d"] {
+                let id = ws.next_project_id;
+                ws.next_project_id += 1;
+                let mut project = crate::project::Project::bootstrap(
+                    id,
+                    root.join(name),
+                    &crate::lane::git::FakeGit::new(),
+                );
+                project.tab_order = ws.projects.len() as u32;
+                ws.projects.push(project);
+            }
+            let ids: Vec<_> = ws.projects.iter().map(|p| p.id).collect();
+            // Top pool: a(0) c(2) tools(4) apps(5); tools holds d(3), b(1).
+            let tools = ws.add_group("tools".into(), None, cx);
+            ws.add_group("apps".into(), None, cx);
+            ws.move_project_to_group(ids[3], Some(tools), cx);
+            ws.move_project_to_group(ids[1], Some(tools), cx);
+            ws.toggle_group_collapse(tools, cx);
+
+            let snap = ws.prepare_left_dock_snapshot(cx);
+            let tree = named(
+                top_rows(&snap),
+                |g| snap.groups[g].name.to_string(),
+                |p| snap.projects[p].name.to_string(),
+            );
+            assert_eq!(tree, ["a", "c", "tools[b,d]", "apps[]"]);
+            let (groups, projects) = ws.project_order_keys();
+            let model = named(
+                crate::workspace::project_order::arrange(&groups, &projects),
+                |g| ws.groups[g].name.clone(),
+                |p| ws.projects[p].name.clone(),
+            );
+            assert_eq!(tree, model, "the tree and the workspace agree");
+        });
+    }
+
+    /// Each row by name; a group with its members in brackets.
+    fn named(
+        rows: Vec<TopRow>,
+        group: impl Fn(usize) -> String,
+        project: impl Fn(usize) -> String,
+    ) -> Vec<String> {
+        rows.into_iter()
+            .map(|row| match row {
+                TopRow::Group { group: g, members } => {
+                    let members: Vec<String> = members.into_iter().map(&project).collect();
+                    format!("{}[{}]", group(g), members.join(","))
+                }
+                TopRow::UngroupedProject(p) => project(p),
+            })
+            .collect()
+    }
 }

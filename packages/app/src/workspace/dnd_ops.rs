@@ -192,18 +192,18 @@ impl Workspace {
     /// `tab_order`. The list does not stay live — callers mutate the
     /// returned `Vec` and write it back via `write_top_row_order`.
     fn top_row_order(&self) -> Vec<TopRow> {
-        let mut rows: Vec<(TopRow, u32)> = self
-            .groups
-            .iter()
-            .map(|g| (TopRow::Group(g.id), g.tab_order))
-            .chain(
-                self.projects
-                    .ungrouped()
-                    .map(|p| (TopRow::Project(p.id), p.tab_order)),
-            )
-            .collect();
-        rows.sort_by_key(|r| r.1);
-        rows.into_iter().map(|r| r.0).collect()
+        let (groups, projects) = self.project_order_keys();
+        super::project_order::arrange(&groups, &projects)
+            .into_iter()
+            .map(|row| match row {
+                super::project_order::TopRow::Group { group, .. } => {
+                    TopRow::Group(self.groups[group].id)
+                }
+                super::project_order::TopRow::UngroupedProject(project) => {
+                    TopRow::Project(self.projects[project].id)
+                }
+            })
+            .collect()
     }
 
     /// Whether `row` corresponds to a live group or an ungrouped project.
@@ -236,13 +236,11 @@ impl Workspace {
 
     /// Ordered member projects of `group`, sorted by `tab_order`.
     fn group_member_order(&self, group: GroupId) -> Vec<ProjectId> {
-        let mut entries: Vec<(ProjectId, u32)> = self
-            .projects
-            .in_group(group)
-            .map(|p| (p.id, p.tab_order))
-            .collect();
-        entries.sort_by_key(|e| e.1);
-        entries.into_iter().map(|e| e.0).collect()
+        let (_, projects) = self.project_order_keys();
+        super::project_order::members(group, &projects)
+            .into_iter()
+            .map(|project| self.projects[project].id)
+            .collect()
     }
 
     /// Write `ids` back as 0..N `tab_order` values on the matching

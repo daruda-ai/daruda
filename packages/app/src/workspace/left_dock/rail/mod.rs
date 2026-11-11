@@ -19,6 +19,7 @@ use crate::{
     workspace::{
         layout::{Dock, LeftDockSnapshot},
         pages::Page,
+        project_order::TopRow,
     },
 };
 use daruda_store::project::LeftDockView;
@@ -98,43 +99,35 @@ pub(in crate::workspace) fn render(
                 }),
         );
     }
-    let mut roots: Vec<_> = snap
-        .groups
-        .iter()
-        .map(|g| (g.tab_order, Some(g.id), None))
-        .collect();
-    roots.extend(
-        snap.projects
-            .iter()
-            .filter(|p| p.group_id.is_none())
-            .map(|p| (p.tab_order, None, Some(p))),
-    );
-    roots.sort_by_key(|r| r.0);
     let mut tree = div()
         .id("rail-projects")
         .flex_1()
         .min_h_0()
         .overflow_y_scroll();
-    for (index, (_, group, standalone)) in roots.into_iter().enumerate() {
-        if let Some(project_snap) = standalone {
-            tree = tree.child(
-                div()
-                    .when(index > 0, |element| element.mt(px(theme::GAP_LG)))
-                    .child(project(project_snap, snap, cx)),
-            );
-        }
-        if let Some(id) = group {
-            let g = snap.groups.iter().find(|g| g.id == id).unwrap();
-            tree = tree.child(groups::header(g, snap, cx));
-            if !g.is_collapsed {
+    for (index, row) in super::projects::list::top_rows(snap)
+        .into_iter()
+        .enumerate()
+    {
+        match row {
+            TopRow::UngroupedProject(standalone) => {
                 tree = tree.child(
-                    div().flex().flex_col().gap(px(theme::GAP_LG)).children(
-                        snap.projects
-                            .iter()
-                            .filter(|project| project.group_id == Some(id))
-                            .map(|project_snap| project(project_snap, snap, cx)),
-                    ),
+                    div()
+                        .when(index > 0, |element| element.mt(px(theme::GAP_LG)))
+                        .child(project(&snap.projects[standalone], snap, cx)),
                 );
+            }
+            TopRow::Group { group, members } => {
+                let g = &snap.groups[group];
+                tree = tree.child(groups::header(g, snap, cx));
+                if !g.is_collapsed {
+                    tree = tree.child(
+                        div().flex().flex_col().gap(px(theme::GAP_LG)).children(
+                            members
+                                .into_iter()
+                                .map(|member| project(&snap.projects[member], snap, cx)),
+                        ),
+                    );
+                }
             }
         }
     }

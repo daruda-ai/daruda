@@ -86,6 +86,7 @@ mod palette_dispatch;
 mod path_drag;
 mod persistence;
 mod project_ops;
+mod project_order;
 mod project_palette_ops;
 mod render;
 mod right_dock;

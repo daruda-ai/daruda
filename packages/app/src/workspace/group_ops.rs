@@ -106,6 +106,33 @@ impl Workspace {
             .unwrap_or(0)
     }
 
+    /// What [`project_order`](super::project_order) reads of `self.groups`
+    /// and `self.projects`, index for index.
+    pub(in crate::workspace) fn project_order_keys(
+        &self,
+    ) -> (
+        Vec<super::project_order::GroupKey>,
+        Vec<super::project_order::ProjectKey>,
+    ) {
+        let groups = self
+            .groups
+            .iter()
+            .map(|g| super::project_order::GroupKey {
+                id: g.id,
+                tab_order: g.tab_order,
+            })
+            .collect();
+        let projects = self
+            .projects
+            .iter()
+            .map(|p| super::project_order::ProjectKey {
+                group: p.group_id,
+                tab_order: p.tab_order,
+            })
+            .collect();
+        (groups, projects)
+    }
+
     fn find_group_mut(
         &mut self,
         group_id: GroupId,
