@@ -111,8 +111,11 @@ fn a_tap_on_a_gone_pane_or_an_old_board_says_so_on_the_page(cx: &mut gpui::TestA
             },
         );
         cx.update(|cx| {
+            let connection = &cx.global::<RemoteChannels>().connections["work"];
+            let generation = connection.generation;
+            let bot = connection.bot.clone().unwrap();
             cx.spawn(async move |cx| {
-                super::super::driver::tapped("work", "1", "3", &data, cx).await
+                super::super::driver::tapped("work", generation, &bot, "1", "3", &data, cx).await
             })
             .detach()
         });

@@ -124,6 +124,89 @@ async fn a_home_tap_acts_once_and_answers_on_the_page(cx: &mut TestAppContext) {
     wait_release(root.path());
 }
 
+/// A tap claimed while its connection cannot send, as when a reopened bot
+/// is back before the worker says it holds the claim again, still acts and
+/// keeps its result. The page showing it waits, and goes out on the retry
+/// tick once the connection sends again.
+#[gpui::test]
+async fn a_home_tap_acts_while_its_connection_cannot_send(cx: &mut TestAppContext) {
+    use crate::remote_channel::runtime::Status;
+    use crate::remote_channel::transport::{AppHome, Credentials, PageVerdict, PageView};
+    use crate::surface::strings as s;
+    fn shown(_: &Credentials, _: &str, _: &PageView<'_>) -> PageVerdict {
+        PageVerdict::Published
+    }
+    cx.executor().allow_parking();
+    let _stub = crate::remote_channel::home::driver::stub_for_test(AppHome {
+        publish: shown,
+        ..transport::app_home(daruda_config::remote::ChannelKind::Slack).unwrap()
+    });
+    let fixture = crate::test_support::workspace_with_agent_chat(cx);
+    let pane = fixture.pane_ref(cx);
+    let root = tempfile::tempdir().unwrap();
+    let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
+    let (generation, scope) = cx.update(|cx| {
+        let generation = install_connection("work", bot.clone(), cx);
+        crate::remote_channel::home::driver::opened("work", "user", "scope", cx);
+        let scope = cx.global::<RemoteChannels>().connections["work"]
+            .thread_scope(&bot)
+            .unwrap();
+        (generation, scope)
+    });
+    cx.run_until_parked();
+    let shown_outcome = |cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            cx.global::<RemoteChannels>()
+                .home
+                .shown_outcome_for_test(&scope)
+        })
+    };
+    assert_eq!(shown_outcome(cx), Some(None), "the page shows the panes");
+    let select = cx
+        .update(|cx| {
+            cx.global::<RemoteChannels>()
+                .home
+                .button_for_test(&scope, pane, false)
+        })
+        .expect("every pane can be selected");
+    let set_status = |status, cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            cx.global_mut::<RemoteChannels>()
+                .connections
+                .get_mut("work")
+                .unwrap()
+                .status = status;
+        })
+    };
+    set_status(Status::Failed, cx);
+
+    tap(generation, "select-1", &select, cx).await;
+    let selected = cx.update(|cx| {
+        cx.global::<RemoteChannels>().connections["work"]
+            .core
+            .command_state()
+            .selected()
+    });
+    assert_eq!(selected, Some(pane), "the tap acted");
+    assert_eq!(
+        shown_outcome(cx),
+        Some(None),
+        "the page waits for the connection"
+    );
+
+    set_status(Status::Connected, cx);
+    cx.update(crate::remote_channel::home::driver::retry);
+    cx.run_until_parked();
+    let shown = shown_outcome(cx).flatten().unwrap_or_default();
+    assert!(
+        shown.starts_with(&s::control::selected("")),
+        "the retry tick shows the tap's result: {shown}"
+    );
+    cx.update(|cx| cx.global_mut::<RemoteChannels>().connections.clear());
+    drop(bot);
+    wait_release(root.path());
+}
+
 /// Serve a tap on "work"'s page as the connection's queue does, claim first.
 async fn tap(generation: uuid::Uuid, event_id: &str, data: &str, cx: &mut TestAppContext) {
     let event = transport::HomeEvent {

@@ -12,7 +12,8 @@ pub(crate) use tap::tapped;
 use super::board::{Board, PaneRow};
 use crate::remote_channel::bridge::PaneRef;
 use crate::remote_channel::command::ListingRow;
-use crate::remote_channel::global::RemoteChannels;
+use crate::remote_channel::global::{Connection, RemoteChannels};
+use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::threads::Scope;
 use crate::remote_channel::transport::{self, AppHome};
 use daruda_config::remote::ChannelKind;
@@ -20,12 +21,19 @@ use gpui::App;
 
 /// The paired person, `user_id` of team `team_id`, opened connection `id`'s
 /// page: show it every pane as it is now. Idempotent, so it claims nothing in
-/// the inbox; a repeat only refreshes.
+/// the inbox; a repeat only refreshes. Taken while the connection reconnects
+/// too: the board waits for it to send again.
 pub(crate) fn opened(id: &str, user_id: &str, team_id: &str, cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {
         return;
     }
-    let Some(scope) = serving_person(id, user_id, team_id, cx) else {
+    let channels = cx.global::<RemoteChannels>();
+    // Without a bot the connection has no identity to keep a page under;
+    // the person's next opening, once it has one, shows the page.
+    let Some(scope) = channels.live(id, cx).and_then(|connection| {
+        let bot = connection.bot.as_ref()?;
+        person_scope(connection, bot, user_id, team_id)
+    }) else {
         return;
     };
     cx.global_mut::<RemoteChannels>().home.queue.opened(&scope);
@@ -91,17 +99,28 @@ fn rebuild(cx: &mut App) {
     }
 }
 
-/// The thread scope of connection `id`, when `user_id` of `team_id` is its
-/// paired person, its channel has a page, and the page can be published to
-/// now.
-fn serving_person(id: &str, user_id: &str, team_id: &str, cx: &App) -> Option<Scope> {
-    let connection = cx.global::<RemoteChannels>().live(id, cx)?;
+/// The scope connection `id`'s page is kept under while `bot` serves it,
+/// when its channel has a page and `user_id` of `team_id` is its paired
+/// person. Asks only who the page is for, not whether it can be sent now.
+fn person_scope(
+    connection: &Connection,
+    bot: &BotSession,
+    user_id: &str,
+    team_id: &str,
+) -> Option<Scope> {
     app_home(connection.config.kind)?;
-    if !connection.can_send() || !connection.config.accepts_person(user_id, team_id) {
+    if !connection.config.accepts_person(user_id, team_id) {
         return None;
     }
-    let bot = connection.bot.as_ref()?;
     connection.thread_scope(bot)
+}
+
+/// Whether what was made under `scope` may still be shown: its connection
+/// is live and serves that identity, or is reconnecting and has not said
+/// which identity yet.
+fn identity_holds(scope: &Scope, cx: &App) -> bool {
+    let channels = cx.global::<RemoteChannels>();
+    channels.live(&scope.connection, cx).is_some() && (channels.scope_alive())(scope)
 }
 
 /// The app home of the channel `scope`'s connection is on, while the

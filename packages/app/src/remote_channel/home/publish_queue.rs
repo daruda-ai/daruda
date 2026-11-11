@@ -354,6 +354,12 @@ impl PublishQueue {
         page.wanted.as_ref().or(page.published.as_ref())
     }
 
+    /// The board `scope`'s page shows, as far as this run knows.
+    #[cfg(test)]
+    pub(super) fn published(&self, scope: &Scope) -> Option<&Board> {
+        current_ref(&self.pages, scope)?.published.as_ref()
+    }
+
     #[cfg(test)]
     pub(super) fn viewer(&self, scope: &Scope) -> Option<Viewer> {
         self.pages

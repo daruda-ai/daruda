@@ -76,6 +76,13 @@ impl Home {
         self.rebuild_pending
     }
 
+    /// What the last tap came to on the board `scope`'s page shows, and
+    /// whether it shows one.
+    pub(crate) fn shown_outcome_for_test(&self, scope: &Scope) -> Option<Option<String>> {
+        let board = self.queue.published(scope)?;
+        Some(board.outcome().map(|outcome| outcome.text.clone()))
+    }
+
     /// What the last tap on `scope`'s page came to.
     pub(crate) fn outcome_for_test(&self, scope: &Scope) -> Option<String> {
         self.queue

@@ -206,13 +206,22 @@ async fn serve_home_tap<F: Future<Output = ClaimResult>>(
     claim: &impl Fn(&InboxStore, ChannelKey, InboxId) -> F,
     cx: &mut gpui::AsyncApp,
 ) -> Served {
-    match claim_incoming(id, generation, &tap.event_id, claim, cx).await {
-        Claimed::Ready(_) => {}
+    let bot = match claim_incoming(id, generation, &tap.event_id, claim, cx).await {
+        Claimed::Ready(bot) => bot,
         Claimed::Skip => return Served::Done,
         Claimed::Retry => return Served::Retry(QueuedCommand::HomeTap(tap)),
-    }
+    };
     if let transport::HomeEventKind::Tap { data } = &tap.kind {
-        crate::remote_channel::home::driver::tapped(id, &tap.user_id, &tap.team_id, data, cx).await;
+        crate::remote_channel::home::driver::tapped(
+            id,
+            generation,
+            &bot,
+            &tap.user_id,
+            &tap.team_id,
+            data,
+            cx,
+        )
+        .await;
     }
     Served::Done
 }
