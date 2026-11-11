@@ -228,9 +228,10 @@ fn permalink_of(response: Result<Value, http::Failure>) -> Result<String, LinkFa
         .and_then(|value| http::required(value, "permalink").ok())
         .map(str::to_owned);
     match verdict("chat.getPermalink", response) {
-        // A reply without the link names no refusal, like one without a code.
+        // A successful reply without the link is malformed, and the same
+        // request gets the same answer again.
         UpdateVerdict::Updated => link.ok_or_else(|| {
-            LinkFailure::Transient("Slack chat.getPermalink reply is missing permalink".into())
+            LinkFailure::Refused("Slack chat.getPermalink reply is missing permalink".into())
         }),
         UpdateVerdict::Transient(reason) => Err(LinkFailure::Transient(reason)),
         UpdateVerdict::Refused { reason, .. } => Err(LinkFailure::Refused(reason)),

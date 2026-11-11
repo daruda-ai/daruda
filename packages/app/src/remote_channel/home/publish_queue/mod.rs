@@ -61,16 +61,16 @@ pub(super) struct PublishQueue {
 
 impl PublishQueue {
     /// The person opened the page of `scope`'s connection: keep it up to
-    /// date, and let what waits on a passing failure go again once the page
-    /// is built.
+    /// date, and let everything the page gave up on go again once it is
+    /// built (see [`Page::reopen`]).
     pub(super) fn opened(&mut self, scope: &Scope) {
         let page = self.page(scope);
         page.viewer = Viewer::Viewing;
-        page.resume();
+        page.reopen();
     }
 
-    /// The retry tick: each page whose scope `sendable` names lets what
-    /// waits on a passing failure go again once built. A page whose connection cannot send
+    /// The retry tick: each page whose scope `sendable` names lets a board
+    /// that waits go again once built. A page whose connection cannot send
     /// keeps waiting, so it costs no rebuild until it can. Whether any page
     /// has something to build for.
     pub(super) fn retry(&mut self, sendable: impl Fn(&Scope) -> bool) -> bool {

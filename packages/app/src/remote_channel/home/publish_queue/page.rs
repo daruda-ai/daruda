@@ -46,7 +46,8 @@ pub(super) struct Page {
     published: Option<Board>,
     phase: Option<Phase>,
     /// The board the channel refused last: an equal board would be refused
-    /// again, so it is not sent until another has gone out.
+    /// again, so it is not sent until another has gone out or the person
+    /// opens the page again.
     refused: Option<Board>,
     /// What the person's last tap came to, shown atop every later board.
     pub outcome: Option<Outcome>,
@@ -68,17 +69,26 @@ impl Page {
         }
     }
 
-    /// Give up what waits for a later trigger: a board that could not go out
-    /// is built anew, since the panes have moved on meanwhile, and links that
-    /// failed for a passing reason are asked again. Whether there was
-    /// anything to give up.
+    /// Give up a board that waits for a later trigger: it is built anew,
+    /// since the panes have moved on meanwhile. Whether one waited.
     pub(super) fn resume(&mut self) -> bool {
         let waiting = self.phase == Some(Phase::Waiting);
         if waiting {
             self.phase = None;
             self.wanted = None;
         }
-        self.links.retry_failed() | waiting
+        waiting
+    }
+
+    /// The person opened the page: besides a waiting board, forget the
+    /// links that failed or were refused, and the board refused last. A
+    /// refusal may come from the bot's access (a channel it left, a scope it
+    /// lacked), which the person can fix without a new token; an opening is
+    /// theirs, so asking again on it cannot loop.
+    pub(super) fn reopen(&mut self) {
+        self.resume();
+        self.links.forget_failures();
+        self.refused = None;
     }
 
     /// The pane `tap` names: on the board shown, on the one in flight, or on

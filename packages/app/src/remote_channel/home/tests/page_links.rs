@@ -11,15 +11,21 @@ fn ask(queue: &mut PublishQueue, scope: &Scope, roots: &[&str]) -> Vec<String> {
 }
 
 /// A page asks once for each thread's link: a pending ask is not repeated,
-/// a known link stays, a failed one waits for the retry tick or the next
-/// opening, and a refused one is not asked again. A failure is told once per
-/// root; another identity's page asks anew, and a link landing for the
-/// replaced page is stale.
+/// a known link stays, and one that failed or was refused waits for the
+/// person's next opening. Each failure and refusal is told once per root;
+/// another identity's page asks anew, and a link landing for the replaced
+/// page is stale.
+///
+/// The defect this guards: a link that kept failing (a reply that never
+/// names its trouble) was asked again, and the page built anew, on every
+/// retry tick; and a refusal fixable without a new token (the bot added to
+/// the channel) was kept for as long as the page.
 #[test]
-fn a_page_asks_each_thread_link_once_until_a_failure_is_retried() {
+fn a_page_asks_each_thread_link_once_until_the_next_opening() {
     use super::super::publish_queue::Learned;
     use crate::remote_channel::transport::LinkFailure;
-    let failed = Err(LinkFailure::Transient("ratelimited".into()));
+    let failed = Err(LinkFailure::Transient("unknown_error".into()));
+    let refused = Err(LinkFailure::Refused("not_in_channel".into()));
     let work = scope("work", "bot");
     let linked = |queue: &PublishQueue, scope| {
         let mut threaded = row("a", None);
@@ -39,13 +45,8 @@ fn a_page_asks_each_thread_link_once_until_a_failure_is_retried() {
         "pending asks are not repeated"
     );
     assert_eq!(
-        queue.learn_link(
-            &work,
-            epoch,
-            "3.3",
-            &Err(LinkFailure::Refused("message_not_found".into()))
-        ),
-        Some(Learned::Refused)
+        queue.learn_link(&work, epoch, "3.3", &refused),
+        Some(Learned::Refused { first: true })
     );
     assert_eq!(linked(&queue, &work), None, "pending: no link yet");
     assert_eq!(
@@ -57,26 +58,28 @@ fn a_page_asks_each_thread_link_once_until_a_failure_is_retried() {
         queue.learn_link(&work, epoch, "2.2", &failed),
         Some(Learned::Failed { first: true })
     );
+    for tick in 0..3 {
+        assert!(!queue.retry(|_| true), "tick {tick}: nothing to build");
+    }
     assert!(
-        ask(&mut queue, &work, &["1.1", "2.2"]).is_empty(),
-        "a failed link waits for a later trigger"
+        ask(&mut queue, &work, &["1.1", "2.2", "3.3"]).is_empty(),
+        "the retry tick asks neither again"
     );
-    assert!(queue.retry(|_| true), "the retry tick asks again");
+    queue.opened(&work);
     assert_eq!(
         ask(&mut queue, &work, &["1.1", "2.2", "3.3"]),
-        ["2.2"],
-        "but not for a refused link"
+        ["2.2", "3.3"],
+        "the next opening asks both again, not the known one"
     );
     assert_eq!(
         queue.learn_link(&work, epoch, "2.2", &failed),
         Some(Learned::Failed { first: false }),
-        "told once"
+        "a failure told once"
     );
-    queue.opened(&work);
     assert_eq!(
-        ask(&mut queue, &work, &["2.2", "3.3"]),
-        ["2.2"],
-        "the next opening asks again, but not for a refused link"
+        queue.learn_link(&work, epoch, "3.3", &refused),
+        Some(Learned::Refused { first: false }),
+        "a refusal told once"
     );
     let other = scope("work", "other");
     queue.opened(&other);

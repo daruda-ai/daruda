@@ -205,8 +205,8 @@ fn a_permalink_is_read_from_the_reply_or_refused_by_code() {
         ),
         (
             Ok(json!({"ok": true})),
-            transient("Slack chat.getPermalink reply is missing permalink"),
-            "a reply without the link",
+            refused("Slack chat.getPermalink reply is missing permalink"),
+            "a successful reply without the link, malformed alike each time",
         ),
         (
             Err(http::Failure::Status(503)),

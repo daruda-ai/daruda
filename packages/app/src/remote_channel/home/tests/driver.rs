@@ -231,8 +231,8 @@ fn a_tap_on_a_gone_pane_or_an_old_board_says_so_on_the_page(cx: &mut gpui::TestA
 
 /// Thread links are asked off the main thread while the board goes out
 /// without them. Each that lands is kept and builds the page again; one that
-/// fails leaves its row without a button and is not asked again until the
-/// retry tick, and one the channel refused is not asked again at all.
+/// fails or is refused leaves its row without a button and is not asked
+/// again until the person's next opening.
 #[gpui::test]
 fn thread_links_land_after_the_board_and_build_the_page_again(cx: &mut gpui::TestAppContext) {
     use crate::remote_channel::transport::{AppHome, Credentials, LinkFailure};
@@ -307,17 +307,22 @@ fn thread_links_land_after_the_board_and_build_the_page_again(cx: &mut gpui::Tes
             .is_empty()),
         "a failed link is not asked again before the retry tick"
     );
-    cx.update(super::super::driver::retry);
-    cx.update(|cx| {
-        assert_eq!(
+    let asked_again = |cx: &mut gpui::TestAppContext| {
+        cx.update(|cx| {
             cx.global_mut::<RemoteChannels>()
                 .home
                 .queue
                 .ask_links(&scope, ["1.1", "2.2", "3.3"])
                 .unwrap()
-                .roots,
-            ["2.2"],
-            "the retry tick asks a failed link again, not a refused one"
-        )
-    });
+                .roots
+        })
+    };
+    cx.update(super::super::driver::retry);
+    assert!(asked_again(cx).is_empty(), "the retry tick asks neither");
+    cx.update(|cx| super::super::driver::opened("work", "1", "3", cx));
+    assert_eq!(
+        asked_again(cx),
+        ["2.2", "3.3"],
+        "the next opening asks the failed and the refused link again"
+    );
 }

@@ -60,20 +60,19 @@ fn learn(
     };
     match (learned, link) {
         (Learned::Known, _) => super::changed(cx),
-        // The row shows no button meanwhile; the retry tick or the person's
-        // next opening asks again, and a repeat failure is not logged again.
+        // The row shows no button meanwhile; the person's next opening asks
+        // again, and a repeat failure or refusal is not logged again.
         (Learned::Failed { first: true }, Err(error)) => crate::remote_channel::log_error(
             "Remote home thread link unavailable",
             &error,
             "remote.home.link",
         ),
-        // Never asked again for this page, so told once.
-        (Learned::Refused, Err(error)) => crate::remote_channel::log_error(
+        (Learned::Refused { first: true }, Err(error)) => crate::remote_channel::log_error(
             "Remote home thread link refused",
             &error,
             "remote.home.link.refused",
         ),
-        (Learned::Failed { .. } | Learned::Refused, _) => {}
+        (Learned::Failed { .. } | Learned::Refused { .. }, _) => {}
     }
     true
 }

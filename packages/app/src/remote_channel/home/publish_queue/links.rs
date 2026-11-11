@@ -13,11 +13,12 @@ enum Link {
     /// Being asked for; the board goes out without it meanwhile.
     Pending,
     Known(String),
-    /// The last ask failed for a passing reason; asked again on the retry
-    /// tick or the person's next opening.
+    /// The last ask failed: asked again on the person's next opening. Not
+    /// on the retry tick, which would ask every tick while the channel keeps
+    /// answering so; meanwhile the row only lacks its button.
     Failed,
-    /// The channel refused to link this root: not asked again for this page,
-    /// since the same ask would be refused again.
+    /// The channel refused to link this root: not asked again until the
+    /// person opens the page again, since the same ask would be refused.
     Refused,
 }
 
@@ -29,8 +30,9 @@ pub(in crate::remote_channel::home) enum Learned {
     /// Failed for a passing reason; `first` the first time this root failed
     /// on this page.
     Failed { first: bool },
-    /// Refused: the row goes without a link for as long as the page.
-    Refused,
+    /// Refused: the row goes without a link until the next opening;
+    /// `first` the first time this root was refused on this page.
+    Refused { first: bool },
 }
 
 #[derive(Default)]
@@ -40,6 +42,8 @@ pub(super) struct PageLinks {
     /// Roots whose link failed on this page, so each failure is reported
     /// once rather than on every attempt.
     told_failed: HashSet<String>,
+    /// Likewise for roots whose link was refused.
+    told_refused: HashSet<String>,
 }
 
 impl PageLinks {
@@ -68,7 +72,12 @@ impl PageLinks {
                     first: self.told_failed.insert(root.to_owned()),
                 },
             ),
-            Err(LinkFailure::Refused(_)) => (Link::Refused, Learned::Refused),
+            Err(LinkFailure::Refused(_)) => (
+                Link::Refused,
+                Learned::Refused {
+                    first: self.told_refused.insert(root.to_owned()),
+                },
+            ),
         };
         self.links.insert(root.to_owned(), entry);
         learned
@@ -82,11 +91,9 @@ impl PageLinks {
         });
     }
 
-    /// Let the links that failed for a passing reason be asked again.
-    /// Whether there were any.
-    pub(super) fn retry_failed(&mut self) -> bool {
-        let links = self.links.len();
-        self.links.retain(|_, link| *link != Link::Failed);
-        self.links.len() != links
+    /// Let the links that failed or were refused be asked again.
+    pub(super) fn forget_failures(&mut self) {
+        self.links
+            .retain(|_, link| !matches!(link, Link::Failed | Link::Refused));
     }
 }

@@ -55,8 +55,8 @@ pub(crate) fn changed(cx: &mut App) {
 }
 
 /// The retry tick: forget pages no connection can serve any more, then
-/// build anew the pages whose board or thread links wait on a passing
-/// failure or on their connection, once that connection can send. The panes have moved on since,
+/// build anew the pages whose board waits on a passing failure or on their
+/// connection, once that connection can send. The panes have moved on since,
 /// so the board that waited is not sent as it was.
 pub(crate) fn retry(cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {

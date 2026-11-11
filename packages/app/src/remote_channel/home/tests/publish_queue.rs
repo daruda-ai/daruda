@@ -180,6 +180,24 @@ fn a_refused_board_is_not_sent_again_until_another_goes_out() {
     );
 }
 
+/// A refusal may come from the bot's access, which the person can fix
+/// without a new token: their next opening sends the refused board again.
+#[test]
+fn the_next_opening_sends_a_refused_board_again() {
+    let work = scope("work", "bot");
+    let mut queue = PublishQueue::default();
+    queue.opened(&work);
+    queue.want(&work, board(&["a"]));
+    let refused = queue.ready();
+    queue.finish(&refused[0], &PageVerdict::Refused("not_in_channel".into()));
+    assert!(!queue.retry(|_| true), "the retry tick leaves it refused");
+    queue.want(&work, board(&["a"]));
+    assert!(queue.ready().is_empty(), "not sent again unasked");
+    queue.opened(&work);
+    queue.want(&work, board(&["a"]));
+    assert_eq!(sent(&mut queue), [["a"]], "the person's opening sends it");
+}
+
 #[test]
 fn a_turned_off_page_is_reported_once_per_connection() {
     let work = scope("work", "bot");
