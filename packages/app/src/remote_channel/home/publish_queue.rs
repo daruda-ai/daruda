@@ -22,9 +22,10 @@ pub(crate) enum Viewer {
 }
 
 /// Where a page's next publish stands, when one is owed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Phase {
-    InFlight,
+    /// The board on its way, which may already be on screen.
+    InFlight(Board),
     /// Failed for a passing reason, or its connection could not send; sent
     /// again on the retry tick or the person's next opening.
     Waiting,
@@ -109,11 +110,16 @@ impl PublishQueue {
         current_ref(&self.pages, scope)?.outcome.as_ref()
     }
 
-    /// The pane `tap` names on `scope`'s page: on the board it shows, or on
-    /// the one on its way there, which may already be on screen.
+    /// The pane `tap` names on `scope`'s page: on the board it shows, on the
+    /// one in flight, or on the one wanted next; either of the last two may
+    /// already be on screen.
     pub(super) fn resolve(&self, scope: &Scope, tap: Tap) -> Option<PaneRef> {
         let page = current_ref(&self.pages, scope)?;
-        [&page.published, &page.wanted]
+        let in_flight = match &page.phase {
+            Some(Phase::InFlight(board)) => Some(board),
+            _ => None,
+        };
+        [page.published.as_ref(), in_flight, page.wanted.as_ref()]
             .into_iter()
             .flatten()
             .find_map(|board| board.resolve(tap))
@@ -147,14 +153,17 @@ impl PublishQueue {
             if retrying && page.phase == Some(Phase::Waiting) {
                 page.phase = None;
             }
-            if page.wanted.is_some() && page.wanted == page.published {
+            // With a publish in flight, what the page will show is not known
+            // until it settles; the wanted board is compared then.
+            let in_flight = matches!(page.phase, Some(Phase::InFlight(_)));
+            if !in_flight && page.wanted.is_some() && page.wanted == page.published {
                 page.wanted = None;
             }
             if page.viewer != Viewer::Viewing || page.phase.is_some() {
                 continue;
             }
             if let Some(board) = &page.wanted {
-                page.phase = Some(Phase::InFlight);
+                page.phase = Some(Phase::InFlight(board.clone()));
                 ready.push(Publication {
                     scope: page.scope.clone(),
                     board: board.clone(),
@@ -182,6 +191,9 @@ impl PublishQueue {
             PublishVerdict::Disabled => {
                 page.viewer = Viewer::Unavailable;
                 page.wanted = None;
+                // Slack may not keep the old view across the tab going off
+                // and on, so the next opening publishes again.
+                page.published = None;
                 Settled::Unavailable {
                     first: self
                         .told_unavailable

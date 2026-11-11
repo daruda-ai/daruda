@@ -50,6 +50,51 @@ fn an_opened_page_gets_the_latest_board_once() {
     );
 }
 
+/// The defect this guards: a board equal to the published one was dropped
+/// while another was in flight, so the page kept the in-flight board once it
+/// landed. What is wanted is compared with what the page shows afterwards.
+#[test]
+fn a_board_wanted_during_a_publish_is_compared_after_it_lands() {
+    let cases = [
+        ("p", true, "back to what was published"),
+        ("a", false, "the board already in flight"),
+    ];
+    for (later, resent, label) in cases {
+        let work = scope("work", "bot");
+        let mut queue = PublishQueue::default();
+        queue.opened(&work);
+        queue.want(&work, board(&["p"]));
+        let first = queue.ready(false);
+        queue.finish(&first[0], &PublishVerdict::Published);
+        queue.want(&work, board(&["a"]));
+        let in_flight = queue.ready(false);
+        assert_eq!(in_flight[0].board, board(&["a"]), "{label}");
+        queue.want(&work, board(&[later]));
+        assert!(queue.ready(false).is_empty(), "{label}: one at a time");
+        queue.finish(&in_flight[0], &PublishVerdict::Published);
+        let want: &[[&str; 1]] = if resent { &[[later]] } else { &[] };
+        assert_eq!(sent(&mut queue), want, "{label}");
+    }
+}
+
+/// Slack may not keep the old view across the tab going off and on, so the
+/// board published before is sent again once the page is opened.
+#[test]
+fn a_page_turned_off_and_reopened_gets_its_board_again() {
+    let work = scope("work", "bot");
+    let mut queue = PublishQueue::default();
+    queue.opened(&work);
+    queue.want(&work, board(&["a"]));
+    let first = queue.ready(false);
+    queue.finish(&first[0], &PublishVerdict::Published);
+    queue.want(&work, board(&["b"]));
+    let second = queue.ready(false);
+    queue.finish(&second[0], &PublishVerdict::Disabled);
+    queue.opened(&work);
+    queue.want(&work, board(&["a"]));
+    assert_eq!(sent(&mut queue), [["a"]]);
+}
+
 #[test]
 fn each_verdict_leaves_the_page_as_it_says() {
     let cases = [
@@ -255,7 +300,16 @@ fn a_tap_resolves_against_the_shown_or_coming_board() {
     let coming = numbered(&["b"], &mut numbering);
     queue.want(&work, coming.clone());
     queue.finish(&publication, &PublishVerdict::Published);
-    for (board, label) in [(&shown, "shown"), (&coming, "coming")] {
+    let second = queue.ready(false).remove(0);
+    let next = numbered(&["c"], &mut numbering);
+    queue.want(&work, next.clone());
+    assert_eq!(
+        queue.resolve(&work, tap(&coming)),
+        Some(coming.rows[0].pane),
+        "in flight after the wanted board moved on"
+    );
+    queue.finish(&second, &PublishVerdict::Published);
+    for (board, label) in [(&coming, "shown"), (&next, "coming")] {
         assert_eq!(
             queue.resolve(&work, tap(board)),
             Some(board.rows[0].pane),
