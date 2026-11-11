@@ -2,6 +2,7 @@
 //! panes. Other transports have none; callers ask
 //! [`crate::remote_channel::transport::app_home`] before using this.
 
+use super::pane_lines::{PaneLines, StatusLine};
 use super::{API, Credentials, UpdateVerdict, verdict};
 use crate::remote_channel::transport::{
     AppHome, HomeEvent, HomeEventKind, LinkFailure, PageVerdict, PageView, chunks, http,
@@ -115,20 +116,17 @@ fn page_blocks(view: &PageView<'_>) -> Vec<Value> {
         blocks.push(text_block(vec![plain(view.empty)]));
     }
     for (index, row) in view.rows.iter().enumerate() {
-        let mut elements = vec![
-            json!({"type": "text", "text": capped(row.name, TEXT_LIMIT), "style": {"bold": true}}),
-        ];
-        if let Some(selected) = row.selected {
-            elements.push(json!({"type": "text", "text": capped(&format!(" {selected}"), TEXT_LIMIT), "style": {"italic": true}}));
-        }
-        elements.push(json!({"type": "text", "text": "\n"}));
-        if let Some(emoji) = row.emoji {
-            elements.push(json!({"type": "emoji", "name": emoji}));
-            elements.push(plain(&format!(" {}", row.status)));
-        } else {
-            elements.push(plain(row.status));
-        }
-        blocks.push(text_block(elements));
+        // Read as the pane's thread root reads, so the two name it alike.
+        let lines = PaneLines {
+            title: row.name,
+            subject: row.subject,
+            status: Some(StatusLine {
+                emoji: row.emoji,
+                label: row.status,
+                mark: row.selected,
+            }),
+        };
+        blocks.push(text_block(lines.elements()));
         let mut buttons = Vec::new();
         if let Some((label, url)) = row.thread {
             buttons.push(json!({

@@ -407,6 +407,7 @@ fn update_result(
 }
 
 pub(crate) mod home;
+mod pane_lines;
 pub(crate) mod threads;
 
 #[cfg(test)]

@@ -2,6 +2,7 @@
 //! replies under it. Other transports have no thread concept here; callers
 //! ask [`crate::remote_channel::transport::pane_threads`] before using this.
 
+use super::pane_lines::{PaneLines, StatusLine};
 use super::{
     API, Credentials, Message, Reply, Result, SentPart, UpdateVerdict, api, post, post_payload,
     update_verdict,
@@ -28,16 +29,16 @@ impl RootView<'_> {
     /// then its status, so a thread list tells panes apart before it tells
     /// their states.
     fn blocks(&self) -> Vec<Value> {
-        let mut elements =
-            vec![json!({"type": "text", "text": self.title, "style": {"bold": true}})];
-        if let Some(subject) = self.subject {
-            elements.push(json!({"type": "text", "text": format!("\n{subject}")}));
+        let elements = PaneLines {
+            title: self.title,
+            subject: self.subject,
+            status: self.status.map(|(emoji, label)| StatusLine {
+                emoji: Some(emoji),
+                label,
+                mark: None,
+            }),
         }
-        if let Some((emoji, label)) = self.status {
-            elements.push(json!({"type": "text", "text": "\n"}));
-            elements.push(json!({"type": "emoji", "name": emoji}));
-            elements.push(json!({"type": "text", "text": format!(" {label}")}));
-        }
+        .elements();
         let mut blocks = vec![json!({"type": "rich_text", "elements": [
             {"type": "rich_text_section", "elements": elements}]})];
         if let Some((label, value)) = self.stop {

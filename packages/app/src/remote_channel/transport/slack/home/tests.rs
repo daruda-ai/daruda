@@ -5,6 +5,7 @@ use crate::remote_channel::transport::{IncomingKind, PageRow};
 fn row<'a>(name: &'a str, emoji: Option<&'a str>, thread: Option<&'a str>) -> PageRow<'a> {
     PageRow {
         name,
+        subject: None,
         selected: None,
         emoji,
         status: "Working",
@@ -32,6 +33,7 @@ fn a_page_lists_each_pane_with_its_status_and_buttons() {
         Some("https://x.slack.com/archives/D1/p1"),
     );
     running.stop = Some(("Stop", "hom:1:0:stop"));
+    running.subject = Some("Fix the login bug");
     let mut quiet = row("app/fix_bug (Codex)", None, None);
     quiet.select = ("Select", "hom:1:1:sel");
     quiet.selected = Some("(selected)");
@@ -42,14 +44,17 @@ fn a_page_lists_each_pane_with_its_status_and_buttons() {
     assert_eq!(blocks[0]["type"], "header");
     assert_eq!(blocks[0]["text"]["text"], "Agents");
     assert_eq!(blocks[1]["type"], "divider", "no tap, no result line");
-    let first = &blocks[2]["elements"][0]["elements"];
-    assert_eq!(first[0]["text"], "app/main (Claude)");
-    assert_eq!(first[0]["style"]["bold"], true);
+    // Read as the pane's thread root reads: bold name, subject, status.
     assert_eq!(
-        first[2],
-        json!({"type": "emoji", "name": "hourglass_flowing_sand"})
+        blocks[2]["elements"][0]["elements"],
+        json!([
+            {"type": "text", "text": "app/main (Claude)", "style": {"bold": true}},
+            {"type": "text", "text": "\nFix the login bug"},
+            {"type": "text", "text": "\n"},
+            {"type": "emoji", "name": "hourglass_flowing_sand"},
+            {"type": "text", "text": " Working"},
+        ])
     );
-    assert_eq!(first[3]["text"], " Working");
     let buttons = blocks[3]["elements"].as_array().unwrap();
     assert_eq!(buttons[0]["url"], "https://x.slack.com/archives/D1/p1");
     assert_eq!(buttons[0]["text"]["text"], "Open thread");
@@ -58,12 +63,17 @@ fn a_page_lists_each_pane_with_its_status_and_buttons() {
     assert_eq!(buttons[1]["text"]["text"], "Select");
     assert_eq!(buttons[2]["value"], "hom:1:0:stop");
     assert_eq!(buttons[2]["text"]["text"], "Stop");
-    let second = &blocks[4]["elements"][0]["elements"];
+    // No subject: two lines, the selected pane marked on its status line.
     assert_eq!(
-        second[1]["text"], " (selected)",
-        "the selected pane is marked"
+        blocks[4]["elements"][0]["elements"],
+        json!([
+            {"type": "text", "text": "app/fix_bug (Codex)", "style": {"bold": true}},
+            {"type": "text", "text": "\n"},
+            {"type": "text", "text": "Working"},
+            {"type": "text", "text": " (selected)", "style": {"italic": true}},
+        ]),
+        "no emoji without a status"
     );
-    assert_eq!(second[3]["text"], "Working", "no emoji without a status");
     let buttons = blocks[5]["elements"].as_array().unwrap();
     assert_eq!(buttons.len(), 1, "no thread link, nothing to stop");
     assert_eq!(buttons[0]["value"], "hom:1:1:sel");
@@ -114,6 +124,7 @@ fn a_full_page_fits_in_one_view() {
             let mut row = row("pane", Some("bell"), Some("https://x"));
             row.stop = Some(("Stop", "hom:1:0:stop"));
             row.selected = Some("(selected)");
+            row.subject = Some("subject");
             row
         })
         .collect();

@@ -7,11 +7,13 @@ use crate::remote_channel::command::{ListingRow, agent_label, title_suffix};
 use crate::remote_channel::threads::status::ShownStatus;
 use crate::surface::strings as s;
 
-/// One pane on the page.
+/// One pane on the page, named as its thread root names it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PaneRow {
     pub pane: PaneRef,
     pub name: String,
+    /// What the pane is working on, as its activity bar says.
+    pub subject: Option<String>,
     /// `None` while the pane has not reported since daruda started.
     pub shown: Option<ShownStatus>,
     /// The root of the pane's thread on this connection, when it has one.
@@ -23,7 +25,8 @@ pub(super) struct PaneRow {
 }
 
 impl PaneRow {
-    /// A listing row as `/list` names it.
+    /// A listing row as `/list` names it: the name a row falls back to
+    /// when its workspace cannot name the pane.
     pub(super) fn named(row: &ListingRow) -> String {
         s::remote_channel::home_row_name(
             &row.name,

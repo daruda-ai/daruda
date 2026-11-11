@@ -21,6 +21,7 @@ pub(super) struct HomeLook {
 
 struct RowLook {
     name: String,
+    subject: Option<String>,
     emoji: Option<&'static str>,
     status: String,
     link: Option<String>,
@@ -52,6 +53,7 @@ impl HomeLook {
                     };
                     RowLook {
                         name: row.name.clone(),
+                        subject: row.subject.clone(),
                         emoji,
                         status,
                         link: row.link.clone(),
@@ -82,6 +84,7 @@ impl HomeLook {
                 .iter()
                 .map(|row| PageRow {
                     name: &row.name,
+                    subject: row.subject.as_deref(),
                     selected: row.selected.then_some(self.selected.as_str()),
                     emoji: row.emoji,
                     status: &row.status,

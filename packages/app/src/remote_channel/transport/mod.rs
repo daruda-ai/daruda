@@ -149,10 +149,13 @@ pub(crate) struct PageView<'a> {
     pub more: Option<&'a str>,
 }
 
-/// One pane on the page: its name, its status below, its buttons under both.
+/// One pane on the page, read as its thread root reads: its name, what it
+/// is working on, its status, and its buttons under all three.
 pub(crate) struct PageRow<'a> {
     pub name: &'a str,
-    /// The mark beside the name of the pane commands address.
+    /// The pane's activity title, when it has one.
+    pub subject: Option<&'a str>,
+    /// The mark beside the status of the pane commands address.
     pub selected: Option<&'a str>,
     /// The status's emoji, by short name, when one is known.
     pub emoji: Option<&'a str>,

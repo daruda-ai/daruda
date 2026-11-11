@@ -9,6 +9,7 @@ fn each_row_reads_its_status_and_links_only_a_known_thread() {
     let mut linked = row("asking", Some(ShownStatus::NeedsYou { since: 1 }));
     linked.thread = Some("1.1".into());
     linked.link = Some("https://x/p1".into());
+    linked.subject = Some("Fix the bug".into());
     let mut unlinked = row("quiet", None);
     unlinked.thread = Some("2.2".into());
     let page = Board::new(vec![linked, unlinked, row("left out", None)], 2, None);
@@ -26,6 +27,8 @@ fn each_row_reads_its_status_and_links_only_a_known_thread() {
             "https://x/p1"
         ))
     );
+    assert_eq!(view.rows[0].subject, Some("Fix the bug"));
+    assert_eq!(view.rows[1].subject, None, "no activity title");
     assert_eq!(view.rows[1].emoji, None);
     assert_eq!(view.rows[1].status, s::remote_channel::home_status_idle());
     assert!(view.rows[1].thread.is_none(), "no link known yet");

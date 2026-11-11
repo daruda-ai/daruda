@@ -16,6 +16,7 @@ pub(super) fn row(name: &str, shown: Option<ShownStatus>) -> PaneRow {
     PaneRow {
         pane: pane(name.bytes().map(u64::from).sum()),
         name: name.into(),
+        subject: None,
         shown,
         thread: None,
         link: None,

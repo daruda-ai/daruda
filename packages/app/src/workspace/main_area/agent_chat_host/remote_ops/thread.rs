@@ -17,17 +17,26 @@ impl Workspace {
         cx: &Context<Self>,
     ) -> Option<PaneConversation> {
         let key = self.remote_key(pane_id, cx)?;
+        let name = self.remote_name(pane_id, cx)?;
         let view = self.agent_chat_view(pane_id)?.read(cx);
         Some(PaneConversation {
             key,
             agent_name: view.agent_name().to_owned(),
-            name: RootName {
-                // One line: a thread list shows a root's first line only.
-                title: self
-                    .remote_header(pane_id, cx)
-                    .replace('\n', &s::remote_channel::thread_name_separator()),
-                subject: view.activity_title().map(str::to_owned),
-            },
+            name,
+        })
+    }
+
+    /// What the pane's thread root, and its row on a remote page, call it.
+    /// Known before the agent has a session. `None` for a pane that is not
+    /// an agent chat.
+    pub(crate) fn remote_name(&self, pane_id: PaneId, cx: &Context<Self>) -> Option<RootName> {
+        let view = self.agent_chat_view(pane_id)?.read(cx);
+        Some(RootName {
+            // One line: a thread list shows a root's first line only.
+            title: self
+                .remote_header(pane_id, cx)
+                .replace('\n', &s::remote_channel::thread_name_separator()),
+            subject: view.activity_title().map(str::to_owned),
         })
     }
 
