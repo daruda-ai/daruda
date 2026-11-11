@@ -70,6 +70,19 @@ impl Target {
         }
     }
 
+    /// Point this recipient's commands at `pane`, then hand back the table the
+    /// reply renders against. `None` like [`Self::state`].
+    fn select<'a>(&self, pane: Option<PaneRef>, cx: &'a mut App) -> Option<&'a mut CommandState> {
+        match self {
+            Self::Telegram => {
+                let state = self.state(cx)?;
+                state.select(pane);
+                Some(state)
+            }
+            Self::Remote(id) => super::global::RemoteChannels::select(id, pane, cx),
+        }
+    }
+
     /// Forget a gone pane on this recipient's routing, then hand back the
     /// table the reply renders against.
     fn forget<'a>(

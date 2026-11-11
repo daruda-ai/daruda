@@ -26,6 +26,7 @@ impl Workspace {
             on_app_chat_event(pane_ref, event, cx)
         })
         .detach();
+        crate::remote_channel::panes::opened(cx);
         let pane = self.run_pane(pane_id);
         view.update(cx, |_, cx| {
             cx.on_release(move |view, cx| {

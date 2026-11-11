@@ -158,6 +158,14 @@ impl Connection {
             .unwrap_or_else(|| self.core.route_listing(data))
     }
 
+    /// Point this connection's commands at `pane`. Whether the pick changed.
+    fn select(&mut self, pane: Option<PaneRef>) -> bool {
+        let state = self.core.command_state_mut();
+        let changed = state.selected() != pane;
+        state.select(pane);
+        changed
+    }
+
     /// Withdraw the bot without forgetting its cards: the same bot may serve
     /// again, and its messages are still the ones on the person's screen.
     pub(super) fn revoke_bot(&mut self) {
@@ -268,11 +276,8 @@ impl RemoteChannels {
                 .cloned()
                 .collect()
         };
-        let bridge = cx.global_mut::<Self>();
         for id in ids {
-            if let Some(connection) = bridge.connections.get_mut(&id) {
-                connection.core.command_state_mut().select(Some(pane));
-            }
+            Self::select(&id, Some(pane), cx);
         }
         Self::send_ping(
             BridgePing {
@@ -284,6 +289,34 @@ impl RemoteChannels {
             },
             delivery,
             cx,
+        )
+    }
+
+    /// Point connection `id`'s commands at `pane`, and hand back its command
+    /// state. The one way a remote pick changes, so the app home's mark
+    /// follows every pick. `None` once the connection is gone.
+    pub(crate) fn select<'a>(
+        id: &str,
+        pane: Option<PaneRef>,
+        cx: &'a mut App,
+    ) -> Option<&'a mut crate::remote_channel::command::CommandState> {
+        if !cx.has_global::<Self>() {
+            return None;
+        }
+        let changed = cx
+            .global_mut::<Self>()
+            .connections
+            .get_mut(id)?
+            .select(pane);
+        if changed {
+            super::home::driver::changed(cx);
+        }
+        Some(
+            cx.global_mut::<Self>()
+                .connections
+                .get_mut(id)?
+                .core
+                .command_state_mut(),
         )
     }
 

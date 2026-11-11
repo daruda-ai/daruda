@@ -226,9 +226,12 @@ pub(crate) enum Resolution {
     /// Hand this to `control::exec::run`. The `PaneRef` it addresses, if any,
     /// travels alongside so a `TargetGone` can drop the stale selection.
     Run(ResolvedCommand, Option<PaneRef>),
-    /// Already answered here — `/use` only moves adapter state, and a failed
-    /// ordinal never reaches the executor.
+    /// Already answered here: a failed ordinal never reaches the executor.
     Answer(ControlOutcome),
+    /// `/use` — point the target at this pane, or at none. Only adapter
+    /// state moves, but the caller moves it: the bridge that owns the state
+    /// must hear of a changed pick.
+    Select(Option<ChatSummary>),
     /// `/daruda` — the destination is the orchestrator's to name, and naming
     /// it may have to start one. That needs the `App` this step does not
     /// have, so the caller finishes the command.
@@ -262,20 +265,14 @@ pub(crate) fn resolve_command(command: ControlCommand, state: &mut CommandState)
         }
         ControlCommand::Flow(FlowCommand::Run { name }) => Resolution::RunFlow(name),
         ControlCommand::Ask { text } => Resolution::Ask(text),
-        ControlCommand::Use(UseTarget::Clear) => {
-            state.select(None);
-            Resolution::Answer(Ok(ControlResult::Selected { target: None }))
-        }
+        ControlCommand::Use(UseTarget::Clear) => Resolution::Select(None),
         ControlCommand::Use(UseTarget::Select(ordinal)) => {
-            let Some(summary) = state.row_at(ordinal).map(|row| row.summary.clone()) else {
-                return Resolution::Answer(Err(ControlError::OrdinalNotFound {
-                    ordinal: ordinal.0,
-                }));
-            };
-            state.select(Some(summary.target));
-            Resolution::Answer(Ok(ControlResult::Selected {
-                target: Some(summary),
-            }))
+            match state.row_at(ordinal).map(|row| row.summary.clone()) {
+                Some(summary) => Resolution::Select(Some(summary)),
+                None => {
+                    Resolution::Answer(Err(ControlError::OrdinalNotFound { ordinal: ordinal.0 }))
+                }
+            }
         }
         ControlCommand::Say { target, text } => match state.resolve(target) {
             Ok(target) => Resolution::Run(ResolvedCommand::Say { target, text }, Some(target)),
@@ -510,8 +507,10 @@ pub(crate) mod tests {
         state.record_listing(&listing_of(&[b]));
         assert_eq!(state.resolve_token(&stale), None);
     }
+    /// `/use` names the pane from the table alone and leaves moving the pick
+    /// to the caller, whose bridge must hear of it.
     #[test]
-    fn use_selects_without_reaching_the_executor() {
+    fn use_names_its_pane_without_reaching_the_executor() {
         let a = pane(10);
         let mut state = CommandState::default();
         state.record_listing(&listing_of(&[a]));
@@ -519,11 +518,15 @@ pub(crate) mod tests {
             ControlCommand::Use(UseTarget::Select(Ordinal(1))),
             &mut state,
         );
-        let Resolution::Answer(Ok(ControlResult::Selected { target: Some(s) })) = resolution else {
+        let Resolution::Select(Some(s)) = resolution else {
             panic!("/use answers from adapter state alone");
         };
         assert_eq!(s.target, a);
-        assert_eq!(state.selected(), Some(a));
+        assert_eq!(state.selected(), None, "the caller moves the pick");
+        assert!(matches!(
+            resolve_command(ControlCommand::Use(UseTarget::Clear), &mut state),
+            Resolution::Select(None)
+        ));
     }
 
     #[test]

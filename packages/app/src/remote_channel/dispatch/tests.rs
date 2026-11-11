@@ -394,3 +394,49 @@ async fn a_revoked_connection_drops_the_answer_instead_of_panicking(cx: &mut gpu
         assert!(matches!(effect, super::Effect::None));
     }
 }
+
+/// A pick moved by `/use` reaches the app home the person views, so its
+/// selected mark follows; a `/use` that leaves the pick as it was does not
+/// rebuild the page.
+#[gpui::test]
+fn a_use_command_rebuilds_the_viewed_app_home(cx: &mut gpui::TestAppContext) {
+    use crate::control::spec::{ControlCommand, UseTarget};
+    use crate::remote_channel::global::RemoteChannels;
+    cx.update(|cx| {
+        let _outgoing = crate::remote_channel::global::tests::setup(cx);
+        crate::remote_channel::home::driver::opened("work", "1", "3", cx);
+        let picked = PaneRef {
+            workspace: Default::default(),
+            pane: 7,
+        };
+        RemoteChannels::select("work", Some(picked), cx);
+    });
+    cx.run_until_parked();
+    let target = Target::Remote("work".into());
+    for (label, scheduled) in [("the pick cleared", true), ("cleared already", false)] {
+        // Checked inside the update that ran the command: the rebuild runs
+        // when it ends.
+        cx.update(|cx| {
+            let aimed = aim_in_app(
+                Routed::Ready(InboundAction::RunCommand {
+                    command: ControlCommand::Use(UseTarget::Clear),
+                }),
+                cx,
+            );
+            let effect = handle_in_app(aimed, &target, cx);
+            assert!(matches!(effect, Effect::Reply(_)), "{label}: answered");
+            let channels = cx.global::<RemoteChannels>();
+            assert_eq!(
+                channels.connections["work"].core.command_state().selected(),
+                None,
+                "{label}"
+            );
+            assert_eq!(
+                channels.home.rebuild_scheduled_for_test(),
+                scheduled,
+                "{label}"
+            );
+        });
+        cx.run_until_parked();
+    }
+}

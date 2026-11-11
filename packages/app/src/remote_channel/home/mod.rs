@@ -62,6 +62,12 @@ impl Home {
         Some(board.token(index, act))
     }
 
+    /// Whether a rebuild of the viewed pages waits for the current update
+    /// to end.
+    pub(crate) fn rebuild_scheduled_for_test(&self) -> bool {
+        self.rebuild_pending
+    }
+
     /// What the last tap on `scope`'s page came to.
     pub(crate) fn outcome_for_test(
         &self,

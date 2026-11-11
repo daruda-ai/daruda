@@ -49,12 +49,15 @@ async fn list_then_use_then_plain_text_reaches_the_selected_pane(cx: &mut TestAp
         core.command_state_mut(),
     );
 
-    // `/use 1` selects, without ever reaching the executor.
-    let resolution = resolve_command(
+    // `/use 1` names the pane without ever reaching the executor; the
+    // bridge moves its pick, as `dispatch` does.
+    let Resolution::Select(Some(summary)) = resolve_command(
         ControlCommand::Use(UseTarget::Select(Ordinal(1))),
         core.command_state_mut(),
-    );
-    assert!(matches!(resolution, Resolution::Answer(Ok(_))));
+    ) else {
+        panic!("/use names a listed pane");
+    };
+    core.command_state_mut().select(Some(summary.target));
     let target = core.command_state_mut().selected().expect("a target");
     assert_eq!(target.pane, fixture.pane());
 
@@ -135,7 +138,11 @@ async fn routing_observes_state_an_earlier_update_changed(cx: &mut TestAppContex
     else {
         panic!("/use routes as a command");
     };
-    let _ = resolve_command(command, core.command_state_mut());
+    let Resolution::Select(Some(summary)) = resolve_command(command, core.command_state_mut())
+    else {
+        panic!("/use 1 names a listed pane");
+    };
+    core.command_state_mut().select(Some(summary.target));
 
     // After: the identical text now resolves, without any reply-to.
     assert_eq!(

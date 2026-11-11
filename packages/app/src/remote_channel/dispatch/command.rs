@@ -29,6 +29,11 @@ pub(crate) fn run_command(
     };
     let (outcome, addressed) = match step {
         command::Resolution::Answer(outcome) => (outcome, None),
+        command::Resolution::Select(summary) => {
+            let pane = summary.as_ref().map(|summary| summary.target);
+            target.select(pane, cx);
+            (Ok(ControlResult::Selected { target: summary }), None)
+        }
         // Fill in the one target no listing can name, then run like any other.
         command::Resolution::Ask(text) => (
             (|| {
@@ -245,8 +250,7 @@ fn select(
     cx: &mut App,
 ) -> Option<String> {
     trace::state("target.selected", || format!("pane={}", trace::pane(pane)));
-    let state = target.state(cx)?;
-    state.select(Some(pane));
+    let state = target.select(Some(pane), cx)?;
     Some(
         command::render(
             &Ok(ControlResult::Selected { target: summary }),

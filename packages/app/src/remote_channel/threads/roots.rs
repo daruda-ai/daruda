@@ -18,7 +18,11 @@ use std::sync::Arc;
 
 /// Report `pane`'s activity, and whether the status it shows changed. Panes
 /// with no thread yet only remember it, for the root a later message starts.
-pub(crate) fn pane_activity(pane: PaneRef, activity: PaneActivity, cx: &mut App) -> bool {
+pub(in crate::remote_channel) fn pane_activity(
+    pane: PaneRef,
+    activity: PaneActivity,
+    cx: &mut App,
+) -> bool {
     if !cx.has_global::<RemoteChannels>() {
         return false;
     }
@@ -37,17 +41,14 @@ pub(crate) fn pane_activity(pane: PaneRef, activity: PaneActivity, cx: &mut App)
 }
 
 /// Give `pane`'s roots its latest name; a root whose name changed is updated.
-/// Whether the name its roots know changed.
-pub(crate) fn pane_named(pane: PaneRef, name: &RootName, cx: &mut App) -> bool {
+pub(in crate::remote_channel) fn pane_named(pane: PaneRef, name: &RootName, cx: &mut App) {
     if !cx.has_global::<RemoteChannels>() {
-        return false;
+        return;
     }
-    let renamed = cx
-        .global_mut::<RemoteChannels>()
+    cx.global_mut::<RemoteChannels>()
         .threads
         .rename_pane(pane, name);
     flush(cx);
-    renamed
 }
 
 /// Send every root update that is due now.
