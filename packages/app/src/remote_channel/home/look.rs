@@ -1,10 +1,10 @@
 //! How a board reads on the page: every text in the person's language, held
 //! so the transport can borrow it. One builder for every publish.
 
-use super::board::Board;
+use super::board::{Board, Part};
 use super::token::Act;
 use crate::remote_channel::threads::status::ShownStatus;
-use crate::remote_channel::transport::{PageGroup, PageHelp, PageRow, PageView};
+use crate::remote_channel::transport::{PageHelp, PagePart, PageRow, PageView};
 use crate::surface::strings as s;
 
 pub(super) struct HomeLook {
@@ -12,8 +12,7 @@ pub(super) struct HomeLook {
     summary: Option<String>,
     outcome: Option<String>,
     empty: String,
-    running_title: String,
-    others_title: String,
+    parts: Vec<PartLook>,
     rows: Vec<RowLook>,
     more: Option<String>,
     open_thread: String,
@@ -24,6 +23,13 @@ pub(super) struct HomeLook {
     legend: Vec<(&'static str, String)>,
 }
 
+/// One piece of the listing in words; rows by index into `rows`.
+enum PartLook {
+    Heading(String),
+    Label(String),
+    Rows(Vec<usize>),
+}
+
 struct RowLook {
     name: String,
     subject: Option<String>,
@@ -31,8 +37,7 @@ struct RowLook {
     status: String,
     link: Option<String>,
     select: String,
-    /// Only a running pane has something to stop, and only it is grouped
-    /// under the running heading.
+    /// Only a running pane has something to stop.
     stop: Option<String>,
 }
 
@@ -52,8 +57,22 @@ impl HomeLook {
                 )
             }),
             empty: s::control::listing_empty(),
-            running_title: s::remote_channel::home_group_running(),
-            others_title: s::remote_channel::home_group_others(),
+            parts: board
+                .parts()
+                .into_iter()
+                .map(|part| match part {
+                    Part::NeedsYou => PartLook::Heading(s::remote_channel::home_needs_you()),
+                    Part::Window(number) => {
+                        PartLook::Heading(s::remote_channel::home_window(number))
+                    }
+                    Part::Group(name) | Part::Project(name) => PartLook::Heading(name.to_owned()),
+                    Part::GroupedProject(name) => PartLook::Label(name.to_owned()),
+                    Part::Lane { project, lane } => {
+                        PartLook::Label(s::control::lane_path(project, lane))
+                    }
+                    Part::Rows(rows) => PartLook::Rows(rows.to_vec()),
+                })
+                .collect(),
             rows: board
                 .rows()
                 .iter()
@@ -96,25 +115,25 @@ impl HomeLook {
     }
 
     pub(super) fn view(&self) -> PageView<'_> {
-        let (running, others): (Vec<_>, Vec<_>) =
-            self.rows.iter().partition(|row| row.stop.is_some());
-        let groups = [
-            (self.running_title.as_str(), running),
-            (self.others_title.as_str(), others),
-        ]
-        .into_iter()
-        .filter(|(_, rows)| !rows.is_empty())
-        .map(|(title, rows)| PageGroup {
-            title,
-            rows: rows.into_iter().map(|row| self.row(row)).collect(),
-        })
-        .collect();
+        let parts = self
+            .parts
+            .iter()
+            .map(|part| match part {
+                PartLook::Heading(text) => PagePart::Heading(text),
+                PartLook::Label(text) => PagePart::Label(text),
+                PartLook::Rows(rows) => PagePart::Rows(
+                    rows.iter()
+                        .map(|&index| self.row(&self.rows[index]))
+                        .collect(),
+                ),
+            })
+            .collect();
         PageView {
             header: &self.header,
             summary: self.summary.as_deref(),
             outcome: self.outcome.as_deref(),
             empty: &self.empty,
-            groups,
+            parts,
             more: self.more.as_deref(),
             help: PageHelp {
                 title: &self.help_title,

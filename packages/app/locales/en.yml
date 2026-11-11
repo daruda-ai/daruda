@@ -2640,10 +2640,10 @@ remote_channel:
   # Counts on that page of every open pane, the ones the page has no room
   # for included.
   home_summary: "Working %{working} · Needs you %{needs_you} · Total %{total}"
-  # Heading over the panes that are working or waiting for the person.
-  home_group_running: "Running"
-  # Heading over every other pane.
-  home_group_others: "Other panes"
+  # Heading over the strip of panes waiting for the person, atop the page.
+  home_needs_you: "Needs you"
+  # Heading over one window's panes, when more than one window has any.
+  home_window: "Window %{n}"
   # Heading of the usage help at the foot of that page.
   home_help_title: "How to use"
   # Usage help lines, in Markdown: commands in code spans, as the person

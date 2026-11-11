@@ -9,7 +9,7 @@ mod publish_queue;
 mod token;
 
 use crate::remote_channel::threads::Scope;
-use board::{Board, PaneRow};
+use board::{Board, WindowPanes};
 
 /// Every connection's page, and the numbering their buttons share.
 #[derive(Default)]
@@ -38,11 +38,16 @@ impl Home {
         self.rebuild_pending = false;
     }
 
-    /// The board `scope`'s page shows next: `rows` arranged for `capacity`,
-    /// under what the last tap came to, with the thread links the page
-    /// knows, and buttons numbered for this board.
-    fn board(&mut self, scope: &Scope, rows: Vec<PaneRow>, capacity: usize) -> Board {
-        let mut board = Board::new(rows, capacity, self.queue.outcome(scope).cloned());
+    /// The board `scope`'s page shows next: `windows`' panes laid out for
+    /// `budget`, under what the last tap came to, with the thread links the
+    /// page knows, and buttons numbered for this board.
+    fn board(
+        &mut self,
+        scope: &Scope,
+        windows: Vec<WindowPanes>,
+        budget: crate::remote_channel::transport::PageBudget,
+    ) -> Board {
+        let mut board = Board::new(windows, budget, self.queue.outcome(scope).cloned());
         self.queue.link(scope, &mut board);
         board.number(&mut self.numbering);
         board

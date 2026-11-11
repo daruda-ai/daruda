@@ -513,3 +513,92 @@ async fn stop_on_a_missing_pane_is_target_gone(cx: &mut gpui::TestAppContext) {
         assert_eq!(ws.control_stop(9_999, cx), Err(ControlError::TargetGone));
     });
 }
+
+/// Agent panes arranged as the sidebar arranges their projects: an
+/// ungrouped project ahead of a group by `tab_order`, a group's projects,
+/// a project's lanes in tab order; a project without a pane left out.
+#[gpui::test]
+async fn the_arrangement_follows_the_sidebar(cx: &mut gpui::TestAppContext) {
+    let fixture = workspace_with_agent_chat(cx);
+    let names = cx
+        .update_window(fixture.window.into(), |_, window, cx| {
+            fixture.workspace.update(cx, |ws, cx| {
+                let first = ws.active.project;
+                let root = ws.project_for(first).expect("project").root.clone();
+                let second_lane = ws.alloc_id();
+                let mut lane = crate::lane::Lane::default_for_project(second_lane, root.clone());
+                lane.name = Some("second".into());
+                lane.tab_order = 1;
+                ws.project_for_mut(first).expect("project").lanes.push(lane);
+                let mut others = Vec::new();
+                for name in ["other", "empty"] {
+                    std::fs::create_dir_all(root.join(name)).expect("project root");
+                    let id = ws.next_project_id;
+                    ws.next_project_id += 1;
+                    let mut project = crate::project::Project::bootstrap(
+                        id,
+                        root.join(name),
+                        &crate::lane::git::FakeGit::new(),
+                    );
+                    project.tab_order = ws.projects.len() as u32;
+                    others.push(LaneRef {
+                        project: id,
+                        lane: project.lanes[0].id,
+                    });
+                    ws.projects.push(project);
+                }
+                // Top pool: other(1), empty(2), group(3) holding the first.
+                let group = ws.add_group("team".into(), None, cx);
+                ws.move_project_to_group(first, Some(group), cx);
+                for target in [
+                    LaneRef {
+                        project: first,
+                        lane: second_lane,
+                    },
+                    others[0],
+                ] {
+                    ws.control_insert_chat_for_test(target, window, cx)
+                        .expect("a chat opens");
+                }
+                let shown: Vec<String> = ws
+                    .control_arrangement(cx)
+                    .iter()
+                    .map(|section| {
+                        let projects: Vec<String> = section
+                            .projects()
+                            .iter()
+                            .map(|project| {
+                                let lanes: Vec<String> = project
+                                    .lanes
+                                    .iter()
+                                    .map(|lane| format!("{}:{}", lane.name, lane.panes.len()))
+                                    .collect();
+                                format!("{}({})", project.name, lanes.join(" "))
+                            })
+                            .collect();
+                        match section {
+                            ArrangedSection::Group { name, .. } => {
+                                format!("{name}[{}]", projects.join(","))
+                            }
+                            ArrangedSection::Project(_) => projects.join(","),
+                        }
+                    })
+                    .collect();
+                let first_name = ws.project_for(first).expect("project").name.clone();
+                let first_lane = ws.control_lane_name(LaneRef {
+                    project: first,
+                    lane: ws.project_for(first).expect("project").lanes[0].id,
+                });
+                (shown, first_name, first_lane)
+            })
+        })
+        .expect("window is live");
+    let (shown, first, first_lane) = names;
+    assert_eq!(
+        shown,
+        [
+            "other(other:1)".to_owned(),
+            format!("team[{first}({first_lane}:1 second:1)]"),
+        ]
+    );
+}

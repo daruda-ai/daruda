@@ -32,7 +32,9 @@ mod notification_ops;
 /// The external control surface's vocabulary answer — see [`SlashClaim`].
 /// Re-exported because `telegram::global`'s poll loop folds per-window answers
 /// and lives outside `crate::workspace`.
-pub(crate) use control_ops::{ChatDisclosure, ChatLabel, SlashClaim};
+pub(crate) use control_ops::{
+    ArrangedLane, ArrangedProject, ArrangedSection, ChatDisclosure, ChatLabel, SlashClaim,
+};
 pub(crate) use control_task_ops::ControlTaskStart;
 /// The chat a control command opens, built by the dispatcher outside
 /// `crate::workspace`.

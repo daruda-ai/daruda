@@ -4,25 +4,35 @@
 
 use super::{API, Credentials, UpdateVerdict, verdict};
 use crate::remote_channel::transport::{
-    AppHome, HomeEvent, HomeEventKind, LinkFailure, PageHelp, PageRow, PageVerdict, PageView,
-    chunks, http,
+    AppHome, HomeEvent, HomeEventKind, LinkFailure, PageBudget, PageHelp, PagePart, PageRow,
+    PageVerdict, PageView, chunks, http,
 };
 use serde_json::{Value, json};
 
 /// The app home as daruda writes to it on Slack.
 pub(crate) const APP_HOME: AppHome = AppHome {
-    capacity: ROW_CAPACITY,
+    budget: PageBudget {
+        blocks: VIEW_BLOCKS - FRAME_BLOCKS,
+        cards_per_block: CAROUSEL_CARDS,
+        cards: CARD_CAPACITY,
+    },
     publish,
     link: permalink,
     off_hint: "Turn on the Home tab in the Slack app's App Home settings",
 };
 
-/// The rows one page holds, of Slack's 100 blocks a view: 10 fixed (header,
-/// summary, result, 2 dividers, 2 group headings, rows left out, help, key),
-/// and N rows over two groups take at most ceil(N / 10) + 1 carousels: 11 at
-/// 100 rows, 21 blocks in all. Blocks alone would allow 890; 100 keeps the
-/// payload and the page a person scrolls through modest.
-const ROW_CAPACITY: usize = 100;
+/// Slack's cap on the blocks of one view.
+const VIEW_BLOCKS: usize = 100;
+/// The blocks of a page besides its listing, all at once: header, summary,
+/// result, the two dividers, the line counting what is left out, help and
+/// the status key. The empty-page line stands only where the listing would.
+/// What is left, 92, is the listing's: one block per heading or label, one
+/// carousel per ten cards.
+const FRAME_BLOCKS: usize = 8;
+/// The cards one page holds, a pane in the strip and in its project counted
+/// twice. Blocks alone would allow hundreds; this keeps the payload and the
+/// page a person scrolls through modest.
+const CARD_CAPACITY: usize = 100;
 /// Slack's cap on the cards of one carousel.
 const CAROUSEL_CARDS: usize = 10;
 /// Slack's cap on the elements of one context block.
@@ -112,32 +122,39 @@ fn parse_home_tap(envelope: &Value) -> Option<HomeEvent> {
 }
 
 /// The view's blocks: a header over the counts and the last tap's result,
-/// each group's panes as carousels of cards, then the usage help. Only a
-/// pane's status shows an emoji: every text of daruda's or the person's is
-/// written with shortcodes left as typed.
+/// the listing's headings, labels and carousels of cards, then the usage
+/// help. Only a pane's status shows an emoji: every text of daruda's or the
+/// person's is written with shortcodes left as typed.
 fn page_blocks(view: &PageView<'_>) -> Vec<Value> {
     let mut blocks = vec![json!({"type": "header", "text": plain(view.header, HEADER_LIMIT)})];
     for line in [view.summary, view.outcome].into_iter().flatten() {
         blocks.push(json!({"type": "context", "elements": [plain(line, TEXT_LIMIT)]}));
     }
     blocks.push(json!({"type": "divider"}));
-    if view.groups.is_empty() {
+    if view.parts.is_empty() {
         blocks.push(json!({"type": "section", "text": plain(view.empty, TEXT_LIMIT)}));
     }
-    // Action ids are unique across the view: numbered on through the groups.
+    // Action ids are unique across the view: numbered on through every
+    // carousel, a pane shown twice taking two.
     let mut index = 0;
-    for group in &view.groups {
-        blocks.push(json!({"type": "section",
-            "text": mrkdwn(&format!("*{}*", escaped(group.title, TEXT_LIMIT - 2)))}));
-        for cards in group.rows.chunks(CAROUSEL_CARDS) {
-            let elements: Vec<Value> = cards
-                .iter()
-                .map(|row| {
-                    index += 1;
-                    card(row, index - 1)
-                })
-                .collect();
-            blocks.push(json!({"type": "carousel", "elements": elements}));
+    for part in &view.parts {
+        match part {
+            PagePart::Heading(text) => blocks.push(heading(text)),
+            PagePart::Label(text) => {
+                blocks.push(json!({"type": "context", "elements": [plain(text, TEXT_LIMIT)]}));
+            }
+            PagePart::Rows(rows) => {
+                for cards in rows.chunks(CAROUSEL_CARDS) {
+                    let elements: Vec<Value> = cards
+                        .iter()
+                        .map(|row| {
+                            index += 1;
+                            card(row, index - 1)
+                        })
+                        .collect();
+                    blocks.push(json!({"type": "carousel", "elements": elements}));
+                }
+            }
         }
     }
     if let Some(more) = view.more {
@@ -146,6 +163,13 @@ fn page_blocks(view: &PageView<'_>) -> Vec<Value> {
     blocks.push(json!({"type": "divider"}));
     blocks.extend(help_blocks(&view.help));
     blocks
+}
+
+/// A heading in bold, as a thread root shows a pane's name: rich_text reads
+/// no markup or shortcode in a group's or project's name.
+fn heading(text: &str) -> Value {
+    json!({"type": "rich_text", "elements": [{"type": "rich_text_section", "elements": [
+        {"type": "text", "text": capped(text, TEXT_LIMIT), "style": {"bold": true}}]}]})
 }
 
 /// One pane: its name, its status (the one emoji on the page), what it is

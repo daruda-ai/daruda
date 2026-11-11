@@ -87,7 +87,7 @@ fn a_held_page_is_built_anew_only_once_its_connection_can_send(cx: &mut gpui::Te
         connection.status = Status::Failed;
         let queue = &mut channels.home.queue;
         queue.opened(&scope);
-        queue.want(&scope, Board::new(Vec::new(), 10, None));
+        queue.want(&scope, flat(Vec::new()));
         let held = queue.ready();
         queue.hold(&held[0]);
         (scope, bot)
@@ -174,7 +174,7 @@ fn a_tap_on_a_gone_pane_or_an_old_board_says_so_on_the_page(cx: &mut gpui::TestA
     let show_gone = |cx: &mut gpui::TestAppContext| {
         cx.update(|cx| {
             let home = &mut cx.global_mut::<RemoteChannels>().home;
-            let mut board = Board::new(vec![row("gone", None)], 10, None);
+            let mut board = flat(vec![row("gone", None)]);
             board.number(&mut home.numbering);
             let generation = board.generation();
             home.queue.want(&scope, board);
@@ -270,10 +270,14 @@ fn thread_links_land_after_the_board_and_build_the_page_again(cx: &mut gpui::Tes
     let linked = |cx: &mut gpui::TestAppContext| {
         let rows = rows.clone();
         cx.update(|cx| {
-            let board = cx
-                .global_mut::<RemoteChannels>()
-                .home
-                .board(&scope, rows, 10);
+            let board = cx.global_mut::<RemoteChannels>().home.board(
+                &scope,
+                vec![window(
+                    1,
+                    vec![alone(project("p", vec![lane("main", rows)]))],
+                )],
+                ROOMY,
+            );
             let links: Vec<Option<String>> =
                 board.rows().iter().map(|row| row.link.clone()).collect();
             (board, links)

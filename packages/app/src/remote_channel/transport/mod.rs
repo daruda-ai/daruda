@@ -123,11 +123,11 @@ pub(crate) fn pane_threads(kind: ChannelKind) -> bool {
 }
 
 /// The page of the app's own on which daruda shows its panes, on channels
-/// that have one: how many rows it holds and how to write to it.
+/// that have one: how much it holds and how to write to it.
 #[derive(Clone, Copy)]
 pub(crate) struct AppHome {
-    /// The rows one page holds.
-    pub capacity: usize,
+    /// What one page's panes may take.
+    pub budget: PageBudget,
     /// Show the view as person `user_id`'s page, replacing what it showed.
     pub publish: fn(&Credentials, &str, &PageView<'_>) -> PageVerdict,
     /// The link that opens message `message_id` of `conversation_id`: a
@@ -137,6 +137,28 @@ pub(crate) struct AppHome {
     pub off_hint: &'static str,
 }
 
+/// The room a page has for its [`PagePart`]s, as the transport draws them:
+/// a heading or a label takes one block, and a run of `n` rows takes
+/// `ceil(n / cards_per_block)`. The page's frame (header, counts, result,
+/// dividers, the line counting what is left out, help) is not counted here:
+/// the transport keeps its own room for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PageBudget {
+    /// Blocks the parts may take.
+    pub blocks: usize,
+    /// Rows one block holds side by side.
+    pub cards_per_block: usize,
+    /// Rows the page shows in all, a pane shown twice counted twice.
+    pub cards: usize,
+}
+
+impl PageBudget {
+    /// The blocks a run of `rows` rows takes.
+    pub(crate) fn rows_blocks(&self, rows: usize) -> usize {
+        rows.div_ceil(self.cards_per_block.max(1))
+    }
+}
+
 /// What a page shows, in the order it shows it.
 pub(crate) struct PageView<'a> {
     pub header: &'a str,
@@ -144,21 +166,26 @@ pub(crate) struct PageView<'a> {
     pub summary: Option<&'a str>,
     /// What the person's last tap came to, under the header.
     pub outcome: Option<&'a str>,
-    /// Said in place of the groups when there are no panes.
+    /// Said in place of the parts when there are no panes.
     pub empty: &'a str,
-    /// The panes, under their groups' headings; a group without panes is
-    /// left out.
-    pub groups: Vec<PageGroup<'a>>,
-    /// The line that counts the rows left out, when some were.
+    /// The panes under their headings, top to bottom.
+    pub parts: Vec<PagePart<'a>>,
+    /// The line that counts the panes left out, when some were.
     pub more: Option<&'a str>,
     /// How to use the page and the conversation, at its foot.
     pub help: PageHelp<'a>,
 }
 
-/// Panes shown together under one heading.
-pub(crate) struct PageGroup<'a> {
-    pub title: &'a str,
-    pub rows: Vec<PageRow<'a>>,
+/// One piece of a page's listing. Names are shown as written, never read as
+/// markup or emoji.
+pub(crate) enum PagePart<'a> {
+    /// Heads what follows: the panes needing the person, a window, a group,
+    /// or a project outside any group.
+    Heading(&'a str),
+    /// A quieter line naming what follows: a project in a group, or a lane.
+    Label(&'a str),
+    /// Panes shown side by side.
+    Rows(Vec<PageRow<'a>>),
 }
 
 /// The usage help at the foot of a page.

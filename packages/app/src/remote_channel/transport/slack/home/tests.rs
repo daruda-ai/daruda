@@ -1,6 +1,6 @@
 use super::super::{BUTTON_LABEL_LIMIT, parse};
 use super::*;
-use crate::remote_channel::transport::{IncomingKind, PageGroup, PageRow};
+use crate::remote_channel::transport::{IncomingKind, PagePart, PageRow};
 
 fn row<'a>(name: &'a str, emoji: Option<&'a str>, thread: Option<&'a str>) -> PageRow<'a> {
     PageRow {
@@ -16,13 +16,13 @@ fn row<'a>(name: &'a str, emoji: Option<&'a str>, thread: Option<&'a str>) -> Pa
 
 const LEGEND: [(&str, &str); 2] = [("hourglass_flowing_sand", "Working"), ("bell", "Needs you")];
 
-fn view<'a>(groups: Vec<PageGroup<'a>>, more: Option<&'a str>) -> PageView<'a> {
+fn view<'a>(parts: Vec<PagePart<'a>>, more: Option<&'a str>) -> PageView<'a> {
     PageView {
         header: "Agents",
         summary: Some("Working 1 · Needs you 0 · Total 2"),
         outcome: None,
         empty: "No agent chats are open.",
-        groups,
+        parts,
         more,
         help: PageHelp {
             title: "How to use",
@@ -32,8 +32,18 @@ fn view<'a>(groups: Vec<PageGroup<'a>>, more: Option<&'a str>) -> PageView<'a> {
     }
 }
 
-fn group<'a>(title: &'a str, rows: Vec<PageRow<'a>>) -> PageGroup<'a> {
-    PageGroup { title, rows }
+/// A heading over `rows`, as the strip or an ungrouped project is shown.
+fn group<'a>(title: &'a str, rows: Vec<PageRow<'a>>) -> [PagePart<'a>; 2] {
+    [PagePart::Heading(title), PagePart::Rows(rows)]
+}
+
+/// A heading as the page draws it: bold, literal text.
+fn heading_text(block: &Value) -> &str {
+    assert_eq!(block["type"], "rich_text", "{block}");
+    let text = &block["elements"][0]["elements"][0];
+    assert_eq!(text["type"], "text");
+    assert_eq!(text["style"], json!({"bold": true}));
+    text["text"].as_str().unwrap()
 }
 
 fn types(blocks: &[Value]) -> Vec<&str> {
@@ -52,17 +62,26 @@ fn cards(blocks: &[Value]) -> Vec<&Value> {
         .collect()
 }
 
-/// Header, counts, divider, each group's heading over its carousel, the
-/// rows left out, divider, help, and the status key, in that order.
+/// Header, counts, divider, then the listing in order: a heading in bold
+/// rich text, a label as context, each run of rows as a carousel; the rows
+/// left out, divider, help, and the status key.
 #[test]
-fn a_page_is_laid_out_header_groups_then_help() {
-    let mut running = row("app/main (Claude)", Some("hourglass_flowing_sand"), None);
-    running.stop = Some(("Stop", "hom:1:0:stop"));
-    let quiet = row("app/fix_bug (Codex)", None, None);
+fn a_page_is_laid_out_header_listing_then_help() {
+    let mut asking = row("web/fix (Claude)", Some("bell"), None);
+    asking.stop = Some(("Stop", "hom:1:3:stop"));
+    let mut again = row("web/fix (Claude)", Some("bell"), None);
+    again.stop = Some(("Stop", "hom:1:3:stop"));
+    let quiet = row("cli/main (Codex)", None, None);
     let page = view(
         vec![
-            group("Running", vec![running]),
-            group("Other panes", vec![quiet]),
+            PagePart::Heading("Needs you"),
+            PagePart::Rows(vec![asking]),
+            PagePart::Heading("Window 1"),
+            PagePart::Heading("tools"),
+            PagePart::Label("cli"),
+            PagePart::Rows(vec![quiet]),
+            PagePart::Label("web/fix"),
+            PagePart::Rows(vec![again]),
         ],
         Some("2 more not shown"),
     );
@@ -73,8 +92,21 @@ fn a_page_is_laid_out_header_groups_then_help() {
     assert_eq!(
         types(blocks),
         [
-            "header", "context", "divider", "section", "carousel", "section", "carousel",
-            "context", "divider", "section", "context"
+            "header",
+            "context",
+            "divider",
+            "rich_text",
+            "carousel",
+            "rich_text",
+            "rich_text",
+            "context",
+            "carousel",
+            "context",
+            "carousel",
+            "context",
+            "divider",
+            "section",
+            "context"
         ]
     );
     assert_eq!(blocks[0]["text"]["text"], "Agents");
@@ -82,27 +114,35 @@ fn a_page_is_laid_out_header_groups_then_help() {
         blocks[1]["elements"][0]["text"],
         "Working 1 · Needs you 0 · Total 2"
     );
-    assert_eq!(
-        blocks[3]["text"],
-        json!({"type": "mrkdwn", "text": "*Running*"})
-    );
+    assert_eq!(heading_text(&blocks[3]), "Needs you");
     assert_eq!(
         blocks[4]["elements"][0]["title"]["text"],
-        "app/main (Claude)"
+        "web/fix (Claude)"
     );
-    assert_eq!(blocks[5]["text"]["text"], "*Other panes*");
+    assert_eq!(heading_text(&blocks[5]), "Window 1");
+    assert_eq!(heading_text(&blocks[6]), "tools");
     assert_eq!(
-        blocks[6]["elements"][0]["title"]["text"],
-        "app/fix_bug (Codex)"
+        blocks[7]["elements"],
+        json!([{"type": "plain_text", "text": "cli", "emoji": false}])
     );
-    assert_eq!(blocks[7]["elements"][0]["text"], "2 more not shown");
     assert_eq!(
-        blocks[9]["text"]["text"],
+        blocks[8]["elements"][0]["title"]["text"],
+        "cli/main (Codex)"
+    );
+    assert_eq!(blocks[9]["elements"][0]["text"], "web/fix");
+    // The pane shown twice: the same values, its own action ids.
+    let (first, second) = (&blocks[4]["elements"][0], &blocks[10]["elements"][0]);
+    assert_eq!(first["actions"][1]["value"], second["actions"][1]["value"]);
+    assert_eq!(first["actions"][0]["action_id"], "home-select-0");
+    assert_eq!(second["actions"][0]["action_id"], "home-select-2");
+    assert_eq!(blocks[11]["elements"][0]["text"], "2 more not shown");
+    assert_eq!(
+        blocks[13]["text"]["text"],
         "*How to use*\n• Reply in a thread.\n• Commands: `!list` · `!stop`"
     );
     // The key is built from the statuses the page was handed.
     assert_eq!(
-        blocks[10]["elements"],
+        blocks[14]["elements"],
         json!([
             {"type": "mrkdwn", "text": ":hourglass_flowing_sand: Working"},
             {"type": "mrkdwn", "text": ":bell: Needs you"},
@@ -110,21 +150,25 @@ fn a_page_is_laid_out_header_groups_then_help() {
     );
 }
 
-/// A tap's result follows the counts; a group without panes is not given
-/// a heading.
+/// A tap's result follows the counts.
 #[test]
-fn a_tap_result_follows_the_counts_and_only_filled_groups_show() {
-    let mut page = view(vec![group("Other panes", vec![row("a", None, None)])], None);
+fn a_tap_result_follows_the_counts() {
+    let mut page = view(group("app", vec![row("a", None, None)]).into(), None);
     page.outcome = Some("09:30 · Stopped");
     let blocks = page_blocks(&page);
     assert_eq!(
         types(&blocks)[..6],
         [
-            "header", "context", "context", "divider", "section", "carousel"
+            "header",
+            "context",
+            "context",
+            "divider",
+            "rich_text",
+            "carousel"
         ]
     );
     assert_eq!(blocks[2]["elements"][0]["text"], "09:30 · Stopped");
-    assert_eq!(blocks[4]["text"]["text"], "*Other panes*");
+    assert_eq!(heading_text(&blocks[4]), "app");
 }
 
 #[test]
@@ -158,10 +202,7 @@ fn a_card_shows_one_pane_and_its_buttons() {
     quiet.select = ("Select", "hom:1:1:sel");
     quiet.status = "Idle";
     let blocks = page_blocks(&view(
-        vec![
-            group("Running", vec![running]),
-            group("Other panes", vec![quiet]),
-        ],
+        vec![PagePart::Rows(vec![running]), PagePart::Rows(vec![quiet])],
         None,
     ));
     let cards = cards(&blocks);
@@ -197,11 +238,19 @@ fn a_card_shows_one_pane_and_its_buttons() {
     );
 }
 
-/// Slack holds ten cards to a carousel: 23 panes in one group take three.
+/// Slack holds ten cards to a carousel: a run of 23 panes takes three, as
+/// the budget counts it.
 #[test]
-fn a_group_is_split_into_carousels_of_ten() {
+fn a_run_of_rows_is_split_into_carousels_of_ten() {
     let rows = (0..23).map(|_| row("pane", None, None)).collect();
-    let blocks = page_blocks(&view(vec![group("Other panes", rows)], None));
+    let blocks = page_blocks(&view(vec![PagePart::Rows(rows)], None));
+    assert_eq!(
+        blocks
+            .iter()
+            .filter(|block| block["type"] == "carousel")
+            .count(),
+        APP_HOME.budget.rows_blocks(23)
+    );
     let sizes: Vec<usize> = blocks
         .iter()
         .filter(|block| block["type"] == "carousel")
@@ -216,29 +265,31 @@ fn a_group_is_split_into_carousels_of_ten() {
     assert_eq!(ids[22], "home-select-22", "numbered on across carousels");
 }
 
-/// A full page, split between both groups, every row with all three
-/// buttons, a result line, and the rows left out counted, stays within
-/// Slack's 100 blocks; every button keeps its own action id.
+/// A listing that takes the whole budget, a heading or label a block and a
+/// carousel per ten cards, under a result line and over the rows left out,
+/// fills Slack's 100 blocks and no more; every button keeps its own action
+/// id, a pane shown twice included.
 #[test]
 fn a_full_page_fits_in_one_view() {
+    let budget = APP_HOME.budget;
     let full = || {
         let mut row = row("pane", Some("bell"), Some("https://x"));
         row.stop = Some(("Stop", "hom:1:0:stop"));
         row.subject = Some("subject");
         row
     };
-    let split = ROW_CAPACITY / 2 + 1;
-    let running = (0..split).map(|_| full()).collect();
-    let others = (split..ROW_CAPACITY).map(|_| full()).collect();
-    let mut page = view(
-        vec![group("Running", running), group("Other panes", others)],
-        Some("more"),
-    );
+    let runs = budget.cards / CAROUSEL_CARDS;
+    let mut parts: Vec<PagePart<'_>> = (0..runs)
+        .map(|_| PagePart::Rows((0..CAROUSEL_CARDS).map(|_| full()).collect()))
+        .collect();
+    let used = runs * budget.rows_blocks(CAROUSEL_CARDS);
+    parts.extend((used..budget.blocks).map(|_| PagePart::Label("project")));
+    let mut page = view(parts, Some("more"));
     page.outcome = Some("09:30 · Stopped");
     let blocks = page_blocks(&page);
-    assert!(blocks.len() <= 100, "{} blocks", blocks.len());
+    assert_eq!(blocks.len(), 100, "the frame and a full listing");
     let cards = cards(&blocks);
-    assert_eq!(cards.len(), ROW_CAPACITY);
+    assert_eq!(cards.len(), budget.cards);
     assert!(
         cards
             .iter()
@@ -249,17 +300,25 @@ fn a_full_page_fits_in_one_view() {
         .flat_map(|card| card["actions"].as_array().unwrap())
         .filter_map(|button| button["action_id"].as_str())
         .collect();
-    assert_eq!(action_ids.len(), ROW_CAPACITY * 3);
+    assert_eq!(action_ids.len(), budget.cards * 3);
 }
 
-/// Only a status shows an emoji: a shortcode in a pane's name, its subject
-/// or daruda's own texts stays text, and no mrkdwn text but a card's status
-/// and the status key carries one.
+/// Only a status shows an emoji: a shortcode in a pane's, project's or
+/// group's name, its subject or daruda's own texts stays text, and no
+/// mrkdwn text but a card's status and the status key carries one.
 #[test]
 fn only_statuses_show_emoji() {
     let mut odd = row(":fire: app", Some("bell"), None);
     odd.subject = Some(":tada: done");
-    let blocks = page_blocks(&view(vec![group("Running", vec![odd])], None));
+    let blocks = page_blocks(&view(
+        vec![
+            PagePart::Heading(":rocket: *group*"),
+            PagePart::Label(":star: project"),
+            PagePart::Rows(vec![odd]),
+        ],
+        None,
+    ));
+    assert_eq!(heading_text(&blocks[3]), ":rocket: *group*", "literal");
     let mut shown = Vec::new();
     walk(&Value::from(blocks.clone()), &mut |text: &Value| {
         if text["type"] == "plain_text" {
@@ -328,7 +387,7 @@ fn long_texts_are_capped() {
     long.status = &status;
     long.thread = Some((&label, "https://x"));
     let header = "h".repeat(200);
-    let mut page = view(vec![group("Running", vec![long])], None);
+    let mut page = view(group("Running", vec![long]).into(), None);
     page.header = &header;
     let blocks = page_blocks(&page);
     let length = |value: &Value| value.as_str().unwrap().encode_utf16().count();

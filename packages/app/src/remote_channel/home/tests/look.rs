@@ -1,11 +1,33 @@
 use super::super::look::HomeLook;
 use super::*;
-use crate::remote_channel::transport::{PageRow, PageView};
+use crate::remote_channel::transport::{PagePart, PageRow, PageView};
 use crate::surface::strings as s;
 
-/// Every row of `view`, the groups read in order.
+/// Every row of `view`, top to bottom: a pane in the strip and in its
+/// project twice.
 fn every_row<'a>(view: &'a PageView<'_>) -> Vec<&'a PageRow<'a>> {
-    view.groups.iter().flat_map(|group| &group.rows).collect()
+    view.parts
+        .iter()
+        .flat_map(|part| match part {
+            PagePart::Rows(rows) => rows.as_slice(),
+            _ => &[],
+        })
+        .collect()
+}
+
+/// The listing in short: `#` a heading, `-` a label, `[..]` rows by name.
+fn outline(view: &PageView<'_>) -> Vec<String> {
+    view.parts
+        .iter()
+        .map(|part| match part {
+            PagePart::Heading(text) => format!("#{text}"),
+            PagePart::Label(text) => format!("-{text}"),
+            PagePart::Rows(rows) => {
+                let names: Vec<&str> = rows.iter().map(|row| row.name).collect();
+                format!("[{}]", names.join(","))
+            }
+        })
+        .collect()
 }
 
 /// A pane with no status since daruda started reads idle, without an emoji;
@@ -18,35 +40,41 @@ fn each_row_reads_its_status_and_links_only_a_known_thread() {
     linked.subject = Some("Fix the bug".into());
     let mut unlinked = row("quiet", None);
     unlinked.thread = Some("2.2".into());
-    let page = Board::new(vec![linked, unlinked, row("left out", None)], 2, None);
+    let page = flat(vec![linked, unlinked]);
     let look = HomeLook::new(&page);
     let view = look.view();
     let rows = every_row(&view);
-    assert_eq!(rows[0].emoji, Some("bell"));
-    assert_eq!(rows[0].status, s::remote_channel::thread_status_needs_you());
     assert_eq!(
-        rows[0].thread,
+        rows.len(),
+        3,
+        "the asking pane in the strip and its project"
+    );
+    let (asking, quiet) = (rows[1], rows[2]);
+    assert_eq!(asking.emoji, Some("bell"));
+    assert_eq!(asking.status, s::remote_channel::thread_status_needs_you());
+    assert_eq!(
+        asking.thread,
         Some((
             s::remote_channel::home_open_thread().as_str(),
             "https://x/p1"
         ))
     );
-    assert_eq!(rows[0].subject, Some("Fix the bug"));
-    assert_eq!(rows[1].subject, None, "no activity title");
-    assert_eq!(rows[1].emoji, None);
-    assert_eq!(rows[1].status, s::remote_channel::home_status_idle());
-    assert!(rows[1].thread.is_none(), "no link known yet");
-    assert_eq!(view.more, Some(s::remote_channel::home_more(1).as_str()));
-    let full = HomeLook::new(&board(&["a"]));
-    assert!(full.view().more.is_none(), "nothing left out");
+    assert_eq!(asking.subject, Some("Fix the bug"));
+    assert_eq!(quiet.subject, None, "no activity title");
+    assert_eq!(quiet.emoji, None);
+    assert_eq!(quiet.status, s::remote_channel::home_status_idle());
+    assert!(quiet.thread.is_none(), "no link known yet");
+    assert!(view.more.is_none(), "nothing left out");
 }
 
 /// Every row can be selected; only a working pane, or one waiting on the
-/// person, can be stopped. The selected pane is marked and the last tap's
-/// result heads the page.
+/// person, can be stopped. A pane shown twice carries the same values both
+/// times. The selected pane is marked and the last tap's result heads the
+/// page.
 #[test]
 fn a_row_offers_stop_only_while_its_pane_runs() {
     use super::super::board::Outcome;
+    use super::super::token::Act;
     use crate::remote_channel::threads::status::Ending;
     let mut picked = row("done", Some(ShownStatus::Ended(Ending::Completed)));
     picked.selected = true;
@@ -61,29 +89,35 @@ fn a_row_offers_stop_only_while_its_pane_runs() {
         at: 0,
         text: "Stopped".into(),
     };
-    let page = Board::new(rows, 10, Some(outcome));
+    let page = Board::new(
+        vec![window(
+            1,
+            vec![alone(project("p", vec![lane("main", rows)]))],
+        )],
+        ROOMY,
+        Some(outcome),
+    );
     let look = HomeLook::new(&page);
     let view = look.view();
     let rows = every_row(&view);
     let stops: Vec<bool> = rows.iter().map(|row| row.stop.is_some()).collect();
-    assert_eq!(stops, [true, true, false, false, false]);
-    for (index, row) in rows.iter().enumerate() {
+    assert_eq!(stops, [true, true, true, false, false, false]);
+    assert_eq!(rows[0].select, rows[1].select, "the strip's row is its own");
+    assert_eq!(rows[0].stop, rows[1].stop);
+    for (index, row) in rows[1..].iter().enumerate() {
         assert_eq!(row.select.0, s::remote_channel::home_select());
-        assert_eq!(
-            row.select.1,
-            page.token(index, super::super::token::Act::Select)
-        );
+        assert_eq!(row.select.1, page.token(index, Act::Select));
     }
     assert_eq!(
         rows[0].stop.map(|(label, _)| label.to_owned()),
         Some(s::remote_channel::home_stop())
     );
     assert_eq!(
-        rows[2].status,
+        rows[3].status,
         s::remote_channel::home_status_selected(s::remote_channel::thread_status_completed())
     );
     assert_eq!(
-        rows[3].status,
+        rows[4].status,
         s::remote_channel::home_status_idle(),
         "unselected, unmarked"
     );
@@ -97,38 +131,64 @@ fn a_row_offers_stop_only_while_its_pane_runs() {
     );
 }
 
-/// Running panes, the ones waiting on the person first, are grouped apart
-/// from the rest; the counts include the panes left out; an empty group is
-/// left out; the help ends with a key built from the statuses.
+/// The strip, windows, groups, projects and lanes read in the person's
+/// language; the counts include the panes left out, and the help ends with
+/// a key built from the statuses.
 #[test]
-fn panes_are_grouped_by_whether_they_run_under_counts_and_help() {
-    use crate::remote_channel::threads::status::Ending;
-    let rows = vec![
-        row("done", Some(ShownStatus::Ended(Ending::Completed))),
-        row("working", Some(ShownStatus::Working { since: 1 })),
-        row("asking", Some(ShownStatus::NeedsYou { since: 1 })),
-        row("quiet", None),
-        row("left out", None),
+fn headings_and_labels_name_what_follows_under_counts_and_help() {
+    let asking = || row("asking", Some(ShownStatus::NeedsYou { since: 1 }));
+    let windows = vec![
+        window(
+            1,
+            vec![group(
+                "tools",
+                vec![
+                    project("cli", vec![lane("main", vec![row("quiet", None)])]),
+                    project(
+                        "web",
+                        vec![
+                            lane("main", vec![row("w", None)]),
+                            lane("fix", vec![asking()]),
+                        ],
+                    ),
+                ],
+            )],
+        ),
+        window(
+            2,
+            vec![alone(project(
+                "solo",
+                vec![lane("main", vec![row("left out", None)])],
+            ))],
+        ),
     ];
-    let look = HomeLook::new(&Board::new(rows, 4, None));
+    let budget = PageBudget {
+        blocks: 11,
+        ..ROOMY
+    };
+    let look = HomeLook::new(&Board::new(windows, budget, None));
     let view = look.view();
-    let grouped: Vec<(&str, Vec<&str>)> = view
-        .groups
-        .iter()
-        .map(|group| (group.title, group.rows.iter().map(|row| row.name).collect()))
-        .collect();
-    let running = s::remote_channel::home_group_running();
-    let others = s::remote_channel::home_group_others();
+    let needs_you = format!("#{}", s::remote_channel::home_needs_you());
+    let window_1 = format!("#{}", s::remote_channel::home_window(1));
     assert_eq!(
-        grouped,
+        outline(&view),
         [
-            (running.as_str(), vec!["asking", "working"]),
-            (others.as_str(), vec!["done", "quiet"]),
+            needs_you.as_str(),
+            "[asking]",
+            window_1.as_str(),
+            "#tools",
+            "-cli",
+            "[quiet]",
+            &format!("-{}", s::control::lane_path("web", "main")),
+            "[w]",
+            &format!("-{}", s::control::lane_path("web", "fix")),
+            "[asking]",
         ]
     );
+    assert_eq!(view.more, Some(s::remote_channel::home_more(1).as_str()));
     assert_eq!(
         view.summary,
-        Some(s::remote_channel::home_summary(1, 1, 5).as_str())
+        Some(s::remote_channel::home_summary(0, 1, 4).as_str())
     );
     let help = &view.help;
     assert_eq!(help.title, s::remote_channel::home_help_title());
@@ -150,10 +210,7 @@ fn panes_are_grouped_by_whether_they_run_under_counts_and_help() {
         "working without its time"
     );
 
-    let idle = HomeLook::new(&board(&["a"]));
-    let titles: Vec<&str> = idle.view().groups.iter().map(|group| group.title).collect();
-    assert_eq!(titles, [others.as_str()], "no running heading without one");
-    let empty = HomeLook::new(&Board::new(Vec::new(), 4, None));
+    let empty = HomeLook::new(&flat(Vec::new()));
     let view = empty.view();
-    assert!(view.groups.is_empty() && view.summary.is_none());
+    assert!(view.parts.is_empty() && view.summary.is_none());
 }

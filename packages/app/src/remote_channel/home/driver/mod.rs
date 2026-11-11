@@ -10,16 +10,16 @@ mod tap;
 
 pub(crate) use tap::tapped;
 
-use super::board::{Board, PaneRow};
+use super::board::{Board, PaneRow, WindowPanes};
+use crate::control::result::ChatSummary;
 use crate::remote_channel::bridge::PaneRef;
-use crate::remote_channel::command::ListingRow;
 use crate::remote_channel::global::{Connection, RemoteChannels};
 use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::threads::Scope;
-use crate::remote_channel::transport::{self, AppHome};
+use crate::remote_channel::transport::{self, AppHome, PageBudget};
+use crate::surface::strings as s;
 use daruda_config::remote::ChannelKind;
 use gpui::App;
-use std::collections::HashMap;
 
 /// The paired person, `user_id` of team `team_id`, opened connection `id`'s
 /// page: show it every pane as it is now. Idempotent, so it claims nothing in
@@ -84,16 +84,15 @@ fn rebuild(cx: &mut App) {
     if scopes.is_empty() {
         return;
     }
-    // One listing for every page: it walks, and updates, every workspace.
-    let listing = crate::remote_channel::command::flatten(&crate::control::exec::listing(cx));
-    let panes = panes::now(&listing, cx);
+    // One walk for every page: it enters, and updates, every workspace.
+    let panes = panes::now(cx);
     for scope in scopes {
         // Only a removed connection has no page left; the retry tick
         // forgets it.
         let Some(home) = page_of(&scope, cx) else {
             continue;
         };
-        let board = board(&scope, home.capacity, &listing, &panes, cx);
+        let board = board(&scope, home.budget, &panes, cx);
         // A connection that cannot send now still gets its board; it waits
         // for a retry tick the connection can send on. Its thread links are
         // asked on a later rebuild.
@@ -149,44 +148,56 @@ fn app_home(kind: ChannelKind) -> Option<AppHome> {
     Some(home)
 }
 
-/// Every pane `/list` shows, named as its thread root names it, with its
-/// status, its thread under `scope` — found by the conversation each is in
-/// now, as `panes` says — and whether commands address it, under what the
-/// last tap came to.
-fn board(
-    scope: &Scope,
-    capacity: usize,
-    listing: &[ListingRow],
-    panes: &HashMap<PaneRef, panes::PaneNow>,
-    cx: &mut App,
-) -> Board {
+/// Every agent pane, window by window in the sidebar's arrangement, named
+/// as its thread root names it, with its status, its thread under `scope` —
+/// found by the conversation each is in now — and whether commands address
+/// it, laid out for `budget` under what the last tap came to.
+fn board(scope: &Scope, budget: PageBudget, panes: &panes::Panes, cx: &mut App) -> Board {
     let channels = cx.global_mut::<RemoteChannels>();
     let selected: Option<PaneRef> = channels
         .connections
         .get(&scope.connection)
         .and_then(|connection| connection.core.command_state().selected());
     let threads = &channels.threads;
-    let rows = listing
+    let windows = panes
+        .windows
         .iter()
-        .map(|row| {
-            let pane = row.summary.target;
-            let now = panes.get(&pane);
-            let (name, subject) = match now {
-                Some(now) => (now.name.title.clone(), now.name.subject.clone()),
-                None => (PaneRow::named(row), None),
-            };
-            PaneRow {
-                pane,
-                name,
-                subject,
-                shown: threads.activity_of(pane),
-                thread: threads.root_for(scope, pane, now.and_then(|now| now.key.as_ref())),
-                link: None,
-                selected: selected == Some(pane),
-            }
+        .enumerate()
+        .map(|(index, sections)| WindowPanes {
+            number: index + 1,
+            sections: sections
+                .iter()
+                .cloned()
+                .map(|section| {
+                    section.map(&mut |project, lane, summary: ChatSummary| {
+                        let pane = summary.target;
+                        let now = panes.now.get(&pane);
+                        let (name, subject) = match now {
+                            Some(now) => (now.name.title.clone(), now.name.subject.clone()),
+                            None => (
+                                PaneRow::named(&s::control::lane_path(project, lane), &summary),
+                                None,
+                            ),
+                        };
+                        PaneRow {
+                            pane,
+                            name,
+                            subject,
+                            shown: threads.activity_of(pane),
+                            thread: threads.root_for(
+                                scope,
+                                pane,
+                                now.and_then(|now| now.key.as_ref()),
+                            ),
+                            link: None,
+                            selected: selected == Some(pane),
+                        }
+                    })
+                })
+                .collect(),
         })
         .collect();
-    channels.home.board(scope, rows, capacity)
+    channels.home.board(scope, windows, budget)
 }
 
 /// Ask the links `board` lacks for `scope`'s page, as a rebuild does.

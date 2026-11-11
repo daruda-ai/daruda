@@ -15,15 +15,19 @@ use crate::control::result::{
 use crate::remote_channel::bridge::PaneRef;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::project_order::TopRow;
 use daruda_chat::view::{ActivityState, AgentChatView, AgentSessionStatus, PromptDispatch};
 use daruda_control_types::agent_text::{bound_agent_text, one_line, sanitize_title};
 use daruda_store::project::{LaneRef, ProjectId};
+use std::collections::HashMap;
 
+mod arrangement;
 mod disclosure;
 mod slash;
 #[cfg(test)]
 mod test_hooks;
 
+pub(crate) use arrangement::{ArrangedLane, ArrangedProject, ArrangedSection};
 pub(crate) use disclosure::ChatDisclosure;
 pub(crate) use slash::SlashClaim;
 
@@ -76,6 +80,62 @@ impl Workspace {
                         tab_name: self.pane_tab_name(pane_id),
                     },
                 ))
+            })
+            .collect()
+    }
+
+    /// This window's agent-chat panes arranged as the project sidebar shows
+    /// their projects: groups and ungrouped projects in its order, a
+    /// project's lanes in tab order, a lane's panes by id as `/list` has
+    /// them. Lanes, projects and groups without a pane are left out, and a
+    /// project the sidebar shows nowhere (one naming a missing group) too.
+    ///
+    /// Read-only, for the same reason as [`Self::control_snapshot`].
+    pub(crate) fn control_arrangement(&self, cx: &App) -> Vec<ArrangedSection<ChatSummary>> {
+        let mut by_lane: HashMap<LaneRef, Vec<ChatSummary>> = HashMap::new();
+        for (lane, summary) in self.control_snapshot(cx) {
+            by_lane.entry(lane).or_default().push(summary);
+        }
+        for panes in by_lane.values_mut() {
+            panes.sort_by_key(|summary| summary.target.pane);
+        }
+        let mut project_at = |index: usize| {
+            let project = &self.projects[index];
+            let mut lanes: Vec<&crate::lane::Lane> = project.lanes.iter().collect();
+            lanes.sort_by_key(|lane| lane.tab_order);
+            let lanes: Vec<ArrangedLane<ChatSummary>> = lanes
+                .into_iter()
+                .filter_map(|lane| {
+                    let panes = by_lane.remove(&LaneRef {
+                        project: project.id,
+                        lane: lane.id,
+                    })?;
+                    Some(ArrangedLane {
+                        name: lane.display_name(),
+                        panes,
+                    })
+                })
+                .collect();
+            (!lanes.is_empty()).then(|| ArrangedProject {
+                name: project.name.clone(),
+                lanes,
+            })
+        };
+        let (groups, projects) = self.project_order_keys();
+        crate::workspace::project_order::arrange(&groups, &projects)
+            .into_iter()
+            .filter_map(|row| match row {
+                TopRow::Group { group, members } => {
+                    let projects: Vec<_> =
+                        members.into_iter().filter_map(&mut project_at).collect();
+                    (!projects.is_empty()).then(|| ArrangedSection::Group {
+                        name: self.groups[group].name.clone(),
+                        projects,
+                    })
+                }
+                TopRow::UngroupedProject(project) => {
+                    project_at(project).map(ArrangedSection::Project)
+                }
             })
             .collect()
     }

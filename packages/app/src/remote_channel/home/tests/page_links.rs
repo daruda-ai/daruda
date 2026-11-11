@@ -30,7 +30,7 @@ fn a_page_asks_each_thread_link_once_until_the_next_opening() {
     let linked = |queue: &PublishQueue, scope| {
         let mut threaded = row("a", None);
         threaded.thread = Some("1.1".into());
-        let mut board = Board::new(vec![threaded], 10, None);
+        let mut board = flat(vec![threaded]);
         queue.link(scope, &mut board);
         board.rows()[0].link.clone()
     };
