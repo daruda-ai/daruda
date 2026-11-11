@@ -1370,3 +1370,132 @@ async fn a_task_bound_pane_keeps_its_session_on_an_account_pick(cx: &mut TestApp
     assert_eq!(selection, Some(AccountSelection::SystemDefault));
     assert!(!divided, "the task's session was not handed over");
 }
+
+fn claude_system() -> daruda_agent::accounts::LoginTarget {
+    daruda_agent::accounts::LoginTarget::System {
+        recipe: daruda_store::accounts::AccountRecipeId::Claude,
+    }
+}
+
+fn auth_refusal() -> ChatItem {
+    ChatItem::Failure(daruda_acp::AcpFailure::classify(
+        &agent_client_protocol::Error::new(-32000, "Authentication required"),
+    ))
+}
+
+/// A registered workspace window holding one live chat pane seeded with
+/// `items` — registered, so a fan-out over every window reaches it.
+fn window_with_chat(
+    cx: &mut TestAppContext,
+    cwd: &std::path::Path,
+    items: Vec<ChatItem>,
+) -> (gpui::Entity<Workspace>, PaneId) {
+    let (window_handle, workspace) = build_workspace(cx);
+    cx.run_until_parked();
+    cx.update(|cx| {
+        crate::window_registry::WindowRegistry::register(
+            window_handle.into(),
+            workspace.downgrade(),
+            cx,
+        )
+    });
+    let pane_id = cx
+        .update_window(window_handle.into(), |_, window, cx| {
+            workspace.update(cx, |ws, cx| seed_live_chat(ws, cwd, items, window, cx))
+        })
+        .unwrap();
+    cx.run_until_parked();
+    (workspace, pane_id)
+}
+
+fn chat_items(
+    cx: &mut TestAppContext,
+    workspace: &gpui::Entity<Workspace>,
+    pane_id: PaneId,
+) -> Vec<ChatItem> {
+    workspace.read_with(cx, |ws, cx| {
+        agent_view(ws, pane_id).read(cx).items().to_vec()
+    })
+}
+
+/// A sign-in clears the refusal that ended a live pane's conversation — but
+/// only for a pane on the credentials it wrote; a login elsewhere leaves it.
+#[gpui::test]
+async fn a_sign_in_clears_the_refusal_on_its_own_panes_only(cx: &mut TestAppContext) {
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = ChatItem::UserText("hi".into());
+    let (workspace, pane_id) =
+        window_with_chat(cx, dir.path(), vec![prompt.clone(), auth_refusal()]);
+
+    let codex = daruda_agent::accounts::LoginTarget::System {
+        recipe: daruda_store::accounts::AccountRecipeId::Codex,
+    };
+    workspace.update(cx, |ws, cx| ws.settle_panes_after_login(codex, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        chat_items(cx, &workspace, pane_id),
+        vec![prompt.clone(), auth_refusal()],
+        "another domain's login fixed nothing here"
+    );
+
+    workspace.update(cx, |ws, cx| {
+        ws.settle_panes_after_login(claude_system(), cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        chat_items(cx, &workspace, pane_id),
+        vec![prompt],
+        "the refusal no longer applies"
+    );
+}
+
+/// A pane whose connection was refused for its login reconnects once the
+/// login lands, rather than waiting for a second click.
+#[gpui::test]
+async fn a_sign_in_reconnects_a_pane_whose_connection_it_refused(cx: &mut TestAppContext) {
+    use daruda_chat::view::AgentSessionStatus;
+
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let dir = tempfile::tempdir().unwrap();
+    let (workspace, pane_id) = window_with_chat(cx, dir.path(), Vec::new());
+    workspace.update(cx, |ws, cx| {
+        agent_view(ws, pane_id).update(cx, |v, _| {
+            v.set_status_for_test(AgentSessionStatus::Error {
+                message: "Authentication required".into(),
+                remedy: daruda_acp::Remedy::Reauthenticate,
+            })
+        })
+    });
+
+    workspace.update(cx, |ws, cx| {
+        ws.settle_panes_after_login(claude_system(), cx)
+    });
+    cx.run_until_parked();
+
+    let status = workspace.read_with(cx, |ws, cx| {
+        agent_view(ws, pane_id).read(cx).status().clone()
+    });
+    assert!(
+        !matches!(status, AgentSessionStatus::Error { .. }),
+        "the refused connection was retried: {status:?}"
+    );
+}
+
+/// The login is heard only by the window that ran it, but the credentials are
+/// shared: a pane in another window on them loses its refusal too.
+#[gpui::test]
+async fn a_sign_in_reaches_panes_in_other_windows(cx: &mut TestAppContext) {
+    let _connections = cx.update(Workspace::fake_agent_connections_for_test);
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = ChatItem::UserText("hi".into());
+    let (signing_in, _) = window_with_chat(cx, dir.path(), Vec::new());
+    let (other, pane_id) = window_with_chat(cx, dir.path(), vec![prompt.clone(), auth_refusal()]);
+
+    signing_in.update(cx, |ws, cx| {
+        ws.settle_panes_after_login_everywhere(claude_system(), cx)
+    });
+    cx.run_until_parked();
+
+    assert_eq!(chat_items(cx, &other, pane_id), vec![prompt]);
+}

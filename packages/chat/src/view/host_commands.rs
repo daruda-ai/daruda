@@ -12,6 +12,7 @@ use super::{AgentChatEvent, AgentChatView, AgentIdentity, HostCard};
 mod phone_questions;
 mod question_keys;
 mod questions;
+mod sign_in;
 
 pub use phone_questions::{PhoneAnswerResult, PhoneQuestion, PhoneReply};
 

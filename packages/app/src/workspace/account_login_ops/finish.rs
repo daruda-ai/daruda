@@ -256,7 +256,7 @@ impl Workspace {
                     cx,
                 );
                 self.probe_auth_status(target, true, cx);
-                self.reconnect_panes_after_login(target, cx);
+                self.settle_panes_after_login_everywhere(target, cx);
                 cx.notify();
             }
             LoginOutcome::Denied => {
@@ -390,7 +390,7 @@ impl Workspace {
         );
         // The panes that sent the user here are still sitting on the failure
         // this login just cleared.
-        self.reconnect_panes_after_login(
+        self.settle_panes_after_login_everywhere(
             LoginTarget::Managed {
                 id: account_id,
                 recipe: recipe_id,
