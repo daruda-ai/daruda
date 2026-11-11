@@ -3,7 +3,7 @@
 //! pages again, so the first rows link without waiting for the last.
 
 use super::super::board::Board;
-use super::super::publish_queue::Learned;
+use super::super::publish_queue::{Learned, LinkAsk, PageEpoch};
 use crate::remote_channel::global::RemoteChannels;
 use crate::remote_channel::runtime::BotSession;
 use crate::remote_channel::threads::Scope;
@@ -14,11 +14,14 @@ use std::sync::Arc;
 /// Ask `bot` for the links to the threads `board` shows without one that
 /// `scope`'s page has not asked for yet. One at a time, off the main thread.
 pub(super) fn ask(scope: &Scope, home: AppHome, bot: Arc<BotSession>, board: &Board, cx: &mut App) {
-    let roots = cx
+    let Some(LinkAsk { epoch, roots }) = cx
         .global_mut::<RemoteChannels>()
         .home
         .queue
-        .ask_links(scope, board.unlinked());
+        .ask_links(scope, board.unlinked())
+    else {
+        return;
+    };
     if roots.is_empty() {
         return;
     }
@@ -32,9 +35,9 @@ pub(super) fn ask(scope: &Scope, home: AppHome, bot: Arc<BotSession>, board: &Bo
                 .background_executor()
                 .spawn(async move { (home.link)(&credentials, &channel, &asked) })
                 .await;
-            // Another identity's page has replaced this one: its own asks
-            // are its own.
-            if !cx.update(|cx| learn(&scope, &root, link, cx)) {
+            // The page was replaced or forgotten: the rest of these asks
+            // were its own, and a new page asks for itself.
+            if !cx.update(|cx| learn(&scope, epoch, &root, link, cx)) {
                 return;
             }
         }
@@ -42,11 +45,17 @@ pub(super) fn ask(scope: &Scope, home: AppHome, bot: Arc<BotSession>, board: &Bo
     .detach();
 }
 
-/// Keep what the link asked for `root` came to. Whether `scope`'s page
-/// still waited for it.
-fn learn(scope: &Scope, root: &str, link: Result<String, LinkFailure>, cx: &mut App) -> bool {
+/// Keep what the link `scope`'s page of `epoch` asked for `root` came to.
+/// Whether that page is still there.
+fn learn(
+    scope: &Scope,
+    epoch: PageEpoch,
+    root: &str,
+    link: Result<String, LinkFailure>,
+    cx: &mut App,
+) -> bool {
     let queue = &mut cx.global_mut::<RemoteChannels>().home.queue;
-    match (queue.learn_link(scope, root, &link), link) {
+    match (queue.learn_link(scope, epoch, root, &link), link) {
         (Learned::Stale, _) => return false,
         (Learned::Known, _) => super::changed(cx),
         // The row shows no button meanwhile; the retry tick or the person's

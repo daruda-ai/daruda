@@ -220,6 +220,8 @@ fn thread_links_land_after_the_board_and_build_the_page_again(cx: &mut gpui::Tes
             .home
             .queue
             .ask_links(&scope, ["1.1", "2.2", "3.3"])
+            .unwrap()
+            .roots
             .is_empty()),
         "asked once, pending meanwhile"
     );
@@ -232,6 +234,8 @@ fn thread_links_land_after_the_board_and_build_the_page_again(cx: &mut gpui::Tes
             .home
             .queue
             .ask_links(&scope, ["2.2"])
+            .unwrap()
+            .roots
             .is_empty()),
         "a failed link is not asked again before the retry tick"
     );
@@ -241,7 +245,9 @@ fn thread_links_land_after_the_board_and_build_the_page_again(cx: &mut gpui::Tes
             cx.global_mut::<RemoteChannels>()
                 .home
                 .queue
-                .ask_links(&scope, ["1.1", "2.2", "3.3"]),
+                .ask_links(&scope, ["1.1", "2.2", "3.3"])
+                .unwrap()
+                .roots,
             ["2.2"],
             "the retry tick asks a failed link again, not a refused one"
         )

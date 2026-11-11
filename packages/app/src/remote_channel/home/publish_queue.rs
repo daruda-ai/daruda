@@ -56,8 +56,20 @@ pub(super) enum Learned {
     Failed { first: bool },
     /// Refused: the row goes without a link for as long as the page.
     Refused,
-    /// For a page another identity has replaced since, or no longer asked.
+    /// For a page that has been replaced or forgotten since.
     Stale,
+}
+
+/// Which page, of all a connection had, an ask was made for: a page another
+/// identity replaced, even one under the same identity again, has another.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PageEpoch(u64);
+
+/// The links a page asked for at once, all answered for that page.
+#[derive(Debug)]
+pub(super) struct LinkAsk {
+    pub epoch: PageEpoch,
+    pub roots: Vec<String>,
 }
 
 /// A board on its way to the page of `scope`'s connection.
@@ -70,11 +82,16 @@ pub(super) struct Publication {
 /// One connection's page, under the identity that serves it.
 struct Page {
     scope: Scope,
+    /// Tells this page's link answers from a replaced page's.
+    epoch: PageEpoch,
     viewer: Viewer,
     wanted: Option<Board>,
     /// What the page shows now, as far as this run knows.
     published: Option<Board>,
     phase: Option<Phase>,
+    /// The board the channel refused last: an equal board would be refused
+    /// again, so it is not sent until another has gone out.
+    refused: Option<Board>,
     /// What the person's last tap came to, shown atop every later board.
     outcome: Option<Outcome>,
     /// The link to each thread root the page's boards have shown.
@@ -85,13 +102,15 @@ struct Page {
 }
 
 impl Page {
-    fn new(scope: Scope) -> Self {
+    fn new(scope: Scope, epoch: PageEpoch) -> Self {
         Self {
             scope,
+            epoch,
             viewer: Viewer::NotSeen,
             wanted: None,
             published: None,
             phase: None,
+            refused: None,
             outcome: None,
             links: HashMap::new(),
             told_failed: HashSet::new(),
@@ -134,6 +153,8 @@ pub(super) struct PublishQueue {
     pages: HashMap<String, Page>,
     /// Connections whose page was reported off, so it is reported once.
     told_unavailable: HashSet<String>,
+    /// The epoch the next page made takes.
+    next_epoch: u64,
 }
 
 impl PublishQueue {
@@ -203,8 +224,8 @@ impl PublishQueue {
             .map(|page| &page.scope)
     }
 
-    /// The boards to publish now: wanted, not already shown, not in flight,
-    /// and not waiting.
+    /// The boards to publish now: wanted, not already shown, not refused
+    /// last, not in flight, and not waiting.
     pub(super) fn ready(&mut self) -> Vec<Publication> {
         let mut ready = Vec::new();
         for page in self.pages.values_mut() {
@@ -214,10 +235,14 @@ impl PublishQueue {
             if !in_flight && page.wanted.is_some() && page.wanted == page.published {
                 page.wanted = None;
             }
+            if page.wanted.is_some() && page.wanted == page.refused {
+                page.wanted = None;
+            }
             if page.viewer != Viewer::Viewing || page.phase.is_some() {
                 continue;
             }
             if let Some(board) = &page.wanted {
+                page.refused = None;
                 page.phase = Some(Phase::InFlight(board.clone()));
                 ready.push(Publication {
                     scope: page.scope.clone(),
@@ -259,6 +284,7 @@ impl PublishQueue {
                 if page.wanted.as_ref() == Some(&publication.board) {
                     page.wanted = None;
                 }
+                page.refused = Some(publication.board.clone());
                 Settled::Dropped
             }
         }
@@ -284,15 +310,13 @@ impl PublishQueue {
     }
 
     /// The roots among `roots` whose link `scope`'s page has not asked for
-    /// yet, each marked as being asked for now.
+    /// yet, each marked as being asked for now. `None` without a page.
     pub(super) fn ask_links<'a>(
         &mut self,
         scope: &Scope,
         roots: impl IntoIterator<Item = &'a str>,
-    ) -> Vec<String> {
-        let Some(page) = current(&mut self.pages, scope) else {
-            return Vec::new();
-        };
+    ) -> Option<LinkAsk> {
+        let page = current(&mut self.pages, scope)?;
         let mut asked = Vec::new();
         for root in roots {
             if !page.links.contains_key(root) {
@@ -300,43 +324,39 @@ impl PublishQueue {
                 asked.push(root.to_owned());
             }
         }
-        asked
+        Some(LinkAsk {
+            epoch: page.epoch,
+            roots: asked,
+        })
     }
 
-    /// The link asked for `root` on `scope`'s page came back as `link`, or
-    /// failed.
+    /// The link `scope`'s page of `epoch` asked for `root` came back as
+    /// `link`, or failed. Every ask of a page is answered for that page
+    /// alone, so none is left pending by a replaced page's answer.
     pub(super) fn learn_link(
         &mut self,
         scope: &Scope,
+        epoch: PageEpoch,
         root: &str,
         link: &Result<String, LinkFailure>,
     ) -> Learned {
-        let Some(page) = current(&mut self.pages, scope) else {
+        let Some(page) = current(&mut self.pages, scope).filter(|page| page.epoch == epoch) else {
             return Learned::Stale;
         };
-        let Some(entry) = page
-            .links
-            .get_mut(root)
-            .filter(|entry| **entry == Link::Pending)
-        else {
-            return Learned::Stale;
-        };
-        match link {
-            Ok(link) => {
-                *entry = Link::Known(link.clone());
-                Learned::Known
-            }
-            Err(LinkFailure::Transient(_)) => {
-                *entry = Link::Failed;
+        // Only this page's ask marked `root` pending, and nothing else
+        // settles it, so the answer is kept as it is.
+        let (entry, learned) = match link {
+            Ok(link) => (Link::Known(link.clone()), Learned::Known),
+            Err(LinkFailure::Transient(_)) => (
+                Link::Failed,
                 Learned::Failed {
                     first: page.told_failed.insert(root.to_owned()),
-                }
-            }
-            Err(LinkFailure::Refused(_)) => {
-                *entry = Link::Refused;
-                Learned::Refused
-            }
-        }
+                },
+            ),
+            Err(LinkFailure::Refused(_)) => (Link::Refused, Learned::Refused),
+        };
+        page.links.insert(root.to_owned(), entry);
+        learned
     }
 
     /// Forget the pages of scopes no connection can serve any more.
@@ -347,12 +367,16 @@ impl PublishQueue {
     /// The page `scope`'s connection has under `scope`; another identity's
     /// page is forgotten for a new one.
     fn page(&mut self, scope: &Scope) -> &mut Page {
+        let fresh = PageEpoch(self.next_epoch);
         let page = self
             .pages
             .entry(scope.connection.clone())
-            .or_insert_with(|| Page::new(scope.clone()));
+            .or_insert_with(|| Page::new(scope.clone(), fresh));
         if page.scope != *scope {
-            *page = Page::new(scope.clone());
+            *page = Page::new(scope.clone(), fresh);
+        }
+        if page.epoch == fresh {
+            self.next_epoch += 1;
         }
         page
     }

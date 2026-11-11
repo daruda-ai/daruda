@@ -130,8 +130,10 @@ fn each_verdict_leaves_the_page_as_it_says() {
             queue.ready().is_empty(),
             "{label}: the next opening sends nothing by itself"
         );
-        queue.want(&work, board(&["a"]));
-        assert_eq!(sent(&mut queue), [["a"]], "{label}: the page built then");
+        // The panes moved on meanwhile; the same board again is another
+        // case for a refused one.
+        queue.want(&work, board(&["b"]));
+        assert_eq!(sent(&mut queue), [["b"]], "{label}: the page built then");
     }
 }
 
@@ -151,6 +153,31 @@ fn a_board_wanted_during_a_refused_publish_goes_at_once() {
         Settled::Dropped
     );
     assert_eq!(sent(&mut queue), [["b"]], "the newer board, not on a retry");
+}
+
+/// The defect this guards: an unrelated rebuild wanted the refused board
+/// again, and it was sent again, to be refused again. It stays unsent until
+/// another board has gone out.
+#[test]
+fn a_refused_board_is_not_sent_again_until_another_goes_out() {
+    let work = scope("work", "bot");
+    let mut queue = PublishQueue::default();
+    queue.opened(&work);
+    queue.want(&work, board(&["a"]));
+    let refused = queue.ready();
+    queue.finish(&refused[0], &PageVerdict::Refused("invalid_blocks".into()));
+    queue.want(&work, board(&["a"]));
+    assert!(queue.ready().is_empty(), "the same board is not sent again");
+    queue.want(&work, board(&["b"]));
+    let other = queue.ready();
+    assert_eq!(other[0].board, board(&["b"]), "another board goes");
+    queue.finish(&other[0], &PageVerdict::Published);
+    queue.want(&work, board(&["a"]));
+    assert_eq!(
+        sent(&mut queue),
+        [["a"]],
+        "once another went out, it may be sent again"
+    );
 }
 
 #[test]
@@ -340,6 +367,13 @@ fn a_tap_resolves_against_the_shown_or_coming_board() {
     assert_eq!(queue.outcome(&work), Some(&outcome), "kept until replaced");
 }
 
+/// The roots `scope`'s page asks links for now, none without a page.
+fn ask(queue: &mut PublishQueue, scope: &Scope, roots: &[&str]) -> Vec<String> {
+    queue
+        .ask_links(scope, roots.iter().copied())
+        .map_or_else(Vec::new, |ask| ask.roots)
+}
+
 /// A page asks once for each thread's link: a pending ask is not repeated,
 /// a known link stays, a failed one waits for the retry tick or the next
 /// opening, and a refused one is not asked again. A failure is told once per
@@ -359,22 +393,19 @@ fn a_page_asks_each_thread_link_once_until_a_failure_is_retried() {
         board.rows()[0].link.clone()
     };
     let mut queue = PublishQueue::default();
-    assert!(
-        queue.ask_links(&work, ["1.1"]).is_empty(),
-        "no page, no ask"
-    );
+    assert!(queue.ask_links(&work, ["1.1"]).is_none(), "no page, no ask");
     queue.opened(&work);
-    assert_eq!(
-        queue.ask_links(&work, ["1.1", "2.2", "3.3"]),
-        ["1.1", "2.2", "3.3"]
-    );
+    let first = queue.ask_links(&work, ["1.1", "2.2", "3.3"]).unwrap();
+    assert_eq!(first.roots, ["1.1", "2.2", "3.3"]);
+    let epoch = first.epoch;
     assert!(
-        queue.ask_links(&work, ["1.1", "2.2", "3.3"]).is_empty(),
+        ask(&mut queue, &work, &["1.1", "2.2", "3.3"]).is_empty(),
         "pending asks are not repeated"
     );
     assert_eq!(
         queue.learn_link(
             &work,
+            epoch,
             "3.3",
             &Err(LinkFailure::Refused("message_not_found".into()))
         ),
@@ -382,42 +413,76 @@ fn a_page_asks_each_thread_link_once_until_a_failure_is_retried() {
     );
     assert_eq!(linked(&queue, &work), None, "pending: no link yet");
     assert_eq!(
-        queue.learn_link(&work, "1.1", &Ok("https://x/p1".into())),
+        queue.learn_link(&work, epoch, "1.1", &Ok("https://x/p1".into())),
         Learned::Known
     );
     assert_eq!(linked(&queue, &work).as_deref(), Some("https://x/p1"));
     assert_eq!(
-        queue.learn_link(&work, "2.2", &failed),
+        queue.learn_link(&work, epoch, "2.2", &failed),
         Learned::Failed { first: true }
     );
     assert!(
-        queue.ask_links(&work, ["1.1", "2.2"]).is_empty(),
+        ask(&mut queue, &work, &["1.1", "2.2"]).is_empty(),
         "a failed link waits for a later trigger"
     );
     assert!(queue.retry(), "the retry tick asks again");
     assert_eq!(
-        queue.ask_links(&work, ["1.1", "2.2", "3.3"]),
+        ask(&mut queue, &work, &["1.1", "2.2", "3.3"]),
         ["2.2"],
         "but not for a refused link"
     );
     assert_eq!(
-        queue.learn_link(&work, "2.2", &failed),
+        queue.learn_link(&work, epoch, "2.2", &failed),
         Learned::Failed { first: false },
         "told once"
     );
     queue.opened(&work);
     assert_eq!(
-        queue.ask_links(&work, ["2.2", "3.3"]),
+        ask(&mut queue, &work, &["2.2", "3.3"]),
         ["2.2"],
         "the next opening asks again, but not for a refused link"
     );
     let other = scope("work", "other");
     queue.opened(&other);
     assert_eq!(
-        queue.learn_link(&work, "2.2", &Ok("https://x/p2".into())),
+        queue.learn_link(&work, epoch, "2.2", &Ok("https://x/p2".into())),
         Learned::Stale,
         "the old identity's page is gone"
     );
     assert_eq!(linked(&queue, &other), None, "links do not carry over");
-    assert_eq!(queue.ask_links(&other, ["1.1"]), ["1.1"]);
+    assert_eq!(ask(&mut queue, &other, &["1.1"]), ["1.1"]);
+}
+
+/// The defect this guards: the identity flipped away and back while a page's
+/// links were being asked, the replaced page's answer settled the new page's
+/// ask, and the new page's own answer, found settled, ended its asking with
+/// the rest still pending. Answers count only for the page that asked.
+#[test]
+fn a_page_made_again_under_the_same_identity_settles_only_its_own_asks() {
+    use super::super::publish_queue::Learned;
+    let work = scope("work", "bot");
+    let link = |n: u8| Ok(format!("https://x/p{n}"));
+    let mut queue = PublishQueue::default();
+    queue.opened(&work);
+    let old = queue.ask_links(&work, ["1.1", "2.2"]).unwrap().epoch;
+    queue.opened(&scope("work", "other"));
+    queue.opened(&work);
+    let new = queue.ask_links(&work, ["1.1", "2.2"]).unwrap();
+    assert_eq!(new.roots, ["1.1", "2.2"], "the new page asks for itself");
+    assert_eq!(
+        queue.learn_link(&work, old, "1.1", &link(1)),
+        Learned::Stale,
+        "the replaced page's answer"
+    );
+    for root in ["1.1", "2.2"] {
+        assert_eq!(
+            queue.learn_link(&work, new.epoch, root, &link(1)),
+            Learned::Known,
+            "{root}: the new page's own answer"
+        );
+    }
+    assert!(
+        ask(&mut queue, &work, &["1.1", "2.2"]).is_empty(),
+        "nothing pending is left unanswered"
+    );
 }
