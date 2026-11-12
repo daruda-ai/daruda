@@ -23,6 +23,7 @@
 # | `gethostname` / `GetComputerName*` | `daruda_core::host::name`         |
 # | `env::var("HOME")`             | `dirs::home_dir`                      |
 # | `File::sync_all` / `sync_data` | `daruda_core::path::{sync_file, sync_file_data}` |
+# | `cfg(not(feature = "test-support"))` | `daruda_core::isolation::isolated()` |
 #
 # The file-URL row is a platform call in disguise: `to_file_path` decodes by
 # the build OS, so "is this a file URL?" came back `false` for `file:///tmp`
@@ -125,8 +126,12 @@ done < <(find "${SCAN_DIRS[@]}" -name '*.rs' -type f | sort)
 
 violations=""
 for file in "${FILES[@]}"; do
+    # The two single-home rules below apply even in whitelisted files: a
+    # platform gate may make OS calls, but only `core::path` flushes and only
+    # `core::isolation` tells a test process from a shipping binary.
+    gated=0
     if is_whitelisted "$file"; then
-        continue
+        gated=1
     fi
     case "$file" in
         */tests.rs|*/tests/*|*_tests.rs) continue ;;
@@ -136,7 +141,7 @@ for file in "${FILES[@]}"; do
     # is a declaration with no body, and an attribute on a test-only method
     # sits mid-file — either one blanked the rest of the file. `node.rs` and
     # `sync/ports.rs` each hid production calls behind one.
-    hit=$(perl -ne '
+    hit=$(GATED=$gated perl -ne '
         if ($skip_depth > 0) {
             $skip_depth += tr/{//;
             $skip_depth -= tr/}//;
@@ -156,6 +161,16 @@ for file in "${FILES[@]}"; do
         }
         if (/^\s*#\[cfg\(test\)\]/) { $pending_test = 1; next; }
         next if m{^\s*//};
+        if ($ARGV !~ m{^packages/core/src/path(\.rs|/)}
+            && (/\.sync_(all|data)\(\)/ || /\bFile::sync_(all|data)\s*\(/
+                || /\blibc::fsync\b/ || /\bF_FULLFSYNC\b/ || /\bFlushFileBuffers\b/)) {
+            print "$ARGV:$.: file flush -> daruda_core::path::{sync_file, sync_file_data}\n";
+        }
+        if ($ARGV ne "packages/core/src/isolation.rs"
+            && /not\((any\(test,\s*)?feature\s*=\s*"test-support"/) {
+            print "$ARGV:$.: test-only behavior behind a feature -> daruda_core::isolation::isolated()\n";
+        }
+        next if $ENV{GATED};
         if (/\bCommand::new\b/ && !/CommandBuilder::new/) {
             print "$ARGV:$.: Command::new -> daruda_core::process::command\n";
         }
@@ -182,9 +197,6 @@ for file in "${FILES[@]}"; do
         }
         if (/\bgethostname\b/ || /\bGetComputerName\w*/) {
             print "$ARGV:$.: host name -> daruda_core::host::name\n";
-        }
-        if (/\.sync_(all|data)\(\)/) {
-            print "$ARGV:$.: file flush -> daruda_core::path::{sync_file, sync_file_data}\n";
         }
     ' "$file" || true)
     if [ -n "$hit" ]; then

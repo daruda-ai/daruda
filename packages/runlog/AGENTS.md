@@ -10,7 +10,8 @@ reopens to a committed prefix. GPUI-free; depends only on `daruda_core`.
 seq advances. Nothing else may change machine state.
 
 - `check` is pure and must also accept the event as `assign` filled it in;
-  test builds re-check every replayed record.
+  test processes (`daruda_core::isolation::isolated()`) re-check every
+  replayed record.
 - `assign` fills numbers the log owns (attempt, ask id) from current state,
   so concurrent proposers never pick the same one.
 - `apply` is infallible and deterministic: replay runs it alone.

@@ -1,5 +1,6 @@
-//! Whether this process may reach the developer's real machine: flush to
-//! disk, read another program's credentials.
+//! Whether this process is a test rather than a shipping binary. A test
+//! process stays off the developer's machine (no disk flushes, no other
+//! program's credentials, no real shell) and keeps test-only checks on.
 //!
 //! A `test-support` build starts isolated, so no test needs to opt in. The
 //! feature reaches dev-dependencies only, but `cargo test` links them into

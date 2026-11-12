@@ -118,17 +118,17 @@ pub(crate) fn replay<M: Machine>(
     Ok(replayed)
 }
 
-/// Records were checked when written; a test build re-checks them so a
-/// machine whose `check` and `apply` disagree fails loudly.
-#[cfg(any(test, feature = "test-support"))]
+/// Records were checked when written; a test process re-checks them so a
+/// machine whose `check` and `apply` disagree fails loudly. A shipping binary
+/// never panics on a log it already accepted.
 fn check_replayed<M: Machine>(state: &M::State, event: &M::Event, line: u64) {
+    if !daruda_core::isolation::isolated() {
+        return;
+    }
     if let Err(rejected) = M::check(state, event) {
         panic!("replayed record at line {line} fails its own precondition: {rejected}");
     }
 }
-
-#[cfg(not(any(test, feature = "test-support")))]
-fn check_replayed<M: Machine>(_: &M::State, _: &M::Event, _: u64) {}
 
 #[cfg(test)]
 mod tests {

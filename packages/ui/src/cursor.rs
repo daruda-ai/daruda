@@ -133,8 +133,12 @@ pub fn release_pointer_visible(cx: &mut App) {
 fn window_cursor(style: CursorStyle) -> impl IntoElement {
     canvas(
         move |_bounds: Bounds<Pixels>, _: &mut Window, _: &mut App| {
+            // Only a test reads the record back; a shipping binary that
+            // links test-support would otherwise grow it on every paint.
             #[cfg(any(test, feature = "test-support"))]
-            painted::record(style, _bounds);
+            if daruda_core::isolation::isolated() {
+                painted::record(style, _bounds);
+            }
         },
         move |_, (), window: &mut Window, _: &mut App| window.set_window_cursor_style(style),
     )

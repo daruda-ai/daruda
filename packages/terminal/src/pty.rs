@@ -187,23 +187,19 @@ pub fn runs_foreground_job(master: &(dyn MasterPty + Send), shell_pid: Option<u3
 
 /// Spawn a PTY session with the given configuration.
 ///
-/// Under test this delegates to [`spawn_pty_stub`] so that tests which
-/// merely construct a `Workspace` do not incur a real shell start-up
-/// (~0.5 s each). Tests that exercise real PTY I/O should call
-/// [`spawn_pty_real`] directly.
-///
-/// Keyed on the `test-support` feature as well as `cfg(test)`: a dependent
-/// crate's test build compiles this one *without* `cfg(test)`, so the gate
-/// that names only `test` leaves every app-side workspace test spawning a
-/// real shell — which is where the cost this stub exists to remove lives.
-///
-/// In production builds this is identical to [`spawn_pty_real`].
-#[cfg(any(test, feature = "test-support"))]
+/// A test process ([`daruda_core::isolation::isolated`]) gets
+/// [`spawn_pty_stub`] instead, so tests that merely construct a `Workspace`
+/// skip a real shell start-up (~0.5 s each). Tests that exercise real PTY
+/// I/O call [`spawn_pty_real`] directly.
 pub fn spawn_pty(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
-    if config.shell == STUB_FAILING_SHELL {
-        return Err(PtyError::SpawnShell(STUB_FAILING_SHELL.to_owned()));
+    #[cfg(any(test, feature = "test-support"))]
+    if daruda_core::isolation::isolated() {
+        if config.shell == STUB_FAILING_SHELL {
+            return Err(PtyError::SpawnShell(STUB_FAILING_SHELL.to_owned()));
+        }
+        return spawn_pty_stub();
     }
-    spawn_pty_stub()
+    spawn_pty_real(config)
 }
 
 /// A shell name the test stub refuses, so a dependent crate's test can make
@@ -364,13 +360,6 @@ pub fn spawn_pty_with_args(
         master: Some(master),
         child_pid,
     })
-}
-
-/// Production entry point — calls `spawn_pty_real`. Only compiled when the
-/// stub above is not, so `spawn_pty` never has two definitions.
-#[cfg(not(any(test, feature = "test-support")))]
-pub fn spawn_pty(config: &PtyConfig) -> Result<PtyHandle, PtyError> {
-    spawn_pty_real(config)
 }
 
 /// Zero-cost stub for dependent crates' tests: live but silent channels and

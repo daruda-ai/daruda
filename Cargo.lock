@@ -1905,6 +1905,7 @@ dependencies = [
  "criterion",
  "daruda_core",
  "daruda_store",
+ "daruda_terminal",
  "dirs 7.0.0",
  "ghostty_vt",
  "gpui",

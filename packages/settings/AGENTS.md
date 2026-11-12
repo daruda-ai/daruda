@@ -24,10 +24,12 @@ event. Never a dependency on the app.
 
 ## Rules
 
-- **Store isolation in tests.** `SettingsStore` starts at defaults and writes to
-  a temp file under `cfg(any(test, feature = "test-support"))`. The app's
-  dev-dependency turns `test-support` on; without it the app's tests would
-  read and rewrite the developer's own `config.toml`.
+- **Store isolation in tests.** In a test process
+  (`daruda_core::isolation::isolated()`), `SettingsStore` starts at defaults
+  and writes to a temp file; without that the app's tests would read and
+  rewrite the developer's own `config.toml`. The switch is a runtime check,
+  not the `test-support` feature, because `cargo test` links that feature
+  into the app binary too.
 - **Test seams return plain values** (`accounts()`, `auth_statuses()`, …),
   gated on the same `cfg`; capture seams (`seed_*_for_shot`, `EditorShot`) sit
   behind `screenshot`.

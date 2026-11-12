@@ -28,6 +28,9 @@ tracing = { workspace = true }
 unicode-width = { workspace = true }
 
 [dev-dependencies]
+daruda_core = { workspace = true, features = ["test-support"] }
+# Its own stub on, as `cargo test` links it into the app binary.
+daruda_terminal = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 criterion = { version = "0.8", features = ["html_reports"] }
 tempfile = { workspace = true }

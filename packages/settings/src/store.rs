@@ -28,23 +28,24 @@ struct ConfigWriter {
 
 impl Default for ConfigWriter {
     fn default() -> Self {
-        // In a test build, never the developer's own `config.toml`. A
+        // In a test process, never the developer's own `config.toml`. A
         // fixture that read it would inherit whichever switches that person
         // happens to have on — the approval-card tests need Telegram *off*,
         // and a real user has it on — and one that patched it would rewrite
         // their settings. [`SettingsStore::set_user_for_testing`] replaces
         // this with a directory it seeds itself.
         #[cfg(any(test, feature = "test-support"))]
-        {
+        if daruda_core::isolation::isolated() {
             let temp_dir = tempfile::tempdir().expect("settings test temp dir");
-            Self {
+            return Self {
                 path: temp_dir.path().join("config.toml"),
                 _temp_dir: Some(temp_dir),
-            }
+            };
         }
-        #[cfg(not(any(test, feature = "test-support")))]
         Self {
             path: daruda_config::config_path(),
+            #[cfg(any(test, feature = "test-support"))]
+            _temp_dir: None,
         }
     }
 }
@@ -84,18 +85,15 @@ impl Default for SettingsStore {
 
 /// The user layer a fresh store starts from.
 ///
-/// Defaults rather than the file in a test build, for the reason
+/// Defaults rather than the file in a test process, for the reason
 /// [`ConfigWriter::default`] gives: a test must not depend on which switches
 /// the developer running it has on.
 fn fresh_user_config() -> Config {
     #[cfg(any(test, feature = "test-support"))]
-    {
-        Config::default()
+    if daruda_core::isolation::isolated() {
+        return Config::default();
     }
-    #[cfg(not(any(test, feature = "test-support")))]
-    {
-        Config::load()
-    }
+    Config::load()
 }
 
 impl SettingsStore {
