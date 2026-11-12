@@ -8,6 +8,7 @@ use daruda_store::project::PaneCwd;
 use gpui::{Context, Entity, Focusable as _, Window};
 
 use super::Workspace;
+use super::main_area::bottom_dock::QueuedInputCache;
 use super::main_area::pane::{PaneContent, TabEntry};
 use super::main_area::pane_tree::PaneId;
 use daruda_chat::view::AgentChatView;
@@ -30,6 +31,7 @@ pub(in crate::workspace) struct OrchestratorChat {
     pub cwd: Option<PaneCwd>,
     pub account: AccountSelection,
     pub agent_id: String,
+    pub queued_input_cache: QueuedInputCache,
 }
 
 impl Workspace {
@@ -172,6 +174,7 @@ impl Workspace {
             cwd: content.cwd,
             account,
             agent_id: content.agent_id,
+            queued_input_cache: QueuedInputCache::default(),
         });
         crate::control::notices::schedule(cx);
         cx.notify();

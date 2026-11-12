@@ -5,6 +5,7 @@ use super::super::{
 };
 mod composer;
 mod navigation;
+mod submission;
 use super::*;
 use crate::workspace::tests::build_workspace_with;
 use gpui::{
@@ -93,11 +94,7 @@ async fn a_saved_selection_keeps_its_contents_after_source_edits_and_submission(
                     .contains("Explain the failure.")
             );
             assert_eq!(
-                ws.queued_composer_content(
-                    target,
-                    queued_id,
-                    queue.find(queued_id).unwrap().text()
-                ),
+                ws.queued_input_content(target, queued_id, queue.find(queued_id).unwrap().text()),
                 edited
             );
 

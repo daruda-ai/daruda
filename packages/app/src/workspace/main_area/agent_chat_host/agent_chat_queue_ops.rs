@@ -274,7 +274,7 @@ impl Workspace {
         let Some(text) = found else {
             return;
         };
-        let content = self.queued_composer_content(pane_id, id, &text);
+        let content = self.queued_input_content(pane_id, id, &text);
         // Pull the text into the composer, cursor at end (mirrors
         // `do_history_navigate`). Separate `entity.update` from the view update
         // below — never nest two updates on entities in one call.

@@ -1,6 +1,6 @@
 //! Per-lane state removed together by lane and project teardown.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -10,20 +10,14 @@ use crate::files::watcher::FileTreeWatcher;
 use crate::lane::git::base::{AgainstBase, BaseProblem};
 use crate::lane::git::{GitDirs, GitTracking, GitWorktreeStatus};
 use crate::workspace::left_dock::file_tree_ops::{FilesReloadQueue, VisibleEntry};
-use crate::workspace::main_area::bottom_dock::{InputHistory, QueuedDraft};
+use crate::workspace::main_area::bottom_dock::{InputHistory, QueuedInputCache};
 
 #[derive(Default)]
 pub(in crate::workspace) struct LaneScoped {
     pub git: GitLaneState,
     pub files: FileTreeLaneState,
     pub input_history: InputHistory,
-    pub queued_drafts: HashMap<
-        (
-            super::main_area::pane_tree::PaneId,
-            daruda_chat::view::PromptId,
-        ),
-        QueuedDraft,
-    >,
+    pub queued_input_cache: QueuedInputCache,
     /// Expanded-sidebar disclosure for this app session, independent of rail grouping.
     pub show_individual_panes: bool,
 }

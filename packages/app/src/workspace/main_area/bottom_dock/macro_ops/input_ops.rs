@@ -3,6 +3,7 @@
 
 use crate::workspace::Workspace;
 use crate::workspace::layout::ComposerExpand;
+use crate::workspace::main_area::agent_chat_host::AttachmentSubmitOutcome;
 use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::view::PromptId;
@@ -100,9 +101,9 @@ impl Workspace {
             .bottom_input_pane()
             .filter(|id| !self.is_agent_chat_pane(*id))
             .map(|_| self.quoting_shell());
-        let raw = crate::workspace::main_area::file_context::prompt_text(&content, shell);
-        let trimmed = raw.trim_end_matches(['\n', '\r']);
-        let before = self.composer_queue_state(cx);
+        let expanded_text = crate::workspace::main_area::file_context::prompt_text(&content, shell);
+        let trimmed = expanded_text.trim_end_matches(['\n', '\r']);
+        let before = self.snapshot_composer_queue(cx);
         if let Some(recipient) = self.bottom_input_pane()
             && self.active_runtime().focused_pane_id != recipient
             && (!trimmed.is_empty()
@@ -112,58 +113,56 @@ impl Workspace {
         {
             self.maybe_connect_agent_chat(recipient, cx);
         }
-        if let Some(accepted) = self.send_attached_composer_if_any(trimmed.to_owned(), cx) {
-            if accepted {
-                self.remember_queued_composer(before, &content, trimmed, cx);
-                if let Some(owner) = self.input_dock.owner {
-                    self.input_dock.drafts.remove(&owner);
+        let (draft_owner, prompt_text) = match self.submit_attached_composer(trimmed.to_owned(), cx)
+        {
+            AttachmentSubmitOutcome::Rejected => return,
+            AttachmentSubmitOutcome::Accepted => (self.input_dock.owner, trimmed),
+            AttachmentSubmitOutcome::NotApplicable => {
+                if trimmed.is_empty() {
+                    // An empty composer is not a command: through the funnel a focused
+                    // terminal would take the submit and receive a bare `\r`. Only an
+                    // agent pane reads it, as a gesture. No history entry and no
+                    // `set_value` — that emits `Change` even for identical text, which
+                    // would disarm the gesture this very Enter just armed.
+                    let Some(focused) = self.bottom_input_pane() else {
+                        return;
+                    };
+                    if self.is_agent_chat_pane(focused) {
+                        self.agent_empty_submit(focused, window, cx);
+                    }
+                    return;
                 }
-                self.input_dock
-                    .input
-                    .update(cx, |state, cx| state.set_value("", window, cx));
+                // Push to per-lane history before routing so both agent prompts and
+                // terminal commands land in the same unified buffer. `push` resets
+                // the navigation cursor, so ↑ after submit starts from the entry
+                // we just pushed.
+                let lane_ref = self.active_ref();
+                let history_text = trimmed.trim().to_owned();
+                self.lane_scoped_mut(lane_ref)
+                    .input_history
+                    .push_content(&history_text, &content);
+                let Some(recipient) = self.bottom_input_pane() else {
+                    return;
+                };
+                if !self.deliver_text_to_pane(
+                    recipient,
+                    PaneTextInput {
+                        body: trimmed.to_string(),
+                        intent: PaneTextIntent::Command { submit: true },
+                        task: None,
+                    },
+                    window,
+                    cx,
+                ) {
+                    return;
+                }
+                (Some(recipient), trimmed.trim())
             }
-            return;
-        }
-        if trimmed.is_empty() {
-            // An empty composer is not a command: through the funnel a focused
-            // terminal would take the submit and receive a bare `\r`. Only an
-            // agent pane reads it, as a gesture. No history entry and no
-            // `set_value` — that emits `Change` even for identical text, which
-            // would disarm the gesture this very Enter just armed.
-            let Some(focused) = self.bottom_input_pane() else {
-                return;
-            };
-            if self.is_agent_chat_pane(focused) {
-                self.agent_empty_submit(focused, window, cx);
-            }
-            return;
-        }
-        // Push to per-lane history before routing so both agent prompts and
-        // terminal commands land in the same unified buffer. `push` resets
-        // the navigation cursor, so ↑ after submit starts from the entry
-        // we just pushed.
-        let lane_ref = self.active_ref();
-        let history_text = trimmed.trim().to_owned();
-        self.lane_scoped_mut(lane_ref)
-            .input_history
-            .push_content(&history_text, &content);
-        let Some(recipient) = self.bottom_input_pane() else {
-            return;
         };
-        if !self.deliver_text_to_pane(
-            recipient,
-            PaneTextInput {
-                body: trimmed.to_string(),
-                intent: PaneTextIntent::Command { submit: true },
-                task: None,
-            },
-            window,
-            cx,
-        ) {
-            return;
+        self.cache_queued_input(before, &content, prompt_text, cx);
+        if let Some(owner) = draft_owner {
+            self.input_dock.drafts.remove(&owner);
         }
-        self.remember_queued_composer(before, &content, trimmed.trim(), cx);
-        self.input_dock.drafts.remove(&recipient);
         self.input_dock
             .input
             .update(cx, |s, cx_state| s.set_value("", window, cx_state));

@@ -59,6 +59,10 @@ impl Workspace {
             ws.on_agent_chat_event(pane_id, event, window, cx)
         })
         .detach();
+        cx.observe(view, move |ws, view, cx| {
+            ws.prune_queued_input_cache(pane_id, &view, cx)
+        })
+        .detach();
     }
 
     fn on_agent_chat_event(

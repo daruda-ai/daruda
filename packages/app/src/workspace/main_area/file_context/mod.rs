@@ -183,8 +183,14 @@ impl Workspace {
             .cwd()
             .and_then(|cwd| daruda_core::path::strip_root(&reference.path, cwd))
             .unwrap_or_else(|| reference.path.clone());
-        let text = reference.format(&reference.path.to_string_lossy(), None);
-        if reference.selected.is_some() && text.len() > reference::EXCERPT_LIMIT {
+        let hide_unchanged = self
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .and_then(|pane| pane.file_view())
+            .is_some_and(|view| view.hide_unchanged);
+        let Some(context) = context::FileContext::capture(&reference, hide_unchanged) else {
             self.report_error(
                 daruda_store::observability::error_report::ErrorReport::new(
                     s::file_viewer::input_selection_too_large(),
@@ -194,16 +200,8 @@ impl Workspace {
                 cx,
             );
             return;
-        }
-        let hide_unchanged = self
-            .active_runtime()
-            .panes
-            .iter()
-            .find(|pane| pane.id == pane_id)
-            .and_then(|pane| pane.file_view())
-            .is_some_and(|view| view.hide_unchanged);
-        let token =
-            context::FileContext::token(&reference, &path.to_string_lossy(), hide_unchanged);
+        };
+        let token = context.into_token(&reference, &path.to_string_lossy());
         self.activate_bottom_input(cx);
         if !self.docks.bottom.read(cx).is_open {
             self.docks.bottom.update(cx, |dock, cx| {

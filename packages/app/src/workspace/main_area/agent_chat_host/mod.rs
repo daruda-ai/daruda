@@ -27,6 +27,7 @@ mod agent_default_writer;
 mod agent_menu;
 mod attachment_load;
 mod attachment_ops;
+pub(in crate::workspace) use attachment_ops::AttachmentSubmitOutcome;
 mod host_event_ops;
 pub(in crate::workspace) mod lane_status;
 mod overage_stop;

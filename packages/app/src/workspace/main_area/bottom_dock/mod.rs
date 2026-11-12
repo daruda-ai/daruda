@@ -10,10 +10,11 @@
 
 pub(in crate::workspace) mod composer_ops;
 mod config_chip;
-mod context_ops;
 mod history;
-pub(in crate::workspace) use context_ops::QueuedDraft;
+mod queued_input_cache;
+mod queued_input_ops;
 pub(in crate::workspace) use history::InputHistory;
+pub(in crate::workspace) use queued_input_cache::QueuedInputCache;
 pub(in crate::workspace) mod input_dock;
 pub(super) mod macro_edit_modal;
 pub(super) mod macro_key;

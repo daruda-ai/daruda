@@ -1,7 +1,7 @@
 use super::*;
 use daruda_acp::{AcpEvent, AcpSessionHandle, QuestionField, QuestionFieldKind, QuestionRequest};
 
-fn add_selected_context(
+pub(super) fn add_selected_context(
     ws: &mut Workspace,
     file: PaneId,
     window: &mut Window,

@@ -8,6 +8,13 @@ use daruda_store::observability::{error_report::ErrorReport, log_writer::LogWrit
 use gpui::{ClipboardEntry, Context, WeakEntity, Window};
 use std::path::PathBuf;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum AttachmentSubmitOutcome {
+    NotApplicable,
+    Accepted,
+    Rejected,
+}
+
 impl Workspace {
     fn composer_attachments_changed(&mut self, cx: &mut Context<Self>) {
         self.sync_question_marks(cx);
@@ -254,34 +261,41 @@ impl Workspace {
     }
 
     /// Only an explicit composer submission consumes its pane's attachment draft.
-    pub(in crate::workspace) fn send_attached_composer_if_any(
+    pub(in crate::workspace) fn submit_attached_composer(
         &mut self,
         text: String,
         cx: &mut Context<Self>,
-    ) -> Option<bool> {
-        let pane = self.bottom_input_pane()?;
-        let view = self.agent_chat_view(pane)?.clone();
+    ) -> AttachmentSubmitOutcome {
+        let Some(pane) = self.bottom_input_pane() else {
+            return AttachmentSubmitOutcome::NotApplicable;
+        };
+        let Some(view) = self.agent_chat_view(pane).cloned() else {
+            return AttachmentSubmitOutcome::NotApplicable;
+        };
         if view.read(cx).draft_attachments().is_empty() {
-            return None;
+            return AttachmentSubmitOutcome::NotApplicable;
         }
         let dispatch = match view.update(cx, |v, cx| v.send_composer_prompt(text, cx)) {
             Ok(dispatch) => dispatch,
             Err(error) => {
                 self.attachment_error(error, cx);
-                return Some(false);
+                return AttachmentSubmitOutcome::Rejected;
             }
         };
         self.composer_attachments_changed(cx);
-        let accepted = matches!(dispatch, PromptDispatch::Queued | PromptDispatch::SentNow);
-        if !accepted {
+        let submit_outcome = if matches!(dispatch, PromptDispatch::Queued | PromptDispatch::SentNow)
+        {
+            AttachmentSubmitOutcome::Accepted
+        } else {
             self.attachment_error(s::agent_chat::queue_full().to_string(), cx);
-        }
+            AttachmentSubmitOutcome::Rejected
+        };
         let edge = view.update(cx, |v, cx| v.tick_activity(std::time::Instant::now(), cx));
         if let Some(outcome) = edge {
             self.fire_activity_completion(pane, outcome, cx);
         }
         cx.notify();
-        Some(accepted)
+        submit_outcome
     }
 
     fn attachment_error(&mut self, detail: String, cx: &mut Context<Self>) {

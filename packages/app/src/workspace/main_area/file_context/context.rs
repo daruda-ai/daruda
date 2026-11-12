@@ -7,7 +7,7 @@ use daruda_core::shell::quote::{Shell, quote_str};
 use serde::{Deserialize, Serialize};
 
 use super::super::file_view_pane::{DiffSource, FileViewMode};
-use super::reference::{FileReference, SelectionSource, inline_code};
+use super::reference::{EXCERPT_LIMIT, FileReference, SelectionSource, inline_code};
 
 const TOKEN_PREFIX: &str = "file-context:";
 
@@ -38,11 +38,15 @@ fn working_tree_source() -> DiffSource {
 }
 
 impl FileContext {
-    pub(super) fn token(
-        reference: &FileReference,
-        display_path: &str,
-        hide_unchanged: bool,
-    ) -> Result<InlineToken, serde_json::Error> {
+    /// Capture and validate the prompt once, before encoding its input token.
+    pub(super) fn capture(reference: &FileReference, hide_unchanged: bool) -> Option<Self> {
+        if reference
+            .selected
+            .as_ref()
+            .is_some_and(|selected| selected.excerpt().len() > EXCERPT_LIMIT)
+        {
+            return None;
+        }
         let context = Self {
             path: reference.path.clone(),
             source: reference.source.clone(),
@@ -62,6 +66,21 @@ impl FileContext {
                     prompt: reference.format(&reference.path.to_string_lossy(), None),
                 }),
         };
+        if context
+            .selection
+            .as_ref()
+            .is_some_and(|selection| selection.prompt.len() > EXCERPT_LIMIT)
+        {
+            return None;
+        }
+        Some(context)
+    }
+
+    pub(super) fn into_token(
+        self,
+        reference: &FileReference,
+        display_path: &str,
+    ) -> Result<InlineToken, serde_json::Error> {
         let label = reference.label(
             &reference
                 .path
@@ -82,7 +101,7 @@ impl FileContext {
                 })
                 .collect::<String>()
         };
-        let id = format!("{TOKEN_PREFIX}{}", serde_json::to_string(&context)?);
+        let id = format!("{TOKEN_PREFIX}{}", serde_json::to_string(&self)?);
         Ok(InlineToken::new(id, clean(reference.label(display_path))).with_label(clean(label)))
     }
 

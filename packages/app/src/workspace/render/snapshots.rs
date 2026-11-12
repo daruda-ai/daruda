@@ -265,7 +265,7 @@ impl Workspace {
                 .map(|(q, paused)| crate::workspace::layout::QueuedPromptView {
                     id: q.id(),
                     text: daruda_chat::view::display_prompt(
-                        self.queued_composer_content(id, q.id(), q.text()).text(),
+                        self.queued_input_content(id, q.id(), q.text()).text(),
                         q.attachments(),
                     ),
                     editing: editing == Some(q.id()),

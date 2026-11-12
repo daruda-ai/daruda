@@ -76,14 +76,22 @@ impl Workspace {
         self.release_pane_tracking(pane_ids, cx);
         for id in pane_ids {
             self.main_area.activity_counter.remove(id);
-            self.forget_pane_input_draft(*id);
+            self.forget_pane_input_state(*id);
         }
     }
 
-    pub(in crate::workspace) fn forget_pane_input_draft(&mut self, pane_id: PaneId) {
+    pub(in crate::workspace) fn forget_pane_input_state(&mut self, pane_id: PaneId) {
         self.input_dock.drafts.remove(&pane_id);
         for state in self.lane_scoped.values_mut() {
-            state.queued_drafts.retain(|(pane, _), _| *pane != pane_id);
+            state.queued_input_cache.forget_pane(pane_id);
+        }
+        if let Some(chat) = self
+            .orchestrator
+            .chat
+            .as_mut()
+            .filter(|chat| chat.pane_id == pane_id)
+        {
+            chat.queued_input_cache.forget_pane(pane_id);
         }
         self.input_dock.question.forget_pane(pane_id);
         if self.input_dock.owner == Some(pane_id) {
