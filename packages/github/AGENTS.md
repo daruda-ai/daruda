@@ -28,7 +28,9 @@ through `GitHost`.
 - `link::pick` decides which PR a branch belongs to: same repository only;
   a lane on the default branch has none.
 - `prompt` builds text for agents from outside input (CI logs, review
-  comments): every piece goes through `strip_control` and is fenced or
-  quoted so it cannot close its quote or end a bracketed paste.
+  comments): every piece goes through `strip_control` (`one_line` for a
+  field a header holds) and is fenced or quoted so it cannot close its
+  quote or end a bracketed paste. The app sends it only to writable agent
+  chats, inserted and never submitted.
 - Polling (`app/src/github/poller.rs`) is process-wide and asks once per
   repository per round, however many windows show its lanes.
