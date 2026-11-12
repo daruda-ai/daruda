@@ -97,6 +97,8 @@ settings:
   label_git_confirm_push: "Confirm before pushing"
   label_git_default_commit_message: "Commit an empty message as \"Update <file>\""
   hint_git_default_commit_message: "Off: an empty message is refused."
+  label_github_enabled: "Show GitHub pull requests"
+  hint_github_enabled: "Each worktree shows its pull request and checks, read through the gh CLI."
   card_status_bar: "Status bar"
   search_heading: "Results for “%{query}”"
   search_none: "No settings match “%{query}”."
