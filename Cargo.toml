@@ -166,6 +166,14 @@ syn = { opt-level = 3 }
 tree-sitter = { opt-level = 3 }
 taffy = { opt-level = 3 }
 resvg = { opt-level = 3 }
+# Vendored sources change only through re-vendoring, so their incremental
+# caches (several GB) rarely pay off.
+gpui = { incremental = false }
+gpui-base = { incremental = false }
+gpui-component = { incremental = false }
+gpui-component-macros = { incremental = false }
+gpui-kit-assets = { incremental = false }
+ferrum_flow = { incremental = false }
 
 [profile.release]
 debug = "limited"
