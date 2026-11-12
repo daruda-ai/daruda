@@ -8,7 +8,7 @@
 use crate::NodeId;
 use crate::error::{ValidationIssue, ValidationKind};
 use crate::graph::FlowGraph;
-use crate::model::{AgentFail, Flow, GateFail, NodeKind, Prompt};
+use crate::model::{Flow, GateFail, NodeKind};
 use std::collections::{HashMap, HashSet};
 
 mod rules;
@@ -63,33 +63,18 @@ pub fn validate(flow: &Flow, graph: &FlowGraph) -> Vec<ValidationIssue> {
                     &mut claimed_outputs,
                     &mut issues,
                 );
-
-                let mut texts = Vec::new();
-                if let Prompt::Inline(text) = &body.prompt {
-                    texts.push(text.as_str());
-                }
-                if let AgentFail::Retry {
-                    hint: Prompt::Inline(text),
-                    ..
-                } = &body.on_fail
-                {
-                    texts.push(text.as_str());
-                }
-                rules::output_refs_name_ancestors(id, &texts, reachable, &mut issues);
-                crate::input::check_refs(id, &texts, &flow.inputs, &mut issues);
             }
-            NodeKind::Command { run, on_fail } => {
-                let mut texts = vec![run.as_str()];
+            NodeKind::Command { on_fail, .. } => {
                 if let GateFail::Repair { fix, rerun, .. } = on_fail {
                     rules::repair_names_the_failure(id, fix, &mut issues);
                     rules::repair_has_an_agent(id, flow.default_agent.as_ref(), &mut issues);
                     rules::rerun_roots_are_ancestors(id, rerun, reachable, &mut issues);
-                    texts.push(fix.as_str());
                 }
-                rules::output_refs_name_ancestors(id, &texts, reachable, &mut issues);
-                crate::input::check_refs(id, &texts, &flow.inputs, &mut issues);
             }
         }
+        let texts: Vec<&str> = node.templates().into_iter().map(|(_, text)| text).collect();
+        rules::output_refs_name_ancestors(id, &texts, reachable, &mut issues);
+        crate::input::check_refs(id, &texts, &flow.inputs, &mut issues);
     }
 
     issues

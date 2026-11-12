@@ -8,7 +8,7 @@ use crate::NodeId;
 use crate::record::AttemptOutcome;
 use crate::run_log::machine::FlowRunEvent;
 use crate::runner::{NodeFailure, RunContext};
-use crate::template::{Surface, TemplateContext, render};
+use crate::template::{TemplateContext, render};
 use std::path::PathBuf;
 
 impl Run<'_> {
@@ -83,7 +83,7 @@ impl Run<'_> {
             failure: Some(failure),
             attempts: evidence,
         };
-        let text = render(fix, &tctx, Surface::Prompt);
+        let text = render(fix, &tctx, crate::model::TemplateField::Fix.surface());
 
         let fix_id = NodeId::from(FIX_SESSION_ID);
         let gate = ctx.node_id;

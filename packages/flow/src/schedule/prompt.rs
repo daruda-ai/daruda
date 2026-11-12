@@ -6,9 +6,9 @@
 
 use super::policy::PolicyKind;
 use super::{Run, doing};
-use crate::model::{Node, NodeKind, Prompt};
+use crate::model::{Node, NodeKind, Prompt, TemplateField};
 use crate::runner::NodeFailure;
-use crate::template::{Surface, TemplateContext, render};
+use crate::template::{TemplateContext, render};
 use std::path::{Path, PathBuf};
 
 /// A read that failed, labelled and with the path it was given. Everything
@@ -41,12 +41,12 @@ impl Run<'_> {
             attempts: evidence,
         };
         match &node.kind {
-            NodeKind::Command { run, .. } => Ok(render(run, &tctx, Surface::Shell)),
+            NodeKind::Command { run, .. } => Ok(render(run, &tctx, TemplateField::Run.surface())),
             NodeKind::Agent(body) => {
                 let mut text = render(
                     &self.read_prompt(&body.prompt, doing::READ_PROMPT)?,
                     &tctx,
-                    Surface::Prompt,
+                    TemplateField::Prompt.surface(),
                 );
                 if let (Some(_), PolicyKind::Retry { hint }) = (failure, self.policy_of(node).kind)
                 {
@@ -57,7 +57,7 @@ impl Run<'_> {
                         &render(
                             &self.read_prompt(&hint, doing::READ_HINT)?,
                             &tctx,
-                            Surface::Prompt,
+                            TemplateField::Hint.surface(),
                         ),
                     );
                 }

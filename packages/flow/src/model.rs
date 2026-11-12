@@ -159,6 +159,59 @@ pub enum PermissionPolicy {
     Ask,
 }
 
+/// A node field the template variables are filled into. One list, so the
+/// rule that only a command line is shell-quoted is stated once — reading,
+/// checking and rewriting a node's templates all go through it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TemplateField {
+    Prompt,
+    Hint,
+    Run,
+    Fix,
+}
+
+impl TemplateField {
+    /// Where the field's rendered text goes. Only a command is parsed by a
+    /// shell; a fix prompt is prose an agent reads.
+    pub fn surface(self) -> crate::template::Surface {
+        match self {
+            TemplateField::Run => crate::template::Surface::Shell,
+            TemplateField::Prompt | TemplateField::Hint | TemplateField::Fix => {
+                crate::template::Surface::Prompt
+            }
+        }
+    }
+}
+
+impl Node {
+    /// The node's inline template texts, with the field each is. A
+    /// file-backed prompt or hint is not here: its text is in a file.
+    pub fn templates(&self) -> Vec<(TemplateField, &str)> {
+        let mut texts = Vec::new();
+        match &self.kind {
+            NodeKind::Agent(body) => {
+                if let Prompt::Inline(text) = &body.prompt {
+                    texts.push((TemplateField::Prompt, text.as_str()));
+                }
+                if let AgentFail::Retry {
+                    hint: Prompt::Inline(text),
+                    ..
+                } = &body.on_fail
+                {
+                    texts.push((TemplateField::Hint, text.as_str()));
+                }
+            }
+            NodeKind::Command { run, on_fail } => {
+                texts.push((TemplateField::Run, run.as_str()));
+                if let GateFail::Repair { fix, .. } = on_fail {
+                    texts.push((TemplateField::Fix, fix.as_str()));
+                }
+            }
+        }
+        texts
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Prompt {
     Inline(String),
@@ -207,6 +260,109 @@ mod tests {
             std::mem::size_of::<NodeKind>(),
             std::mem::size_of::<AgentBody>(),
         );
+    }
+
+    fn agent(prompt: Prompt, on_fail: AgentFail) -> NodeKind {
+        NodeKind::Agent(Box::new(AgentBody {
+            agent: AgentSpec {
+                id: "a".to_string(),
+                model: None,
+                effort: None,
+                mode: None,
+                permission: PermissionPolicy::Deny,
+            },
+            prompt,
+            output: PathBuf::from("o.md"),
+            output_schema: None,
+            continue_until: None,
+            max_turns: DEFAULT_MAX_TURNS,
+            on_fail,
+        }))
+    }
+
+    /// Which texts a node hands its template readers, and where each goes.
+    #[test]
+    fn a_node_lists_its_inline_templates_with_their_surface() {
+        use crate::template::Surface::{Prompt as P, Shell as S};
+        let inline = |t: &str| Prompt::Inline(t.to_string());
+        let file = || Prompt::File(PathBuf::from("p.md"));
+        let retry = |hint| AgentFail::Retry {
+            hint,
+            max_attempts: 2,
+            wait: Duration::ZERO,
+        };
+        let repair = GateFail::Repair {
+            fix: "fix".to_string(),
+            rerun: Vec::new(),
+            max_attempts: 2,
+            wait: Duration::ZERO,
+        };
+        let command = |on_fail| NodeKind::Command {
+            run: "run".to_string(),
+            on_fail,
+        };
+        type Row<'a> = (
+            &'a str,
+            NodeKind,
+            Vec<(TemplateField, &'a str, crate::template::Surface)>,
+        );
+        let rows: Vec<Row> = vec![
+            (
+                "agent, inline, halt",
+                agent(inline("p"), AgentFail::Halt),
+                vec![(TemplateField::Prompt, "p", P)],
+            ),
+            (
+                "agent, file prompt is not a template here",
+                agent(file(), AgentFail::Halt),
+                vec![],
+            ),
+            (
+                "agent, inline hint",
+                agent(inline("p"), retry(inline("h"))),
+                vec![
+                    (TemplateField::Prompt, "p", P),
+                    (TemplateField::Hint, "h", P),
+                ],
+            ),
+            (
+                "agent, file hint",
+                agent(inline("p"), retry(file())),
+                vec![(TemplateField::Prompt, "p", P)],
+            ),
+            (
+                "command, halt",
+                command(GateFail::Halt),
+                vec![(TemplateField::Run, "run", S)],
+            ),
+            (
+                "command, repair: the fix is prose",
+                command(repair),
+                vec![
+                    (TemplateField::Run, "run", S),
+                    (TemplateField::Fix, "fix", P),
+                ],
+            ),
+        ];
+        for (label, kind, want) in rows {
+            let node = Node {
+                id: NodeId::from("n"),
+                deps: Vec::new(),
+                kind,
+                timeout: Duration::ZERO,
+                cwd: None,
+            };
+            let got: Vec<_> = node
+                .templates()
+                .into_iter()
+                .map(|(field, text)| (field, text.to_string(), field.surface()))
+                .collect();
+            let want: Vec<_> = want
+                .iter()
+                .map(|(field, text, surface)| (*field, text.to_string(), *surface))
+                .collect();
+            assert_eq!(got, want, "{label}");
+        }
     }
 
     /// A command node owes no output and spends no turn, and the accessors
