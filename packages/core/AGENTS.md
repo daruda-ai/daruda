@@ -48,12 +48,17 @@ An OS call that differs by platform has one named gate; domain code calls it.
 Every disk flush goes through `path`'s sync functions. macOS publishes with
 one `F_FULLFSYNC` per device after cheap `fsync`s, not one per handle.
 
-`isolation` is the one switch between tests and the developer's machine. A
-`test-support` build starts isolated: flushes are skipped and another
-program's credentials read as absent. Every shipping binary's `main` calls
-`isolation::require_production()` first, because `cargo test` links
-test-support crates into the app binary as well. A new test-only stand-in
-for a real-machine effect reads `isolated()` rather than its own flag.
+`isolation` is the switch between tests and the developer's machine for
+code outside the app. A build with core's `test-support` feature starts
+isolated: flushes are skipped and another program's credentials read as
+absent. Crates whose tests write durable files enable it as a
+dev-dependency; testing a crate that does not leaves the flushes real.
+Every shipping binary's `main`, examples included, calls
+`isolation::require_production()` first, because dev-dependency features
+also reach binaries `cargo test` builds. Core's own flush tests require
+production in `tests/production.rs`, a binary of their own. A new
+test-only stand-in for a real-machine effect reads `isolated()`; app code
+may keep `cfg!(test)`, since every app test lives in its `src`.
 
 `Url::to_file_path` decodes by the build OS. A remote machine's path must
 instead go through `file_url` with an explicit `PathStyle`, keeping

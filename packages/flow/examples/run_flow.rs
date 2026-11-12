@@ -28,6 +28,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const NODE_BUDGET: u32 = 50;
 
 fn main() {
+    // Examples build with dev-dependencies, which isolate the process from
+    // the disk; a real run must keep its run log durable.
+    daruda_core::isolation::require_production();
     let mut args = std::env::args().skip(1);
     let Some(flow_path) = args.next().map(PathBuf::from) else {
         eprintln!("usage: run_flow <flow.yaml> [cwd]");

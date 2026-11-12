@@ -5,6 +5,7 @@ use std::io;
 use std::path::Path;
 
 /// [`File::sync_all`]: the file's data and metadata reach stable storage.
+/// Every flush here does nothing while [`crate::isolation::isolated`].
 pub fn sync_file(file: &File) -> io::Result<()> {
     if crate::isolation::isolated() {
         return Ok(());
@@ -108,22 +109,38 @@ fn barrier_positions(devices: &[u64]) -> Vec<usize> {
 #[cfg(target_os = "macos")]
 fn flush_to_device(handle: &File) -> io::Result<()> {
     use std::os::fd::AsRawFd as _;
-    // SAFETY: the descriptor is owned by `handle`, which outlives the call.
-    if unsafe { libc::fsync(handle.as_raw_fd()) } == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
+    retry_interrupted(|| {
+        // SAFETY: the descriptor is owned by `handle`, which outlives the call.
+        if unsafe { libc::fsync(handle.as_raw_fd()) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    })
 }
 
 #[cfg(target_os = "macos")]
 fn drain_device(handle: &File) -> io::Result<()> {
     use std::os::fd::AsRawFd as _;
-    // SAFETY: the descriptor is owned by `handle`, which outlives the call;
-    // `F_FULLFSYNC` ignores its argument.
-    if unsafe { libc::fcntl(handle.as_raw_fd(), libc::F_FULLFSYNC) } == -1 {
-        return Err(io::Error::last_os_error());
+    retry_interrupted(|| {
+        // SAFETY: the descriptor is owned by `handle`, which outlives the
+        // call; `F_FULLFSYNC` ignores its argument.
+        if unsafe { libc::fcntl(handle.as_raw_fd(), libc::F_FULLFSYNC) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    })
+}
+
+/// fsync(2) can fail with `EINTR` when a signal lands mid-flush; that is no
+/// verdict on the data, and a failed publication closes a run log for good.
+#[cfg(any(target_os = "macos", test))]
+fn retry_interrupted(mut call: impl FnMut() -> io::Result<()>) -> io::Result<()> {
+    loop {
+        match call() {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            outcome => return outcome,
+        }
     }
-    Ok(())
 }
 
 /// Elsewhere `fsync` already reaches stable storage, so it needs no drain.
@@ -163,14 +180,24 @@ mod tests {
     }
 
     #[test]
-    fn a_file_in_freshly_created_directories_is_published() {
-        let temp = tempfile::tempdir().unwrap();
-        let directory = temp.path().join("a").join("b");
-        std::fs::create_dir_all(&directory).unwrap();
-        let path = directory.join("entry");
-        let file = File::create(&path).unwrap();
+    fn an_interrupted_flush_is_retried_and_other_failures_are_returned() {
+        let interrupted = || io::Error::from(io::ErrorKind::Interrupted);
+        let mut outcomes = vec![Ok(()), Err(interrupted()), Err(interrupted())];
+        let mut calls = 0;
+        retry_interrupted(|| {
+            calls += 1;
+            outcomes.pop().unwrap()
+        })
+        .unwrap();
+        assert_eq!(calls, 3, "two interruptions, then success");
 
-        sync_file_entry(&file, &path).unwrap();
-        assert!(sync_file_entry(&file, &directory.join("missing")).is_err());
+        let mut calls = 0;
+        let error = retry_interrupted(|| {
+            calls += 1;
+            Err(io::Error::from(io::ErrorKind::PermissionDenied))
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(calls, 1, "a real failure is not retried");
     }
 }

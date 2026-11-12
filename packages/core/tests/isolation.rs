@@ -1,4 +1,5 @@
-//! Public API tests for the test-isolation switch.
+//! The test-isolation switch, in a binary of its own: ending isolation is
+//! process-global and would leak into any test sharing the process.
 
 use daruda_core::isolation::{isolated, require_production};
 
