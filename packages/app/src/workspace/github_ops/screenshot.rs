@@ -30,6 +30,7 @@ fn pr(number: u64, head: &str, title: &str, state: PrState, checks: CheckRollup)
         CheckRollup::Failing { failed } => (0..failed)
             .map(|i| FailedCheck {
                 workflow: None,
+                event: None,
                 name: format!("build ({i})"),
                 details_url: None,
                 job: None,

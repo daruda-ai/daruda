@@ -2,7 +2,8 @@
 //!
 //! Cancelled and timed-out runs count as failures; skipped, neutral and stale
 //! ones are left out; a check re-run counts only its latest run, a queued
-//! re-run included. A check is identified by its kind, workflow and name.
+//! re-run included. A check is identified by its kind, workflow, triggering
+//! event and name, as GitHub lists them (`CI / test (push)`).
 
 use std::collections::HashMap;
 
@@ -67,6 +68,7 @@ pub fn summarize(runs: &[CheckRun]) -> (CheckRollup, Vec<FailedCheck>) {
         .filter(|run| run.status == CheckStatus::Failure)
         .map(|run| FailedCheck {
             workflow: run.workflow.clone(),
+            event: run.event.clone(),
             name: run.name.clone(),
             details_url: run.details_url.clone(),
             job: run.details_url.as_deref().and_then(actions_job),
@@ -86,10 +88,15 @@ pub fn summarize(runs: &[CheckRun]) -> (CheckRollup, Vec<FailedCheck>) {
     (rollup, failed)
 }
 
-type Key<'a> = (CheckKind, Option<&'a str>, &'a str);
+type Key<'a> = (CheckKind, Option<&'a str>, Option<&'a str>, &'a str);
 
 fn key(run: &CheckRun) -> Key<'_> {
-    (run.kind, run.workflow.as_deref(), run.name.as_str())
+    (
+        run.kind,
+        run.workflow.as_deref(),
+        run.event.as_deref(),
+        run.name.as_str(),
+    )
 }
 
 /// A queued run has not started yet, so it is newer than any run that has.

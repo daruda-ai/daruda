@@ -154,13 +154,18 @@ fn count(text: &str) -> usize {
     text.chars().count()
 }
 
-/// `Workflow / job` for an Actions check, so same-named jobs of two
-/// workflows read apart; the bare name otherwise.
+/// `Workflow / job (event)` for an Actions check, as GitHub lists it, so
+/// same-named jobs of two workflows or two events read apart; the bare name
+/// otherwise.
 fn check_label(check: &FailedCheck) -> String {
-    match &check.workflow {
-        Some(workflow) => format!("{} / {}", one_line(workflow), one_line(&check.name)),
-        None => one_line(&check.name),
+    let mut label = one_line(&check.name);
+    if let Some(workflow) = &check.workflow {
+        label = format!("{} / {label}", one_line(workflow));
     }
+    if let Some(event) = &check.event {
+        label = format!("{label} ({})", one_line(event));
+    }
+    label
 }
 
 /// `log` fenced, within `room` characters if it can be cut to fit.

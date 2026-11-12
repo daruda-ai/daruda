@@ -56,6 +56,10 @@ pub struct CheckRun {
     /// The Actions workflow a check run belongs to; two workflows may each
     /// have a job of the same name.
     pub workflow: Option<String>,
+    /// The event that ran the workflow (`push`, `pull_request`, ...). A
+    /// workflow on both runs each job twice for a same-repository PR — on
+    /// the branch head and on the merge with the base — and either can fail.
+    pub event: Option<String>,
     pub name: String,
     pub status: CheckStatus,
     pub details_url: Option<String>,
@@ -98,6 +102,8 @@ pub struct ActionsJob {
 pub struct FailedCheck {
     /// The Actions workflow, for a check run that belongs to one.
     pub workflow: Option<String>,
+    /// The event that ran it, for an Actions check run.
+    pub event: Option<String>,
     pub name: String,
     pub details_url: Option<String>,
     /// `None` for a check outside GitHub Actions, which has no log to fetch.

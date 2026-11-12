@@ -2,6 +2,8 @@
 //! (gh 2.74.2, 2026-11-12). `prs_for_branches.json` is `cli/cli` for three
 //! branches; `prs_status_contexts.json` wraps a real Prow (`StatusContext`)
 //! rollup from `kubernetes/kubernetes` in the same answer shape.
+//! `prs_push_and_pull_request.json` is `serde-rs/serde` #3113, a same-repo
+//! PR whose workflow runs on both `push` and `pull_request`.
 
 use daruda_github::query::{parse_prs_for_branches, prs_for_branches_query};
 use daruda_github::{CheckRollup, GhError, PrState, ReviewDecision};
@@ -51,6 +53,19 @@ fn a_real_answer_parses_per_branch() {
             .all(|p| p.cross_repo && p.state == PrState::Closed)
     );
     assert!(answer.by_branch[&names[2]].is_empty());
+}
+
+#[test]
+fn a_job_run_by_two_events_counts_as_two_checks() {
+    let names = branches(&["deprecatedsince"]);
+    let answer =
+        parse_prs_for_branches(&fixture("prs_push_and_pull_request.json"), &names).unwrap();
+    let pr = &answer.by_branch[&names[0]][0];
+    assert_eq!((pr.number, pr.state), (3113, PrState::Merged));
+    // 28 runs: 14 jobs, each once for `push` and once for `pull_request`,
+    // all passing; neither event's run may stand in for the other's.
+    assert_eq!(pr.checks, CheckRollup::Passing);
+    assert!(pr.failed.is_empty());
 }
 
 #[test]

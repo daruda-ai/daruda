@@ -50,7 +50,7 @@ pub fn prs_for_branches_query(count: usize) -> String {
          isCrossRepository reviewDecision updatedAt statusCheckRollup {{ state \
          contexts(first: {CHECKS_PER_PR}) {{ pageInfo {{ hasNextPage }} nodes {{ __typename \
          ... on CheckRun {{ name status conclusion detailsUrl startedAt \
-         checkSuite {{ workflowRun {{ workflow {{ name }} }} }} }} \
+         checkSuite {{ workflowRun {{ event workflow {{ name }} }} }} }} \
          ... on StatusContext {{ context state targetUrl createdAt }} }} }} }} }}"
     )
 }
@@ -316,6 +316,8 @@ struct CheckSuite {
 
 #[derive(Deserialize)]
 struct WorkflowRun {
+    #[serde(default)]
+    event: Option<String>,
     workflow: Workflow,
 }
 
@@ -334,16 +336,22 @@ impl Context {
                 details_url,
                 started_at,
                 check_suite,
-            } => CheckRun {
-                kind: CheckKind::Run,
-                workflow: check_suite
-                    .and_then(|suite| suite.workflow_run)
-                    .map(|run| run.workflow.name),
-                status: check_run_status(&status, conclusion.as_deref()),
-                name,
-                details_url,
-                started_at,
-            },
+            } => {
+                let run = check_suite.and_then(|suite| suite.workflow_run);
+                let (workflow, event) = match run {
+                    Some(run) => (Some(run.workflow.name), run.event),
+                    None => (None, None),
+                };
+                CheckRun {
+                    kind: CheckKind::Run,
+                    workflow,
+                    event,
+                    status: check_run_status(&status, conclusion.as_deref()),
+                    name,
+                    details_url,
+                    started_at,
+                }
+            }
             Self::StatusContext {
                 context,
                 state,
@@ -352,6 +360,7 @@ impl Context {
             } => CheckRun {
                 kind: CheckKind::Status,
                 workflow: None,
+                event: None,
                 status: status_context_status(&state),
                 name: context,
                 details_url: target_url,

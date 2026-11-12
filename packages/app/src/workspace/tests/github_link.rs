@@ -416,12 +416,14 @@ fn failing_pr() -> PrSummary {
     failing.failed = vec![
         daruda_github::FailedCheck {
             workflow: None,
+            event: None,
             name: "build".into(),
             details_url: Some("https://github.com/o/r/actions/runs/11/job/22".into()),
             job: Some(daruda_github::ActionsJob { run: 11, job: 22 }),
         },
         daruda_github::FailedCheck {
             workflow: None,
+            event: None,
             name: "prow".into(),
             details_url: Some("https://prow.example/1".into()),
             job: None,

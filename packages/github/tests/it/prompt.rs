@@ -29,6 +29,7 @@ fn pr() -> PrSummary {
 fn check(name: &str) -> FailedCheck {
     FailedCheck {
         workflow: None,
+        event: None,
         name: name.into(),
         details_url: Some("https://github.com/cli/cli/actions/runs/1/job/2".into()),
         job: None,
@@ -110,6 +111,7 @@ fn the_prompt_quotes_each_check_and_says_when_a_log_is_missing() {
             CheckLog {
                 check: FailedCheck {
                     workflow: None,
+                    event: None,
                     name: "pull-kubernetes-e2e".into(),
                     details_url: Some("https://prow.k8s.io/view/1".into()),
                     job: None,
@@ -148,6 +150,7 @@ fn many_long_failures_stay_within_the_budget() {
 fn same_named_jobs_read_apart_by_workflow() {
     let mut ci = check("build");
     ci.workflow = Some("CI".into());
+    ci.event = Some("push".into());
     let prompt = failed_checks(
         &pr(),
         &[CheckLog {
@@ -155,7 +158,7 @@ fn same_named_jobs_read_apart_by_workflow() {
             log: Err("x".into()),
         }],
     );
-    assert!(prompt.contains("## CI / build\n"), "{prompt}");
+    assert!(prompt.contains("## CI / build (push)\n"), "{prompt}");
 }
 
 #[test]

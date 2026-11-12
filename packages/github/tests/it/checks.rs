@@ -7,6 +7,7 @@ fn run(name: &str, status: CheckStatus, started: &str) -> CheckRun {
     CheckRun {
         kind: CheckKind::Run,
         workflow: Some("CI".into()),
+        event: None,
         name: name.into(),
         status,
         details_url: None,
@@ -28,10 +29,18 @@ fn in_workflow(run: CheckRun, workflow: &str) -> CheckRun {
     }
 }
 
+fn on_event(run: CheckRun, event: &str) -> CheckRun {
+    CheckRun {
+        event: Some(event.into()),
+        ..run
+    }
+}
+
 fn status(run: CheckRun) -> CheckRun {
     CheckRun {
         kind: CheckKind::Status,
         workflow: None,
+        event: None,
         ..run
     }
 }
@@ -129,6 +138,22 @@ fn checks_add_up_by_the_one_rule() {
                 in_workflow(run("build", Success, "2"), "Release"),
             ],
             CheckRollup::Failing { failed: 1 },
+        ),
+        (
+            "a push run's failure is not hidden by the pull_request run after it",
+            vec![
+                on_event(run("test", Failure, "1"), "push"),
+                on_event(run("test", Success, "2"), "pull_request"),
+            ],
+            CheckRollup::Failing { failed: 1 },
+        ),
+        (
+            "a re-run of one event still replaces that event's earlier run",
+            vec![
+                on_event(run("test", Failure, "1"), "pull_request"),
+                on_event(run("test", Success, "2"), "pull_request"),
+            ],
+            CheckRollup::Passing,
         ),
         (
             "a status context does not replace a check run of the same name",
