@@ -62,6 +62,7 @@ mod flow_declared;
 mod flow_events;
 mod flow_file_ops;
 pub(in crate::workspace) mod flow_history;
+mod flow_include;
 pub(in crate::workspace) mod flow_inputs_modal;
 pub(in crate::workspace) mod flow_move_ops;
 mod flow_navigation;

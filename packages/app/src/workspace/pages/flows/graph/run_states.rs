@@ -36,7 +36,7 @@ impl FlowGraphView {
         let FlowGraphState::Graph { canvas, model, ids } = &self.state else {
             return;
         };
-        if !colouring.is_about(model.nodes.iter().map(|node| node.id.clone())) {
+        if !colouring.is_about(model.run_ids.iter().cloned()) {
             return;
         }
         // Read before the state below is borrowed, and kept: this is called to
@@ -50,7 +50,7 @@ impl FlowGraphView {
             .iter()
             .filter_map(|node| {
                 let id = ids.canvas(&node.id)?;
-                let state = colouring.states.get(&node.id).copied().unwrap_or_default();
+                let state = node_state(colouring, node);
                 let card = card_for(
                     node,
                     super::renderer::CardFacts {
@@ -70,5 +70,20 @@ impl FlowGraphView {
             canvas.dispatch_command(StampCards { cards: stamped }, cx);
             cx.notify();
         });
+    }
+}
+
+/// What a run says about one card: its node's state, or for an include the
+/// one state its members fold to.
+fn node_state(
+    colouring: &RunColouring,
+    node: &super::model::GraphNode,
+) -> crate::runs::NodeRunState {
+    let of = |id: &daruda_flow::NodeId| colouring.states.get(id).copied().unwrap_or_default();
+    match &node.kind {
+        super::model::GraphNodeKind::Include { members, .. } => {
+            crate::runs::fold_states(members.iter().map(of))
+        }
+        _ => of(&node.id),
     }
 }

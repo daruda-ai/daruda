@@ -129,6 +129,25 @@ pub enum ValidationKind {
     PinnedSourceMissing { node: NodeId, path: String },
     /// The declared graph is cyclic.
     Cycle,
+    /// An `include` node read where no host can find the flow it names —
+    /// loaded without a source of flows, or resolved on its own.
+    IncludeUnavailable,
+    /// The host has no flow by the name an `include` gives.
+    UnknownInclude { flow: String },
+    /// A flow includes itself, directly or through another.
+    IncludeCycle { flow: String },
+    /// Includes nested deeper than `crate::include::MAX_DEPTH`.
+    IncludeTooDeep { flow: String },
+    /// The included flow does not load on its own.
+    IncludeInvalid { flow: String },
+    /// An include's `inputs` do not fit the included flow's declarations:
+    /// undeclared, missing while required, refused by the type, or text
+    /// mixed with a token.
+    IncludeInputMismatch { flow: String, name: String },
+    /// An included node would run as a different agent once the run is
+    /// read back from `run.yaml`, where it sits under the including flow's
+    /// `defaults`.
+    IncludeAgentMismatch { flow: String },
     /// An agent node names a catalog id the host did not supply.
     UnknownAgent { id: String },
     /// The run could reach `permission: ask` and this host wired nowhere

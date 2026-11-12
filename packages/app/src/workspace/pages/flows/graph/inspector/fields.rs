@@ -168,26 +168,32 @@ pub(in crate::workspace) enum Refusal {
     RunRequired,
 }
 
+/// The form's view of `node`, or `None` for a node this form cannot edit.
+///
+/// An `include` has no box for its body — the body is another file — and
+/// a save rebuilds a node from these fields wholesale, so offering it the
+/// form would rewrite it as an agent or a command. No draft is built from
+/// `None`, which is what keeps every save path away from it.
 pub(in crate::workspace::pages::flows::graph) fn fields_of(
     node: &daruda_flow::parse::NodeFile,
-) -> NodeFields {
-    NodeFields {
+) -> Option<NodeFields> {
+    Some(NodeFields {
         id: node.id.clone().into_string(),
         deps: node.deps.iter().map(|d| d.as_str().to_string()).collect(),
         timeout: node.timeout.map_or(TimeoutField::Absent, TimeoutField::Set),
         max_turns: turns_of(node),
         cwd: node.cwd.as_ref().map(|p| p.display().to_string()),
         agent: agent_fields_of(node),
-        body: body_fields_of(node),
-    }
+        body: body_fields_of(node)?,
+    })
 }
 
 /// The node's body as the file holds it, with the other kind's boxes empty.
 pub(in crate::workspace::pages::flows::graph) fn body_fields_of(
     node: &daruda_flow::parse::NodeFile,
-) -> BodyFields {
+) -> Option<BodyFields> {
     use daruda_flow::parse::{NodeKindFile, PromptSource};
-    match &node.kind {
+    Some(match &node.kind {
         NodeKindFile::Agent {
             prompt,
             output,
@@ -210,7 +216,8 @@ pub(in crate::workspace::pages::flows::graph) fn body_fields_of(
             run: run.clone(),
             on_fail: repair_fields_of(on_fail),
         },
-    }
+        NodeKindFile::Include { .. } => return None,
+    })
 }
 
 /// Which policy a kind allows.
@@ -230,7 +237,7 @@ fn turns_of(node: &daruda_flow::parse::NodeFile) -> TurnsField {
         NodeKindFile::Agent { max_turns, .. } => {
             max_turns.map_or(TurnsField::Absent, TurnsField::Set)
         }
-        NodeKindFile::Command { .. } => TurnsField::Absent,
+        NodeKindFile::Command { .. } | NodeKindFile::Include { .. } => TurnsField::Absent,
     }
 }
 

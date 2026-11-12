@@ -1926,6 +1926,11 @@ flow:
   graph_parse_failed: "This file is not a flow: %{detail}"
   # Chip on an agent node in the flow graph.
   graph_kind_agent: "AGENT"
+  # Chip on a node that splices in another flow's nodes.
+  graph_kind_include: "INCLUDE"
+  # The meta line of an include card: how many nodes it stands for.
+  graph_include_nodes: "%{n} nodes"
+  graph_include_nodes_one: "1 node"
   # What an empty agent box resolves to. Shown as the box's placeholder, so
   # "blank" reads as "inherits this" rather than as "nothing".
   form_inherited: "%{value} (from defaults)"
@@ -2042,6 +2047,8 @@ flow:
   form_many_selected: "%{n} nodes selected — fields show for one at a time."
   # What the inspector says with nothing selected.
   form_no_selection: "Click a node to edit it."
+  # What the inspector says for an include: its body is another file.
+  form_include: "Includes the flow %{flow}. Open that flow to edit its nodes; change this node's flow, profile or inputs in the YAML."
   # What it says for a flow that has no nodes yet.
   form_no_nodes: "This flow has no nodes — add one."
   # The select row for "this node names none" — the absent option.
@@ -2228,6 +2235,13 @@ flow:
   issue_duplicate_id: "shares its id with another node"
   issue_unknown_dep: "depends on %{dep}, which no node declares"
   issue_cycle: "the nodes depend on one another in a circle, so none can run first"
+  issue_include_unavailable: "includes another flow, which cannot be found from here"
+  issue_unknown_include: "includes the flow `%{flow}`, which does not exist"
+  issue_include_cycle: "includes `%{flow}`, which already includes this flow"
+  issue_include_too_deep: "includes `%{flow}` too many levels deep"
+  issue_include_invalid: "includes `%{flow}`, which does not load on its own — open it to see why"
+  issue_include_input_mismatch: "gives `%{flow}` an input `%{name}` it cannot take — undeclared, missing, the wrong type, or text mixed with a {{…}} token"
+  issue_include_agent_mismatch: "includes `%{flow}`, whose agent settings would change when the run is resumed — name the agent's id, mode and model on its nodes"
   issue_unknown_agent: "names the agent %{id}, which is not configured"
   issue_nobody_to_ask: "asks a person for permission, and this run has no way to ask"
   issue_missing_prompt_file: "%{field} points at %{path}, which is not there"

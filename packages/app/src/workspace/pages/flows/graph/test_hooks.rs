@@ -20,6 +20,12 @@ use super::FlowGraphView;
 use super::{FlowGraphError, renderer};
 
 impl FlowGraphView {
+    /// Whether a node form is bound — none is, for an include.
+    #[cfg(test)]
+    pub(in crate::workspace) fn has_form_for_test(&self) -> bool {
+        self.form.is_some()
+    }
+
     /// The canvas entity, for tests that assert where the graph ended up on
     /// screen. `None` when the flow did not load.
     #[cfg(test)]

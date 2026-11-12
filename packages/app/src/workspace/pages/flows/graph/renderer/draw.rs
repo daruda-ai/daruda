@@ -159,19 +159,24 @@ fn full_body(card: &CardData, p: CardPalette, show_summary: bool) -> impl IntoEl
 
 /// The chip reduced to a mark: at this size its word would not fit.
 ///
-/// Shape carries the kind, not colour — a round mark is an agent, a square one
-/// a gate. The card's border is already spending colour on run status, and
+/// Shape carries the kind, not colour — a round mark is an agent, a filled
+/// square a gate, a hollow square an include. The card's border is already spending colour on run status, and
 /// DESIGN.md's rule against colour-only signals applies twice over when the
 /// mark is six pixels wide.
 fn kind_dot(card: &CardData, p: CardPalette) -> impl IntoElement {
     let mark = div()
         .flex_none()
         .w(px(palette::FLOW_GRAPH_KIND_DOT))
-        .h(px(palette::FLOW_GRAPH_KIND_DOT))
-        .bg(rgb(p.text_mute));
+        .h(px(palette::FLOW_GRAPH_KIND_DOT));
     match card.kind {
-        CardKind::Gate => mark.rounded(px(palette::FLOW_GRAPH_KIND_DOT / 4.0)),
-        CardKind::Agent => mark.rounded_full(),
+        CardKind::Gate => mark
+            .bg(rgb(p.text_mute))
+            .rounded(px(palette::FLOW_GRAPH_KIND_DOT / 4.0)),
+        CardKind::Agent => mark.bg(rgb(p.text_mute)).rounded_full(),
+        // Outlined, not filled: at six pixels a corner alone does not read.
+        CardKind::Include => mark
+            .border(px(palette::FLOW_GRAPH_KIND_RING_W))
+            .border_color(rgb(p.text_mute)),
     }
 }
 

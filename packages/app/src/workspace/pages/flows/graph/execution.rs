@@ -100,7 +100,10 @@ impl ExecutionGraph {
                         Some(duration) => format!("{} · {duration}", agent.id),
                         None => agent.id.clone(),
                     },
-                    super::model::GraphNodeKind::Gate { .. } => duration.unwrap_or_default(),
+                    // A run's graph is expanded (`from_flow`), so it draws no
+                    // include card; the arm is the gate's answer for one.
+                    super::model::GraphNodeKind::Gate { .. }
+                    | super::model::GraphNodeKind::Include { .. } => duration.unwrap_or_default(),
                 };
                 cards.push((id, serde_json::to_value(data).unwrap_or_default()));
             }

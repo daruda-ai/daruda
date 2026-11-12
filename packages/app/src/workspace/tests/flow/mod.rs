@@ -13,6 +13,7 @@ mod browser;
 mod control;
 mod files;
 mod graph;
+mod includes;
 mod inputs;
 mod inspector;
 mod ownership;

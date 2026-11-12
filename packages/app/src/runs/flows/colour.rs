@@ -40,6 +40,36 @@ pub(crate) struct RunColouring {
     pub of_nodes: Vec<NodeId>,
 }
 
+/// One state for several nodes drawn as one card: an include's members.
+///
+/// A failure is the news, then a repair, then work in flight. All passed is
+/// passed; some passed with the rest not yet started is the included flow
+/// part way through, which reads as running — pending would say it has not
+/// begun.
+pub(crate) fn fold_states(members: impl IntoIterator<Item = NodeRunState>) -> NodeRunState {
+    let (mut failed, mut fixing, mut running, mut passed, mut pending) =
+        (false, false, None::<u32>, false, false);
+    for state in members {
+        match state {
+            NodeRunState::Failed => failed = true,
+            NodeRunState::Fixing => fixing = true,
+            NodeRunState::Running { attempt } => {
+                running = Some(running.map_or(attempt, |seen| seen.max(attempt)))
+            }
+            NodeRunState::Passed => passed = true,
+            NodeRunState::Pending => pending = true,
+        }
+    }
+    match (failed, fixing, running, passed, pending) {
+        (true, ..) => NodeRunState::Failed,
+        (_, true, ..) => NodeRunState::Fixing,
+        (_, _, Some(attempt), ..) => NodeRunState::Running { attempt },
+        (_, _, None, true, false) => NodeRunState::Passed,
+        (_, _, None, true, true) => NodeRunState::Running { attempt: 1 },
+        (_, _, None, false, _) => NodeRunState::Pending,
+    }
+}
+
 impl RunColouring {
     /// Whether this colouring is about `nodes` — the same ids, in the same
     /// order. A graph that has changed shape since the run started is left

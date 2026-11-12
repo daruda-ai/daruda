@@ -17,7 +17,7 @@ mod render;
 #[cfg(feature = "screenshot")]
 pub(in crate::workspace) mod screenshot;
 
-pub(super) use render::{render, render_empty, render_many, render_no_nodes};
+pub(super) use render::{render, render_empty, render_include, render_many, render_no_nodes};
 // Re-exported so every caller keeps saying `form::NodeFields`: which file a
 // value's declaration sits in is not their business.
 pub(in crate::workspace) use fields::*;

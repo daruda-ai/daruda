@@ -23,26 +23,46 @@ pub(crate) struct TaskFlowApproval {
 }
 
 /// A flow file as one read saw it: where the task's flow name resolved and
-/// a SHA-256 digest of the bytes there. A start a card approved compares
-/// this, so a flow edited, or shadowed by another file of that name, after
+/// a SHA-256 digest of the bytes there, with every flow it includes found
+/// the same way. A start a card approved compares this, so a flow — or one
+/// it includes — edited, or shadowed by another file of that name, after
 /// the card named its modes is refused rather than run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FlowFileSeen {
     path: PathBuf,
     digest: [u8; 32],
+    included: Vec<crate::workspace::flow_include::IncludeSeen>,
 }
 
 impl FlowFileSeen {
-    /// Read `path` once: what was seen, and the text to parse from that same
-    /// read. `None` when it cannot be read.
-    fn read(path: &Path) -> Option<(Self, String)> {
+    /// Read `path`, and expand it under `profile` from `sources`, once: what
+    /// was seen, and the permission modes that same read names. `None` when
+    /// the file cannot be read.
+    fn read(
+        path: &Path,
+        profile: Option<&str>,
+        sources: Option<&crate::workspace::flow_paths::FlowSources>,
+    ) -> Option<(Self, Vec<Option<String>>)> {
         use sha2::{Digest as _, Sha256};
         let bytes = std::fs::read(path).ok()?;
+        let text = String::from_utf8_lossy(&bytes);
+        let (modes, included) = match sources {
+            Some(sources) => {
+                let recording = crate::workspace::flow_include::RecordingSources::new(sources);
+                let modes = permission_modes(daruda_flow::load_with(&text, profile, &recording));
+                (modes, recording.into_seen())
+            }
+            None => (
+                permission_modes(daruda_flow::load(&text, profile)),
+                Vec::new(),
+            ),
+        };
         let seen = Self {
             path: path.to_path_buf(),
             digest: Sha256::digest(&bytes).into(),
+            included,
         };
-        Some((seen, String::from_utf8_lossy(&bytes).into_owned()))
+        Some((seen, modes))
     }
 }
 
@@ -66,10 +86,10 @@ impl Workspace {
                 file: None,
             };
         };
-        let read = FlowFileSeen::read(&target.path);
-        let modes = read.as_ref().map_or_else(Vec::new, |(_, text)| {
-            flow_permission_modes(text, target.profile.as_deref())
-        });
+        let read = self.read_task_flow(project, run_in, base, &target);
+        let modes = read
+            .as_ref()
+            .map_or_else(Vec::new, |(_, modes)| modes.clone());
         // A flow of commands alone has no agent to give a mode to.
         let modes = if modes.is_empty() {
             s::approval_flow_no_agents()
@@ -101,7 +121,22 @@ impl Workspace {
         flow: &TaskFlow,
     ) -> Option<FlowFileSeen> {
         let target = self.resolve_task_flow(project, run_in, base, flow).ok()?;
-        FlowFileSeen::read(&target.path).map(|(seen, _)| seen)
+        self.read_task_flow(project, run_in, base, &target)
+            .map(|(seen, _)| seen)
+    }
+
+    /// The one read both of the above make, so the card and the start hash
+    /// the same files: the flow's, and those it includes, found from the
+    /// scopes the flow's own name was found in — where the run will look.
+    fn read_task_flow(
+        &self,
+        project: ProjectUuid,
+        run_in: &TaskRunIn,
+        base: Option<&Path>,
+        target: &super::TaskFlowTarget,
+    ) -> Option<(FlowFileSeen, Vec<Option<String>>)> {
+        let sources = self.task_flow_sources(project, run_in, base);
+        FlowFileSeen::read(&target.path, target.profile.as_deref(), sources.as_ref())
     }
 }
 
@@ -110,13 +145,14 @@ impl Workspace {
 /// one phone message, while a count says there is more to read.
 const FLOW_MODES_QUOTED: usize = 4;
 
-/// The permission modes the agents of the flow in `text` run under with
-/// `profile`, each once, in node order; `None` for a node that names none
-/// and so runs in the agent's own default. A new flow defaults to
-/// `bypassPermissions`, so an approval says it rather than leave it to be
-/// found out.
-fn flow_permission_modes(text: &str, profile: Option<&str>) -> Vec<Option<String>> {
-    let Ok(loaded) = daruda_flow::load(text, profile) else {
+/// The permission modes the agents of a loaded flow run under, each once,
+/// in node order; `None` for a node that names none and so runs in the
+/// agent's own default. A new flow defaults to `bypassPermissions`, so an
+/// approval says it rather than leave it to be found out.
+fn permission_modes(
+    loaded: Result<daruda_flow::LoadedFlow, daruda_flow::FlowError>,
+) -> Vec<Option<String>> {
+    let Ok(loaded) = loaded else {
         return Vec::new();
     };
     let mut modes: Vec<Option<String>> = Vec::new();
@@ -162,7 +198,52 @@ mod tests {
             format!("version: 1\ndefaults:\n  agent:\n    id: claude\nnodes:\n{nodes}"),
         )
         .unwrap();
-        flow_permission_modes(&std::fs::read_to_string(&path).unwrap(), None)
+        FlowFileSeen::read(&path, None, None).unwrap().1
+    }
+
+    /// A card names the modes of the agents a run will actually open, and
+    /// an include brings its flow's agents with it. What the card saw covers
+    /// the included flow too, so an edit to it alone is a different flow.
+    #[test]
+    fn an_included_flows_modes_are_on_the_card_and_in_what_it_saw() {
+        let root = tempfile::tempdir().unwrap();
+        let sources = crate::workspace::flow_paths::FlowSources {
+            lane: root.path().join("lane"),
+            project: None,
+            global: root.path().join("global"),
+        };
+        std::fs::create_dir_all(&sources.global).unwrap();
+        let steps = |mode: &str| {
+            format!(
+                "version: 1\ndefaults:\n  agent: {{ id: claude, mode: {mode} }}\nnodes:\n  - id: a\n    kind: agent\n    output: a.md\n    prompt: p\n"
+            )
+        };
+        std::fs::write(sources.global.join("steps.yaml"), steps("plan")).unwrap();
+        let outer = root.path().join("outer.yaml");
+        std::fs::write(
+            &outer,
+            "version: 1\nnodes:\n  - id: s\n    kind: include\n    flow: steps\n",
+        )
+        .unwrap();
+
+        let (seen, modes) = FlowFileSeen::read(&outer, None, Some(&sources)).unwrap();
+        assert_eq!(modes, vec![Some("plan".to_string())]);
+        let (_, alone) = FlowFileSeen::read(&outer, None, None).unwrap();
+        assert!(
+            alone.is_empty(),
+            "with nowhere to look the include does not load"
+        );
+
+        std::fs::write(
+            sources.global.join("steps.yaml"),
+            steps("bypassPermissions"),
+        )
+        .unwrap();
+        let (edited, _) = FlowFileSeen::read(&outer, None, Some(&sources)).unwrap();
+        assert_ne!(
+            edited, seen,
+            "an edit to the included flow alone is noticed"
+        );
     }
 
     fn agent_node(id: &str, mode: Option<&str>) -> String {

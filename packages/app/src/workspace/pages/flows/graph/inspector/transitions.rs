@@ -59,7 +59,9 @@ impl InspectorModel {
         };
         let mut discarded = self.discarded.clone();
         self.drafts.retain(|id, draft| {
-            if base.node(id).is_none() {
+            // A node now an `include` is out of the form's reach, the same as
+            // one deleted: no draft may save over it.
+            if base.node(id).and_then(super::fields::fields_of).is_none() {
                 if draft.has_unsaved_typing() && !discarded.contains(id) {
                     discarded.push(id.clone());
                 }

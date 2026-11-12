@@ -530,6 +530,14 @@ pub(in super::super) fn render_no_nodes(
     note(crate::surface::strings::flow::form_no_nodes(), cx)
 }
 
+/// What it says for an include, which the form cannot edit.
+pub(in super::super) fn render_include(
+    flow: &str,
+    cx: &mut Context<super::super::FlowGraphView>,
+) -> impl IntoElement {
+    note(crate::surface::strings::flow::form_include(flow), cx)
+}
+
 /// What it says with nothing selected. The column is there either way — see the
 /// note in `FlowGraphView::render` for why it does not come and go.
 pub(in super::super) fn render_empty(

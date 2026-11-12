@@ -26,6 +26,11 @@ pub(in crate::workspace) fn node_fields(file: &mut FlowFile, node: &NodeId, fiel
         return;
     };
     let target = &mut file.nodes[index];
+    // The form's fields describe an agent or a command; written over an
+    // include they would replace another flow with one of those.
+    if matches!(target.kind, NodeKindFile::Include { .. }) {
+        return;
+    }
     target.deps = fields
         .deps
         .iter()
@@ -119,14 +124,20 @@ pub(in crate::workspace) fn draft_fields(file: &mut FlowFile, drafts: &[(NodeId,
         let Some(current) = file.nodes.iter().find(|n| &n.id == node) else {
             continue;
         };
-        let mut intermediate = super::fields::fields_of(current);
+        let Some(mut intermediate) = super::fields::fields_of(current) else {
+            continue;
+        };
         intermediate.id = temporary.to_string();
         node_fields(file, node, &intermediate);
         renames.push((temporary, fields.id.clone()));
     }
     for (temporary, final_id) in renames {
-        if let Some(current) = file.nodes.iter().find(|n| n.id == temporary) {
-            let mut fields = super::fields::fields_of(current);
+        if let Some(mut fields) = file
+            .nodes
+            .iter()
+            .find(|n| n.id == temporary)
+            .and_then(super::fields::fields_of)
+        {
             fields.id = final_id;
             node_fields(file, &temporary, &fields);
         }
@@ -206,6 +217,15 @@ fn rename_output_refs_in(node: &mut daruda_flow::parse::NodeFile, from: &NodeId,
             rewrite(run);
             if let GateFailFile::Repair { fix, .. } = on_fail {
                 rewrite(fix);
+            }
+        }
+        // An include hands an earlier node's output to the flow it splices in
+        // through `inputs`, so a renamed node is renamed there too.
+        NodeKindFile::Include { inputs, .. } => {
+            for value in inputs.values_mut() {
+                if let daruda_flow::input::InputValue::Text(text) = value {
+                    rewrite(text);
+                }
             }
         }
     }
@@ -302,7 +322,7 @@ fn schema_of(
     use daruda_flow::parse::NodeKindFile;
     match kind {
         NodeKindFile::Agent { output_schema, .. } => output_schema.clone(),
-        NodeKindFile::Command { .. } => None,
+        NodeKindFile::Command { .. } | NodeKindFile::Include { .. } => None,
     }
 }
 
@@ -317,7 +337,7 @@ fn continue_until_of(
     use daruda_flow::parse::NodeKindFile;
     match kind {
         NodeKindFile::Agent { continue_until, .. } => continue_until.clone(),
-        NodeKindFile::Command { .. } => None,
+        NodeKindFile::Command { .. } | NodeKindFile::Include { .. } => None,
     }
 }
 
@@ -329,7 +349,8 @@ fn retry_of(
 ) -> daruda_flow::parse::AgentFailFile {
     let mut policy = match current {
         daruda_flow::parse::NodeKindFile::Agent { on_fail, .. } => on_fail.clone(),
-        daruda_flow::parse::NodeKindFile::Command { .. } => Default::default(),
+        daruda_flow::parse::NodeKindFile::Command { .. }
+        | daruda_flow::parse::NodeKindFile::Include { .. } => Default::default(),
     };
     apply_retry(&mut policy, fields);
     policy
@@ -341,7 +362,8 @@ fn repair_of(
 ) -> daruda_flow::parse::GateFailFile {
     let mut policy = match current {
         daruda_flow::parse::NodeKindFile::Command { on_fail, .. } => on_fail.clone(),
-        daruda_flow::parse::NodeKindFile::Agent { .. } => Default::default(),
+        daruda_flow::parse::NodeKindFile::Agent { .. }
+        | daruda_flow::parse::NodeKindFile::Include { .. } => Default::default(),
     };
     apply_repair(&mut policy, fields);
     policy
@@ -439,9 +461,9 @@ nodes:
     #[test]
     fn batch_renames_keep_references_in_other_drafts_and_support_swaps() {
         let mut file = daruda_flow::parse::parse_flow_file(GATE_FLOW).unwrap();
-        let mut build = super::super::fields::fields_of(&file.nodes[0]);
+        let mut build = super::super::fields::fields_of(&file.nodes[0]).unwrap();
         build.id = "check".into();
-        let mut check = super::super::fields::fields_of(&file.nodes[1]);
+        let mut check = super::super::fields::fields_of(&file.nodes[1]).unwrap();
         check.id = "build".into();
         check.body.run = "cat {{node.build.output}}".into();
         draft_fields(
@@ -500,6 +522,61 @@ nodes:
             rerun,
             &vec![NodeId::from("assemble")],
             "the repair reruns the node under its new name"
+        );
+    }
+
+    const INCLUDE_FLOW: &str = "\
+version: 1
+nodes:
+  - id: build
+    kind: agent
+    output: build.md
+    prompt: build it
+  - id: review
+    kind: include
+    flow: pr-review
+    deps: [build]
+    inputs:
+      notes: \"{{node.build.output}}\"
+      focus: security
+";
+
+    /// The form has no box for an include's body, so it never builds fields
+    /// for one, and a save addressed to one leaves it as it was.
+    #[test]
+    fn the_form_cannot_rewrite_an_include() {
+        let file = daruda_flow::parse::parse_flow_file(INCLUDE_FLOW).expect("fixture parses");
+        assert!(super::super::fields::fields_of(&file.nodes[1]).is_none());
+
+        let mut saved = file.clone();
+        let build = super::super::fields::fields_of(&file.nodes[0]).unwrap();
+        node_fields(&mut saved, &"review".into(), &build);
+        assert_eq!(saved, file, "fields aimed at the include change nothing");
+    }
+
+    /// An include hands an earlier node's output on through `inputs`, so a
+    /// rename has to reach it there, and leave the include an include.
+    #[test]
+    fn a_rename_reaches_an_includes_inputs() {
+        let mut file = daruda_flow::parse::parse_flow_file(INCLUDE_FLOW).expect("fixture parses");
+        node_fields(&mut file, &"build".into(), &fields_renaming("assemble"));
+
+        assert_eq!(file.nodes[1].deps, vec![NodeId::from("assemble")]);
+        let NodeKindFile::Include { flow, inputs, .. } = &file.nodes[1].kind else {
+            panic!("the include is still an include");
+        };
+        assert_eq!(flow, "pr-review");
+        assert_eq!(
+            inputs.get("notes"),
+            Some(&daruda_flow::input::InputValue::Text(
+                "{{node.assemble.output}}".to_string()
+            ))
+        );
+        assert_eq!(
+            inputs.get("focus"),
+            Some(&daruda_flow::input::InputValue::Text(
+                "security".to_string()
+            ))
         );
     }
 

@@ -210,6 +210,35 @@ impl Node {
         }
         texts
     }
+
+    /// The same texts, to rewrite in place.
+    pub(crate) fn templates_mut(&mut self) -> Vec<(TemplateField, &mut String)> {
+        let mut texts = Vec::new();
+        match &mut self.kind {
+            NodeKind::Agent(body) => {
+                let AgentBody {
+                    prompt, on_fail, ..
+                } = &mut **body;
+                if let Prompt::Inline(text) = prompt {
+                    texts.push((TemplateField::Prompt, text));
+                }
+                if let AgentFail::Retry {
+                    hint: Prompt::Inline(text),
+                    ..
+                } = on_fail
+                {
+                    texts.push((TemplateField::Hint, text));
+                }
+            }
+            NodeKind::Command { run, on_fail } => {
+                texts.push((TemplateField::Run, run));
+                if let GateFail::Repair { fix, .. } = on_fail {
+                    texts.push((TemplateField::Fix, fix));
+                }
+            }
+        }
+        texts
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -345,7 +374,7 @@ mod tests {
             ),
         ];
         for (label, kind, want) in rows {
-            let node = Node {
+            let mut node = Node {
                 id: NodeId::from("n"),
                 deps: Vec::new(),
                 kind,
@@ -362,6 +391,12 @@ mod tests {
                 .map(|(field, text, surface)| (*field, text.to_string(), *surface))
                 .collect();
             assert_eq!(got, want, "{label}");
+            let fields_mut: Vec<_> = node.templates_mut().into_iter().map(|(f, _)| f).collect();
+            let fields: Vec<_> = want.iter().map(|(f, _, _)| *f).collect();
+            assert_eq!(
+                fields_mut, fields,
+                "{label}: the mutable view lists the same fields"
+            );
         }
     }
 

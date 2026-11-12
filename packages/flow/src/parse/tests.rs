@@ -425,3 +425,91 @@ nodes:
         other => panic!("expected a command node, got {other:?}"),
     }
 }
+
+const WITH_INCLUDE: &str = "\
+version: 1
+inputs:
+  pr:
+    required: true
+nodes:
+  - id: build
+    kind: command
+    run: ./build.sh
+  - id: review
+    kind: include
+    flow: pr-review
+    profile: strict
+    deps: [build]
+    inputs:
+      pr: \"{{input.pr}}\"
+      focus: security
+      rounds: 2
+";
+
+#[test]
+fn an_include_node_parses_and_writes_back_unchanged() {
+    let file = parse_flow_file(WITH_INCLUDE).expect("an include node parses");
+    let NodeKindFile::Include {
+        flow,
+        profile,
+        inputs,
+    } = &file.nodes[1].kind
+    else {
+        panic!("expected an include node, got {:?}", file.nodes[1].kind);
+    };
+    assert_eq!(flow, "pr-review");
+    assert_eq!(profile.as_deref(), Some("strict"));
+    assert_eq!(
+        inputs.get("rounds"),
+        Some(&crate::input::InputValue::Number(2.into())),
+        "a number keeps its type"
+    );
+    let yaml = yaml_serde::to_string(&file).unwrap();
+    assert_eq!(parse_flow_file(&yaml).unwrap(), file);
+    assert!(
+        schema_issues(WITH_INCLUDE).is_empty(),
+        "every key an include has is its own"
+    );
+}
+
+/// Loading with no host to find flows cannot expand one, and says so on the
+/// node rather than running a flow with a step missing.
+#[test]
+fn an_include_without_a_source_of_flows_is_refused() {
+    let Err(crate::FlowError::Validate(issues)) = crate::load(WITH_INCLUDE, None) else {
+        panic!("an include must not load without a source of flows");
+    };
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert_eq!(issues[0].kind, ValidationKind::IncludeUnavailable);
+    assert_eq!(issues[0].node.as_ref().map(NodeId::as_str), Some("review"));
+}
+
+#[test]
+fn an_include_refuses_keys_of_the_other_kinds() {
+    let text = WITH_INCLUDE.replace(
+        "    flow: pr-review\n",
+        "    flow: pr-review\n    run: echo\n",
+    );
+    let kinds: Vec<_> = schema_issues(&text).into_iter().map(|i| i.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![ValidationKind::UnknownField {
+            field: "run".to_string()
+        }]
+    );
+}
+
+/// An include stands in for other nodes, each with its own `timeout` and
+/// `cwd`; one of its own would have nothing to apply to.
+#[test]
+fn an_include_refuses_a_timeout_or_cwd_of_its_own() {
+    for key in ["timeout: 5m", "cwd: sub"] {
+        let text = WITH_INCLUDE.replace(
+            "    flow: pr-review\n",
+            &format!("    flow: pr-review\n    {key}\n"),
+        );
+        let field = key.split(':').next().unwrap().to_string();
+        let kinds: Vec<_> = schema_issues(&text).into_iter().map(|i| i.kind).collect();
+        assert_eq!(kinds, vec![ValidationKind::UnknownField { field }], "{key}");
+    }
+}

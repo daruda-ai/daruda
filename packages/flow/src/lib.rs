@@ -10,6 +10,7 @@
 pub mod error;
 pub mod event;
 pub mod history;
+pub mod include;
 pub mod input;
 pub mod journal;
 pub mod load;
@@ -48,7 +49,8 @@ pub(crate) mod validate;
 pub(crate) mod testing;
 
 pub use error::FlowError;
-pub use load::{Inspected, LoadedFlow, inspect, load};
+pub use include::{IncludeSite, IncludeSource, IncludedFlow};
+pub use load::{Inspected, LoadedFlow, inspect, inspect_with, load, load_with};
 // The one template question an editor asks. The module stays crate-private:
 // rendering needs a run's context, which nothing outside a run has.
 pub use node_id::NodeId;

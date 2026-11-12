@@ -13,7 +13,7 @@ use daruda_store::tasks::{TaskFlow, TaskRunIn};
 
 use crate::workspace::Workspace;
 use crate::workspace::flow_declared::{ProfileRefusal, declared_flow, profile_refusal};
-use crate::workspace::flow_paths::{FlowSources, flow_label, names_flow};
+use crate::workspace::flow_paths::{FlowSources, flow_label};
 
 mod approval;
 
@@ -100,11 +100,8 @@ impl Workspace {
         let sources = self
             .task_flow_sources(project, run_in, base)
             .ok_or(TaskFlowProblem::NotFound)?;
-        let path = sources
-            .list_flows()
-            .into_iter()
-            .find(|found| names_flow(&found.path, &flow.name))
-            .map(|found| found.path)
+        let (path, _) = sources
+            .locate(&flow.name)
             .ok_or(TaskFlowProblem::NotFound)?;
         let (profiles, decls) = declared_flow(&path);
         match profile_refusal(&profiles, flow.profile.as_deref()) {

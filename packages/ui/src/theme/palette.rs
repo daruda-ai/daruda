@@ -860,6 +860,8 @@ pub const FLOW_GRAPH_DENSITY_FULL_W: f32 = 200.0;
 pub const FLOW_GRAPH_DENSITY_COMPACT_W: f32 = 110.0;
 pub const FLOW_GRAPH_MARKER_FONT_SIZE: f32 = FONT_SIZE_XS;
 pub const FLOW_GRAPH_KIND_DOT: f32 = 6.0;
+/// The outline of an include's kind mark, which is drawn hollow.
+pub const FLOW_GRAPH_KIND_RING_W: f32 = 1.0;
 pub const FLOW_GRAPH_FRAME_MARGIN: f32 = 0.08;
 pub const FLOW_GRAPH_FRAME_MIN_ZOOM: f32 = 0.2;
 pub const FLOW_INSPECTOR_W: f32 = 340.0;

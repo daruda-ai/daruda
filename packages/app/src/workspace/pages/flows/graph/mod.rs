@@ -146,6 +146,9 @@ pub(in crate::workspace) struct FlowGraphView {
     /// same path for its tab title, and two copies of an identity can disagree
     /// — a reload handed the wrong one would quietly draw another file.
     path: PathBuf,
+    /// Where an `include` in this file is looked up: the scopes of the
+    /// worktree the graph was opened for, the same ones its runs use.
+    sources: Option<crate::workspace::flow_paths::FlowSources>,
     state: FlowGraphState,
     /// Nodes whose finished output this pane will reuse rather than run.
     ///
@@ -209,6 +212,7 @@ impl FlowGraphView {
     /// than a toast — the pane is where the person is looking.
     pub(in crate::workspace) fn new(
         path: &Path,
+        sources: Option<crate::workspace::flow_paths::FlowSources>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -220,7 +224,7 @@ impl FlowGraphView {
         let delete_request = delete_key::DeleteRequest::default();
         let pan_armed = space_pan::PanArmed::default();
         let (text, state) = match read_flow(path) {
-            Ok(text) => match policy::model_from(&text) {
+            Ok(text) => match policy::model_from(&text, sources.as_ref()) {
                 Ok(model) => (
                     Some(text),
                     build_graph_state(
@@ -266,6 +270,7 @@ impl FlowGraphView {
             pan_cursor_shown: None,
             holds_the_pointer: false,
             path: path.to_path_buf(),
+            sources,
             state,
             inspector: inspector::InspectorModel::new(text.map(Into::into), issues),
             pins: PinSet::default(),
@@ -486,7 +491,12 @@ impl FlowGraphView {
     /// something that is no longer true.
     pub(in crate::workspace) fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let pending_name = self.name_is_dirty(cx);
-        let decision = policy::decide(read_flow(&self.path), self.text(), self.drawn());
+        let decision = policy::decide(
+            read_flow(&self.path),
+            self.text(),
+            self.drawn(),
+            self.sources.as_ref(),
+        );
         if matches!(decision, policy::Reload::Unchanged) {
             return;
         }

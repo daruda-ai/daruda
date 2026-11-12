@@ -137,6 +137,19 @@ pub enum NodeKindFile {
         #[serde(default, with = "yaml_serde::with::singleton_map")]
         on_fail: GateFailFile,
     },
+    /// Another flow's nodes, spliced in where this node stands. Only a file
+    /// has one: loading expands it (see `crate::include`), so the model and
+    /// a run's `run.yaml` never do.
+    Include {
+        /// The flow's file name or stem, as a host finds it — not its `name:`.
+        flow: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<String>,
+        /// Values for the included flow's inputs: text fixed here, or one
+        /// `{{input.x}}` / `{{node.x.output}}` token of the including flow.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        inputs: BTreeMap<String, crate::input::InputValue>,
+    },
 }
 
 /// Every field optional: a node names only the axes it overrides, and
@@ -311,6 +324,7 @@ const AGENT_KEYS: &[&str] = &[
     "on_fail",
 ];
 const COMMAND_KEYS: &[&str] = &["run", "on_fail"];
+const INCLUDE_KEYS: &[&str] = &["flow", "profile", "inputs"];
 const RETRY_KEYS: &[&str] = &["hint", "hint_file", "max_attempts", "wait"];
 const REPAIR_KEYS: &[&str] = &["fix", "rerun", "max_attempts", "wait"];
 
@@ -351,11 +365,16 @@ fn collect_schema_issues(text: &str, issues: &mut Vec<ValidationIssue>) -> Optio
             .and_then(yaml_serde::Value::as_str)
             .unwrap_or("?");
         let kind = map.get("kind").and_then(yaml_serde::Value::as_str);
-        let allowed: Vec<&str> = NODE_KEYS
+        // An include is a stand-in for another flow's nodes, each with its own
+        // `timeout` and `cwd`; one of its own would have nothing to apply to.
+        let shared = NODE_KEYS
             .iter()
             .copied()
+            .filter(|key| kind != Some("include") || !matches!(*key, "timeout" | "cwd"));
+        let allowed: Vec<&str> = shared
             .chain(match kind {
                 Some("agent") => AGENT_KEYS.iter().copied(),
+                Some("include") => INCLUDE_KEYS.iter().copied(),
                 _ => COMMAND_KEYS.iter().copied(),
             })
             .collect();

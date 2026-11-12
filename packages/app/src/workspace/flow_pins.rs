@@ -54,6 +54,7 @@ pub(in crate::workspace) fn resolve_in(
     pinned: &[NodeId],
     flow_text: &str,
     profile: Option<&str>,
+    sources: Option<&super::flow_paths::FlowSources>,
     run_dir: Option<&Path>,
 ) -> ResolvedPins {
     let unavailable = || ResolvedPins {
@@ -70,7 +71,7 @@ pub(in crate::workspace) fn resolve_in(
     };
     let (Ok(then), Ok(now)) = (
         daruda_flow::load(&spec, None),
-        daruda_flow::load(flow_text, profile),
+        super::flow_include::load_flow(flow_text, profile, sources),
     ) else {
         return unavailable();
     };
@@ -143,7 +144,8 @@ impl Workspace {
             super::flow_history::newest_run_dir(&super::flow_paths::runs_dir(&l.path))
         });
         let text = std::fs::read_to_string(flow_path).unwrap_or_default();
-        let resolved = resolve_in(pinned, &text, profile, newest.as_deref());
+        let sources = self.flow_sources_for(lane);
+        let resolved = resolve_in(pinned, &text, profile, sources.as_ref(), newest.as_deref());
         if !resolved.unavailable.is_empty() {
             self.report_error(
                 ErrorReport::new(s::flow::pin_unavailable(&resolved.unavailable))
@@ -220,7 +222,7 @@ nodes:
     #[test]
     fn a_node_that_passed_resolves_to_that_runs_output() {
         let dir = run_dir(TWO, &["design"], &["design.md"]);
-        let resolved = resolve_in(&["design".into()], TWO, None, Some(dir.path()));
+        let resolved = resolve_in(&["design".into()], TWO, None, None, Some(dir.path()));
         assert_eq!(
             resolved.reuse,
             vec![PinnedOutput {
@@ -263,7 +265,7 @@ nodes:
         std::fs::write(daruda_flow::run_log::log_file(dir.path()), log).expect("log");
         std::fs::write(dir.path().join("design.md"), "done\n").expect("output");
 
-        let resolved = resolve_in(&["design".into()], TWO, None, Some(dir.path()));
+        let resolved = resolve_in(&["design".into()], TWO, None, None, Some(dir.path()));
 
         assert_eq!(
             resolved.reuse,
@@ -293,7 +295,7 @@ nodes:
     prompt: a different job entirely
 ";
         let dir = run_dir(OTHER, &["design"], &["design.md"]);
-        let resolved = resolve_in(&["design".into()], TWO, None, Some(dir.path()));
+        let resolved = resolve_in(&["design".into()], TWO, None, None, Some(dir.path()));
         assert!(resolved.reuse.is_empty(), "{:?}", resolved.reuse);
         assert_eq!(resolved.unavailable, vec![NodeId::from("design")]);
     }
@@ -304,7 +306,7 @@ nodes:
     fn a_run_with_no_spec_satisfies_nothing() {
         let dir = run_dir(TWO, &["design"], &["design.md"]);
         std::fs::remove_file(dir.path().join(RUN_SPEC)).expect("drop the spec");
-        let resolved = resolve_in(&["design".into()], TWO, None, Some(dir.path()));
+        let resolved = resolve_in(&["design".into()], TWO, None, None, Some(dir.path()));
         assert!(resolved.reuse.is_empty(), "{:?}", resolved.reuse);
     }
 
@@ -313,7 +315,7 @@ nodes:
     #[test]
     fn a_node_that_did_not_pass_is_not_sent() {
         let dir = run_dir(TWO, &[], &["design.md"]);
-        let resolved = resolve_in(&["design".into()], TWO, None, Some(dir.path()));
+        let resolved = resolve_in(&["design".into()], TWO, None, None, Some(dir.path()));
         assert!(resolved.reuse.is_empty(), "{:?}", resolved.reuse);
         assert_eq!(resolved.unavailable, vec![NodeId::from("design")]);
     }
@@ -328,7 +330,7 @@ nodes:
             "gate",
         ] {
             let dir = run_dir(TWO, &[node], &[]);
-            let resolved = resolve_in(&[node.into()], TWO, None, Some(dir.path()));
+            let resolved = resolve_in(&[node.into()], TWO, None, None, Some(dir.path()));
             assert!(resolved.reuse.is_empty(), "{node}");
             assert_eq!(resolved.unavailable, vec![NodeId::from(node)]);
         }
@@ -338,7 +340,7 @@ nodes:
     /// rather than pointing the engine at a path it invented.
     #[test]
     fn no_previous_run_leaves_every_pin_unavailable() {
-        let resolved = resolve_in(&["design".into()], TWO, None, None);
+        let resolved = resolve_in(&["design".into()], TWO, None, None, None);
         assert!(resolved.reuse.is_empty());
         assert_eq!(resolved.unavailable, vec![NodeId::from("design")]);
     }

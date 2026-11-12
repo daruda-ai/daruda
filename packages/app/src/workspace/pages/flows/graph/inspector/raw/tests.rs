@@ -6,7 +6,7 @@ fn inactive_fields_do_not_change_effective_values() {
         "version: 1\nnodes:\n  - id: build\n    kind: command\n    run: echo ok\n",
     )
     .unwrap();
-    let fields = fields_of(&file.nodes[0]);
+    let fields = fields_of(&file.nodes[0]).unwrap();
     let mut raw = RawInputs::from_fields(&fields);
     let initial = raw.effective();
     raw.prompt_inline = "retained prose".into();
@@ -31,7 +31,7 @@ fn effective_fields_preserve_the_existing_file_mutation_for_each_kind_and_policy
     ];
     for text in cases {
         let file = daruda_flow::parse::parse_flow_file(text).unwrap();
-        let fields = fields_of(&file.nodes[0]);
+        let fields = fields_of(&file.nodes[0]).unwrap();
         let effective = RawInputs::from_fields(&fields).effective().into_fields();
         let mut before = file.clone();
         let mut after = file;

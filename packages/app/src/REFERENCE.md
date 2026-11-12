@@ -302,7 +302,8 @@ prompt, flow) and what it resolved to then, read as the start reads it: the
 branch the run's code comes from (`Workspace::task_start_checkout`: a new
 worktree's base ref, or an existing lane's checked-out branch) and the flow
 file the flow's name found, by path and SHA-256 of the bytes its modes were
-read from (`task_flow::FlowFileSeen`). `still_shown` compares it, the budget
+read from, together with every flow it includes as the same scopes resolved
+each name then (`task_flow::FlowFileSeen`). `still_shown` compares it, the budget
 slot follows its `run_in`, and the start compares it once more where it reads
 the task, with no task proposal still landing, and before the repository lock,
 git or the log; an edit landing in between answers `approval_stale` and the

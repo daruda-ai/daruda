@@ -31,6 +31,9 @@ pub(super) struct FlowGraphModel {
     /// and the ones at fault can say so. The run still refuses it: the engine
     /// asks `load`, which is `inspect` plus that refusal.
     pub issues: Vec<daruda_flow::error::ValidationIssue>,
+    /// The node ids a run of this flow reports on, in the flow's order. The
+    /// drawn ids, except where an include's card stands for its members.
+    pub run_ids: Vec<NodeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,7 +46,6 @@ pub(in crate::workspace) struct GraphEdge {
 pub(in crate::workspace) struct GraphNode {
     pub id: NodeId,
     pub kind: GraphNodeKind,
-    pub timeout: Duration,
     /// Where this node runs, relative to the run directory. `None` is that
     /// directory itself — which is also what lets two nodes overlap.
     pub cwd: Option<PathBuf>,
@@ -56,9 +58,19 @@ pub(in crate::workspace) enum GraphNodeKind {
         agent: AgentAxes,
         prompt: PromptSummary,
         output: PathBuf,
+        timeout: Duration,
     },
     /// A shell line whose exit code is the verdict.
-    Gate { run: String },
+    Gate { run: String, timeout: Duration },
+    /// Another flow's nodes, drawn as the one node the file wrote. Only the
+    /// editor's picture has one ([`FlowGraphModel::collapsed`]); a run's
+    /// graph shows what was expanded.
+    Include {
+        flow: String,
+        profile: Option<String>,
+        /// The ids its nodes run under, which a run reports them by.
+        members: Vec<NodeId>,
+    },
 }
 
 /// The agent axes worth seeing without opening the node.
@@ -100,7 +112,7 @@ impl FlowGraphModel {
     pub(super) fn from_flow(flow: &Flow, issues: Vec<daruda_flow::error::ValidationIssue>) -> Self {
         let mut deps = Vec::new();
         let mut rerun = Vec::new();
-        let nodes = flow
+        let nodes: Vec<GraphNode> = flow
             .nodes
             .iter()
             .map(|node| {
@@ -124,19 +136,97 @@ impl FlowGraphModel {
                 }
                 GraphNode {
                     id: node.id.clone(),
-                    kind: kind_of(&node.kind),
-                    timeout: node.timeout,
+                    kind: kind_of(node),
                     cwd: node.cwd.clone(),
                     fail: fail_of(&node.kind),
                 }
             })
+            .collect();
+        let run_ids = nodes
+            .iter()
+            .map(|node: &GraphNode| node.id.clone())
             .collect();
         Self {
             nodes,
             deps,
             rerun,
             issues,
+            run_ids,
         }
+    }
+
+    /// The editor's picture of `loaded`: each `include` the one node the file
+    /// wrote, standing for the members it expanded into. Lines into or out of
+    /// a member are drawn to the include; lines between members are not drawn,
+    /// and an issue about a member is the include's.
+    pub(super) fn collapsed(
+        loaded: &daruda_flow::LoadedFlow,
+        issues: Vec<daruda_flow::error::ValidationIssue>,
+    ) -> Self {
+        let mut model = Self::from_flow(loaded.flow(), issues);
+        let sites = loaded.includes();
+        if sites.is_empty() {
+            return model;
+        }
+        let owner: std::collections::HashMap<&NodeId, &daruda_flow::IncludeSite> = sites
+            .iter()
+            .flat_map(|site| site.members.iter().map(move |member| (member, site)))
+            .collect();
+        let card = |id: &NodeId| {
+            owner
+                .get(id)
+                .map_or_else(|| id.clone(), |site| site.id.clone())
+        };
+
+        let mut nodes = Vec::with_capacity(model.nodes.len());
+        for node in model.nodes {
+            match owner.get(&node.id) {
+                None => nodes.push(node),
+                // Members were spliced in where the include stood, so the
+                // first one is where its card goes.
+                Some(site) if site.members.first() == Some(&node.id) => nodes.push(GraphNode {
+                    id: site.id.clone(),
+                    kind: GraphNodeKind::Include {
+                        flow: site.flow.clone(),
+                        profile: site.profile.clone(),
+                        members: site.members.clone(),
+                    },
+                    cwd: None,
+                    fail: FailPolicy::Halt,
+                }),
+                Some(_) => {}
+            }
+        }
+        let fold = |edges: Vec<GraphEdge>| {
+            let mut folded: Vec<GraphEdge> = Vec::new();
+            for edge in edges {
+                let edge = GraphEdge {
+                    from: card(&edge.from),
+                    to: card(&edge.to),
+                };
+                if edge.from != edge.to && !folded.contains(&edge) {
+                    folded.push(edge);
+                }
+            }
+            folded
+        };
+        model.deps = fold(std::mem::take(&mut model.deps));
+        model.rerun = fold(std::mem::take(&mut model.rerun));
+        for issue in &mut model.issues {
+            if let Some(node) = issue.node.as_mut() {
+                *node = card(node);
+            }
+        }
+        model.nodes = nodes;
+        model
+    }
+
+    /// Whether `node` is an include's card, which stands for nodes the run
+    /// knows by other ids — so it cannot be where a run stops.
+    pub(in crate::workspace) fn is_include(&self, node: &NodeId) -> bool {
+        self.nodes
+            .iter()
+            .any(|n| &n.id == node && matches!(n.kind, GraphNodeKind::Include { .. }))
     }
 
     /// How many refusals name `node`. Flow-level ones — a cycle, an unknown
@@ -150,8 +240,8 @@ impl FlowGraphModel {
     }
 }
 
-fn kind_of(kind: &NodeKind) -> GraphNodeKind {
-    match kind {
+fn kind_of(node: &daruda_flow::model::Node) -> GraphNodeKind {
+    match &node.kind {
         NodeKind::Agent(body) => GraphNodeKind::Agent {
             agent: AgentAxes {
                 id: body.agent.id.clone(),
@@ -164,8 +254,12 @@ fn kind_of(kind: &NodeKind) -> GraphNodeKind {
                 Prompt::File(path) => PromptSummary::File(path.clone()),
             },
             output: body.output.clone(),
+            timeout: node.timeout,
         },
-        NodeKind::Command { run, .. } => GraphNodeKind::Gate { run: run.clone() },
+        NodeKind::Command { run, .. } => GraphNodeKind::Gate {
+            run: run.clone(),
+            timeout: node.timeout,
+        },
     }
 }
 
@@ -363,16 +457,17 @@ mod tests {
         );
 
         let work = &m.nodes[0];
-        assert_eq!(work.timeout, Duration::from_secs(300));
         assert_eq!(work.fail, FailPolicy::Halt);
         let GraphNodeKind::Agent {
             agent,
             prompt,
             output,
+            timeout,
         } = &work.kind
         else {
             panic!("work is an agent node");
         };
+        assert_eq!(*timeout, Duration::from_secs(300));
         assert_eq!(agent.id, "claude");
         assert_eq!(agent.effort.as_deref(), Some("high"));
         assert_eq!(
@@ -385,8 +480,10 @@ mod tests {
         assert_eq!(
             m.nodes[1].kind,
             GraphNodeKind::Gate {
-                run: "cargo test".into()
-            }
+                run: "cargo test".into(),
+                timeout: Duration::from_secs(600),
+            },
+            "a gate with no timeout of its own takes the engine's default"
         );
     }
 
@@ -407,6 +504,84 @@ mod tests {
             *prompt,
             PromptSummary::File(PathBuf::from("./prompts/work.md"))
         );
+    }
+
+    struct Steps;
+
+    impl daruda_flow::IncludeSource for Steps {
+        fn find(&self, flow: &str) -> Option<daruda_flow::IncludedFlow> {
+            (flow == "steps").then(|| daruda_flow::IncludedFlow {
+                text: "version: 1\nnodes:\n  - id: a\n    kind: command\n    run: \"true\"\n  - id: b\n    kind: command\n    deps: [a]\n    run: \"true\"\n  - id: c\n    kind: command\n    deps: [a]\n    run: \"true\"\n".to_string(),
+                dir: PathBuf::from("/flows"),
+            })
+        }
+    }
+
+    const INCLUDING: &str = "\
+version: 1
+nodes:
+  - id: build
+    kind: command
+    run: \"true\"
+  - id: steps
+    kind: include
+    flow: steps
+    profile: quick
+    deps: [build]
+  - id: ship
+    kind: command
+    deps: [steps]
+    run: \"true\"
+";
+
+    /// The editor draws the file as written: the include is one card where
+    /// it stood, with the lines the file drew to and from it.
+    #[test]
+    fn an_include_is_drawn_as_one_card() {
+        let text = INCLUDING.replace("    profile: quick\n", "");
+        let loaded = daruda_flow::load_with(&text, None, &Steps).expect("the include expands");
+        let m = FlowGraphModel::collapsed(&loaded, Vec::new());
+
+        let ids: Vec<_> = m.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, ["build", "steps", "ship"]);
+        assert_eq!(
+            m.nodes[1].kind,
+            GraphNodeKind::Include {
+                flow: "steps".into(),
+                profile: None,
+                members: vec!["steps--a".into(), "steps--b".into(), "steps--c".into()],
+            }
+        );
+        let run: Vec<_> = m.run_ids.iter().map(NodeId::as_str).collect();
+        assert_eq!(
+            run,
+            ["build", "steps--a", "steps--b", "steps--c", "ship"],
+            "a run still reports on every member"
+        );
+        assert_eq!(
+            m.deps,
+            vec![edge("build", "steps"), edge("steps", "ship")],
+            "one line per pair, none inside the include"
+        );
+        assert!(m.is_include(&"steps".into()));
+        assert!(!m.is_include(&"build".into()));
+
+        let expanded = FlowGraphModel::from_flow(loaded.flow(), Vec::new());
+        assert_eq!(expanded.nodes.len(), 5, "a run's graph keeps every member");
+    }
+
+    #[test]
+    fn an_issue_about_a_member_is_the_includes() {
+        let text = INCLUDING.replace("    profile: quick\n", "");
+        let loaded = daruda_flow::load_with(&text, None, &Steps).expect("the include expands");
+        let issue = |node: &str| daruda_flow::error::ValidationIssue {
+            node: Some(node.into()),
+            kind: daruda_flow::error::ValidationKind::DuplicateOutput,
+            message: String::new(),
+        };
+        let m = FlowGraphModel::collapsed(&loaded, vec![issue("steps--b"), issue("ship")]);
+        assert_eq!(m.issues_naming(&"steps".into()), 1);
+        assert_eq!(m.issues_naming(&"ship".into()), 1);
     }
 
     fn fold(events: &[FlowEvent]) -> NodeRunStates {
@@ -550,6 +725,25 @@ mod tests {
                 .map(|s| daruda_flow::NodeId::from(*s))
                 .collect(),
         }
+    }
+
+    /// A run of a flow with an include reports on the members; the editor
+    /// draws the include. The picture is still the one the run is about.
+    #[test]
+    fn a_run_of_an_include_colours_the_collapsed_picture() {
+        let text = INCLUDING.replace("    profile: quick\n", "");
+        let loaded = daruda_flow::load_with(&text, None, &Steps).expect("the include expands");
+        let m = FlowGraphModel::collapsed(&loaded, Vec::new());
+        let ran = colouring(&["build", "steps--a", "steps--b", "steps--c", "ship"]);
+        assert!(
+            ran.is_about(m.run_ids.iter().cloned()),
+            "a run reports on the members the card stands for"
+        );
+        let before = colouring(&["build", "steps--a", "ship"]);
+        assert!(
+            !before.is_about(m.run_ids.iter().cloned()),
+            "a run of the included flow as it was is a different flow"
+        );
     }
 
     /// A colouring is about the nodes the run was submitted with — the same ids

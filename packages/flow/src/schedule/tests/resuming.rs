@@ -58,8 +58,16 @@ fn killed_after(
     stop_at: &str,
     runner: FakeRunner,
 ) -> std::path::PathBuf {
+    killed_running(request_for(flow, dir), stop_at, runner)
+}
+
+/// [`killed_after`], for a request a test built itself.
+pub(super) fn killed_running(
+    request: crate::request::RunRequest,
+    stop_at: &str,
+    runner: FakeRunner,
+) -> std::path::PathBuf {
     let runner = runner.cancel_at(stop_at, 1);
-    let request = request_for(flow, dir);
     let lock_dir = super::lock_dir_of(&request);
     let report = execute(&request, &runner, &CancelToken::default());
     for marker in ["DONE", "FAILED", "CANCELED"] {
@@ -83,7 +91,7 @@ fn killed_after(
 
 /// Resume the run in `run_dir`, with the same fake runner the first half
 /// used.
-fn resume_run(run_dir: &std::path::Path, flow: &str, runner: &FakeRunner) -> RunReport {
+pub(super) fn resume_run(run_dir: &std::path::Path, flow: &str, runner: &FakeRunner) -> RunReport {
     // One predicate answers both questions — whether the run is resumable
     // at all, and whether its stale lock may be reclaimed. A host that let
     // them disagree would offer a resume the lock then refuses.

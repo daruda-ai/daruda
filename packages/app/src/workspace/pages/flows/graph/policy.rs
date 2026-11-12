@@ -46,6 +46,7 @@ pub(super) fn decide(
     incoming: Result<String, FlowGraphError>,
     shown_text: Option<&str>,
     drawn: Drawn<'_>,
+    sources: Option<&crate::workspace::flow_paths::FlowSources>,
 ) -> Reload {
     let text = match incoming {
         Ok(text) => text,
@@ -58,19 +59,37 @@ pub(super) fn decide(
             return Reload::Unreadable { text: None, error };
         }
     };
-    if shown_text == Some(text.as_str()) {
+    let same_text = shown_text == Some(text.as_str());
+    // The same bytes are nothing to do — unless the file includes another
+    // flow, whose own edits this file's text cannot show. Those are read
+    // again, and only a picture that came out different is redrawn.
+    if same_text && !includes_a_flow(&text) {
         return Reload::Unchanged;
     }
-    match model_from(&text) {
+    match model_from(&text, sources) {
         Ok(model) => match drawn {
+            Drawn::Graph(current) if same_text && *current == model => Reload::Unchanged,
             Drawn::Graph(current) if same_shape(current, &model) => Reload::Restamp { text, model },
             _ => Reload::Rebuild { text, model },
         },
-        Err(error) => Reload::Unreadable {
-            text: Some(text),
-            error,
+        Err(error) => match drawn {
+            Drawn::Nothing(shown) if same_text && *shown == error => Reload::Unchanged,
+            _ => Reload::Unreadable {
+                text: Some(text),
+                error,
+            },
         },
     }
+}
+
+/// Whether `text` has an `include` node. A file that does not parse has none
+/// worth reading again for.
+fn includes_a_flow(text: &str) -> bool {
+    daruda_flow::parse::parse_flow_file(text).is_ok_and(|file| {
+        file.nodes
+            .iter()
+            .any(|node| matches!(node.kind, daruda_flow::parse::NodeKindFile::Include { .. }))
+    })
 }
 
 /// The model to draw, and what the engine refuses about it.
@@ -80,10 +99,16 @@ pub(super) fn decide(
 /// drawn — and a card that says where the problem is beats a banner that took
 /// the picture away. The stages before that leave nothing to draw and stay a
 /// refusal here.
-pub(super) fn model_from(text: &str) -> Result<FlowGraphModel, FlowGraphError> {
-    match daruda_flow::inspect(text, None) {
-        Ok(inspected) => Ok(FlowGraphModel::from_flow(
-            inspected.loaded.flow(),
+///
+/// An `include` is expanded from `sources` and drawn as the one node the file
+/// wrote ([`FlowGraphModel::collapsed`]).
+pub(super) fn model_from(
+    text: &str,
+    sources: Option<&crate::workspace::flow_paths::FlowSources>,
+) -> Result<FlowGraphModel, FlowGraphError> {
+    match crate::workspace::flow_include::inspect_flow(text, None, sources) {
+        Ok(inspected) => Ok(FlowGraphModel::collapsed(
+            &inspected.loaded,
             inspected.issues,
         )),
         Err(daruda_flow::FlowError::Parse(detail)) => Err(FlowGraphError::Parse { detail }),
@@ -131,15 +156,59 @@ nodes:
 ";
 
     fn model(text: &str) -> FlowGraphModel {
-        model_from(text).expect("the fixture loads")
+        model_from(text, None).expect("the fixture loads")
     }
 
     #[test]
     fn the_same_bytes_are_nothing_to_do() {
         let current = model(TWO);
         assert_eq!(
-            decide(Ok(TWO.to_string()), Some(TWO), Drawn::Graph(&current)),
+            decide(Ok(TWO.to_string()), Some(TWO), Drawn::Graph(&current), None),
             Reload::Unchanged
+        );
+    }
+
+    /// A file that includes another reads the same while the other changes
+    /// under it: the same bytes are read again, and only a different picture
+    /// redraws.
+    #[test]
+    fn the_same_bytes_with_an_edited_include_redraw() {
+        let root = tempfile::tempdir().unwrap();
+        let sources = crate::workspace::flow_paths::FlowSources {
+            lane: root.path().join("lane"),
+            project: None,
+            global: root.path().join("global"),
+        };
+        std::fs::create_dir_all(&sources.global).unwrap();
+        let steps = |nodes: &str| format!("version: 1\nnodes:\n{nodes}");
+        let one = "  - id: a\n    kind: command\n    run: \"true\"\n";
+        let two = "  - id: a\n    kind: command\n    run: \"true\"\n  - id: b\n    kind: command\n    deps: [a]\n    run: \"true\"\n";
+        std::fs::write(sources.global.join("steps.yaml"), steps(one)).unwrap();
+        let text = "version: 1\nnodes:\n  - id: s\n    kind: include\n    flow: steps\n";
+        let current = model_from(text, Some(&sources)).expect("the include expands");
+
+        assert_eq!(
+            decide(
+                Ok(text.to_string()),
+                Some(text),
+                Drawn::Graph(&current),
+                Some(&sources)
+            ),
+            Reload::Unchanged,
+            "nothing changed anywhere"
+        );
+        std::fs::write(sources.global.join("steps.yaml"), steps(two)).unwrap();
+        assert!(
+            matches!(
+                decide(
+                    Ok(text.to_string()),
+                    Some(text),
+                    Drawn::Graph(&current),
+                    Some(&sources)
+                ),
+                Reload::Restamp { .. }
+            ),
+            "the included flow grew, and the card says so"
         );
     }
 
@@ -149,7 +218,7 @@ nodes:
         let current = model(TWO);
         let edited = TWO.replace("build it", "build it twice");
         assert!(matches!(
-            decide(Ok(edited), Some(TWO), Drawn::Graph(&current)),
+            decide(Ok(edited), Some(TWO), Drawn::Graph(&current), None),
             Reload::Restamp { .. }
         ));
     }
@@ -162,7 +231,7 @@ nodes:
             "",
         );
         assert!(matches!(
-            decide(Ok(gone), Some(TWO), Drawn::Graph(&current)),
+            decide(Ok(gone), Some(TWO), Drawn::Graph(&current), None),
             Reload::Rebuild { .. }
         ));
     }
@@ -173,7 +242,7 @@ nodes:
         let current = model(TWO);
         let unchained = TWO.replace("    deps: [design]\n", "");
         assert!(matches!(
-            decide(Ok(unchained), Some(TWO), Drawn::Graph(&current)),
+            decide(Ok(unchained), Some(TWO), Drawn::Graph(&current), None),
             Reload::Rebuild { .. }
         ));
     }
@@ -188,7 +257,12 @@ nodes:
             detail: "gone".into(),
         };
         assert_eq!(
-            decide(Err(error.clone()), Some(TWO), Drawn::Graph(&model(TWO))),
+            decide(
+                Err(error.clone()),
+                Some(TWO),
+                Drawn::Graph(&model(TWO)),
+                None
+            ),
             Reload::Unreadable { text: None, error }
         );
     }
@@ -198,9 +272,12 @@ nodes:
     #[test]
     fn a_file_that_does_not_load_keeps_its_bytes() {
         let broken = "nodes: [".to_string();
-        let Reload::Unreadable { text, .. } =
-            decide(Ok(broken.clone()), Some(TWO), Drawn::Graph(&model(TWO)))
-        else {
+        let Reload::Unreadable { text, .. } = decide(
+            Ok(broken.clone()),
+            Some(TWO),
+            Drawn::Graph(&model(TWO)),
+            None,
+        ) else {
             panic!("a file that does not load is unreadable");
         };
         assert_eq!(text.as_deref(), Some(broken.as_str()));
@@ -212,14 +289,14 @@ nodes:
             detail: "same".into(),
         };
         assert_eq!(
-            decide(Err(error.clone()), None, Drawn::Nothing(&error)),
+            decide(Err(error.clone()), None, Drawn::Nothing(&error), None),
             Reload::Unchanged
         );
         let other = FlowGraphError::Parse {
             detail: "different".into(),
         };
         assert!(matches!(
-            decide(Err(other), None, Drawn::Nothing(&error)),
+            decide(Err(other), None, Drawn::Nothing(&error), None),
             Reload::Unreadable { .. }
         ));
     }

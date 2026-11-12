@@ -486,71 +486,74 @@ fn check_file(
     let Prompt::File(relative) = prompt else {
         return;
     };
-    if !crate::path_rules::stays_relative(relative) {
-        issues.push(ValidationIssue {
-            node: Some(node.clone()),
-            kind: ValidationKind::PromptFileOutsideFlowDir {
-                field,
-                path: relative.clone(),
-            },
-            message: format!(
-                "`{field}` must stay under the flow directory: `{}`",
-                relative.display()
-            ),
-        });
-        return;
-    }
-    let path = flow_dir.join(relative);
-    if !path.is_file() {
-        issues.push(ValidationIssue {
-            node: Some(node.clone()),
-            kind: ValidationKind::MissingPromptFile {
-                field,
-                path: path.clone(),
-            },
-            message: format!(
-                "`{field}` points at `{}`, which does not exist",
-                path.display()
-            ),
-        });
-        return;
-    }
-
-    let root = daruda_core::path::canonicalize_or_self(flow_dir);
-    let canonical = daruda_core::path::canonicalize_or_self(&path);
-    if !canonical.starts_with(&root) {
-        issues.push(ValidationIssue {
-            node: Some(node.clone()),
-            kind: ValidationKind::PromptFileOutsideFlowDir {
-                field,
-                path: path.clone(),
-            },
-            message: format!(
-                "`{field}` resolves outside `{}`: `{}`",
-                root.display(),
-                canonical.display()
-            ),
-        });
-        return;
-    }
-
-    match std::fs::read_to_string(&path) {
+    match crate::path_rules::read_under(flow_dir, relative) {
         // What a file-backed prompt references is only knowable here, where
         // the file is read; the inline ones were checked at load.
         Ok(text) => {
             crate::validate::check_output_refs(&text, node, ancestors, issues);
             crate::input::check_refs(node, &[text.as_str()], inputs, issues);
         }
-        // Unreadable is the same fact as missing to a caller — a distinct
-        // kind would only add a branch nothing renders differently.
-        Err(e) => issues.push(ValidationIssue {
-            node: Some(node.clone()),
-            kind: ValidationKind::MissingPromptFile {
+        Err(problem) => issues.push(prompt_file_issue(problem, field, node)),
+    }
+}
+
+/// A prompt or hint file that could not be read, as the issue a host words.
+pub(crate) fn prompt_file_issue(
+    problem: crate::path_rules::FileProblem,
+    field: &'static str,
+    node: &NodeId,
+) -> ValidationIssue {
+    use crate::path_rules::FileProblem;
+    let (kind, message) = match problem {
+        FileProblem::NotRelative(path) => (
+            ValidationKind::PromptFileOutsideFlowDir {
                 field,
                 path: path.clone(),
             },
-            message: format!("`{field}` at `{}` cannot be read: {e}", path.display()),
-        }),
+            format!(
+                "`{field}` must stay under the flow directory: `{}`",
+                path.display()
+            ),
+        ),
+        FileProblem::Missing(path) => (
+            ValidationKind::MissingPromptFile {
+                field,
+                path: path.clone(),
+            },
+            format!(
+                "`{field}` points at `{}`, which does not exist",
+                path.display()
+            ),
+        ),
+        FileProblem::Outside {
+            path,
+            root,
+            canonical,
+        } => (
+            ValidationKind::PromptFileOutsideFlowDir {
+                field,
+                path: path.clone(),
+            },
+            format!(
+                "`{field}` resolves outside `{}`: `{}`",
+                root.display(),
+                canonical.display()
+            ),
+        ),
+        // Unreadable is the same fact as missing to a caller — a distinct
+        // kind would only add a branch nothing renders differently.
+        FileProblem::Unreadable { path, error } => (
+            ValidationKind::MissingPromptFile {
+                field,
+                path: path.clone(),
+            },
+            format!("`{field}` at `{}` cannot be read: {error}", path.display()),
+        ),
+    };
+    ValidationIssue {
+        node: Some(node.clone()),
+        kind,
+        message,
     }
 }
 

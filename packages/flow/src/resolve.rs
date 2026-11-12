@@ -62,6 +62,16 @@ pub fn resolve(file: FlowFile, profile: Option<&str>) -> Result<Flow, Vec<Valida
                 run,
                 on_fail: resolve_gate_fail(on_fail),
             },
+            // Expanded before this point by `crate::include`; one that got
+            // here was read with no host to find the flow it names.
+            NodeKindFile::Include { flow, .. } => {
+                issues.push(ValidationIssue {
+                    node: Some(node.id.clone()),
+                    kind: ValidationKind::IncludeUnavailable,
+                    message: format!("`include` of `{flow}` needs a host that can find flows"),
+                });
+                continue;
+            }
             NodeKindFile::Agent {
                 agent: override_,
                 prompt,
@@ -317,7 +327,8 @@ fn agent_override(spec: &AgentSpec) -> AgentOverride {
     }
 }
 
-fn unanimous_agent_from_nodes(nodes: &[Node]) -> Option<AgentSpec> {
+/// The agent every agent node in `nodes` agrees on exactly, if they do.
+pub(crate) fn unanimous_agent_from_nodes(nodes: &[Node]) -> Option<AgentSpec> {
     let mut agents = nodes.iter().filter_map(|n| match &n.kind {
         NodeKind::Agent(body) => Some(&body.agent),
         NodeKind::Command { .. } => None,
@@ -328,6 +339,14 @@ fn unanimous_agent_from_nodes(nodes: &[Node]) -> Option<AgentSpec> {
     } else {
         None
     }
+}
+
+/// The agent `defaults` — under `profile` — names outright, without the
+/// fallback to what every node agrees on. `None` also for a profile the file
+/// does not declare; `resolve` is what reports that.
+pub(crate) fn explicit_default_agent(file: &FlowFile, profile: Option<&str>) -> Option<AgentSpec> {
+    effective_defaults(file, profile, &mut Vec::new())
+        .and_then(|defaults| merge_agent(defaults.agent.as_ref(), None))
 }
 
 /// The one name a profile may not take: the file already uses it for the

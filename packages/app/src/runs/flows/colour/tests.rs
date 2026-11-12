@@ -105,3 +105,42 @@ fn a_colouring_is_about_the_nodes_it_was_made_for() {
     assert!(!colouring.is_about(["build", "design"].into_iter().map(NodeId::from)));
     assert!(!colouring.is_about(["design"].into_iter().map(NodeId::from)));
 }
+
+/// Each row: an include's members, and the one state its card shows.
+#[test]
+fn an_includes_card_folds_its_members_states() {
+    use NodeRunState::*;
+    let rows: Vec<(&str, Vec<NodeRunState>, NodeRunState)> = vec![
+        ("nothing started", vec![Pending, Pending], Pending),
+        ("all passed", vec![Passed, Passed], Passed),
+        (
+            "part way through",
+            vec![Passed, Pending],
+            Running { attempt: 1 },
+        ),
+        (
+            "one running",
+            vec![Passed, Running { attempt: 1 }, Pending],
+            Running { attempt: 1 },
+        ),
+        (
+            "the latest retry shows",
+            vec![Running { attempt: 2 }, Running { attempt: 1 }],
+            Running { attempt: 2 },
+        ),
+        (
+            "a repair outranks running",
+            vec![Fixing, Running { attempt: 1 }],
+            Fixing,
+        ),
+        (
+            "a failure is the news",
+            vec![Passed, Failed, Fixing],
+            Failed,
+        ),
+        ("no members", vec![], Pending),
+    ];
+    for (label, members, want) in rows {
+        assert_eq!(fold_states(members), want, "{label}");
+    }
+}

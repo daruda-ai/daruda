@@ -203,6 +203,27 @@ pub(crate) fn issue(kind: &daruda_flow::error::ValidationKind) -> String {
         K::DuplicateId => std::borrow::Cow::<str>::Owned(s::flow::issue_duplicate_id()),
         K::UnknownDep { dep } => std::borrow::Cow::<str>::Owned(s::flow::issue_unknown_dep(dep)),
         K::Cycle => std::borrow::Cow::<str>::Owned(s::flow::issue_cycle()),
+        K::IncludeUnavailable => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_include_unavailable())
+        }
+        K::UnknownInclude { flow } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_unknown_include(flow))
+        }
+        K::IncludeCycle { flow } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_include_cycle(flow))
+        }
+        K::IncludeTooDeep { flow } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_include_too_deep(flow))
+        }
+        K::IncludeInvalid { flow } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_include_invalid(flow))
+        }
+        K::IncludeInputMismatch { flow, name } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_include_input_mismatch(flow, name))
+        }
+        K::IncludeAgentMismatch { flow } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_include_agent_mismatch(flow))
+        }
         K::UndeclaredInput { name } => {
             std::borrow::Cow::<str>::Owned(s::flow::issue_undeclared_input(name))
         }
@@ -269,6 +290,15 @@ pub(crate) fn issue(kind: &daruda_flow::error::ValidationKind) -> String {
         ),
     }
     .into_owned()
+}
+
+/// Replaces the generated `flow::graph_include_nodes`: English names one
+/// node in the singular.
+pub(crate) fn graph_include_nodes(n: usize) -> String {
+    match n {
+        1 => s::flow::graph_include_nodes_one(),
+        n => rust_i18n::t!("flow.graph_include_nodes", n = n).into_owned(),
+    }
 }
 
 #[cfg(test)]

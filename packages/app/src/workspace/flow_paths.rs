@@ -240,12 +240,24 @@ impl FlowSources {
     /// is decided by state a test can set and not by whatever the machine
     /// happens to have.
     pub(in crate::workspace) fn list_flows(&self) -> Vec<FoundFlow> {
-        merge_flows(
-            self.dirs()
-                .into_iter()
-                .map(|(dir, origin)| (flow_files_in(&dir), origin))
-                .collect(),
-        )
+        merge_flows(self.groups())
+    }
+
+    /// The file `name` names: the first [`Self::list_flows`] entry
+    /// [`names_flow`] accepts, so a run, a task and the pickers agree on it.
+    /// Reads no file's contents, which the listing does for every display
+    /// name.
+    pub(in crate::workspace) fn locate(&self, name: &str) -> Option<(PathBuf, FlowOrigin)> {
+        claim_flows(self.groups())
+            .into_iter()
+            .find(|(path, _)| names_flow(path, name))
+    }
+
+    fn groups(&self) -> Vec<(Vec<PathBuf>, FlowOrigin)> {
+        self.dirs()
+            .into_iter()
+            .map(|(dir, origin)| (flow_files_in(&dir), origin))
+            .collect()
     }
 }
 
@@ -258,7 +270,20 @@ impl FlowSources {
 /// replaces user section): the closer a flow is to the repository, the more
 /// specifically it was meant for it.
 fn merge_flows(groups: Vec<(Vec<PathBuf>, FlowOrigin)>) -> Vec<FoundFlow> {
-    let mut found: Vec<FoundFlow> = Vec::new();
+    claim_flows(groups)
+        .into_iter()
+        .map(|(path, origin)| FoundFlow {
+            name: read_flow_name(&path),
+            path,
+            origin,
+        })
+        .collect()
+}
+
+/// [`merge_flows`]' choice of files, before any is read: the narrowest scope
+/// claims each file name, and the result is sorted by file name.
+fn claim_flows(groups: Vec<(Vec<PathBuf>, FlowOrigin)>) -> Vec<(PathBuf, FlowOrigin)> {
+    let mut found: Vec<(PathBuf, FlowOrigin)> = Vec::new();
     let mut claimed: Vec<std::ffi::OsString> = Vec::new();
     for (paths, origin) in groups {
         for path in paths {
@@ -269,11 +294,10 @@ fn merge_flows(groups: Vec<(Vec<PathBuf>, FlowOrigin)>) -> Vec<FoundFlow> {
                 continue;
             }
             claimed.push(name);
-            let name = read_flow_name(&path);
-            found.push(FoundFlow { path, origin, name });
+            found.push((path, origin));
         }
     }
-    found.sort_by(|a, b| a.path.file_name().cmp(&b.path.file_name()));
+    found.sort_by(|a, b| a.0.file_name().cmp(&b.0.file_name()));
     found
 }
 

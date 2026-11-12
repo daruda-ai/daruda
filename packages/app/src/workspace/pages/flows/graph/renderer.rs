@@ -69,6 +69,7 @@ pub(super) enum CardKind {
     #[default]
     Agent,
     Gate,
+    Include,
 }
 
 /// Which colour the card's border and badge take. An enum rather than a
@@ -114,15 +115,21 @@ pub(super) fn card_for(node: &GraphNode, facts: CardFacts<'_>) -> CardData {
     let kind = match &node.kind {
         GraphNodeKind::Agent { .. } => CardKind::Agent,
         GraphNodeKind::Gate { .. } => CardKind::Gate,
+        GraphNodeKind::Include { .. } => CardKind::Include,
     };
     let policy = policy_attempts(node);
     let (chip, meta, summary) = match &node.kind {
-        GraphNodeKind::Agent { agent, prompt, .. } => {
+        GraphNodeKind::Agent {
+            agent,
+            prompt,
+            timeout,
+            ..
+        } => {
             let mut axes = vec![agent.id.clone()];
             axes.extend(agent.model.clone());
             axes.extend(agent.effort.clone());
             axes.extend(agent.mode.clone());
-            axes.push(timeout_label(node.timeout));
+            axes.push(timeout_label(*timeout));
             (
                 s::flow::graph_kind_agent(),
                 axes.join(" · "),
@@ -132,10 +139,22 @@ pub(super) fn card_for(node: &GraphNode, facts: CardFacts<'_>) -> CardData {
                 },
             )
         }
-        GraphNodeKind::Gate { run: line } => (
+        GraphNodeKind::Gate { run: line, timeout } => (
             s::flow::graph_kind_gate(),
-            timeout_label(node.timeout),
+            timeout_label(*timeout),
             line.clone(),
+        ),
+        GraphNodeKind::Include {
+            flow,
+            profile,
+            members,
+        } => (
+            s::flow::graph_kind_include(),
+            s::flow::graph_include_nodes(members.len()),
+            match profile {
+                Some(profile) => format!("{flow} · {profile}"),
+                None => flow.clone(),
+            },
         ),
     };
     let (badge, accent) = badge_for(&facts);
@@ -417,8 +436,8 @@ mod tests {
                 },
                 prompt: PromptSummary::Inline("review it".into()),
                 output: "review.md".into(),
+                timeout: Duration::from_secs(600),
             },
-            timeout: Duration::from_secs(600),
             cwd: None,
             fail,
         }

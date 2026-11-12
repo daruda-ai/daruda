@@ -114,6 +114,14 @@ fn field_for(kind: &ValidationKind) -> Option<FormField> {
         | K::ReservedProfileName
         | K::UnreachableOutputRef { .. }
         | K::RelativeRequestPath { .. } => return None,
+        // An include's body is another file; the form has no box for it.
+        K::IncludeUnavailable
+        | K::UnknownInclude { .. }
+        | K::IncludeCycle { .. }
+        | K::IncludeTooDeep { .. }
+        | K::IncludeInvalid { .. }
+        | K::IncludeInputMismatch { .. }
+        | K::IncludeAgentMismatch { .. } => return None,
     })
 }
 

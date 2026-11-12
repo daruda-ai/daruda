@@ -11,7 +11,7 @@ A run lives in `<cwd>/.daruda/flow-runs/<run-id>/`:
 
 | Path | What it is |
 |---|---|
-| `run.yaml` | The flow as resolved at start. A resume reads it, never the source file. |
+| `run.yaml` | The flow as resolved at start, with every `include` already expanded (`include.rs`). A resume reads it, never the source file or the flows it included. |
 | `logs/progress/` | The run log (`run_log/`). The record of the run; never compacted. File names belong to `daruda_runlog`; read it through `run_log::reader`. |
 | `progress.jsonl` | An older build's journal. Read-only: imported once, into an empty log, on resume. |
 | `logs/` (other files) | Evidence: transcripts, command logs, archived outputs. |

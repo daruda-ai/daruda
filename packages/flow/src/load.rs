@@ -24,6 +24,7 @@ pub struct LoadedFlow {
     name: Option<String>,
     flow: Flow,
     graph: FlowGraph,
+    includes: Vec<crate::include::IncludeSite>,
 }
 
 impl LoadedFlow {
@@ -38,6 +39,13 @@ impl LoadedFlow {
 
     pub fn graph(&self) -> &FlowGraph {
         &self.graph
+    }
+
+    /// The `include` nodes this flow was expanded from, in file order. Empty
+    /// for a flow with none, and for a run's `run.yaml`, which holds the
+    /// expansion and not the includes.
+    pub fn includes(&self) -> &[crate::include::IncludeSite] {
+        &self.includes
     }
 }
 
@@ -67,7 +75,49 @@ pub struct Inspected {
 /// Parse, merge under `profile`, build the graph, and run the
 /// graph-dependent rules — reporting the last stage's verdict rather than
 /// acting on it.
+///
+/// An `include` node is refused here (`IncludeUnavailable`): nothing tells
+/// this call where flows are. [`inspect_with`] is the same with a source.
 pub fn inspect(text: &str, profile: Option<&str>) -> Result<Inspected, FlowError> {
+    inspect_in(
+        text,
+        profile,
+        None,
+        &crate::include::IncludeChain::default(),
+    )
+}
+
+/// [`inspect`], expanding each `include` from the flows `includes` finds.
+pub fn inspect_with(
+    text: &str,
+    profile: Option<&str>,
+    includes: &dyn crate::include::IncludeSource,
+) -> Result<Inspected, FlowError> {
+    inspect_in(
+        text,
+        profile,
+        Some(includes),
+        &crate::include::IncludeChain::default(),
+    )
+}
+
+/// [`load`], expanding each `include` from the flows `includes` finds.
+pub fn load_with(
+    text: &str,
+    profile: Option<&str>,
+    includes: &dyn crate::include::IncludeSource,
+) -> Result<LoadedFlow, FlowError> {
+    refuse_issues(inspect_with(text, profile, includes)?)
+}
+
+/// The one body of every inspection. `chain` is the includes already being
+/// expanded above this flow, so a flow including itself is refused.
+pub(crate) fn inspect_in(
+    text: &str,
+    profile: Option<&str>,
+    includes: Option<&dyn crate::include::IncludeSource>,
+    chain: &crate::include::IncludeChain,
+) -> Result<Inspected, FlowError> {
     let file = parse::parse_flow_file(text)?;
     // After the shape parses and before anything is merged: these are the
     // keys serde could not police itself (see `parse::schema_issues`), and
@@ -77,11 +127,20 @@ pub fn inspect(text: &str, profile: Option<&str>) -> Result<Inspected, FlowError
         return Err(FlowError::Validate(issues));
     }
     let name = file.name.clone();
-    let flow = resolve::resolve(file, profile).map_err(FlowError::Validate)?;
+    let (flow, includes) = match includes {
+        Some(source) => crate::include::expand(file, profile, source, chain),
+        None => resolve::resolve(file, profile).map(|flow| (flow, Vec::new())),
+    }
+    .map_err(FlowError::Validate)?;
     let graph = FlowGraph::build(&flow).map_err(|e| FlowError::Validate(vec![graph_issue(e)]))?;
     let issues = validate::validate(&flow, &graph);
     Ok(Inspected {
-        loaded: LoadedFlow { name, flow, graph },
+        loaded: LoadedFlow {
+            name,
+            flow,
+            graph,
+            includes,
+        },
         issues,
     })
 }
@@ -91,7 +150,10 @@ pub fn inspect(text: &str, profile: Option<&str>) -> Result<Inspected, FlowError
 /// Every path to an agent session goes through here, so the rules stay a
 /// refusal no matter what the editor is willing to draw.
 pub fn load(text: &str, profile: Option<&str>) -> Result<LoadedFlow, FlowError> {
-    let inspected = inspect(text, profile)?;
+    refuse_issues(inspect(text, profile)?)
+}
+
+fn refuse_issues(inspected: Inspected) -> Result<LoadedFlow, FlowError> {
     if inspected.issues.is_empty() {
         Ok(inspected.loaded)
     } else {

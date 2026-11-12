@@ -34,5 +34,47 @@ pub(crate) fn check_cwd(root: &Path, cwd: &Path) -> Result<(), CwdError> {
     Ok(())
 }
 
+/// Why a file named relative to a directory could not be read from under it.
+#[derive(Debug)]
+pub(crate) enum FileProblem {
+    /// Absolute, or climbing with `..`, as written.
+    NotRelative(PathBuf),
+    Missing(PathBuf),
+    /// Inside as written, outside once links are followed.
+    Outside {
+        path: PathBuf,
+        root: PathBuf,
+        canonical: PathBuf,
+    },
+    Unreadable {
+        path: PathBuf,
+        error: std::io::Error,
+    },
+}
+
+/// The text of `relative`, read only if it stays under `dir` — as written
+/// and once links are followed. The one reading of a flow's prompt and hint
+/// files, so a file a flow includes is held to its own folder the same way
+/// a file it names directly is.
+pub(crate) fn read_under(dir: &Path, relative: &Path) -> Result<String, FileProblem> {
+    if !stays_relative(relative) {
+        return Err(FileProblem::NotRelative(relative.to_path_buf()));
+    }
+    let path = dir.join(relative);
+    if !path.is_file() {
+        return Err(FileProblem::Missing(path));
+    }
+    let root = daruda_core::path::canonicalize_or_self(dir);
+    let canonical = daruda_core::path::canonicalize_or_self(&path);
+    if !canonical.starts_with(&root) {
+        return Err(FileProblem::Outside {
+            path,
+            root,
+            canonical,
+        });
+    }
+    std::fs::read_to_string(&path).map_err(|error| FileProblem::Unreadable { path, error })
+}
+
 #[cfg(test)]
 mod tests;

@@ -119,6 +119,31 @@ impl FlowGraphView {
         }
     }
 
+    /// The selected node, when a run can stop there. An include's card stands
+    /// for nodes the run knows by other ids, so it is not one.
+    pub(in crate::workspace) fn until_node(&self, cx: &App) -> Option<NodeId> {
+        let node = self.selected_node(cx)?;
+        match &self.state {
+            FlowGraphState::Graph { model, .. } if model.is_include(&node) => None,
+            _ => Some(node),
+        }
+    }
+
+    /// The flow an include card names, when `node` is one.
+    pub(in crate::workspace) fn included_flow(&self, node: &NodeId) -> Option<String> {
+        let FlowGraphState::Graph { model, .. } = &self.state else {
+            return None;
+        };
+        model
+            .nodes
+            .iter()
+            .find(|n| &n.id == node)
+            .and_then(|n| match &n.kind {
+                super::model::GraphNodeKind::Include { flow, .. } => Some(flow.clone()),
+                _ => None,
+            })
+    }
+
     /// Select a node that has just been written into the file.
     ///
     /// The write's reload has already rebuilt the graph, so the node exists on

@@ -226,7 +226,8 @@ impl Workspace {
         self.pages.flows.history_request = None;
         let id = FlowDetailId(self.alloc_id());
         let owned = path.to_path_buf();
-        let view = cx.new(|cx| FlowGraphView::new(&owned, window, cx));
+        let sources = self.flow_sources_for(lane);
+        let view = cx.new(|cx| FlowGraphView::new(&owned, sources, window, cx));
         let catalog = self.flow_form_catalog();
         view.update(cx, |view, cx| view.set_catalog(catalog, window, cx));
         // Detached: the subscription's life is the view's, which ends when the
@@ -284,7 +285,7 @@ impl Workspace {
                 // No node selected is no stopping point, so there is nothing
                 // to run — the button is off for exactly this, and falling
                 // through would run the whole flow instead.
-                if let Some(until) = view.read(cx).selected_node(cx) {
+                if let Some(until) = view.read(cx).until_node(cx) {
                     self.run_flow_from_graph(id, Some(until), window, cx);
                 }
             }
@@ -632,12 +633,14 @@ nodes:
     /// error it should.
     #[cfg(feature = "screenshot")]
     fn first_flow_path_for_shot(&self) -> Option<PathBuf> {
-        let found = self.flow_sources()?.list_flows();
+        let sources = self.flow_sources()?;
+        let found = sources.list_flows();
         found
             .iter()
             .find(|flow| {
-                std::fs::read_to_string(&flow.path)
-                    .is_ok_and(|text| daruda_flow::load(&text, None).is_ok())
+                std::fs::read_to_string(&flow.path).is_ok_and(|text| {
+                    crate::workspace::flow_include::load_flow(&text, None, Some(&sources)).is_ok()
+                })
             })
             .or_else(|| found.first())
             .map(|flow| flow.path.clone())

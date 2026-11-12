@@ -277,7 +277,14 @@ impl Workspace {
             return Err(EditRefusal::NothingToDo);
         }
         let candidate = daruda_flow_edit::apply(base, &edits);
-        if let Err(e) = daruda_flow::load(&candidate, None) {
+        // An include is looked up where this file's runs will look: the lane
+        // the graph drawing it was opened for, which the page may have moved
+        // away from browsing — else the browsed one.
+        let lane = self
+            .open_graph_of(path, cx)
+            .map_or_else(|| self.flow_browser_lane(), |(_, lane, _)| lane);
+        let sources = self.flow_sources_for(lane);
+        if let Err(e) = super::flow_include::load_flow(&candidate, None, sources.as_ref()) {
             return Err(EditRefusal::WouldNotLoad {
                 detail: load_failure_detail(&e),
                 issues: match e {

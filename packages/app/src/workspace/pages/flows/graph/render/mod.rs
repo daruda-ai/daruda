@@ -111,9 +111,10 @@ impl Render for FlowGraphView {
                 // what is left, and the picture shift under the pointer that
                 // just clicked — a shift-click on a second card would miss it.
                 let inspector = match self.selection(cx) {
-                    Selection::One(_) => match &self.form {
-                        Some(form) => form::render(form, &status, cx).into_any_element(),
-                        None => form::render_empty(cx).into_any_element(),
+                    Selection::One(node) => match (&self.form, self.included_flow(&node)) {
+                        (Some(form), _) => form::render(form, &status, cx).into_any_element(),
+                        (None, Some(flow)) => form::render_include(&flow, cx).into_any_element(),
+                        (None, None) => form::render_empty(cx).into_any_element(),
                     },
                     Selection::Many(nodes) => form::render_many(nodes.len(), cx).into_any_element(),
                     // Nothing to click is not the same as nothing clicked yet.
@@ -127,7 +128,7 @@ impl Render for FlowGraphView {
                 let state = ToolbarState {
                     has_selection: !self.selected_nodes(cx).is_empty(),
                     unsaved_form: unsaved,
-                    until: self.selected_node(cx),
+                    until: self.until_node(cx),
                     pin: self.pin_action(cx),
                 };
                 body.child(

@@ -38,7 +38,7 @@ pub(in crate::workspace) struct NodeDraft {
 
 impl NodeDraft {
     pub(super) fn new(base: Baseline, node: NodeId) -> Option<Self> {
-        let initial = fields_of(base.node(&node)?);
+        let initial = fields_of(base.node(&node)?)?;
         let raw = RawInputs::from_fields(&initial);
         let ui = UiHints {
             agent_open: !initial.agent.is_empty(),
@@ -122,10 +122,12 @@ impl NodeDraft {
         self.ui = ui;
     }
     pub(super) fn adopt(&mut self, base: Baseline) {
-        self.initial_raw = RawInputs::from_fields(&fields_of(
-            base.node(&self.node)
-                .expect("draft node exists in adopted baseline"),
-        ));
+        self.initial_raw = RawInputs::from_fields(
+            &base
+                .node(&self.node)
+                .and_then(fields_of)
+                .expect("a draft is adopted only by a baseline whose node the form can edit"),
+        );
         self.initial = self.initial_raw.effective();
         self.match_memo = RefCell::default();
         self.base = base;

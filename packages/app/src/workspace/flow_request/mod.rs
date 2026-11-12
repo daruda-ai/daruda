@@ -419,7 +419,9 @@ impl Workspace {
             }
             FlowText::Draft { text, path } => (std::borrow::Cow::Borrowed(text), path),
         };
-        let loaded = daruda_flow::load(&text, profile).map_err(FlowSubmitError::Load)?;
+        let sources = self.flow_sources_for(lane_ref);
+        let loaded = super::flow_include::load_flow(&text, profile, sources.as_ref())
+            .map_err(FlowSubmitError::Load)?;
 
         // Here and not at the surface that asked: which past run holds a
         // pinned output depends on the profile, and the profile is only
