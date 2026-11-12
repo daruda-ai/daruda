@@ -104,6 +104,7 @@ Follow these links explicitly rather than relying on tool-specific loading.
 | Run logs, event-sourced state machines, crash recovery | [Run log instructions](packages/runlog/AGENTS.md) |
 | Flow engine, flow run directories, resume, stopping a run | [Flow instructions](packages/flow/AGENTS.md), [Run log instructions](packages/runlog/AGENTS.md) |
 | Process launch, paths, shells, host identity, environment variables | [Core instructions](packages/core/AGENTS.md) |
+| GitHub pull requests, the `gh` CLI | [GitHub instructions](packages/github/AGENTS.md) |
 | Images, Mermaid, Markdown shared across chat and file viewer | [Content instructions](packages/content/AGENTS.md) |
 | Vendored dependencies or GPUI reference patterns | [Vendor rules](packages/ui/AGENTS.md#vendor-dependencies), [Patches](patches/README.md), [References](#reference-implementations) |
 
