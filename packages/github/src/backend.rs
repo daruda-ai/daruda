@@ -5,7 +5,7 @@
 
 use crate::availability::GhAuth;
 use crate::query::RepoPrs;
-use crate::{GhError, NewPr, RepoId};
+use crate::{ActionsJob, GhError, NewPr, RepoId};
 
 pub trait Gh: Send + Sync {
     /// Whether `gh` is installed and logged in to `host`.
@@ -15,4 +15,6 @@ pub trait Gh: Send + Sync {
     fn prs_for_branches(&self, repo: &RepoId, branches: &[String]) -> Result<RepoPrs, GhError>;
     /// Open a pull request; answers its URL.
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError>;
+    /// The log of the failed steps of one Actions job.
+    fn failed_log(&self, repo: &RepoId, job: ActionsJob) -> Result<String, GhError>;
 }

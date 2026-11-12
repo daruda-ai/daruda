@@ -119,8 +119,27 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                 .text_ellipsis()
                 .text_color(muted)
                 .child(format!("{} {}", s::pr_number(pr.number), pr.title));
-            Some(
-                row.when_some(glyph, |d, (path, color)| {
+            let failed = match pr.checks {
+                CheckRollup::Failing { failed } if pr.state.is_active() => failed,
+                _ => 0,
+            };
+            let fix = (failed > 0 && !pr.failed.is_empty()).then(|| {
+                let workspace = snap.workspace.clone();
+                crate::ui::button_compact_sized(
+                    "pr-fix-checks",
+                    s::pr_fix_checks_btn(failed),
+                    metrics,
+                )
+                .loading(snap.pr_sending)
+                .disabled(snap.pr_sending)
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.send_failed_checks(window, cx));
+                    }
+                }))
+            });
+            let line = row
+                .when_some(glyph, |d, (path, color)| {
                     d.child(
                         crate::ui::icons::icon(path)
                             .with_size(px(metrics.icon(theme::GIT_BADGE_ARROW_SIZE)))
@@ -135,8 +154,23 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                     checks_label(pr.checks).filter(|_| pr.state.is_active()),
                     |d, label| d.child(div().flex_none().text_color(subtle).child(label)),
                 )
-                .child(open)
-                .into_any_element(),
+                .child(open);
+            let actions = fix.map(|fix| {
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_end()
+                    .px(px(metrics.space(theme::GIT_HEADER_PAD_X)))
+                    .pb(px(metrics.space(theme::GIT_HEADER_PAD_Y)))
+                    .child(fix)
+            });
+            Some(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(line)
+                    .when_some(actions, |d, actions| d.child(actions))
+                    .into_any_element(),
             )
         }
     }

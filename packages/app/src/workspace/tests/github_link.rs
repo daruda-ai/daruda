@@ -8,7 +8,7 @@ use daruda_github::availability::GhAuth;
 use daruda_github::fake::{FakeGh, GhCall, GhFailure, GhOp};
 use daruda_github::{CheckRollup, PrState, PrSummary, RepoId};
 use daruda_store::project::LaneRef;
-use gpui::TestAppContext;
+use gpui::{AppContext as _, TestAppContext};
 
 use super::GitFixture;
 use crate::github::PrPoller;
@@ -301,4 +301,84 @@ fn a_gh_failure_keeps_its_message(cx: &mut TestAppContext) {
         toasts(&f, cx).iter().any(|t| t.contains("already exists")),
         "gh's stderr reaches the report"
     );
+}
+
+// ---- Sending a PR's problems to the lane's agent ----
+
+fn failing_pr() -> PrSummary {
+    let mut failing = pr(7, PrState::Open, "2026-01-01");
+    failing.checks = CheckRollup::Failing { failed: 2 };
+    failing.failed = vec![
+        daruda_github::FailedCheck {
+            name: "build".into(),
+            details_url: Some("https://github.com/o/r/actions/runs/11/job/22".into()),
+            job: Some(daruda_github::ActionsJob { run: 11, job: 22 }),
+        },
+        daruda_github::FailedCheck {
+            name: "prow".into(),
+            details_url: Some("https://prow.example/1".into()),
+            job: None,
+        },
+    ];
+    failing
+}
+
+fn linked_failing_lane(cx: &mut TestAppContext) -> (GitFixture, FakeGh) {
+    let gh = crate::test_support::fake_gh(cx);
+    gh.set_prs(&repo(), vec![failing_pr()]);
+    gh.set_failed_log(
+        daruda_github::ActionsJob { run: 11, job: 22 },
+        "job\tstep\t2026-01-01T00:00:00.0000000Z ##[group]Run cargo test\n\
+         job\tstep\t2026-01-01T00:00:01.0000000Z test parse ... \u{1b}[31mFAILED\u{1b}[0m\n\
+         job\tstep\t2026-01-01T00:00:02.0000000Z ##[error]Process completed with exit code 101.",
+    );
+    let (f, _) = lane_pushing_feat(cx);
+    tick(cx);
+    (f, gh)
+}
+
+#[gpui::test]
+fn failed_checks_land_in_the_agent_input_unsent(cx: &mut TestAppContext) {
+    let (f, gh) = linked_failing_lane(cx);
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.split_focused_pane_kind(
+                super::NewPaneKind::AgentChat,
+                super::SplitDirection::Horizontal,
+                window,
+                cx,
+            );
+            ws.send_failed_checks(window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        gh.count(GhOp::FailedLog),
+        1,
+        "only the Actions check has a log"
+    );
+    let input = f.ws.read_with(cx, |ws, cx| {
+        ws.input_dock.input.read(cx).value().to_string()
+    });
+    assert!(input.contains("Pull request #7"), "{input}");
+    assert!(
+        input.contains("test parse ... FAILED"),
+        "the log, cleaned: {input}"
+    );
+    assert!(!input.contains('\u{1b}'));
+    assert!(input.contains("(no log: not a GitHub Actions check)"));
+}
+
+#[gpui::test]
+fn without_an_agent_pane_nothing_is_fetched(cx: &mut TestAppContext) {
+    let (f, gh) = linked_failing_lane(cx);
+    let before = toasts(&f, cx).len();
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| ws.send_failed_checks(window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::FailedLog), 0);
+    assert_eq!(toasts(&f, cx).len(), before + 1, "the user hears why");
 }

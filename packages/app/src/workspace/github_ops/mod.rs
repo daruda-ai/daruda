@@ -4,6 +4,7 @@
 pub(crate) mod create;
 pub(crate) mod create_modal;
 pub(crate) mod link;
+mod review_send;
 #[cfg(feature = "screenshot")]
 pub(in crate::workspace) mod screenshot;
 pub(crate) mod strip;

@@ -6,6 +6,7 @@
 //! | `auth` | `Ready` |
 //! | `prs_for_branches` | default branch `main`, no PRs for any branch |
 //! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL |
+//! | `failed_log` | exit 1, as for a run that has no failed log |
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -13,7 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use crate::availability::GhAuth;
 use crate::backend::Gh;
 use crate::query::RepoPrs;
-use crate::{CheckRollup, GhError, NewPr, PrState, PrSummary, RepoId};
+use crate::{ActionsJob, CheckRollup, GhError, NewPr, PrState, PrSummary, RepoId};
 
 /// A request the code under test made.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +22,7 @@ pub enum GhCall {
     Auth { host: String },
     PrsForBranches { repo: RepoId, branches: Vec<String> },
     CreatePr { repo: RepoId, new: NewPr },
+    FailedLog { repo: RepoId, job: ActionsJob },
 }
 
 /// One [`Gh`] method, for aiming failures.
@@ -29,6 +31,7 @@ pub enum GhOp {
     Auth,
     PrsForBranches,
     CreatePr,
+    FailedLog,
 }
 
 /// A cloneable description of a [`GhError`], turned into a fresh error on
@@ -65,6 +68,7 @@ struct FakeState {
     auth: HashMap<String, GhAuth>,
     default_branches: HashMap<RepoId, String>,
     prs: HashMap<RepoId, Vec<PrSummary>>,
+    logs: HashMap<(u64, u64), String>,
     failures: HashMap<GhOp, GhFailure>,
     calls: Vec<GhCall>,
 }
@@ -88,6 +92,11 @@ impl FakeGh {
     /// whose head is that branch.
     pub fn set_prs(&self, repo: &RepoId, prs: Vec<PrSummary>) {
         self.lock().prs.insert(repo.clone(), prs);
+    }
+
+    /// What `failed_log` prints for `job`.
+    pub fn set_failed_log(&self, job: ActionsJob, log: &str) {
+        self.lock().logs.insert((job.run, job.job), log.to_owned());
     }
 
     /// Fail every later call of `op` until [`FakeGh::clear_failure`].
@@ -124,6 +133,7 @@ impl GhCall {
             Self::Auth { .. } => GhOp::Auth,
             Self::PrsForBranches { .. } => GhOp::PrsForBranches,
             Self::CreatePr { .. } => GhOp::CreatePr,
+            Self::FailedLog { .. } => GhOp::FailedLog,
         }
     }
 }
@@ -172,6 +182,25 @@ impl Gh for FakeGh {
             ),
             by_branch,
         })
+    }
+
+    fn failed_log(&self, repo: &RepoId, job: ActionsJob) -> Result<String, GhError> {
+        let mut state = self.lock();
+        state.calls.push(GhCall::FailedLog {
+            repo: repo.clone(),
+            job,
+        });
+        if let Some(failure) = state.failures.get(&GhOp::FailedLog) {
+            return Err(failure.to_error());
+        }
+        state
+            .logs
+            .get(&(job.run, job.job))
+            .cloned()
+            .ok_or_else(|| GhError::Exit {
+                code: Some(1),
+                stderr: "log not found".to_owned(),
+            })
     }
 
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {

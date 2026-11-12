@@ -14,6 +14,7 @@ mod error;
 pub mod fake;
 pub mod link;
 pub mod model;
+pub mod prompt;
 pub mod query;
 pub mod remote_parse;
 mod system;

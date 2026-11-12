@@ -9,7 +9,7 @@ use daruda_core::process::{CaptureError, CaptureLimits, Captured, command_on_pat
 use crate::availability::GhAuth;
 use crate::backend::Gh;
 use crate::query::{RepoPrs, parse_prs_for_branches, prs_for_branches_query};
-use crate::{GhError, NewPr, RepoId};
+use crate::{ActionsJob, GhError, NewPr, RepoId};
 
 const LIMITS: CaptureLimits = CaptureLimits {
     timeout: Duration::from_secs(30),
@@ -124,6 +124,19 @@ impl Gh for SystemGh {
             all.by_branch.extend(part.by_branch);
         }
         Ok(all)
+    }
+
+    fn failed_log(&self, repo: &RepoId, job: ActionsJob) -> Result<String, GhError> {
+        self.stdout([
+            "run".to_owned(),
+            "view".to_owned(),
+            job.run.to_string(),
+            "--repo".to_owned(),
+            repo.qualified(),
+            "--job".to_owned(),
+            job.job.to_string(),
+            "--log-failed".to_owned(),
+        ])
     }
 
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {

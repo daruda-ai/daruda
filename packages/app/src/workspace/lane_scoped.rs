@@ -22,6 +22,9 @@ pub(in crate::workspace) struct LaneScoped {
     /// through `github_ops::link`; never persisted, since the next poll
     /// answers it again.
     pub pr: Option<crate::github::PrLink>,
+    /// Logs or comments for the PR are being read for the agent; the
+    /// strip's send buttons wait.
+    pub pr_sending: bool,
     /// Expanded-sidebar disclosure for this app session, independent of rail grouping.
     pub show_individual_panes: bool,
 }

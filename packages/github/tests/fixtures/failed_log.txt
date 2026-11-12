@@ -1,0 +1,361 @@
+build (windows-latest)	UNKNOWN STEP	﻿2026-11-03T21:20:12.3085509Z Current runner version: '2.338.2'
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:21:52.3492275Z ##[group]Run go mod download
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:21:52.3492575Z [36;1mgo mod download[0m
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:21:52.5390175Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:21:52.5390456Z env:
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:21:52.5390617Z   GOTOOLCHAIN: local
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:21:52.5390803Z ##[endgroup]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:22:03.5756034Z ##[group]Run go test -count=1 -race -tags=integration ./...
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:22:03.5756484Z [36;1mgo test -count=1 -race -tags=integration ./...[0m
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:22:03.5812754Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:22:03.5813031Z env:
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:22:03.5813179Z   GOTOOLCHAIN: local
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:22:03.5813346Z ##[endgroup]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:22:13.6973840Z ok  	github.com/cli/cli/v2/acceptance	1.202s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:22:14.3546593Z ok  	github.com/cli/cli/v2/api	1.247s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:22:52.7972156Z ok  	github.com/cli/cli/v2/cmd/gen-docs	3.658s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:22:52.7973174Z ?   	github.com/cli/cli/v2/cmd/gh	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:22:52.7973702Z ok  	github.com/cli/cli/v2/context	1.046s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7483342Z ok  	github.com/cli/cli/v2/git	50.521s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7483923Z ok  	github.com/cli/cli/v2/internal/agents	1.033s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7484407Z ok  	github.com/cli/cli/v2/internal/attachments	1.462s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7485019Z ok  	github.com/cli/cli/v2/internal/authflow	1.083s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7487014Z ?   	github.com/cli/cli/v2/internal/barista/observability	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7487642Z ?   	github.com/cli/cli/v2/internal/browser	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7488183Z ?   	github.com/cli/cli/v2/internal/build	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7488635Z ok  	github.com/cli/cli/v2/internal/ci	1.035s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7489144Z ok  	github.com/cli/cli/v2/internal/codespaces	1.192s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7489660Z ok  	github.com/cli/cli/v2/internal/codespaces/api	2.234s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7490205Z ok  	github.com/cli/cli/v2/internal/codespaces/connection	1.258s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7490802Z ok  	github.com/cli/cli/v2/internal/codespaces/portforwarder	1.896s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7491402Z ok  	github.com/cli/cli/v2/internal/codespaces/rpc	1.167s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7492010Z ?   	github.com/cli/cli/v2/internal/codespaces/rpc/codespace	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7492664Z ?   	github.com/cli/cli/v2/internal/codespaces/rpc/jupyter	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7493321Z ?   	github.com/cli/cli/v2/internal/codespaces/rpc/ssh	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7493971Z ?   	github.com/cli/cli/v2/internal/codespaces/rpc/test	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7494529Z ok  	github.com/cli/cli/v2/internal/config	1.559s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7495011Z ok  	github.com/cli/cli/v2/internal/config/migration	1.156s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7495501Z ok  	github.com/cli/cli/v2/internal/debug	1.042s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7495927Z ok  	github.com/cli/cli/v2/internal/docs	1.404s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7496399Z ok  	github.com/cli/cli/v2/internal/featuredetection	1.044s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7496850Z ok  	github.com/cli/cli/v2/internal/flock	1.145s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7497337Z ?   	github.com/cli/cli/v2/internal/gh	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7497883Z ?   	github.com/cli/cli/v2/internal/gh/ghtelemetry	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7498458Z ?   	github.com/cli/cli/v2/internal/gh/mock	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7498931Z ok  	github.com/cli/cli/v2/internal/ghcmd	1.236s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7499432Z ok  	github.com/cli/cli/v2/internal/ghinstance	1.033s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7499923Z ok  	github.com/cli/cli/v2/internal/ghrepo	1.036s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7500374Z ok  	github.com/cli/cli/v2/internal/identity	1.120s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7500845Z ?   	github.com/cli/cli/v2/internal/keyring	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7501347Z ok  	github.com/cli/cli/v2/internal/licenses	1.034s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7501824Z ok  	github.com/cli/cli/v2/internal/prompter	3.721s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7502273Z ?   	github.com/cli/cli/v2/internal/run	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7502741Z ok  	github.com/cli/cli/v2/internal/safepaths	1.136s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7503243Z ok  	github.com/cli/cli/v2/internal/safeurl	1.042s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7503732Z ok  	github.com/cli/cli/v2/internal/skills/discovery	1.394s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7504294Z ok  	github.com/cli/cli/v2/internal/skills/frontmatter	1.047s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7506842Z ok  	github.com/cli/cli/v2/internal/skills/installer	1.275s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7507539Z ok  	github.com/cli/cli/v2/internal/skills/lockfile	1.076s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7508098Z ok  	github.com/cli/cli/v2/internal/skills/registry	1.038s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7508637Z ok  	github.com/cli/cli/v2/internal/skills/source	1.041s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7509128Z ok  	github.com/cli/cli/v2/internal/tableprinter	1.054s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7509664Z ok  	github.com/cli/cli/v2/internal/telemetry	1.131s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7510134Z ok  	github.com/cli/cli/v2/internal/text	1.042s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7510589Z ok  	github.com/cli/cli/v2/internal/update	1.308s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7511059Z ok  	github.com/cli/cli/v2/internal/zip	1.073s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7511561Z ?   	github.com/cli/cli/v2/pkg/auth	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7512140Z ?   	github.com/cli/cli/v2/pkg/cmd/accessibility	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7512699Z ?   	github.com/cli/cli/v2/pkg/cmd/actions	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7513240Z ok  	github.com/cli/cli/v2/pkg/cmd/agent-task	1.351s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7513976Z ok  	github.com/cli/cli/v2/pkg/cmd/agent-task/capi	1.092s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7514521Z ok  	github.com/cli/cli/v2/pkg/cmd/agent-task/create	1.268s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7515057Z ok  	github.com/cli/cli/v2/pkg/cmd/agent-task/list	1.291s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7515620Z ok  	github.com/cli/cli/v2/pkg/cmd/agent-task/shared	1.382s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7516150Z ok  	github.com/cli/cli/v2/pkg/cmd/agent-task/view	1.311s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7516660Z ?   	github.com/cli/cli/v2/pkg/cmd/alias	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7517180Z ok  	github.com/cli/cli/v2/pkg/cmd/alias/delete	1.072s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7517737Z ok  	github.com/cli/cli/v2/pkg/cmd/alias/imports	1.209s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7518243Z ok  	github.com/cli/cli/v2/pkg/cmd/alias/list	1.097s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7518741Z ok  	github.com/cli/cli/v2/pkg/cmd/alias/set	1.117s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7519239Z ok  	github.com/cli/cli/v2/pkg/cmd/alias/shared	1.041s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7519743Z ok  	github.com/cli/cli/v2/pkg/cmd/api	1.452s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7520276Z ?   	github.com/cli/cli/v2/pkg/cmd/attestation	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7520843Z ok  	github.com/cli/cli/v2/pkg/cmd/attestation/api	3.664s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7521535Z ok  	github.com/cli/cli/v2/pkg/cmd/attestation/artifact	1.185s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7522127Z ok  	github.com/cli/cli/v2/pkg/cmd/attestation/artifact/digest	1.051s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7522685Z ok  	github.com/cli/cli/v2/pkg/cmd/attestation/artifact/oci	1.183s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:41.7523235Z ok  	github.com/cli/cli/v2/pkg/cmd/attestation/auth	1.069s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:43.3403843Z ok  	github.com/cli/cli/v2/pkg/cmd/attestation/download	1.384s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:49.6928709Z ok  	github.com/cli/cli/v2/pkg/cmd/attestation/inspect	5.821s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:49.6929389Z ?   	github.com/cli/cli/v2/pkg/cmd/attestation/io	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:49.6930035Z ?   	github.com/cli/cli/v2/pkg/cmd/attestation/test	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:49.6930686Z ?   	github.com/cli/cli/v2/pkg/cmd/attestation/test/data	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:23:49.6931333Z ok  	github.com/cli/cli/v2/pkg/cmd/attestation/trustedroot	1.347s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4924867Z ok  	github.com/cli/cli/v2/pkg/cmd/attestation/verification	27.674s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4925650Z ok  	github.com/cli/cli/v2/pkg/cmd/attestation/verify	24.274s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4926220Z ?   	github.com/cli/cli/v2/pkg/cmd/auth	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4926777Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/gitcredential	1.054s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4927340Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/identity	1.074s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4927867Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/login	1.261s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4928392Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/logout	1.326s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4928905Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/refresh	1.305s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4929424Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/setupgit	1.084s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4931052Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/shared	1.150s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4931758Z ?   	github.com/cli/cli/v2/pkg/cmd/auth/shared/contract	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4932422Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/shared/gitcredentials	2.515s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4933022Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/status	1.258s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4933578Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/switch	1.145s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4934079Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/token	1.260s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4934569Z ok  	github.com/cli/cli/v2/pkg/cmd/auth/use	1.151s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4935042Z ok  	github.com/cli/cli/v2/pkg/cmd/browse	1.194s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4935570Z ?   	github.com/cli/cli/v2/pkg/cmd/cache	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4936093Z ok  	github.com/cli/cli/v2/pkg/cmd/cache/delete	1.122s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4936587Z ok  	github.com/cli/cli/v2/pkg/cmd/cache/list	1.137s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:12.4937080Z ok  	github.com/cli/cli/v2/pkg/cmd/cache/shared	1.067s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:13.8460249Z ok  	github.com/cli/cli/v2/pkg/cmd/codespace	1.940s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:13.8461213Z ok  	github.com/cli/cli/v2/pkg/cmd/completion	1.091s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:13.8464555Z ?   	github.com/cli/cli/v2/pkg/cmd/config	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:13.8465121Z ok  	github.com/cli/cli/v2/pkg/cmd/config/clear-cache	1.062s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:14.8651137Z ok  	github.com/cli/cli/v2/pkg/cmd/config/get	1.095s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:15.5625351Z ok  	github.com/cli/cli/v2/pkg/cmd/config/list	1.076s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:16.1846468Z ok  	github.com/cli/cli/v2/pkg/cmd/config/set	1.130s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:16.5804720Z ok  	github.com/cli/cli/v2/pkg/cmd/copilot	1.160s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:16.5809991Z ?   	github.com/cli/cli/v2/pkg/cmd/discussion	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:18.0850751Z ok  	github.com/cli/cli/v2/pkg/cmd/discussion/client	1.358s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:18.5996737Z ok  	github.com/cli/cli/v2/pkg/cmd/discussion/comment	1.175s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:19.0778405Z ok  	github.com/cli/cli/v2/pkg/cmd/discussion/create	1.097s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:19.3827936Z ok  	github.com/cli/cli/v2/pkg/cmd/discussion/edit	1.155s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:20.9786329Z ok  	github.com/cli/cli/v2/pkg/cmd/discussion/list	1.189s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:21.4119655Z ok  	github.com/cli/cli/v2/pkg/cmd/discussion/shared	1.140s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:23.0057268Z ok  	github.com/cli/cli/v2/pkg/cmd/discussion/view	1.366s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7973281Z ok  	github.com/cli/cli/v2/pkg/cmd/extension	15.328s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7973906Z ok  	github.com/cli/cli/v2/pkg/cmd/extension/browse	4.060s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7974443Z ok  	github.com/cli/cli/v2/pkg/cmd/factory	1.463s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7974933Z ?   	github.com/cli/cli/v2/pkg/cmd/gist	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7975438Z ok  	github.com/cli/cli/v2/pkg/cmd/gist/clone	1.097s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7976195Z ok  	github.com/cli/cli/v2/pkg/cmd/gist/create	1.137s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7976969Z ok  	github.com/cli/cli/v2/pkg/cmd/gist/delete	1.124s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7977506Z ok  	github.com/cli/cli/v2/pkg/cmd/gist/edit	1.221s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7978047Z ok  	github.com/cli/cli/v2/pkg/cmd/gist/list	1.243s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7978554Z ok  	github.com/cli/cli/v2/pkg/cmd/gist/rename	1.077s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7979028Z ok  	github.com/cli/cli/v2/pkg/cmd/gist/shared	1.101s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7979509Z ok  	github.com/cli/cli/v2/pkg/cmd/gist/view	1.220s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7979918Z ?   	github.com/cli/cli/v2/pkg/cmd/gpg-key	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7980438Z ok  	github.com/cli/cli/v2/pkg/cmd/gpg-key/add	1.047s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.7980923Z ok  	github.com/cli/cli/v2/pkg/cmd/gpg-key/delete	1.129s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.8800361Z ok  	github.com/cli/cli/v2/pkg/cmd/gpg-key/list	1.113s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.8801302Z ?   	github.com/cli/cli/v2/pkg/cmd/issue	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.8802299Z ?   	github.com/cli/cli/v2/pkg/cmd/issue/argparsetest	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:37.8803015Z ?   	github.com/cli/cli/v2/pkg/cmd/issue/artifact	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:38.6285600Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/artifact/client	1.263s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:42.6139181Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/artifact/create	2.585s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:42.6148876Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/artifact/delete	1.628s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:42.6149407Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/artifact/download	1.841s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:44.3099105Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/artifact/edit	3.089s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:47.4302592Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/artifact/list	1.538s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:47.4303574Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/artifact/shared	1.423s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:47.5642722Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/artifact/view	1.643s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:48.0175519Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/close	1.224s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:50.6282897Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/comment	1.390s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:51.3065182Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/create	1.504s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:51.3071714Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/delete	1.343s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:51.8075992Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/develop	1.368s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:54.6566228Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/edit	1.611s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:55.5129749Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/list	1.506s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:55.5130418Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/lock	1.348s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:55.5138691Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/pin	1.439s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:57.2637976Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/reopen	1.278s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:58.5862497Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/shared	1.222s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:59.1004266Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/status	1.305s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:24:59.1788229Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/transfer	1.342s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:00.1804771Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/unpin	1.225s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:02.4070596Z ok  	github.com/cli/cli/v2/pkg/cmd/issue/view	1.406s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:02.5651329Z ok  	github.com/cli/cli/v2/pkg/cmd/label	1.306s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:02.5654861Z ?   	github.com/cli/cli/v2/pkg/cmd/licenses	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:02.5657214Z ?   	github.com/cli/cli/v2/pkg/cmd/org	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:02.5663720Z ok  	github.com/cli/cli/v2/pkg/cmd/org/list	1.150s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:02.5675670Z ?   	github.com/cli/cli/v2/pkg/cmd/pr	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:03.7819534Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/checkout	1.536s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:06.1889526Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/checks	1.668s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:06.1890099Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/close	1.642s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:06.3218142Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/comment	1.785s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:08.2710284Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/create	1.686s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:09.3457291Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/diff	1.276s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:10.2339945Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/edit	1.457s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:10.2680109Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/list	1.476s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:12.0090585Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/merge	1.564s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:12.4379452Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/ready	1.283s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:13.5761747Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/reopen	1.351s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:13.7147240Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/revert	1.267s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:15.3831976Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/review	1.411s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:16.5561164Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/shared	1.373s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:17.3068821Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/status	1.284s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:17.3070555Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/update-branch	1.184s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:19.0309451Z ok  	github.com/cli/cli/v2/pkg/cmd/pr/view	1.474s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:19.0309841Z ?   	github.com/cli/cli/v2/pkg/cmd/preview	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:19.0310223Z ?   	github.com/cli/cli/v2/pkg/cmd/preview/prompter	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:19.0310610Z ?   	github.com/cli/cli/v2/pkg/cmd/project	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:19.1567536Z ok  	github.com/cli/cli/v2/pkg/cmd/project/close	1.154s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:21.6994067Z ok  	github.com/cli/cli/v2/pkg/cmd/project/copy	1.615s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:21.6995544Z ok  	github.com/cli/cli/v2/pkg/cmd/project/create	1.064s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:22.7178436Z ok  	github.com/cli/cli/v2/pkg/cmd/project/delete	1.181s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:22.8827842Z ok  	github.com/cli/cli/v2/pkg/cmd/project/edit	1.339s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:24.5710727Z ok  	github.com/cli/cli/v2/pkg/cmd/project/field-create	1.307s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:24.6495425Z ok  	github.com/cli/cli/v2/pkg/cmd/project/field-delete	1.142s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:25.8970298Z ok  	github.com/cli/cli/v2/pkg/cmd/project/field-list	1.129s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:26.0566761Z ok  	github.com/cli/cli/v2/pkg/cmd/project/item-add	1.237s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:27.9591142Z ok  	github.com/cli/cli/v2/pkg/cmd/project/item-archive	1.214s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:28.0404857Z ok  	github.com/cli/cli/v2/pkg/cmd/project/item-create	1.198s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:28.9553228Z ok  	github.com/cli/cli/v2/pkg/cmd/project/item-delete	1.139s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:29.4747402Z ok  	github.com/cli/cli/v2/pkg/cmd/project/item-edit	1.322s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:32.0117688Z ok  	github.com/cli/cli/v2/pkg/cmd/project/item-list	1.182s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:32.0369705Z ok  	github.com/cli/cli/v2/pkg/cmd/project/link	1.158s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:32.5004242Z ok  	github.com/cli/cli/v2/pkg/cmd/project/list	1.127s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:32.7992101Z ok  	github.com/cli/cli/v2/pkg/cmd/project/mark-template	1.134s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:32.7994142Z ?   	github.com/cli/cli/v2/pkg/cmd/project/shared/client	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:34.3143146Z ok  	github.com/cli/cli/v2/pkg/cmd/project/shared/format	1.052s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:35.3861138Z ok  	github.com/cli/cli/v2/pkg/cmd/project/shared/queries	1.152s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:35.7221273Z ok  	github.com/cli/cli/v2/pkg/cmd/project/unlink	1.149s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:36.3360353Z ok  	github.com/cli/cli/v2/pkg/cmd/project/view	1.329s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:36.3386996Z ?   	github.com/cli/cli/v2/pkg/cmd/release	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:38.8181968Z ok  	github.com/cli/cli/v2/pkg/cmd/release/create	1.433s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:40.0220677Z ok  	github.com/cli/cli/v2/pkg/cmd/release/delete	1.433s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:40.6478661Z ok  	github.com/cli/cli/v2/pkg/cmd/release/delete-asset	1.560s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:41.2687377Z ok  	github.com/cli/cli/v2/pkg/cmd/release/download	1.540s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:44.4725142Z ok  	github.com/cli/cli/v2/pkg/cmd/release/edit	2.010s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:44.8751702Z ok  	github.com/cli/cli/v2/pkg/cmd/release/list	1.454s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:45.9218733Z ok  	github.com/cli/cli/v2/pkg/cmd/release/shared	1.298s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:46.1328384Z ok  	github.com/cli/cli/v2/pkg/cmd/release/upload	1.390s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:49.4061061Z ok  	github.com/cli/cli/v2/pkg/cmd/release/verify	1.208s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:49.7749269Z ok  	github.com/cli/cli/v2/pkg/cmd/release/verify-asset	1.472s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:50.8059955Z ok  	github.com/cli/cli/v2/pkg/cmd/release/view	1.556s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:50.8060571Z ?   	github.com/cli/cli/v2/pkg/cmd/repo	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:50.8061141Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/archive	1.338s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:50.8061731Z ?   	github.com/cli/cli/v2/pkg/cmd/repo/autolink	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:51.5007634Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/autolink/create	1.105s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:53.5292416Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/autolink/delete	1.118s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:54.4290098Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/autolink/list	1.114s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:54.4290827Z ?   	github.com/cli/cli/v2/pkg/cmd/repo/autolink/shared	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:54.6325575Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/autolink/view	1.262s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:25:55.0414013Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/clone	1.259s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:00.0803195Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/create	4.294s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:00.0804282Z ?   	github.com/cli/cli/v2/pkg/cmd/repo/credits	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:00.0804892Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/delete	1.128s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:00.0806570Z ?   	github.com/cli/cli/v2/pkg/cmd/repo/deploy-key	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:00.0807351Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/deploy-key/add	1.144s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:00.0807982Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/deploy-key/delete	1.184s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:00.3267510Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/deploy-key/list	1.114s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:00.7535913Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/edit	1.103s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:01.1223180Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/fork	1.193s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:01.1238553Z ?   	github.com/cli/cli/v2/pkg/cmd/repo/gitignore	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:02.7323721Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/gitignore/list	1.107s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:03.1713825Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/gitignore/view	1.157s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:03.1714441Z ?   	github.com/cli/cli/v2/pkg/cmd/repo/license	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:03.4834554Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/license/list	1.053s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:03.8706752Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/license/view	1.082s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:05.7046453Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/list	1.220s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:06.5313048Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/read-dir	1.174s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:06.9009132Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/read-file	1.264s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:06.9781812Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/rename	1.122s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:08.3686442Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/setdefault	1.172s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:08.6101655Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/shared	1.063s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1735597Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/sync	7.544s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1736188Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/unarchive	1.112s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1736660Z ok  	github.com/cli/cli/v2/pkg/cmd/repo/view	1.506s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1737290Z --- FAIL: TestResetExperimentDetachesIntegrationWithoutDeletingAccounts (0.03s)
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1739207Z     reset_experiment_test.go:22: 
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1740890Z         	Error Trace:	D:/a/cli/cli/pkg/cmd/root/reset_experiment_test.go:22
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1741769Z         	Error:      	Received unexpected error:
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1742774Z         	            	persistent identities are not supported on Windows by this prototype
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1743692Z         	Test:       	TestResetExperimentDetachesIntegrationWithoutDeletingAccounts
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1744338Z Error: unknown flag: --anything
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1744559Z 
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1744691Z FAIL
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1745017Z FAIL	github.com/cli/cli/v2/pkg/cmd/root	1.680s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1745477Z ?   	github.com/cli/cli/v2/pkg/cmd/ruleset	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1745992Z ok  	github.com/cli/cli/v2/pkg/cmd/ruleset/check	1.071s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1746478Z ok  	github.com/cli/cli/v2/pkg/cmd/ruleset/list	1.126s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.1746994Z ?   	github.com/cli/cli/v2/pkg/cmd/ruleset/shared	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.7122929Z ok  	github.com/cli/cli/v2/pkg/cmd/ruleset/view	1.084s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:16.7124425Z ?   	github.com/cli/cli/v2/pkg/cmd/run	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:18.3852451Z ok  	github.com/cli/cli/v2/pkg/cmd/run/cancel	1.135s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:18.5980562Z ok  	github.com/cli/cli/v2/pkg/cmd/run/delete	1.087s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:19.2330619Z ok  	github.com/cli/cli/v2/pkg/cmd/run/download	1.135s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:19.7850060Z ok  	github.com/cli/cli/v2/pkg/cmd/run/list	1.185s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:21.2981971Z ok  	github.com/cli/cli/v2/pkg/cmd/run/rerun	1.141s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:21.4691046Z ok  	github.com/cli/cli/v2/pkg/cmd/run/shared	1.100s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:24.4298110Z ok  	github.com/cli/cli/v2/pkg/cmd/run/view	1.963s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:24.7522792Z ok  	github.com/cli/cli/v2/pkg/cmd/run/watch	1.069s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:24.7523220Z ?   	github.com/cli/cli/v2/pkg/cmd/search	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:25.1911261Z ok  	github.com/cli/cli/v2/pkg/cmd/search/code	1.332s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:25.2128921Z ok  	github.com/cli/cli/v2/pkg/cmd/search/commits	1.348s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:25.6793346Z ok  	github.com/cli/cli/v2/pkg/cmd/search/issues	1.212s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:27.7143147Z ok  	github.com/cli/cli/v2/pkg/cmd/search/prs	1.134s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:28.4263293Z ok  	github.com/cli/cli/v2/pkg/cmd/search/repos	1.131s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:28.4720445Z ok  	github.com/cli/cli/v2/pkg/cmd/search/shared	1.126s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:28.4721030Z ?   	github.com/cli/cli/v2/pkg/cmd/secret	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:28.7393281Z ok  	github.com/cli/cli/v2/pkg/cmd/secret/delete	1.143s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:30.7855787Z ok  	github.com/cli/cli/v2/pkg/cmd/secret/list	1.287s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:31.6100872Z ok  	github.com/cli/cli/v2/pkg/cmd/secret/set	1.250s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:31.6102658Z ok  	github.com/cli/cli/v2/pkg/cmd/secret/shared	1.071s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:31.9940954Z ok  	github.com/cli/cli/v2/pkg/cmd/send-telemetry	1.122s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:33.9585726Z ok  	github.com/cli/cli/v2/pkg/cmd/skills	1.396s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:35.7480038Z ok  	github.com/cli/cli/v2/pkg/cmd/skills/install	1.782s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:35.7487924Z ok  	github.com/cli/cli/v2/pkg/cmd/skills/list	1.227s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:38.8057972Z ok  	github.com/cli/cli/v2/pkg/cmd/skills/preview	3.971s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:38.8058983Z ok  	github.com/cli/cli/v2/pkg/cmd/skills/publish	1.387s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:38.8059719Z ok  	github.com/cli/cli/v2/pkg/cmd/skills/search	1.209s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:39.1327937Z ok  	github.com/cli/cli/v2/pkg/cmd/skills/update	1.205s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:39.1328999Z ?   	github.com/cli/cli/v2/pkg/cmd/ssh-key	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:39.8714956Z ok  	github.com/cli/cli/v2/pkg/cmd/ssh-key/add	1.094s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:41.6688787Z ok  	github.com/cli/cli/v2/pkg/cmd/ssh-key/delete	1.146s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:41.7635871Z ok  	github.com/cli/cli/v2/pkg/cmd/ssh-key/list	1.113s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:41.7637029Z ok  	github.com/cli/cli/v2/pkg/cmd/ssh-key/shared	1.087s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:43.2383545Z ok  	github.com/cli/cli/v2/pkg/cmd/status	1.347s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:43.2385595Z ?   	github.com/cli/cli/v2/pkg/cmd/variable	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:44.8654202Z ok  	github.com/cli/cli/v2/pkg/cmd/variable/delete	1.185s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:45.1251983Z ok  	github.com/cli/cli/v2/pkg/cmd/variable/get	1.260s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:45.3650224Z ok  	github.com/cli/cli/v2/pkg/cmd/variable/list	1.224s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:46.2531346Z ok  	github.com/cli/cli/v2/pkg/cmd/variable/set	1.166s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:47.4721260Z ok  	github.com/cli/cli/v2/pkg/cmd/variable/shared	1.072s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:47.7339327Z ok  	github.com/cli/cli/v2/pkg/cmd/version	1.074s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:47.7339896Z ?   	github.com/cli/cli/v2/pkg/cmd/workflow	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:48.1127065Z ok  	github.com/cli/cli/v2/pkg/cmd/workflow/disable	1.087s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:48.9495875Z ok  	github.com/cli/cli/v2/pkg/cmd/workflow/enable	1.114s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:50.4288467Z ok  	github.com/cli/cli/v2/pkg/cmd/workflow/list	1.148s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:50.6974138Z ok  	github.com/cli/cli/v2/pkg/cmd/workflow/run	1.125s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:50.9088064Z ok  	github.com/cli/cli/v2/pkg/cmd/workflow/shared	1.088s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:52.2439312Z ok  	github.com/cli/cli/v2/pkg/cmd/workflow/view	1.351s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:53.7852933Z ok  	github.com/cli/cli/v2/pkg/cmdutil	1.288s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:54.0349496Z ok  	github.com/cli/cli/v2/pkg/extensions	1.029s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:54.0349902Z ?   	github.com/cli/cli/v2/pkg/findsh	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:54.2431351Z ok  	github.com/cli/cli/v2/pkg/githubtemplate	1.101s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:54.2431874Z ?   	github.com/cli/cli/v2/pkg/httpmock	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:54.3703784Z ok  	github.com/cli/cli/v2/pkg/iostreams	1.042s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:54.8214264Z ok  	github.com/cli/cli/v2/pkg/jsoncolor	1.034s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:54.8215197Z ?   	github.com/cli/cli/v2/pkg/jsonfieldstest	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:54.8215908Z ?   	github.com/cli/cli/v2/pkg/markdown	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:55.0642749Z ok  	github.com/cli/cli/v2/pkg/option	1.026s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:57.7386886Z ok  	github.com/cli/cli/v2/pkg/search	1.114s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:57.7387526Z ok  	github.com/cli/cli/v2/pkg/set	1.028s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:57.7387895Z ?   	github.com/cli/cli/v2/pkg/ssh	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:57.7388324Z ok  	github.com/cli/cli/v2/pkg/surveyext	1.033s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:57.7388656Z ?   	github.com/cli/cli/v2/script	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:58.0305624Z ok  	github.com/cli/cli/v2/script/api-host-gateway/gateway	1.077s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:58.6942502Z ok  	github.com/cli/cli/v2/script/identity-e2e	1.041s
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:58.6943093Z ?   	github.com/cli/cli/v2/test	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:58.6943562Z ?   	github.com/cli/cli/v2/utils	[no test files]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:26:58.6943971Z FAIL
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.0546342Z ##[error]Process completed with exit code 1.
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.0766845Z Post job cleanup.
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.0770953Z ##[start-action display=Install Go;id=__a0bb9a7d-2ca6-47b6-bec2-c80c6a539a7b.__actions_setup-go]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.0772989Z ##[end-action id=__a0bb9a7d-2ca6-47b6-bec2-c80c6a539a7b.__actions_setup-go;outcome=skipped;conclusion=skipped;duration_ms=0]
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.0916026Z Post job cleanup.
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.2367668Z [command]"C:\Program Files\Git\bin\git.exe" version
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.2648825Z git version 2.56.0.windows.4
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.2708565Z Temporarily overriding HOME='D:\a\_temp\f33e141b-7760-47d9-b607-a7db25fe3919' before making global git config changes
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.2709506Z Adding repository directory to the temporary git global config as a safe directory
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.2718282Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\cli\cli
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.3063410Z Removing SSH command configuration
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.3076314Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+build (windows-latest)	UNKNOWN STEP	2026-11-03T21:27:00.3409516Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
