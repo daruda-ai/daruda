@@ -694,3 +694,60 @@ fn push_targets_are_read_only_while_the_feature_is_on(cx: &mut TestAppContext) {
     );
     assert_eq!(linked(&f, id, cx), Some((7, PrState::Open)));
 }
+
+#[gpui::test]
+fn a_focused_shell_is_passed_over_for_the_agent_chat(cx: &mut TestAppContext) {
+    let (f, gh) = linked_failing_lane(cx);
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            let shell = ws.active_runtime().focused_pane_id;
+            ws.split_focused_pane_kind(
+                super::NewPaneKind::AgentChat,
+                super::SplitDirection::Horizontal,
+                window,
+                cx,
+            );
+            ws.set_focused_pane(shell, window, cx);
+            ws.send_failed_checks(window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::FailedLog), 1);
+    let (input, chat_focused) = f.ws.read_with(cx, |ws, cx| {
+        let focused = ws.active_runtime().focused_pane_id;
+        let chat = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .any(|pane| pane.id == focused && pane.agent_chat_view().is_some());
+        (ws.input_dock.input.read(cx).value().to_string(), chat)
+    });
+    assert!(chat_focused, "the prompt went to the chat, not the shell");
+    assert!(input.contains("Pull request #7"), "{input}");
+}
+
+#[gpui::test]
+fn a_failed_read_frees_the_buttons_and_says_so(cx: &mut TestAppContext) {
+    let (f, gh) = linked_failing_lane(cx);
+    gh.fail(
+        GhOp::ReviewThreads,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "error connecting to api.github.com".into(),
+        },
+    );
+    let before = toasts(&f, cx).len();
+    let input = send_reviews_with_a_chat(&f, cx);
+    assert!(input.is_empty(), "nothing was inserted: {input}");
+    assert!(toasts(&f, cx).len() > before);
+    let work = f.ws.read_with(cx, |ws, _| {
+        let lane = ws.active_ref();
+        ws.lane_scoped.get(&lane).map(|state| state.pr_work)
+    });
+    assert_eq!(
+        work,
+        Some(crate::workspace::lane_scoped::PrWork::Idle),
+        "the send buttons work again"
+    );
+}

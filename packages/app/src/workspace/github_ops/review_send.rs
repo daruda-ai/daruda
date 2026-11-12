@@ -20,32 +20,28 @@ use crate::workspace::main_area::pane_tree::PaneId;
 const NOT_ACTIONS: &str = "not a GitHub Actions check";
 
 impl Workspace {
-    /// The pane the prompt goes to: the focused one if it is an agent chat
-    /// or a terminal in bracketed-paste mode, else an agent chat in the
-    /// active tab, else one in another tab. A terminal without bracketed
-    /// paste would run each line of a pasted log.
+    /// The pane the prompt goes to: a writable agent chat, the focused one
+    /// first, then one in the active tab, then one in another tab.
+    ///
+    /// Never a terminal: a shell's line editor turns bracketed paste on too,
+    /// so a terminal cannot tell an agent CLI from a prompt where Enter would
+    /// run each line of a pasted log.
     pub(in crate::workspace) fn pr_send_target(&self, cx: &App) -> Option<PaneId> {
         let runtime = self.active_runtime();
-        let focused = runtime
-            .panes
-            .iter()
-            .find(|pane| pane.id == runtime.focused_pane_id)
-            .filter(|pane| {
-                pane.agent_chat_view().is_some()
-                    || pane
-                        .terminal_view()
-                        .is_some_and(|view| view.read(cx).session().bracketed_paste_enabled())
-            });
-        if let Some(pane) = focused {
-            return Some(pane.id);
-        }
         let active_tab = runtime.active_tab_index;
         runtime
             .panes
             .iter()
-            .filter(|pane| pane.agent_chat_view().is_some())
-            .filter_map(|pane| Some((self.tab_index_for_pane(pane.id)?, pane.id)))
-            .min_by_key(|(tab, _)| (*tab != active_tab, *tab))
+            .filter(|pane| {
+                pane.agent_chat_view()
+                    .is_some_and(|view| !view.read(cx).is_read_only())
+            })
+            .filter_map(|pane| {
+                let tab = self.tab_index_for_pane(pane.id)?;
+                let rank = (pane.id != runtime.focused_pane_id, tab != active_tab, tab);
+                Some((rank, pane.id))
+            })
+            .min_by_key(|(rank, _)| *rank)
             .map(|(_, id)| id)
     }
 

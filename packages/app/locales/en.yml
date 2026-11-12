@@ -1560,7 +1560,7 @@ error:
   github_pr_create_failed: "Creating the pull request failed"
   github_git_busy: "Another git operation is running; try again when it finishes"
   github_no_agent_pane: "Open an agent chat in this worktree to send it there"
-  github_lane_changed: "The worktree changed while the logs were read; nothing was sent"
+  github_lane_changed: "The worktree changed while reading from GitHub; nothing was sent"
   github_send_failed: "The agent pane did not take the text"
   github_no_open_comments: "This pull request has no unresolved review comments"
   github_read_failed: "Reading from GitHub failed"
