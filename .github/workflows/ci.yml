@@ -127,6 +127,11 @@ jobs:
           bash ./scripts/lint-real-git-tests.sh --self-test
           bash ./scripts/lint-real-git-tests.sh
 
+      - name: Lint — app tests reach gh only through GhHost
+        run: |
+          bash ./scripts/lint-real-gh-tests.sh --self-test
+          bash ./scripts/lint-real-gh-tests.sh
+
       - name: Lint — no silent update swallowing
         run: ./scripts/lint-no-silent-update.sh
 

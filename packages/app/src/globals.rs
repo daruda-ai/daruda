@@ -27,6 +27,7 @@ pub(crate) fn init_all(cx: &mut App) {
     ui::theme::apply_daruda_palette(cx);
     crate::settings_store::SettingsStore::init(cx);
     crate::git_host::GitHost::init_if_missing(cx);
+    crate::gh_host::GhHost::init_if_missing(cx);
     {
         let user = crate::settings_store::SettingsStore::global(cx).user();
         let preset = user.theme.ui_preset.clone();
@@ -91,6 +92,7 @@ pub(crate) fn init_all(cx: &mut App) {
     crate::overage_policy::OveragePolicy::sync(cx);
     register_settings_observer(cx);
     crate::settings_store::spawn_file_watch(cx);
+    crate::github::PrPoller::start(cx);
 }
 
 /// App-level `cx.observe_global::<SettingsStore>` callback for the

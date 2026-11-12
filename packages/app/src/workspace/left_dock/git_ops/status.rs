@@ -182,8 +182,9 @@ impl Workspace {
                             state.git.tracking = Some(data);
                         }
                         // Every ref move lands here, so this is the one place
-                        // the against-base axis needs to hear about it.
+                        // the axes riding on tracking need to hear about it.
                         ws.refresh_against_base(target, cx);
+                        ws.refresh_push_target(target, cx);
                     }
                     Err(e) => {
                         // Only the header's ahead/behind and the lane badges

@@ -8,7 +8,7 @@ use crate::files::gitignore::GitignoreSet;
 use crate::files::tree::FileTree;
 use crate::files::watcher::FileTreeWatcher;
 use crate::lane::git::base::{AgainstBase, BaseProblem};
-use crate::lane::git::{GitDirs, GitTracking, GitWorktreeStatus};
+use crate::lane::git::{GitDirs, GitTracking, GitWorktreeStatus, PushTarget};
 use crate::workspace::left_dock::file_tree_ops::{FilesReloadQueue, VisibleEntry};
 use crate::workspace::main_area::bottom_dock::{InputHistory, QueuedInputCache};
 
@@ -18,6 +18,10 @@ pub(in crate::workspace) struct LaneScoped {
     pub files: FileTreeLaneState,
     pub input_history: InputHistory,
     pub queued_input_cache: QueuedInputCache,
+    /// The pull request this lane's branch belongs to, if any. Written only
+    /// through `github_ops::link`; never persisted, since the next poll
+    /// answers it again.
+    pub pr: Option<crate::github::PrLink>,
     /// Expanded-sidebar disclosure for this app session, independent of rail grouping.
     pub show_individual_panes: bool,
 }
@@ -102,6 +106,11 @@ pub(in crate::workspace) struct GitLaneState {
     /// Shared so the per-render dock snapshot clones a pointer, not the list.
     pub against_base: Option<Arc<Result<AgainstBase, BaseProblem>>>,
     pub against_base_refresh: RefreshSlot,
+    /// Where `git push` sends this lane's branch. Like `against_base`, it
+    /// rides the tracking axis: only a ref or config change moves it.
+    /// `None` until read, and for a detached HEAD or a repo with no remote.
+    pub push_target: Option<PushTarget>,
+    pub push_target_refresh: RefreshSlot,
     /// The Git Changes view's against-base section, folded. Session only.
     pub against_base_collapsed: bool,
     /// Where this lane's git state lives on disk — needed to watch it.
