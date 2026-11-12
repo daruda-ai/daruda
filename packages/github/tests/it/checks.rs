@@ -1,14 +1,38 @@
 use daruda_github::checks::{
     actions_job, check_run_status, rollup_from_state, status_context_status, summarize,
 };
-use daruda_github::{ActionsJob, CheckRollup, CheckRun, CheckStatus};
+use daruda_github::{ActionsJob, CheckKind, CheckRollup, CheckRun, CheckStatus};
 
 fn run(name: &str, status: CheckStatus, started: &str) -> CheckRun {
     CheckRun {
+        kind: CheckKind::Run,
+        workflow: Some("CI".into()),
         name: name.into(),
         status,
         details_url: None,
         started_at: Some(started.into()),
+    }
+}
+
+fn queued(name: &str) -> CheckRun {
+    CheckRun {
+        started_at: None,
+        ..run(name, CheckStatus::Pending, "")
+    }
+}
+
+fn in_workflow(run: CheckRun, workflow: &str) -> CheckRun {
+    CheckRun {
+        workflow: Some(workflow.into()),
+        ..run
+    }
+}
+
+fn status(run: CheckRun) -> CheckRun {
+    CheckRun {
+        kind: CheckKind::Status,
+        workflow: None,
+        ..run
     }
 }
 
@@ -91,6 +115,24 @@ fn checks_add_up_by_the_one_rule() {
         (
             "a re-run that failed replaces the pass, whatever the order",
             vec![run("a", Failure, "2"), run("a", Success, "1")],
+            CheckRollup::Failing { failed: 1 },
+        ),
+        (
+            "a queued re-run replaces the failure it re-runs",
+            vec![run("a", Failure, "1"), queued("a")],
+            CheckRollup::Pending,
+        ),
+        (
+            "the same job name in two workflows is two checks",
+            vec![
+                run("build", Failure, "1"),
+                in_workflow(run("build", Success, "2"), "Release"),
+            ],
+            CheckRollup::Failing { failed: 1 },
+        ),
+        (
+            "a status context does not replace a check run of the same name",
+            vec![run("lint", Failure, "1"), status(run("lint", Success, "2"))],
             CheckRollup::Failing { failed: 1 },
         ),
     ];

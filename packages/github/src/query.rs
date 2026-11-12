@@ -11,11 +11,14 @@ use serde::Deserialize;
 
 use crate::checks::{check_run_status, rollup_from_state, status_context_status, summarize};
 use crate::{
-    CheckRollup, CheckRun, GhError, PrState, PrSummary, ReviewComment, ReviewDecision,
+    CheckKind, CheckRollup, CheckRun, GhError, PrState, PrSummary, ReviewComment, ReviewDecision,
     ReviewThread, ReviewThreads,
 };
 
 /// PRs fetched per branch: enough to find an open one among old closed ones.
+/// Fork PRs with the same head name count against it; `ref.associatedPullRequests`
+/// would exclude them but loses a merged PR once its branch is deleted
+/// (the ref is null then — measured on `cli/cli`).
 const PRS_PER_BRANCH: u32 = 5;
 /// Checks fetched per PR; beyond this GitHub's own rollup state is used.
 const CHECKS_PER_PR: u32 = 100;
@@ -46,7 +49,8 @@ pub fn prs_for_branches_query(count: usize) -> String {
          fragment pr on PullRequest {{ number url title state isDraft headRefName \
          isCrossRepository reviewDecision updatedAt statusCheckRollup {{ state \
          contexts(first: {CHECKS_PER_PR}) {{ pageInfo {{ hasNextPage }} nodes {{ __typename \
-         ... on CheckRun {{ name status conclusion detailsUrl startedAt }} \
+         ... on CheckRun {{ name status conclusion detailsUrl startedAt \
+         checkSuite {{ workflowRun {{ workflow {{ name }} }} }} }} \
          ... on StatusContext {{ context state targetUrl createdAt }} }} }} }} }}"
     )
 }
@@ -97,7 +101,7 @@ pub const REVIEW_THREADS_QUERY: &str = "query($owner: String!, $name: String!, $
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
     reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved isOutdated path \
     line startLine originalLine originalStartLine \
-    comments(first: 20) { nodes { author { login } body } } } } } } }";
+    comments(first: 20) { totalCount nodes { author { login } body } } } } } } }";
 
 /// Parse the answer to [`REVIEW_THREADS_QUERY`], keeping the unresolved
 /// threads. An outdated thread has no current line; where it was written is
@@ -128,10 +132,15 @@ pub fn parse_review_threads(json: &str) -> Result<ReviewThreads, GhError> {
         .map(|thread| {
             let end = thread.line.or(thread.original_line);
             let start = thread.start_line.or(thread.original_start_line).or(end);
+            let more_comments = thread
+                .comments
+                .total_count
+                .is_some_and(|total| total as usize > thread.comments.nodes.len());
             ReviewThread {
                 path: thread.path,
                 lines: end.zip(start).map(|(end, start)| (start.min(end), end)),
                 outdated: thread.is_outdated,
+                more_comments,
                 comments: thread
                     .comments
                     .nodes
@@ -194,7 +203,10 @@ struct ThreadNode {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CommentConnection {
+    #[serde(default)]
+    total_count: Option<u32>,
     nodes: Vec<CommentNode>,
 }
 
@@ -284,6 +296,8 @@ enum Context {
         conclusion: Option<String>,
         details_url: Option<String>,
         started_at: Option<String>,
+        #[serde(default)]
+        check_suite: Option<CheckSuite>,
     },
     #[serde(rename_all = "camelCase")]
     StatusContext {
@@ -292,6 +306,22 @@ enum Context {
         target_url: Option<String>,
         created_at: Option<String>,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CheckSuite {
+    workflow_run: Option<WorkflowRun>,
+}
+
+#[derive(Deserialize)]
+struct WorkflowRun {
+    workflow: Workflow,
+}
+
+#[derive(Deserialize)]
+struct Workflow {
+    name: String,
 }
 
 impl Context {
@@ -303,7 +333,12 @@ impl Context {
                 conclusion,
                 details_url,
                 started_at,
+                check_suite,
             } => CheckRun {
+                kind: CheckKind::Run,
+                workflow: check_suite
+                    .and_then(|suite| suite.workflow_run)
+                    .map(|run| run.workflow.name),
                 status: check_run_status(&status, conclusion.as_deref()),
                 name,
                 details_url,
@@ -315,6 +350,8 @@ impl Context {
                 target_url,
                 created_at,
             } => CheckRun {
+                kind: CheckKind::Status,
+                workflow: None,
                 status: status_context_status(&state),
                 name: context,
                 details_url: target_url,
@@ -360,6 +397,11 @@ impl PrNode {
                     }
                 } else {
                     counted
+                };
+                // `failed` lists what is behind `Failing`, nothing else.
+                let failed = match checks {
+                    CheckRollup::Failing { .. } => failed,
+                    _ => Vec::new(),
                 };
                 (checks, failed)
             }

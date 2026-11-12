@@ -38,14 +38,29 @@ pub enum ReviewDecision {
     ReviewRequired,
 }
 
+/// Where a check comes from. A check run and a commit status are separate
+/// namespaces: the same name in both is two checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CheckKind {
+    /// A check run (GitHub Actions or another app).
+    Run,
+    /// A commit status context (external CI).
+    Status,
+}
+
 /// One check as GitHub reports it, before [`crate::checks::summarize`]
 /// decides what it counts as.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckRun {
+    pub kind: CheckKind,
+    /// The Actions workflow a check run belongs to; two workflows may each
+    /// have a job of the same name.
+    pub workflow: Option<String>,
     pub name: String,
     pub status: CheckStatus,
     pub details_url: Option<String>,
-    /// RFC 3339, so later runs sort after earlier ones as strings.
+    /// RFC 3339, so later runs sort after earlier ones as strings. `None`
+    /// for a run still queued.
     pub started_at: Option<String>,
 }
 
@@ -104,6 +119,8 @@ pub struct ReviewThread {
     /// The diff moved since; `lines` are where it was written.
     pub outdated: bool,
     pub comments: Vec<ReviewComment>,
+    /// The thread has more replies than one request reads.
+    pub more_comments: bool,
 }
 
 /// The unresolved threads of a pull request.

@@ -2,7 +2,7 @@
 //! (`cli/cli`, gh 2.74.2): its first line and the `go test` step through
 //! post-job cleanup, ANSI escapes and BOM included.
 
-use daruda_github::prompt::{CheckLog, clean_log, failed_checks, strip_control};
+use daruda_github::prompt::{CheckLog, clean_log, failed_checks, one_line, strip_control};
 use daruda_github::{CheckRollup, FailedCheck, PrState, PrSummary};
 
 fn fixture() -> String {
@@ -44,10 +44,20 @@ fn control_characters_cannot_reach_a_terminal() {
         ("bom", "\u{feff}x", "x"),
         ("newline and tab stay", "a\n\tb", "a\n\tb"),
         ("unicode stays", "한글 ✓", "한글 ✓"),
+        (
+            "a cut-short csi keeps what follows",
+            "a\u{1b}[31\nb",
+            "a\nb",
+        ),
     ];
     for (label, input, expected) in cases {
         assert_eq!(strip_control(input), expected, "{label}");
     }
+}
+
+#[test]
+fn one_line_fields_cannot_start_a_line() {
+    assert_eq!(one_line("build\n## injected\tx"), "build ## injected x");
 }
 
 #[test]
@@ -69,6 +79,15 @@ fn a_real_log_is_cut_to_the_step_that_failed() {
     assert!(!log.contains("2026-11-03T"), "timestamps are dropped");
     assert!(!log.contains('\u{1b}'));
     assert!(log.chars().count() <= 9_100, "elided to head + tail");
+}
+
+#[test]
+fn without_an_error_marker_the_last_step_is_kept() {
+    let raw = "j\ts\t2026-01-01T00:00:00.0000000Z ##[group]Run setup\n\
+               j\ts\t2026-01-01T00:00:00.0000000Z ok\n\
+               j\ts\t2026-01-01T00:00:00.0000000Z ##[group]Run test\n\
+               j\ts\t2026-01-01T00:00:00.0000000Z killed";
+    assert_eq!(clean_log(raw), "##[group]Run test\nkilled");
 }
 
 #[test]

@@ -63,6 +63,7 @@ fn remote_urls_name_their_repository() {
         ("relative path", "../r.git", None),
         ("file url", "file:///srv/git/r.git", None),
         ("windows path", "C:\\repos\\r.git", None),
+        ("windows path with slashes", "C:/repos/r.git", None),
         ("empty", "", None),
     ];
     for (label, url, expected) in cases {

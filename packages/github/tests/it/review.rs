@@ -85,18 +85,21 @@ fn the_prompt_places_each_comment_and_indents_replies() {
                     comment(Some("rev"), "Rename this.\nIt reads oddly."),
                     comment(None, "Agreed"),
                 ],
+                more_comments: true,
             },
             ReviewThread {
                 path: "src/b.rs".into(),
                 lines: Some((7, 7)),
                 outdated: true,
                 comments: vec![comment(Some("rev"), "\u{1b}[31mstale\u{1b}[0m")],
+                more_comments: false,
             },
             ReviewThread {
                 path: "README.md".into(),
                 lines: None,
                 outdated: false,
                 comments: vec![comment(Some("rev"), "Whole file")],
+                more_comments: false,
             },
         ],
         truncated: true,
@@ -104,11 +107,35 @@ fn the_prompt_places_each_comment_and_indents_replies() {
     let prompt = review_threads(&pr(), &threads).unwrap();
     assert!(prompt.starts_with("Pull request #9 (Tidy) has unresolved review comments."));
     assert!(prompt.contains(
-        "In src/a.rs:L12-L20:\n> rev: Rename this.\n> It reads oddly.\n  > (deleted user): Agreed\n"
+        "In src/a.rs:L12-L20:\n> rev: Rename this.\n> It reads oddly.\n  > (deleted user): Agreed\n  (more replies on GitHub)\n"
     ));
     assert!(prompt.contains("In src/b.rs:L7 (outdated):\n> rev: stale\n"));
     assert!(prompt.contains("In README.md:\n> rev: Whole file\n"));
     assert!(prompt.contains("more threads exist on GitHub"));
+}
+
+#[test]
+fn huge_comments_stay_within_the_budget() {
+    let body = "x".repeat(60_000);
+    let threads = ReviewThreads {
+        threads: (0..20)
+            .map(|i| ReviewThread {
+                path: format!("src/{i}.rs"),
+                lines: Some((1, 1)),
+                outdated: false,
+                comments: vec![comment(Some("rev"), &body)],
+                more_comments: false,
+            })
+            .collect(),
+        truncated: false,
+    };
+    let prompt = review_threads(&pr(), &threads).unwrap();
+    assert!(
+        prompt.chars().count() <= 30_100,
+        "{}",
+        prompt.chars().count()
+    );
+    assert!(prompt.contains("the prompt is full"));
 }
 
 #[test]

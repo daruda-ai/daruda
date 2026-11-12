@@ -48,7 +48,7 @@ impl std::fmt::Display for CaptureError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Spawn(e) => write!(f, "spawn: {e}"),
-            Self::Timeout(d) => write!(f, "timed out after {}s", d.as_secs()),
+            Self::Timeout(d) => write!(f, "timed out after {:.1}s", d.as_secs_f64()),
             Self::Overflow { limit } => write!(f, "output exceeded {limit} bytes"),
         }
     }

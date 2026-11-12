@@ -416,6 +416,7 @@ fn open_review_threads_land_in_the_agent_input(cx: &mut TestAppContext) {
                     author: Some("rev".into()),
                     body: "Name this better.".into(),
                 }],
+                more_comments: false,
             }],
             truncated: false,
         },

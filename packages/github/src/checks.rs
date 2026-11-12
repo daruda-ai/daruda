@@ -1,12 +1,12 @@
 //! The one place that decides what a pull request's checks add up to.
 //!
 //! Cancelled and timed-out runs count as failures; skipped, neutral and stale
-//! ones are left out; a check re-run under the same name counts only its
-//! latest run.
+//! ones are left out; a check re-run counts only its latest run, a queued
+//! re-run included. A check is identified by its kind, workflow and name.
 
 use std::collections::HashMap;
 
-use crate::{ActionsJob, CheckRollup, CheckRun, CheckStatus, FailedCheck};
+use crate::{ActionsJob, CheckKind, CheckRollup, CheckRun, CheckStatus, FailedCheck};
 
 /// A check run's `status` and `conclusion`, as GitHub's GraphQL spells them.
 pub fn check_run_status(status: &str, conclusion: Option<&str>) -> CheckStatus {
@@ -45,12 +45,12 @@ pub fn rollup_from_state(state: &str) -> CheckRollup {
 
 /// Add `runs` up, returning the rollup and the failing checks behind it.
 pub fn summarize(runs: &[CheckRun]) -> (CheckRollup, Vec<FailedCheck>) {
-    let mut latest: HashMap<&str, &CheckRun> = HashMap::new();
+    let mut latest: HashMap<Key<'_>, &CheckRun> = HashMap::new();
     for run in runs {
         latest
-            .entry(run.name.as_str())
+            .entry(key(run))
             .and_modify(|kept| {
-                if run.started_at > kept.started_at {
+                if is_newer(run, kept) {
                     *kept = run;
                 }
             })
@@ -59,7 +59,7 @@ pub fn summarize(runs: &[CheckRun]) -> (CheckRollup, Vec<FailedCheck>) {
     // Input order, so the failures read in the order GitHub listed them.
     let counted: Vec<&CheckRun> = runs
         .iter()
-        .filter(|run| std::ptr::eq(latest[run.name.as_str()], *run))
+        .filter(|run| std::ptr::eq(latest[&key(run)], *run))
         .filter(|run| run.status != CheckStatus::Ignored)
         .collect();
     let failed: Vec<FailedCheck> = counted
@@ -83,6 +83,21 @@ pub fn summarize(runs: &[CheckRun]) -> (CheckRollup, Vec<FailedCheck>) {
         CheckRollup::Passing
     };
     (rollup, failed)
+}
+
+type Key<'a> = (CheckKind, Option<&'a str>, &'a str);
+
+fn key(run: &CheckRun) -> Key<'_> {
+    (run.kind, run.workflow.as_deref(), run.name.as_str())
+}
+
+/// A queued run has not started yet, so it is newer than any run that has.
+fn is_newer(run: &CheckRun, kept: &CheckRun) -> bool {
+    match (&run.started_at, &kept.started_at) {
+        (None, Some(_)) => true,
+        (Some(_), None) => false,
+        (a, b) => a > b,
+    }
 }
 
 /// The Actions job a check's details URL points at:

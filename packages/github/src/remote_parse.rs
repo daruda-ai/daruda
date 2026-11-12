@@ -18,7 +18,8 @@ pub fn parse_remote(url: &str) -> Option<RepoId> {
     } else {
         // scp-like syntax needs a `:` before any `/`; otherwise it is a path.
         let (authority, path) = url.split_once(':')?;
-        if authority.contains('/') || authority.is_empty() {
+        // `C:/repos/r.git` is a Windows path, as git reads it too.
+        if authority.contains('/') || authority.len() <= 1 {
             return None;
         }
         (authority, path)

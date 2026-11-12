@@ -30,6 +30,11 @@ fn failures_are_classified_for_the_poller() {
         ("gh missing", GhError::NotFound, FailureKind::Missing),
         ("no login", exit(4, "gh auth login"), FailureKind::LoggedOut),
         (
+            "revoked token",
+            exit(1, "gh: Bad credentials (HTTP 401)"),
+            FailureKind::LoggedOut,
+        ),
+        (
             "rate limit",
             exit(1, "HTTP 403: API rate limit exceeded for user"),
             FailureKind::RateLimited,

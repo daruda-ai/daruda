@@ -61,6 +61,9 @@ impl GhError {
             Self::NotFound => FailureKind::Missing,
             // `gh` exits 4 when a command needs a login it does not have.
             Self::Exit { code: Some(4), .. } => FailureKind::LoggedOut,
+            // ASSUMPTION: not measured — a revoked or expired token reaches
+            // `gh api` as GitHub's HTTP 401, which gh echoes on stderr.
+            Self::Exit { stderr, .. } if stderr.contains("HTTP 401") => FailureKind::LoggedOut,
             // ASSUMPTION: not measured — gh relays GitHub's "API rate limit
             // exceeded" message on stderr; matched loosely in case it varies.
             Self::Exit { stderr, .. } if stderr.to_ascii_lowercase().contains("rate limit") => {
