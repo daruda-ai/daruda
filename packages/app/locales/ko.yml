@@ -1096,6 +1096,7 @@ error:
   git_init_probe_failed: "git init은 성공했지만 저장소 확인에 실패했습니다"
   git_pull_failed: "git pull 실패"
   git_push_failed: "git push 실패"
+  git_push_target_failed: "이 브랜치의 push 대상을 읽지 못했습니다"
   github_pr_create_failed: "Pull request 만들기 실패"
   github_no_agent_pane: "보낼 곳이 없습니다. 이 worktree에 에이전트 채팅을 여세요"
   github_lane_changed: "로그를 읽는 동안 worktree가 바뀌어 보내지 않았습니다"

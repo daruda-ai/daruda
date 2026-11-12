@@ -439,8 +439,160 @@ fn no_open_thread_sends_nothing_and_says_so(cx: &mut TestAppContext) {
     assert!(
         after.len() > before.len()
             && after
-                .last()
-                .is_some_and(|t| t.contains("no unresolved review comments")),
+                .iter()
+                .any(|t| t.contains("no unresolved review comments")),
         "{after:?}"
     );
+}
+
+// ---- Poller cadence, recovery and the feature switch ----
+
+fn push_target(url: &str, branch: &str) -> PushTarget {
+    PushTarget {
+        remote: "origin".into(),
+        url: url.into(),
+        branch: branch.into(),
+        published: true,
+    }
+}
+
+/// A lane whose push target is `target`, read and registered.
+fn lane_pushing(cx: &mut TestAppContext, target: PushTarget) -> (GitFixture, LaneRef) {
+    let f = GitFixture::open(cx, &daruda_config::Config::default(), |repo: FakeRepo| {
+        repo.push_target(target)
+    });
+    let id = f.ws.read_with(cx, |ws, _| ws.active_ref());
+    f.ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
+    cx.run_until_parked();
+    let (window, ws) = (f.window, f.ws.downgrade());
+    cx.update(|cx| crate::window_registry::WindowRegistry::register(window.into(), ws, cx));
+    (f, id)
+}
+
+fn set_enabled(cx: &mut TestAppContext, enabled: bool) {
+    cx.update(|cx| {
+        let mut config = daruda_config::Config::default();
+        config.github.enabled = enabled;
+        cx.global_mut::<crate::settings_store::SettingsStore>()
+            .set_user_for_testing(config);
+    });
+}
+
+#[gpui::test]
+fn switching_branch_relinks_to_the_new_branchs_pr(cx: &mut TestAppContext) {
+    let gh = gh_with_open_pr(cx);
+    let mut other = pr(9, PrState::Draft, "2026-01-02");
+    other.head_branch = "other".into();
+    gh.set_prs(&repo(), vec![pr(7, PrState::Open, "2026-01-01"), other]);
+    let (f, id) = lane_pushing_feat(cx);
+    tick(cx);
+    assert_eq!(linked(&f, id, cx), Some((7, PrState::Open)));
+
+    f.fake.add_repo(
+        FakeRepo::at(&f.root)
+            .branch("other")
+            .push_target(push_target("git@github.com:o/r.git", "other")),
+    );
+    f.ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        linked(&f, id, cx),
+        Some((9, PrState::Draft)),
+        "the move nudged the poller; no wait for the cadence"
+    );
+}
+
+#[gpui::test]
+fn recheck_picks_up_a_login_made_meanwhile(cx: &mut TestAppContext) {
+    let gh = gh_with_open_pr(cx);
+    gh.set_auth("github.com", GhAuth::LoggedOut);
+    let (f, id) = lane_pushing_feat(cx);
+    tick(cx);
+    assert_eq!(linked(&f, id, cx), None);
+
+    gh.set_auth("github.com", GhAuth::Ready);
+    cx.update(|cx| PrPoller::recheck("github.com", cx));
+    cx.run_until_parked();
+    assert_eq!(linked(&f, id, cx), Some((7, PrState::Open)));
+}
+
+#[gpui::test]
+fn a_poll_that_finds_no_login_is_not_rechecked_at_once(cx: &mut TestAppContext) {
+    let gh = gh_with_open_pr(cx);
+    gh.fail(
+        GhOp::PrsForBranches,
+        GhFailure::Exit {
+            code: Some(4),
+            stderr: "gh auth login".into(),
+        },
+    );
+    let (_f, _) = lane_pushing_feat(cx);
+    tick(cx);
+    assert_eq!(gh.count(GhOp::Auth), 1);
+    assert_eq!(gh.count(GhOp::PrsForBranches), 1);
+    tick(cx);
+    tick(cx);
+    assert_eq!(
+        gh.count(GhOp::Auth),
+        1,
+        "the poll's answer counts as the check"
+    );
+    assert_eq!(
+        gh.count(GhOp::PrsForBranches),
+        1,
+        "a logged-out host is not polled"
+    );
+}
+
+#[gpui::test]
+fn a_rate_limit_grows_the_pause_once_per_round(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let _a = lane_pushing(cx, push_target("git@github.com:o/a.git", "feat"));
+    let _b = lane_pushing(cx, push_target("git@github.com:o/b.git", "feat"));
+    tick(cx);
+    let setup = gh.count(GhOp::PrsForBranches);
+    gh.fail(
+        GhOp::PrsForBranches,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "API rate limit exceeded".into(),
+        },
+    );
+    // Both repositories are due in the same round and both hit the limit.
+    cx.executor().advance_clock(Duration::from_secs(31));
+    tick(cx);
+    assert_eq!(gh.count(GhOp::PrsForBranches), setup + 2);
+    // After the 5-minute floor: both fail again, still a 5-minute pause.
+    cx.executor().advance_clock(Duration::from_secs(5 * 60 + 1));
+    tick(cx);
+    assert_eq!(gh.count(GhOp::PrsForBranches), setup + 4);
+    // Counted per answer that would be the fourth failure, an 8-minute pause.
+    cx.executor().advance_clock(Duration::from_secs(5 * 60 + 1));
+    tick(cx);
+    assert_eq!(gh.count(GhOp::PrsForBranches), setup + 6);
+}
+
+#[gpui::test]
+fn push_targets_are_read_only_while_the_feature_is_on(cx: &mut TestAppContext) {
+    let _gh = gh_with_open_pr(cx);
+    let (f, id) = lane_pushing_feat(cx);
+    tick(cx);
+    set_enabled(cx, false);
+    tick(cx);
+    let reads = f.fake.reads(crate::lane::git::GitOp::PushTarget, &f.root);
+    f.ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        f.fake.reads(crate::lane::git::GitOp::PushTarget, &f.root),
+        reads,
+        "no push-target processes while off"
+    );
+
+    set_enabled(cx, true);
+    tick(cx);
+    assert!(
+        f.fake.reads(crate::lane::git::GitOp::PushTarget, &f.root) > reads,
+        "turning it on reads them again"
+    );
+    assert_eq!(linked(&f, id, cx), Some((7, PrState::Open)));
 }

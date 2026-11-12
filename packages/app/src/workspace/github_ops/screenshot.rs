@@ -1,10 +1,16 @@
-//! Pull-request fixtures for captures; no `gh` or `git` process runs.
+//! Pull-request fixtures for captures. A scripted `FakeGh` that answers the
+//! same as the seeds replaces the real one, so the running poller neither
+//! reaches GitHub with the developer's login nor overwrites what was seeded.
 
-use daruda_github::availability::GhAvailability;
+use std::sync::Arc;
+
+use daruda_github::availability::{GhAuth, GhAvailability};
+use daruda_github::fake::FakeGh;
 use daruda_github::{CheckRollup, FailedCheck, PrState, PrSummary, RepoId};
 use daruda_store::project::LaneRef;
 use gpui::Context;
 
+use crate::gh_host::GhHost;
 use crate::github::{PrLink, PrPoller};
 use crate::lane::git::PushTarget;
 use crate::workspace::Workspace;
@@ -19,7 +25,7 @@ fn repo() -> RepoId {
     }
 }
 
-fn pr(number: u64, title: &str, state: PrState, checks: CheckRollup) -> PrSummary {
+fn pr(number: u64, head: &str, title: &str, state: PrState, checks: CheckRollup) -> PrSummary {
     let failed = match checks {
         CheckRollup::Failing { failed } => (0..failed)
             .map(|i| FailedCheck {
@@ -35,7 +41,7 @@ fn pr(number: u64, title: &str, state: PrState, checks: CheckRollup) -> PrSummar
         url: format!("https://github.com/daruda/daruda/pull/{number}"),
         title: title.into(),
         state,
-        head_branch: "sidebar-sizing".into(),
+        head_branch: head.into(),
         cross_repo: false,
         checks,
         failed,
@@ -55,6 +61,14 @@ pub(in crate::workspace) enum PrShot {
     GhMissing,
 }
 
+/// Answer for GitHub the way the seeds say it is.
+fn install_fake_gh(auth: GhAuth, prs: Vec<PrSummary>, cx: &mut gpui::App) {
+    let gh = FakeGh::new();
+    gh.set_auth(HOST, auth);
+    gh.set_prs(&repo(), prs);
+    GhHost::set_global(Arc::new(gh), cx);
+}
+
 impl Workspace {
     fn seed_push_target_for_shot(&mut self, target: LaneRef, branch: &str) {
         self.lane_scoped_mut(target).git.push_target = Some(PushTarget {
@@ -67,23 +81,32 @@ impl Workspace {
 
     /// The active lane pushing to GitHub, its PR as `shot` says.
     pub(in crate::workspace) fn seed_pr_for_shot(&mut self, shot: PrShot, cx: &mut Context<Self>) {
+        const BRANCH: &str = "sidebar-sizing";
         let active = self.active;
-        self.seed_push_target_for_shot(active, "sidebar-sizing");
-        let availability = match shot {
-            PrShot::Linked | PrShot::NoPr => GhAvailability::Ready,
-            PrShot::GhMissing => GhAvailability::Missing,
+        self.seed_push_target_for_shot(active, BRANCH);
+        let linked = pr(
+            482,
+            BRANCH,
+            "Adjust sidebar presentation for narrow docks",
+            PrState::Open,
+            CheckRollup::Failing { failed: 2 },
+        );
+        let (auth, availability, prs) = match shot {
+            PrShot::Linked => (GhAuth::Ready, GhAvailability::Ready, vec![linked.clone()]),
+            PrShot::NoPr => (GhAuth::Ready, GhAvailability::Ready, Vec::new()),
+            PrShot::GhMissing => (GhAuth::Missing, GhAvailability::Missing, Vec::new()),
         };
+        install_fake_gh(auth, prs, cx);
         PrPoller::seed_for_shot(HOST, availability, cx);
         if shot == PrShot::Linked {
-            self.lane_scoped_mut(active).pr = Some(PrLink {
-                repo: repo(),
-                pr: pr(
-                    482,
-                    "Adjust sidebar presentation for narrow docks",
-                    PrState::Open,
-                    CheckRollup::Failing { failed: 2 },
-                ),
-            });
+            self.seed_pr_link_for_shot(
+                active,
+                PrLink {
+                    repo: repo(),
+                    pr: linked,
+                },
+                cx,
+            );
         }
         cx.notify();
     }
@@ -101,15 +124,24 @@ impl Workspace {
             (PrState::Open, CheckRollup::Passing),
             (PrState::Merged, CheckRollup::Passing),
         ];
+        let mut prs = Vec::new();
         for (i, (lane, (state, checks))) in lanes.into_iter().zip(states).enumerate() {
             let target = LaneRef { project, lane };
-            self.seed_push_target_for_shot(target, "sidebar-sizing");
-            let number = 480 + i as u64;
-            self.lane_scoped_mut(target).pr = Some(PrLink {
-                repo: repo(),
-                pr: pr(number, "Lane PR", state, checks),
-            });
+            // One branch per lane, so one answer links each to its own PR.
+            let branch = format!("lane-{i}");
+            self.seed_push_target_for_shot(target, &branch);
+            let summary = pr(480 + i as u64, &branch, "Lane PR", state, checks);
+            prs.push(summary.clone());
+            self.seed_pr_link_for_shot(
+                target,
+                PrLink {
+                    repo: repo(),
+                    pr: summary,
+                },
+                cx,
+            );
         }
+        install_fake_gh(GhAuth::Ready, prs, cx);
         PrPoller::seed_for_shot(HOST, GhAvailability::Ready, cx);
         cx.notify();
     }

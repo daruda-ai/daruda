@@ -3,6 +3,7 @@
 //! opening more windows does not multiply GitHub requests.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use daruda_github::availability::{BackoffReason, GhAuth, GhAvailability, backoff_delay};
@@ -32,6 +33,8 @@ pub(crate) struct PrPoller {
     started: bool,
     /// Lanes may hold links; cleared once when the feature is turned off.
     linked: bool,
+    /// `[github] enabled` as the last round saw it, to catch it turning on.
+    enabled: Option<bool>,
 }
 
 impl Global for PrPoller {}
@@ -48,7 +51,7 @@ struct HostState {
 struct RepoState {
     /// The last answer, applied every round so a lane that appears after it
     /// links at once instead of waiting for the next request.
-    last: Option<RepoPrs>,
+    last: Option<Arc<RepoPrs>>,
     in_flight: bool,
     polled_at: Option<Instant>,
     /// Ask at the next tick whatever the cadence says.
@@ -126,6 +129,12 @@ impl PrPoller {
             .map_or(GhAvailability::Unknown, |state| state.availability)
     }
 
+    /// The settings changed: run a round now rather than at the next tick,
+    /// so turning the feature off clears badges at once.
+    pub(crate) fn settings_changed(cx: &mut App) {
+        cx.defer(Self::tick);
+    }
+
     /// Forget what `gh auth status` said for `host` so the next tick asks
     /// again: the user says they installed `gh` or logged in.
     pub(crate) fn recheck(host: &str, cx: &mut App) {
@@ -139,7 +148,7 @@ impl PrPoller {
     /// that is due.
     pub(crate) fn tick(cx: &mut App) {
         let config = SettingsStore::global(cx).user().github.clone();
-        cx.default_global::<Self>();
+        let was = cx.default_global::<Self>().enabled.replace(config.enabled);
         if !config.enabled {
             let poller = cx.global_mut::<Self>();
             // Answers from before the switch must not be re-applied after it.
@@ -150,6 +159,10 @@ impl PrPoller {
                 WindowRegistry::for_each_workspace(cx, |ws, _, cx| ws.clear_pr_links(cx));
             }
             return;
+        }
+        // Push targets are not read while the feature is off.
+        if was == Some(false) {
+            WindowRegistry::for_each_workspace(cx, |ws, _, cx| ws.refresh_push_targets(cx));
         }
 
         let mut wanted: BTreeMap<RepoId, RepoDemand> = BTreeMap::new();
@@ -183,7 +196,7 @@ impl PrPoller {
     /// change-gated, so a round with nothing new repaints nothing.
     fn apply_cached(wanted: &BTreeMap<RepoId, RepoDemand>, cx: &mut App) {
         let poller = cx.global::<Self>();
-        let cached: Vec<(RepoId, RepoPrs)> = wanted
+        let cached: Vec<(RepoId, Arc<RepoPrs>)> = wanted
             .keys()
             .filter_map(|repo| {
                 let last = poller.repos.get(repo)?.last.clone()?;
@@ -324,6 +337,7 @@ impl PrPoller {
                 state.polled_at = Some(now);
                 state.failures = 0;
                 state.backoff_until = None;
+                let prs = Arc::new(prs);
                 state.last = Some(prs.clone());
                 poller.linked = true;
                 // A rate-limit pause that has run out ends with this answer.
@@ -343,19 +357,42 @@ impl PrPoller {
                 let poller = cx.global_mut::<Self>();
                 let state = poller.repos.entry(repo.clone()).or_default();
                 state.in_flight = false;
+                let host = poller.hosts.get_mut(&repo.host);
                 let host_now = match e.kind() {
-                    FailureKind::Missing => Some(GhAvailability::Missing),
-                    FailureKind::LoggedOut => Some(GhAvailability::LoggedOut),
-                    FailureKind::RateLimited => {
-                        let failures = poller.hosts.get_mut(&repo.host).map_or(1, |host| {
-                            host.rate_limit_failures += 1;
-                            host.rate_limit_failures
-                        });
-                        Some(GhAvailability::Backoff {
-                            until: now + backoff_delay(failures, BackoffReason::RateLimited),
-                            reason: BackoffReason::RateLimited,
+                    // A poll that finds gh gone or logged out counts as an
+                    // auth check, so the host is not re-asked at once.
+                    FailureKind::Missing | FailureKind::LoggedOut => {
+                        if let Some(host) = host {
+                            host.checked_at = Some(now);
+                        }
+                        Some(if e.kind() == FailureKind::Missing {
+                            GhAvailability::Missing
+                        } else {
+                            GhAvailability::LoggedOut
                         })
                     }
+                    FailureKind::RateLimited => match host {
+                        // Every repository on the host hears the same limit in
+                        // one round; it grows the pause once, not per answer.
+                        Some(HostState {
+                            availability:
+                                GhAvailability::Backoff {
+                                    until,
+                                    reason: BackoffReason::RateLimited,
+                                },
+                            ..
+                        }) if *until > now => None,
+                        host => {
+                            let failures = host.map_or(1, |host| {
+                                host.rate_limit_failures += 1;
+                                host.rate_limit_failures
+                            });
+                            Some(GhAvailability::Backoff {
+                                until: now + backoff_delay(failures, BackoffReason::RateLimited),
+                                reason: BackoffReason::RateLimited,
+                            })
+                        }
+                    },
                     // One repository failing (gone, no access, a network
                     // blip) pauses that repository alone.
                     FailureKind::Transient => {

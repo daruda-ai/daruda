@@ -77,6 +77,28 @@ impl Workspace {
         }
     }
 
+    /// Re-read every git lane's push target: the feature was switched on,
+    /// and push targets are not kept current while it is off.
+    pub(crate) fn refresh_push_targets(&mut self, cx: &mut Context<Self>) {
+        let lanes: Vec<LaneRef> = self.lane_scoped.keys().copied().collect();
+        for lane in lanes {
+            self.refresh_push_target(lane, cx);
+        }
+    }
+
+    /// Set a lane's link for a capture, through the same write as a poll.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn seed_pr_link_for_shot(
+        &mut self,
+        lane: LaneRef,
+        link: PrLink,
+        cx: &mut Context<Self>,
+    ) {
+        if replace_pr(self.lane_scoped_mut(lane), Some(link)) {
+            cx.notify();
+        }
+    }
+
     /// Forget every lane's PR: the feature was switched off.
     pub(crate) fn clear_pr_links(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;

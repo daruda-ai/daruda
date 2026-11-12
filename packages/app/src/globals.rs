@@ -114,6 +114,7 @@ fn register_settings_observer(cx: &mut App) {
         ui::theme::set_configured_ui_preset(&user.theme.ui_preset, cx);
         crate::overage_policy::OveragePolicy::sync(cx);
         crate::hooks::agent_hooks::AgentHooks::sync(cx);
+        crate::github::PrPoller::settings_changed(cx);
         let appearance = window_background_for(&user);
         WindowRegistry::for_each_workspace(cx, |_ws, window, _cx| {
             window.set_background_appearance(appearance);

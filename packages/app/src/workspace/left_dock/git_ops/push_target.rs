@@ -10,12 +10,21 @@ use crate::workspace::Workspace;
 
 impl Workspace {
     /// Re-read where `target`'s branch pushes. Rides the tracking axis: a
-    /// branch switch, a new upstream and a first push all move refs.
+    /// branch switch, a new upstream and a first push all move refs. Skipped
+    /// while `[github]` is off: only pull requests read it, and each read
+    /// costs several git processes per lane.
     pub(in crate::workspace) fn refresh_push_target(
         &mut self,
         target: LaneRef,
         cx: &mut Context<Self>,
     ) {
+        if !crate::settings_store::SettingsStore::global(cx)
+            .user()
+            .github
+            .enabled
+        {
+            return;
+        }
         let Some(path) = self.git_lane_path(target) else {
             return;
         };
@@ -32,7 +41,7 @@ impl Workspace {
                 Ok(found) => ws.set_push_target(target, found, cx),
                 Err(e) => {
                     let report =
-                        ErrorReport::new(crate::surface::strings::error::git_tracking_failed())
+                        ErrorReport::new(crate::surface::strings::error::git_push_target_failed())
                             .severity(ErrorSeverity::Warning)
                             .from_error(&e)
                             .at(file!(), line!())
@@ -40,7 +49,9 @@ impl Workspace {
                             .dedup("git.push_target")
                             .build();
                     ws.report_error(report, cx);
-                    ws.set_push_target(target, None, cx)
+                    // A failed read says nothing about where the branch
+                    // pushes; the last known target and its link stay.
+                    false
                 }
             },
             Self::refresh_push_target,

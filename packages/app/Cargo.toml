@@ -31,6 +31,8 @@ screenshot = [
     "gpui_macos/test-support",
     "daruda_chat/screenshot",
     "daruda_settings/screenshot",
+    # Captures answer for GitHub from a scripted FakeGh, never the real CLI.
+    "daruda_github/test-support",
 ]
 
 # `daruda --replay-acp-log <path>` — replay a captured ACP wire log into a live
