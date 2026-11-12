@@ -10,4 +10,12 @@ description = "GitHub pull requests for daruda lanes through the gh CLI — repo
 [lints]
 workspace = true
 
+[features]
+# `FakeGh`, for crates whose tests must not reach GitHub with the user's
+# credentials. Never a shipping default.
+test-support = []
+
 [dependencies]
+daruda_core = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

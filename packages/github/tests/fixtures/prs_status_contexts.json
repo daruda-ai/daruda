@@ -1,0 +1,181 @@
+{
+ "data": {
+  "repository": {
+   "defaultBranchRef": {
+    "name": "master"
+   },
+   "b0": {
+    "nodes": [
+     {
+      "number": 144073,
+      "url": "https://github.com/kubernetes/kubernetes/pull/144073",
+      "title": "status-context fixture",
+      "state": "OPEN",
+      "isDraft": false,
+      "headRefName": "fix-admin-access-capacity-request",
+      "isCrossRepository": true,
+      "reviewDecision": null,
+      "updatedAt": "2026-11-12T01:32:02Z",
+      "statusCheckRollup": {
+       "state": "FAILURE",
+       "contexts": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-linter-hints",
+          "state": "FAILURE",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-linter-hints/2120688481758875648",
+          "createdAt": "2026-11-12T01:32:02Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "tide",
+          "state": "PENDING",
+          "targetUrl": "https://prow.k8s.io/pr?query=is%3Apr+repo%3Akubernetes%2Fkubernetes+author%3Asunya-ch+head%3Afix-admin-access-capacity-request",
+          "createdAt": "2026-11-12T01:22:37Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "EasyCLA",
+          "state": "SUCCESS",
+          "targetUrl": "https://easycla.lfx.linuxfoundation.org/#/?version=2",
+          "createdAt": "2026-11-12T01:21:47Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-cmd",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-cmd/2120688463782088704",
+          "createdAt": "2026-11-12T01:31:00Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-conformance-kind-ga-only-parallel",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-conformance-kind-ga-only-parallel/2120688466948788224",
+          "createdAt": "2026-11-12T01:36:20Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-dependencies",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-dependencies/2120688464050524160",
+          "createdAt": "2026-11-12T01:24:41Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-dra-integration",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-dra-integration/2120688464855830528",
+          "createdAt": "2026-11-12T01:49:10Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-e2e-gce",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-e2e-gce/2120688465258483712",
+          "createdAt": "2026-11-12T02:07:22Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-e2e-kind",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-e2e-kind/2120688466088955904",
+          "createdAt": "2026-11-12T01:47:59Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-integration",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-integration/2120688465363341312",
+          "createdAt": "2026-11-12T02:00:43Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-kind-dra",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-kind-dra/2120688464121827328",
+          "createdAt": "2026-11-12T01:46:54Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-kind-dra-all",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-kind-dra-all/2120688464247656448",
+          "createdAt": "2026-11-12T01:48:05Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-kind-dra-n-1",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-kind-dra-n-1/2120688464415428608",
+          "createdAt": "2026-11-12T01:46:18Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-kind-dra-n-2",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-kind-dra-n-2/2120688464532869120",
+          "createdAt": "2026-11-12T01:46:27Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-kind-dra-n-3",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-kind-dra-n-3/2120688464671281152",
+          "createdAt": "2026-11-12T01:46:03Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-node-e2e-containerd",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-node-e2e-containerd/2120688479246487552",
+          "createdAt": "2026-11-12T01:57:07Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-node-e2e-containerd-2-4-ubuntu-dra",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-node-e2e-containerd-2-4-ubuntu-dra/2120688464960688128",
+          "createdAt": "2026-11-12T01:56:27Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-node-e2e-containerd-2-4-ubuntu-dra-alpha-beta-features",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-node-e2e-containerd-2-4-ubuntu-dra-alpha-beta-features/2120688465141043200",
+          "createdAt": "2026-11-12T01:56:45Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-typecheck",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-typecheck/2120688480072765440",
+          "createdAt": "2026-11-12T01:24:20Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-unit",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-unit/2120688475085737984",
+          "createdAt": "2026-11-12T01:45:36Z"
+         },
+         {
+          "__typename": "StatusContext",
+          "context": "pull-kubernetes-verify",
+          "state": "SUCCESS",
+          "targetUrl": "https://prow.k8s.io/view/gs/kubernetes-ci-logs/pr-logs/pull/144073/pull-kubernetes-verify/2120688480920014848",
+          "createdAt": "2026-11-12T01:52:55Z"
+         }
+        ]
+       }
+      }
+     }
+    ]
+   }
+  }
+ }
+}

@@ -1829,6 +1829,11 @@ dependencies = [
 [[package]]
 name = "daruda_github"
 version = "0.3.0"
+dependencies = [
+ "daruda_core",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "daruda_project"
