@@ -281,3 +281,55 @@ fn only_the_recorded_process_has_its_group_ended() {
         RecordedGroup::Gone
     );
 }
+
+fn fixture(args: &[&str]) -> std::process::Command {
+    let mut command = command(test_process::executable());
+    command.args(args);
+    command
+}
+
+fn limits(timeout: Duration) -> CaptureLimits {
+    CaptureLimits {
+        timeout,
+        stdout: 1024,
+        stderr: 1024,
+    }
+}
+
+#[test]
+fn run_captured_returns_both_streams_and_the_exit_status() {
+    let out = run_captured(
+        fixture(&["--stdout", "out", "--stderr", "err", "--exit", "3"]),
+        limits(Duration::from_secs(30)),
+    )
+    .unwrap();
+    assert_eq!(out.status.code(), Some(3));
+    assert_eq!(out.stdout, b"out");
+    assert_eq!(out.stderr, b"err");
+}
+
+#[test]
+fn run_captured_kills_a_child_that_outlives_the_deadline() {
+    let started = std::time::Instant::now();
+    let result = run_captured(
+        fixture(&["--sleep-ms", "60000"]),
+        limits(Duration::from_millis(300)),
+    );
+    assert!(
+        matches!(result, Err(CaptureError::Timeout(_))),
+        "{result:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "returned promptly"
+    );
+}
+
+#[test]
+fn run_captured_stops_a_child_that_floods_its_output() {
+    let result = run_captured(fixture(&["--flood"]), limits(Duration::from_secs(30)));
+    assert!(
+        matches!(result, Err(CaptureError::Overflow { limit: 1024 })),
+        "{result:?}"
+    );
+}

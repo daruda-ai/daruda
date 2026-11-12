@@ -6,6 +6,8 @@
 //! does it lives here.
 
 use std::ffi::OsStr;
+mod capture;
+pub use capture::{CaptureError, CaptureLimits, Captured, run_captured};
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
