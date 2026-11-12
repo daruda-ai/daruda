@@ -31,7 +31,7 @@ pub(super) enum KeychainLookup {
 /// The one place this module reads the Keychain. A test never reaches the
 /// user's login keychain: under test the store answers as an empty one.
 pub(super) fn find_keychain_secret(service: &str) -> KeychainLookup {
-    if cfg!(test) {
+    if daruda_core::isolation::isolated() {
         return KeychainLookup::Missing;
     }
     match std::process::Command::new("security")
@@ -87,7 +87,7 @@ pub fn delete_scoped_credentials(config_dir: &Path) {
     use std::process::{Command, Stdio};
 
     // Same rule as `find_keychain_secret`: a test never touches the keychain.
-    if cfg!(test) {
+    if daruda_core::isolation::isolated() {
         return;
     }
     let service = scoped_keychain_service(config_dir);

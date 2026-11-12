@@ -150,6 +150,7 @@ strings_gen = { workspace = true }
 embed-resource = "3.0"
 
 [dev-dependencies]
+daruda_core = { workspace = true, features = ["test-support"] }
 test_process = { workspace = true }
 agent-client-protocol = { workspace = true }
 # `test-support` swaps the PTY spawn for a stub. Declared here rather than on

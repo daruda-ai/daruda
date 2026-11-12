@@ -86,7 +86,7 @@ fn write_json_atomic<T: Serialize>(dir: &Path, target: &Path, value: &T) -> std:
     }
     tmp.write_all(json.as_bytes())?;
     tmp.flush()?;
-    tmp.as_file().sync_all()?;
+    daruda_core::path::sync_file(tmp.as_file())?;
     for attempt in 0..4 {
         match tmp.persist(target) {
             Ok(_) => return Ok(()),

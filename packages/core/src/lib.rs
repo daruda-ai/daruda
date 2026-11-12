@@ -26,7 +26,7 @@
 //!   one table every crate has to agree on — is weighed as a whole rather
 //!   than entry by entry, since what it buys is that no entry is spelled
 //!   anywhere else.
-//! - **Pure by default; two named exceptions.** Modules take values in and
+//! - **Pure by default; three named exceptions.** Modules take values in and
 //!   return values out. Each exception carries the reason it is one:
 //!   - [`process_env`] may read only its registered names, without caching.
 //!     It never writes: `set_var` is unsound once the process is
@@ -39,6 +39,9 @@
 //!     "do" would leave the doing in the callers and the duplication with
 //!     it. A capability module is admitted on that reasoning rather than on
 //!     the consumer count above — it is the *only* place the call may live.
+//!   - [`isolation`] holds one process-global switch. Test-support builds
+//!     start isolated from the developer's machine and shipping binaries
+//!     end it in `main`; a flag per consumer would let one of them forget.
 //!
 //! A "core" name invites drift into a junk drawer. These criteria are the
 //! guard, and they are enforced by review rather than tooling: if a
@@ -49,6 +52,7 @@ pub mod file_url;
 pub mod font;
 pub mod git;
 pub mod host;
+pub mod isolation;
 pub mod language;
 pub mod path;
 pub mod path_style;

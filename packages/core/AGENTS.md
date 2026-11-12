@@ -43,6 +43,17 @@ An OS call that differs by platform has one named gate; domain code calls it.
 | `env::var("HOME")` | `dirs::home_dir` (Windows has no `HOME`) |
 | User-typed program names such as `npx`, `claude`, an editor CLI | `daruda_core::process::command_on_path` (Windows PATHEXT shims) |
 | Raw equality/prefix comparisons of paths from different producers | `daruda_core::path::{same_path, is_within, strip_root}` |
+| `File::sync_all` / `File::sync_data` | `daruda_core::path::{sync_file, sync_file_data, sync_dir, sync_file_entry}` |
+
+Every disk flush goes through `path`'s sync functions. macOS publishes with
+one `F_FULLFSYNC` per device after cheap `fsync`s, not one per handle.
+
+`isolation` is the one switch between tests and the developer's machine. A
+`test-support` build starts isolated: flushes are skipped and another
+program's credentials read as absent. Every shipping binary's `main` calls
+`isolation::require_production()` first, because `cargo test` links
+test-support crates into the app binary as well. A new test-only stand-in
+for a real-machine effect reads `isolated()` rather than its own flag.
 
 `Url::to_file_path` decodes by the build OS. A remote machine's path must
 instead go through `file_url` with an explicit `PathStyle`, keeping

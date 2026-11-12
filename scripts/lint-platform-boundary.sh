@@ -22,6 +22,7 @@
 # | `Url::{to,from}_file_path`, `"file://"` | `daruda_core::file_url`     |
 # | `gethostname` / `GetComputerName*` | `daruda_core::host::name`         |
 # | `env::var("HOME")`             | `dirs::home_dir`                      |
+# | `File::sync_all` / `sync_data` | `daruda_core::path::{sync_file, sync_file_data}` |
 #
 # The file-URL row is a platform call in disguise: `to_file_path` decodes by
 # the build OS, so "is this a file URL?" came back `false` for `file:///tmp`
@@ -108,6 +109,7 @@ SCAN_DIRS=(
     "packages/chat/src"
     "packages/settings/src"
     "packages/flow/src"
+    "packages/runlog/src"
     "packages/store/src"
     "packages/terminal/src"
     "packages/update/src"
@@ -180,6 +182,9 @@ for file in "${FILES[@]}"; do
         }
         if (/\bgethostname\b/ || /\bGetComputerName\w*/) {
             print "$ARGV:$.: host name -> daruda_core::host::name\n";
+        }
+        if (/\.sync_(all|data)\(\)/) {
+            print "$ARGV:$.: file flush -> daruda_core::path::{sync_file, sync_file_data}\n";
         }
     ' "$file" || true)
     if [ -n "$hit" ]; then

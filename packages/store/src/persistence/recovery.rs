@@ -141,7 +141,7 @@ pub fn load_recoverable_json<T: DeserializeOwned>(
             .tempfile_in(dir)?;
         use std::io::Write as _;
         file.write_all(&bytes)?;
-        file.as_file().sync_all()?;
+        daruda_core::path::sync_file(file.as_file())?;
         Some(file.keep().map_err(|error| error.error)?.1)
     } else {
         None

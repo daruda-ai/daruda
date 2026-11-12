@@ -47,7 +47,7 @@ impl InstallerTarget {
             .tempfile()
             .map_err(io_error)?;
         std::fs::copy(verified_package, temporary.path()).map_err(io_error)?;
-        temporary.as_file().sync_all().map_err(io_error)?;
+        daruda_core::path::sync_file(temporary.as_file()).map_err(io_error)?;
         verify(temporary.path())?;
         let (file, path) = temporary.keep().map_err(|error| io_error(error.error))?;
         drop(file);

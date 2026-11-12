@@ -273,7 +273,7 @@ fn append(run_dir: &Path, entry: &Entry) -> std::io::Result<()> {
     // The point of the whole file is to survive a process that does not get
     // to run its destructors, so each line is on disk before the next node
     // starts. One flush per settled attempt, not per byte of output.
-    file.sync_data()
+    daruda_core::path::sync_file_data(&file)
 }
 
 /// Whether this directory holds a journal at all.

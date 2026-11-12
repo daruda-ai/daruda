@@ -29,7 +29,7 @@ pub(super) fn save(
         archive.write_all(event.as_bytes())?;
         archive.write_all(b"\n")?;
     }
-    archive.finish()?.sync_all()?;
+    daruda_core::path::sync_file(&archive.finish()?)?;
     temporary.persist_noclobber(output)?;
     Ok(())
 }

@@ -340,7 +340,7 @@ pub fn write_atomic(path: &Path, value: &Value) -> Result<(), McpPersistError> {
     use std::io::Write as _;
     tmp.as_file_mut().write_all(formatted.as_bytes())?;
     tmp.as_file_mut().write_all(b"\n")?;
-    tmp.as_file().sync_all()?;
+    daruda_core::path::sync_file(tmp.as_file())?;
     tmp.persist(path)
         .map_err(|e| McpPersistError::Io(e.error))?;
     Ok(())

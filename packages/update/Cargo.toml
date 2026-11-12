@@ -20,3 +20,6 @@ hex = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 ureq = { workspace = true, default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+daruda_core = { workspace = true, features = ["test-support"] }

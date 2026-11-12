@@ -117,7 +117,7 @@ impl Ownership {
         let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(SocketError::Io)?;
         serde_json::to_writer(&mut temp, &runtime)
             .map_err(|e| SocketError::Io(std::io::Error::other(e)))?;
-        temp.as_file().sync_all().map_err(SocketError::Io)?;
+        daruda_core::path::sync_file(temp.as_file()).map_err(SocketError::Io)?;
         temp.persist(&self.runtime)
             .map_err(|e| SocketError::Io(e.error))?;
         Ok(())

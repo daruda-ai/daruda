@@ -12,7 +12,7 @@ pub mod io_error;
 mod sync;
 
 pub use identity::{FileId, file_id};
-pub use sync::sync_file_entry;
+pub use sync::{sync_file, sync_file_data, sync_file_entry};
 
 /// Make a path absolute without requiring it to exist or following symlinks.
 /// Resolves Windows drive-relative paths using the OS drive context as well.
@@ -143,7 +143,7 @@ pub fn open_owner_only(
 pub fn sync_dir(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
-        std::fs::File::open(dir)?.sync_all()
+        sync::sync_file(&std::fs::File::open(dir)?)
     }
     #[cfg(not(unix))]
     {

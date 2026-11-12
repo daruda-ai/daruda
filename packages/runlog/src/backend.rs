@@ -166,7 +166,7 @@ impl LogBackend for FileBackend {
     }
 
     fn sync(&mut self) -> io::Result<()> {
-        self.selected()?.1.sync_data()
+        daruda_core::path::sync_file_data(&self.selected()?.1)
     }
 
     fn truncate_tail(&mut self, len: u64) -> io::Result<()> {
@@ -175,7 +175,7 @@ impl LogBackend for FileBackend {
         // `set_len` leaves the cursor where it was; move it to the new end so
         // the next append does not leave a hole.
         file.seek(SeekFrom::End(0))?;
-        file.sync_data()
+        daruda_core::path::sync_file_data(file)
     }
 
     fn replace_snapshot(&mut self, generation: u64, bytes: &[u8]) -> io::Result<()> {
@@ -183,7 +183,7 @@ impl LogBackend for FileBackend {
         let temp = self.dir.join(format!("snapshot.{generation}.json.tmp"));
         let mut file = File::create(&temp)?;
         file.write_all(bytes)?;
-        file.sync_all()?;
+        daruda_core::path::sync_file(&file)?;
         drop(file);
         std::fs::rename(&temp, &target)?;
         let file = OpenOptions::new().write(true).open(&target)?;

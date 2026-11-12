@@ -55,7 +55,7 @@ fn stage(plan: &[PlannedFile]) -> Result<(), UpdateError> {
         staged
             .set_permissions(source.metadata().map_err(io)?.permissions())
             .map_err(io)?;
-        staged.sync_all().map_err(io)?;
+        daruda_core::path::sync_file(&staged).map_err(io)?;
     }
     Ok(())
 }

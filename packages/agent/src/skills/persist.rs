@@ -117,7 +117,7 @@ pub fn write_skill(
     )?;
     use std::io::Write as _;
     tmp.as_file_mut().write_all(serialized.as_bytes())?;
-    tmp.as_file().sync_all()?;
+    daruda_core::path::sync_file(tmp.as_file())?;
     tmp.persist(&target)
         .map_err(|e| PersistError::Io(e.error))?;
 
@@ -162,7 +162,7 @@ pub fn update_skill_source(dir: &Path, expected: &str, source: &str) -> Result<(
     )?;
     use std::io::Write as _;
     tmp.as_file_mut().write_all(source.as_bytes())?;
-    tmp.as_file().sync_all()?;
+    daruda_core::path::sync_file(tmp.as_file())?;
     tmp.persist(target)
         .map_err(|error| PersistError::Io(error.error))?;
     Ok(())
@@ -186,7 +186,7 @@ pub fn create_skill_source_at(dir: &Path, source: &str) -> Result<PathBuf, Persi
     let mut tmp = NamedTempFile::new_in(dir)?;
     use std::io::Write as _;
     tmp.write_all(source.as_bytes())?;
-    tmp.as_file().sync_all()?;
+    daruda_core::path::sync_file(tmp.as_file())?;
     tmp.persist_noclobber(&target).map_err(|e| {
         if e.error.kind() == io::ErrorKind::AlreadyExists {
             PersistError::AlreadyExists(target.clone())

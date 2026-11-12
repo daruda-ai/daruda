@@ -162,7 +162,7 @@ impl NdjsonFileSink {
         }
         // Flush BufWriter first so the kernel has the bytes.
         self.writer.flush()?;
-        self.writer.get_ref().sync_data()?;
+        daruda_core::path::sync_file_data(self.writer.get_ref())?;
         self.last_fsync = Instant::now();
         Ok(())
     }

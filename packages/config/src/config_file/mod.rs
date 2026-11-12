@@ -472,8 +472,7 @@ fn write_config_text_atomic(
             .set_permissions(metadata.permissions())
             .map_err(|e| format!("failed to preserve config permissions: {e}"))?;
     }
-    temp.as_file()
-        .sync_all()
+    daruda_core::path::sync_file(temp.as_file())
         .map_err(|e| format!("failed to sync temporary config: {e}"))?;
     if let Some(expected) = expected
         && read_config_text(path)? != expected

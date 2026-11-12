@@ -14,7 +14,7 @@ pub(super) async fn sync_file(path: PathBuf) {
         let _ = std::fs::OpenOptions::new()
             .write(true)
             .open(&path)
-            .and_then(|file| file.sync_all());
+            .and_then(|file| daruda_core::path::sync_file(&file));
         if let Some(parent) = path.parent() {
             // SILENT-OK: as above.
             let _ = daruda_core::path::sync_dir(parent);

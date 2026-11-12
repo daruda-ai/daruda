@@ -81,7 +81,7 @@ fn publish(root: &Path, journal: &Journal) -> Result<(), UpdateError> {
         &serde_json::to_vec(journal).map_err(|error| UpdateError::Sync(error.to_string()))?,
     )
     .map_err(io)?;
-    tmp.as_file().sync_all().map_err(io)?;
+    daruda_core::path::sync_file(tmp.as_file()).map_err(io)?;
     tmp.persist(root.join(JOURNAL))
         .map_err(|error| io(error.error))?;
     Ok(())

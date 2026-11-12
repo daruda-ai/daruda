@@ -10,6 +10,12 @@ description = "Shared utilities and core logic for daruda — usable from both t
 [lints]
 workspace = true
 
+[features]
+# Starts the process isolated (no disk flushes, no foreign credentials)
+# until a binary calls `isolation::require_production`. Never a shipping
+# default.
+test-support = []
+
 [dependencies]
 dirs = { workspace = true }
 percent-encoding = "2"
@@ -24,5 +30,6 @@ which = { workspace = true }
 windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [dev-dependencies]
+daruda_core = { workspace = true, features = ["test-support"] }
 tempfile = { workspace = true }
 test_process = { workspace = true }

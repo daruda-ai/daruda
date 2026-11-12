@@ -1,8 +1,24 @@
-//! Durable publication of a file under its final name.
+//! Durable writes: every disk flush daruda issues goes through here.
 
 use std::fs::File;
 use std::io;
 use std::path::Path;
+
+/// [`File::sync_all`]: the file's data and metadata reach stable storage.
+pub fn sync_file(file: &File) -> io::Result<()> {
+    if crate::isolation::isolated() {
+        return Ok(());
+    }
+    file.sync_all()
+}
+
+/// [`File::sync_data`]: the data and the metadata needed to read it back.
+pub fn sync_file_data(file: &File) -> io::Result<()> {
+    if crate::isolation::isolated() {
+        return Ok(());
+    }
+    file.sync_data()
+}
 
 /// Persist `file` and its final `path` after a create or rename. The caller
 /// holds a writable handle to that file and prevents concurrent path changes.
@@ -29,7 +45,7 @@ pub fn sync_file_entry(file: &File, path: &Path) -> io::Result<()> {
 
 #[cfg(windows)]
 pub fn sync_file_entry(file: &File, _: &Path) -> io::Result<()> {
-    file.sync_all()
+    sync_file(file)
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -54,13 +70,18 @@ impl Flushed {
     fn push(&mut self, handle: File) -> io::Result<()> {
         use std::os::unix::fs::MetadataExt as _;
         let device = handle.metadata()?.dev();
-        flush_to_device(&handle)?;
+        if !crate::isolation::isolated() {
+            flush_to_device(&handle)?;
+        }
         self.devices.push(device);
         self.handles.push(handle);
         Ok(())
     }
 
     fn drain(self) -> io::Result<()> {
+        if crate::isolation::isolated() {
+            return Ok(());
+        }
         for position in barrier_positions(&self.devices) {
             drain_device(&self.handles[position])?;
         }

@@ -4,6 +4,7 @@ mod age;
 mod file_url;
 mod git;
 mod host;
+mod isolation;
 mod language;
 mod path;
 mod path_identity;

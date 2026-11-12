@@ -28,6 +28,7 @@ smol = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+daruda_core = { workspace = true, features = ["test-support"] }
 # The public-API tests in `tests/it` drive the harness; enabling the feature
 # here keeps them running under a plain `cargo test`.
 daruda_runlog = { workspace = true, features = ["test-support"] }

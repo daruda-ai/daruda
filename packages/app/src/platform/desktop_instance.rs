@@ -111,7 +111,7 @@ fn acquire(dir: &Path, request: Request, exclusive: bool) -> anyhow::Result<Laun
     };
     let mut staging = tempfile::NamedTempFile::new_in(dir)?;
     serde_json::to_writer(&mut staging, &info)?;
-    staging.as_file().sync_all()?;
+    daruda_core::path::sync_file(staging.as_file())?;
     staging
         .persist(&endpoint)
         .context("publishing desktop endpoint")?;

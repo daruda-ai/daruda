@@ -225,7 +225,7 @@ pub(crate) fn write(
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
     use std::io::Write;
     temp.write_all(doc.to_string().as_bytes())?;
-    temp.as_file().sync_all()?;
+    daruda_core::path::sync_file(temp.as_file())?;
     temp.persist(&physical).map_err(|e| e.error)?;
     Ok(())
 }

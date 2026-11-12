@@ -16,6 +16,7 @@ workspace = true
 test-support = []
 
 [dev-dependencies]
+daruda_core = { workspace = true, features = ["test-support"] }
 shell-words = { workspace = true }
 test_process = { workspace = true }
 

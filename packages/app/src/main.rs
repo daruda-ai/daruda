@@ -202,5 +202,8 @@ recent_slot_table! {
 }
 
 fn main() {
+    // `cargo test` links test-support crates into this binary too; without
+    // this it would skip disk flushes and ignore stored logins.
+    daruda_core::isolation::require_production();
     startup::run();
 }

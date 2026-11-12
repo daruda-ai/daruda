@@ -95,7 +95,7 @@ impl WorkspaceMigration {
                 &path,
             )?;
             file.write_all(&record.bytes)?;
-            file.sync_all()?;
+            daruda_core::path::sync_file(&file)?;
             if fs::read(&path)? != record.bytes {
                 return Err(invalid("Workspace migration copy verification failed"));
             }
@@ -106,7 +106,7 @@ impl WorkspaceMigration {
             &marker,
         )?;
         serde_json::to_writer(&mut file, &LayoutVersion { version: VERSION }).map_err(invalid)?;
-        file.sync_all()?;
+        daruda_core::path::sync_file(&file)?;
         drop(file);
         // INVARIANT: the target was absent under the per-destination lock.
         // Only a fully verified snapshot and its marker become visible.

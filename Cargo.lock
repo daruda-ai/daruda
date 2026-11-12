@@ -1784,6 +1784,7 @@ dependencies = [
 name = "daruda_core"
 version = "0.3.0"
 dependencies = [
+ "daruda_core",
  "dirs 7.0.0",
  "dunce",
  "libc",

@@ -5,7 +5,7 @@ use std::path::Path;
 pub fn read_system_credentials() -> Result<(String, PlanInfo), FetchError> {
     // The ambient login is the user's own; under test it reads as absent, as
     // the Keychain does on macOS.
-    if cfg!(test) {
+    if daruda_core::isolation::isolated() {
         return Err(FetchError::NoToken);
     }
     let path = credentials_path().ok_or(FetchError::NoToken)?;

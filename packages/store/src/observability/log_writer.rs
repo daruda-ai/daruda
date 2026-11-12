@@ -277,7 +277,7 @@ fn append_sync_in(dir: &Path, report: &ErrorReport) -> std::io::Result<PathBuf> 
     let mut file =
         daruda_core::path::open_owner_only(OpenOptions::new().create(true).append(true), &path)?;
     file.write_all(report.to_ndjson_line().as_bytes())?;
-    file.sync_all()?;
+    daruda_core::path::sync_file(&file)?;
     Ok(path)
 }
 

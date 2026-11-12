@@ -36,6 +36,7 @@ which = { workspace = true }
 strings_gen = { workspace = true }
 
 [dev-dependencies]
+daruda_core = { workspace = true, features = ["test-support"] }
 # A catalog row names its source apart from a chat pane's label for it.
 daruda_chat = { workspace = true, features = ["test-support"] }
 daruda_ui = { workspace = true, features = ["test-support"] }

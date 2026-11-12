@@ -25,3 +25,10 @@ fn an_empty_config_dir_has_no_credentials() {
     let dir = tempfile::tempdir().expect("tempdir");
     assert!(read_scoped_credentials(dir.path()).is_err());
 }
+
+/// The ambient login is the developer's own; a test build never reads it,
+/// even when this machine is signed in.
+#[test]
+fn a_test_build_never_reads_the_ambient_login() {
+    assert!(read_system_credentials().is_err());
+}
