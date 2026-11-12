@@ -1827,6 +1827,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "daruda_github"
+version = "0.3.0"
+
+[[package]]
 name = "daruda_project"
 version = "0.3.0"
 dependencies = [

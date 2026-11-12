@@ -833,6 +833,7 @@ daruda/
 │   ├── core/                   # daruda_core: shared utilities, no daruda_* or GPUI deps
 │   ├── flow/                   # daruda_flow: declarative ACP flow engine
 │   ├── flow-edit/              # daruda_flow_edit: source-preserving flow-file edits
+│   ├── github/                 # daruda_github: GitHub pull requests through the gh CLI
 │   ├── project/                # daruda_project: runtime Project/Lane model, git ops
 │   ├── runlog/                 # daruda_runlog: crash-consistent event-sourced run log
 │   ├── store/                  # daruda_store: persistence and observability
