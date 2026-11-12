@@ -93,6 +93,37 @@ impl PrPoller {
         cx.defer(Self::tick);
     }
 
+    /// Pretend `gh` already answered for `host`, for a capture.
+    #[cfg(feature = "screenshot")]
+    pub(crate) fn seed_for_shot(host: &str, availability: GhAvailability, cx: &mut App) {
+        let now = cx.background_executor().now();
+        cx.default_global::<Self>().hosts.insert(
+            host.to_owned(),
+            HostState {
+                availability,
+                checked_at: Some(now),
+                checking: false,
+                rate_limit_failures: 0,
+            },
+        );
+    }
+
+    /// What is known about `gh` for `host`.
+    pub(crate) fn availability(host: &str, cx: &App) -> GhAvailability {
+        cx.try_global::<Self>()
+            .and_then(|poller| poller.hosts.get(host))
+            .map_or(GhAvailability::Unknown, |state| state.availability)
+    }
+
+    /// Forget what `gh auth status` said for `host` so the next tick asks
+    /// again: the user says they installed `gh` or logged in.
+    pub(crate) fn recheck(host: &str, cx: &mut App) {
+        if let Some(state) = cx.default_global::<Self>().hosts.get_mut(host) {
+            state.checked_at = None;
+        }
+        cx.defer(Self::tick);
+    }
+
     /// One round: gather every window's lanes, then ask about each repository
     /// that is due.
     pub(crate) fn tick(cx: &mut App) {

@@ -12,8 +12,8 @@ use crate::workspace::layout::{Dock, LeftDockSnapshot, ProjectSnapshot};
 use crate::workspace::project_order::{self, GroupKey, ProjectKey, TopRow};
 
 use super::rows::{
-    git_badge_for, group_header_row, non_git_placeholder, project_header_row, section_header,
-    worktree_row,
+    git_badge_for, group_header_row, non_git_placeholder, pr_badge_for, project_header_row,
+    section_header, worktree_row,
 };
 
 /// Render the Lanes view body.
@@ -207,8 +207,11 @@ fn ungrouped_project_block(
             .gap(px(theme::LANE_LIST_GAP_Y));
         for wt in &project.lanes {
             let is_active = project.id == active_project && wt.id == active_lane;
-            let git_badge = git_badge_for(snap, project.id, wt.id);
-            list = list.child(worktree_row(wt, project.id, is_active, git_badge, snap, cx));
+            let badges = super::rows::LaneBadges {
+                git: git_badge_for(snap, project.id, wt.id),
+                pr: pr_badge_for(snap, project.id, wt.id),
+            };
+            list = list.child(worktree_row(wt, project.id, is_active, badges, snap, cx));
         }
         block = block.child(list);
     }

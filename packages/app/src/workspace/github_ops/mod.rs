@@ -2,3 +2,7 @@
 //! the process-wide [`crate::github::PrPoller`].
 
 pub(crate) mod link;
+#[cfg(feature = "screenshot")]
+mod screenshot;
+pub(crate) mod strip;
+pub(crate) mod tone;

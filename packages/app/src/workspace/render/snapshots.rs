@@ -142,6 +142,12 @@ impl Workspace {
                         .map(|tracking| (*target, tracking.clone()))
                 })
                 .collect(),
+            pr_cache: self
+                .lane_scoped
+                .iter()
+                .filter_map(|(target, state)| state.pr.clone().map(|link| (*target, link)))
+                .collect(),
+            pr_strip: self.pr_strip(cx),
             git_stage_in_flight: self.git_lock_held(GitLock::Index),
             git_op_in_flight: self.git_lock_held(GitLock::Repo),
             git_collapsed_dirs: self

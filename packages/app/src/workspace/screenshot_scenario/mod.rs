@@ -114,6 +114,9 @@ pub(crate) enum ScreenshotScenario {
     LeftDockProjectAlias,
     LeftDockWorktrees,
     LeftDockGit,
+    LeftDockGitPr,
+    LeftDockGitGhMissing,
+    LeftDockWorktreesPr,
     /// Open the command palette (`CommandPaletteState::open`).
     CommandPalette,
     /// Open the Lane switcher with a real candidate whose label is
@@ -822,6 +825,20 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::LeftDockGit => {
             workspace.update(cx, |ws, cx| ws.seed_left_dock_git_for_shot(window, cx));
+        }
+        ScreenshotScenario::LeftDockGitPr | ScreenshotScenario::LeftDockGitGhMissing => {
+            let linked = scenario == ScreenshotScenario::LeftDockGitPr;
+            workspace.update(cx, |ws, cx| {
+                ws.seed_left_dock_git_for_shot(window, cx);
+                ws.seed_pr_for_shot(linked, cx);
+            });
+        }
+        ScreenshotScenario::LeftDockWorktreesPr => {
+            workspace.update(cx, |ws, cx| {
+                // The expanded dock: lane rows, where the badges live.
+                ws.seed_left_dock_for_shot(false, true, false, window, cx);
+                ws.seed_lane_prs_for_shot(cx);
+            });
         }
         ScreenshotScenario::LeftDockGroups
         | ScreenshotScenario::LeftDockWorktrees

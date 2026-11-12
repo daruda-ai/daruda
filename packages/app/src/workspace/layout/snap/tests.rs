@@ -29,6 +29,8 @@ fn fixture(window: &mut Window, cx: &mut gpui::App) -> LeftDockSnapshot {
         active: daruda_store::project::LaneRef::default(),
         git_worktree_cache: std::collections::HashMap::new(),
         git_tracking_cache: std::collections::HashMap::new(),
+        pr_cache: std::collections::HashMap::new(),
+        pr_strip: crate::workspace::github_ops::strip::PrStrip::Hidden,
         git_stage_in_flight: false,
         git_op_in_flight: false,
         git_collapsed_dirs: std::collections::HashSet::new(),
