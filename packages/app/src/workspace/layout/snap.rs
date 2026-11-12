@@ -124,8 +124,8 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     pub pr_cache: std::collections::HashMap<daruda_store::project::LaneRef, crate::github::PrLink>,
     /// What the Git Changes panel says about the active lane's PR.
     pub pr_strip: crate::workspace::github_ops::strip::PrStrip,
-    /// The active lane's PR prompt is being prepared.
-    pub pr_sending: bool,
+    /// What is under way for the active lane's PR.
+    pub pr_work: crate::workspace::lane_scoped::PrWork,
     pub git_stage_in_flight: bool,
     /// Mirrors `Workspace::git_op_in_flight` — true while a Fetch / Push /
     /// Commit / Amend is running. Drives `loading + disabled` on the Fetch

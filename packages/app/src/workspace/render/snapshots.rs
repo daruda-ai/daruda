@@ -148,10 +148,10 @@ impl Workspace {
                 .filter_map(|(target, state)| state.pr.clone().map(|link| (*target, link)))
                 .collect(),
             pr_strip: self.pr_strip(cx),
-            pr_sending: self
+            pr_work: self
                 .lane_scoped
                 .get(&self.active)
-                .is_some_and(|state| state.pr_sending),
+                .map_or_else(Default::default, |state| state.pr_work),
             git_stage_in_flight: self.git_lock_held(GitLock::Index),
             git_op_in_flight: self.git_lock_held(GitLock::Repo),
             git_collapsed_dirs: self

@@ -1558,6 +1558,7 @@ error:
   git_push_failed: "git push failed"
   git_push_target_failed: "Could not read where this branch pushes"
   github_pr_create_failed: "Creating the pull request failed"
+  github_git_busy: "Another git operation is running; try again when it finishes"
   github_no_agent_pane: "Open an agent chat in this worktree to send it there"
   github_lane_changed: "The worktree changed while the logs were read; nothing was sent"
   github_send_failed: "The agent pane did not take the text"

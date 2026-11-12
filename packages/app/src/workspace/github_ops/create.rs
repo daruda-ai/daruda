@@ -1,10 +1,14 @@
-//! Opening a pull request for the active lane: push what GitHub has not seen
-//! yet, then `gh pr create`, under the repository lock so Push and Fetch wait.
+//! Opening a pull request for a lane: push HEAD to where the branch pushes,
+//! then `gh pr create`, under the repository lock so Push and Fetch wait.
+//!
+//! Where to push is read again inside the lock, not taken from the cached
+//! push target: the branch may have moved or gained commits since.
 
 use daruda_github::remote_parse::parse_remote;
 use daruda_github::{GhError, NewPr};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
+use daruda_store::project::LaneRef;
 use gpui::{AnyWindowHandle, Context, WeakEntity, Window};
 
 use super::create_modal::CreatePrModal;
@@ -12,8 +16,10 @@ use crate::gh_host::GhHost;
 use crate::git_host::GitHost;
 use crate::github::PrPoller;
 use crate::lane::git::GitError;
+use crate::surface::strings::error as s;
 use crate::ui::WindowExt as _;
 use crate::workspace::Workspace;
+use crate::workspace::lane_scoped::PrWork;
 use crate::workspace::left_dock::git_ops::lock::GitLock;
 
 /// What the modal hands over; the lane supplies the rest.
@@ -28,6 +34,11 @@ pub(crate) struct CreatePrRequest {
 
 #[derive(Debug)]
 pub(crate) enum CreatePrError {
+    /// Detached HEAD, no remote, or a remote that is not a GitHub repository.
+    NoTarget,
+    /// The branch pushes to the PR's own base.
+    HeadIsBase(String),
+    Read(GitError),
     Push(GitError),
     Gh(GhError),
 }
@@ -35,6 +46,11 @@ pub(crate) enum CreatePrError {
 impl std::fmt::Display for CreatePrError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::NoTarget => write!(f, "the branch has no GitHub remote to push to"),
+            Self::HeadIsBase(branch) => {
+                write!(f, "the branch pushes to {branch}, the pull request's base")
+            }
+            Self::Read(e) => write!(f, "read where the branch pushes: {e}"),
             Self::Push(e) => write!(f, "push before creating the pull request: {e}"),
             Self::Gh(e) => e.fmt(f),
         }
@@ -43,43 +59,23 @@ impl std::fmt::Display for CreatePrError {
 
 impl std::error::Error for CreatePrError {}
 
-/// What the push step must do first, from the lane's push target and how
-/// far it is ahead.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PushFirst {
-    /// The branch was never pushed: push it and set its upstream.
-    Publish,
-    /// Pushed before, with commits since.
-    Update,
-    Nothing,
-}
-
-fn push_first(published: bool, ahead: u32) -> PushFirst {
-    match (published, ahead) {
-        (false, _) => PushFirst::Publish,
-        (true, 0) => PushFirst::Nothing,
-        (true, _) => PushFirst::Update,
-    }
+/// A lane base as `gh --base` takes it: without the push remote's prefix,
+/// and not a commit, which no PR can target.
+fn base_branch(base: &str, remote: &str) -> Option<String> {
+    let base = base.strip_prefix(&format!("{remote}/")).unwrap_or(base);
+    let commit_like = (7..=40).contains(&base.len()) && base.chars().all(|c| c.is_ascii_hexdigit());
+    (!base.is_empty() && !commit_like).then(|| base.to_owned())
 }
 
 impl Workspace {
-    /// The base a new PR targets by default: the lane's own base without its
-    /// remote prefix, else the repository's default branch, else nothing.
-    fn default_pr_base(&self, cx: &gpui::App) -> Option<String> {
-        let state = self.lane_scoped.get(&self.active)?;
-        let push = state.git.push_target.as_ref()?;
-        let lane_base = self
-            .lane_for(self.active)
-            .and_then(|lane| lane.base_ref.clone());
-        let stripped = lane_base.map(|base| {
-            base.strip_prefix(&format!("{}/", push.remote))
-                .map(str::to_owned)
-                .unwrap_or(base)
-        });
-        stripped.or_else(|| {
-            let repo = parse_remote(&push.url)?;
-            PrPoller::default_branch(&repo, cx)
-        })
+    /// The base a new PR targets by default: the lane's own base, else the
+    /// repository's default branch, else nothing (GitHub's choice).
+    fn default_pr_base(&self, lane: LaneRef, cx: &gpui::App) -> Option<String> {
+        let push = self.lane_scoped.get(&lane)?.git.push_target.as_ref()?;
+        self.lane_for(lane)
+            .and_then(|lane| lane.base_ref.as_deref())
+            .and_then(|base| base_branch(base, &push.remote))
+            .or_else(|| PrPoller::default_branch(&parse_remote(&push.url)?, cx))
     }
 
     pub(in crate::workspace) fn open_create_pr_modal(
@@ -87,76 +83,94 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(path) = self.git_lane_path(self.active) else {
+        let lane = self.active;
+        let Some(path) = self.git_lane_path(lane) else {
             return;
         };
-        let base = self.default_pr_base(cx);
+        let base = self.default_pr_base(lane, cx);
         let workspace = cx.weak_entity();
         let repo = GitHost::global(cx).open(&path);
         crate::workspace::dialog_helpers::open_form_modal(
             crate::surface::strings::git::pr_create_title(),
             None,
-            move |window, cx| CreatePrModal::new(workspace, repo, base, window, cx),
+            move |window, cx| CreatePrModal::new(workspace, lane, repo, base, window, cx),
             window,
             cx,
         );
     }
 
-    /// Push if needed, then open the PR. `modal` hears how it went; on
-    /// success the dialog in `window` closes and the poller asks at once.
+    /// Push HEAD, then open the PR for `lane`. `modal` hears every outcome;
+    /// on success the dialog in `window` closes and the poller asks at once.
     pub(in crate::workspace) fn create_pr(
         &mut self,
+        lane: LaneRef,
         request: CreatePrRequest,
         modal: WeakEntity<CreatePrModal>,
         window: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
-        let target = self.active;
-        let state = self.lane_scoped.get(&target);
-        let Some(push) = state.and_then(|s| s.git.push_target.clone()) else {
+        if self.git_lock_held(GitLock::Repo) {
+            fail_modal(modal, s::github_git_busy(), cx);
+            return;
+        }
+        let Some(path) = self.git_lane_path(lane) else {
+            fail_modal(modal, CreatePrError::NoTarget.to_string(), cx);
             return;
         };
-        let Some(repo_id) = parse_remote(&push.url) else {
-            return;
-        };
-        let Some(path) = self.git_lane_path(target) else {
-            return;
-        };
-        let ahead = state
-            .and_then(|s| s.git.tracking.as_ref())
-            .map_or(0, |t| t.ahead);
-        let step = push_first(push.published, ahead);
+        // With no base named, GitHub picks the default branch; guard against
+        // that one too when an answer has told us its name.
+        let default_base = self
+            .lane_scoped
+            .get(&lane)
+            .and_then(|state| state.git.push_target.as_ref())
+            .and_then(|push| parse_remote(&push.url))
+            .and_then(|repo| PrPoller::default_branch(&repo, cx));
         let repo = GitHost::global(cx).open(&path);
         let gh = GhHost::global(cx);
-        let new = NewPr {
-            head: push.branch.clone(),
-            base: request.base,
-            title: request.title,
-            body: request.body,
-            draft: request.draft,
-            worktree: path.to_path_buf(),
-        };
-        let poll_repo = repo_id.clone();
+        let report_path = path.clone();
         self.spawn_locked_git_work(
             GitLock::Repo,
-            target,
+            lane,
             cx,
             move || {
-                match step {
-                    PushFirst::Publish => repo
-                        .push_head(&push.remote, &push.branch, true)
-                        .map_err(CreatePrError::Push)?,
-                    PushFirst::Update => repo.push().map_err(CreatePrError::Push)?,
-                    PushFirst::Nothing => {}
+                let push = repo
+                    .push_target()
+                    .map_err(CreatePrError::Read)?
+                    .ok_or(CreatePrError::NoTarget)?;
+                let repo_id = parse_remote(&push.url).ok_or(CreatePrError::NoTarget)?;
+                let base = request.base.as_deref().or(default_base.as_deref());
+                if base == Some(push.branch.as_str()) {
+                    return Err(CreatePrError::HeadIsBase(push.branch));
                 }
-                gh.create_pr(&repo_id, &new).map_err(CreatePrError::Gh)
+                // An explicit refspec to the branch the PR names: a no-op when
+                // the remote is already at HEAD, so it never skips commits a
+                // cached ahead count missed.
+                repo.push_head(&push.remote, &push.branch, !push.published)
+                    .map_err(CreatePrError::Push)?;
+                let new = NewPr {
+                    head: push.branch,
+                    base: request.base,
+                    title: request.title,
+                    body: request.body,
+                    draft: request.draft,
+                    worktree: path,
+                };
+                gh.create_pr(&repo_id, &new).map_err(CreatePrError::Gh)?;
+                Ok(repo_id)
             },
             move |ws, result, cx| match result {
-                Ok(_url) => {
-                    PrPoller::nudge(poll_repo, cx);
+                Ok(repo_id) => {
+                    if let Some(state) = ws.lane_scoped.get_mut(&lane) {
+                        state.pr_work = PrWork::AwaitingNewPr;
+                    }
+                    PrPoller::nudge(repo_id, cx);
                     // Deferred: this runs inside the workspace's update, and
-                    // closing the dialog re-enters its window.
+                    // closing the dialog re-enters its window. Only this form
+                    // closes; if it is gone, whatever replaced it stays.
                     cx.defer(move |cx| {
+                        if modal.upgrade().is_none() {
+                            return;
+                        }
                         crate::windows::try_update_workspace_window(
                             window,
                             cx,
@@ -166,23 +180,29 @@ impl Workspace {
                     });
                 }
                 Err(e) => {
-                    let message = e.to_string();
-                    let report =
-                        ErrorReport::new(crate::surface::strings::error::github_pr_create_failed())
-                            .severity(ErrorSeverity::Error)
-                            .from_error(&e)
-                            .at(file!(), line!())
-                            .with_context("repo", redact_home(&path))
-                            .dedup("github.create_pr")
-                            .build();
+                    let report = ErrorReport::new(s::github_pr_create_failed())
+                        .severity(ErrorSeverity::Error)
+                        .from_error(&e)
+                        .at(file!(), line!())
+                        .with_context("repo", redact_home(&report_path))
+                        .dedup("github.create_pr")
+                        .build();
                     ws.report_error(report, cx);
-                    if let Some(modal) = modal.upgrade() {
-                        modal.update(cx, |modal, cx| modal.fail(message, cx));
-                    }
+                    fail_modal(modal, format!("{}: {e}", s::github_pr_create_failed()), cx);
                 }
             },
         );
     }
+}
+
+/// Tell the form why it failed. Deferred: callers run inside an update the
+/// form's own update must not nest in (G9).
+fn fail_modal(modal: WeakEntity<CreatePrModal>, reason: String, cx: &mut gpui::App) {
+    cx.defer(move |cx| {
+        if let Some(modal) = modal.upgrade() {
+            modal.update(cx, |modal, cx| modal.fail(reason, cx));
+        }
+    });
 }
 
 #[cfg(test)]
@@ -190,10 +210,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_what_github_has_not_seen_is_pushed() {
-        assert_eq!(push_first(false, 0), PushFirst::Publish);
-        assert_eq!(push_first(false, 3), PushFirst::Publish);
-        assert_eq!(push_first(true, 0), PushFirst::Nothing);
-        assert_eq!(push_first(true, 2), PushFirst::Update);
+    fn a_lane_base_becomes_a_branch_gh_can_target() {
+        let cases = [
+            ("origin/main", Some("main")),
+            ("main", Some("main")),
+            ("feature/x", Some("feature/x")),
+            ("upstream/main", Some("upstream/main")),
+            ("1a2b3c4d", None),
+            ("origin/", None),
+        ];
+        for (base, expected) in cases {
+            assert_eq!(base_branch(base, "origin").as_deref(), expected, "{base}");
+        }
     }
 }

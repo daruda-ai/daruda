@@ -9,6 +9,7 @@ use crate::ui::theme;
 use crate::ui::{Disableable as _, Sizable as _};
 use crate::workspace::github_ops::strip::PrStrip;
 use crate::workspace::github_ops::tone::PrTone;
+use crate::workspace::lane_scoped::PrWork;
 use crate::workspace::layout::{Dock, LeftDockSnapshot};
 
 /// The glyph and color a check tone shows, or nothing for a quiet one.
@@ -58,11 +59,14 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
         .pb(px(metrics.space(theme::GIT_HEADER_PAD_Y)))
         .text_size(px(metrics.text(theme::GIT_BADGE_FONT_SIZE)));
     let workspace = snap.workspace.clone();
+    let sending = snap.pr_work == PrWork::Sending;
     match &snap.pr_strip {
         PrStrip::Hidden => None,
         PrStrip::NoPr => {
+            let waiting = snap.pr_work == PrWork::AwaitingNewPr;
             let create = crate::ui::button_compact_sized("pr-create", s::pr_create_btn(), metrics)
-                .disabled(snap.git_op_in_flight)
+                .loading(waiting)
+                .disabled(snap.git_op_in_flight || waiting)
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
                     if let Some(ws) = workspace.upgrade() {
                         ws.update(cx, |ws, cx| ws.open_create_pr_modal(window, cx));
@@ -130,8 +134,8 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                     s::pr_review_comments_btn(),
                     metrics,
                 )
-                .loading(snap.pr_sending)
-                .disabled(snap.pr_sending)
+                .loading(sending)
+                .disabled(sending)
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
                     if let Some(ws) = workspace.upgrade() {
                         ws.update(cx, |ws, cx| ws.send_review_comments(window, cx));
@@ -145,8 +149,8 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                     s::pr_fix_checks_btn(failed),
                     metrics,
                 )
-                .loading(snap.pr_sending)
-                .disabled(snap.pr_sending)
+                .loading(sending)
+                .disabled(sending)
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
                     if let Some(ws) = workspace.upgrade() {
                         ws.update(cx, |ws, cx| ws.send_failed_checks(window, cx));

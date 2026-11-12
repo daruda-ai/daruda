@@ -11,7 +11,7 @@ use gpui::Context;
 use crate::github::PrLink;
 use crate::lane::git::PushTarget;
 use crate::workspace::Workspace;
-use crate::workspace::lane_scoped::LaneScoped;
+use crate::workspace::lane_scoped::{LaneScoped, PrWork};
 
 /// One lane's question for the poller: which PR is `branch` in `repo`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,8 +22,12 @@ pub(crate) struct PrDemand {
     pub focused: bool,
 }
 
-/// Set `state.pr`, reporting whether it changed.
+/// Set `state.pr`, reporting whether it changed. A link arriving ends the
+/// wait after Create PR.
 fn replace_pr(state: &mut LaneScoped, link: Option<PrLink>) -> bool {
+    if link.is_some() && state.pr_work == PrWork::AwaitingNewPr {
+        state.pr_work = PrWork::Idle;
+    }
     if state.pr == link {
         return false;
     }

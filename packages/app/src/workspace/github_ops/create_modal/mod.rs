@@ -11,6 +11,8 @@ use gpui::{
     WeakEntity, Window,
 };
 
+use daruda_store::project::LaneRef;
+
 use super::create::CreatePrRequest;
 use crate::lane::git::GitRepo;
 use crate::surface::strings::git as s;
@@ -36,12 +38,16 @@ pub(crate) struct CreatePrModal {
     draft: bool,
     state: CreateState,
     workspace: WeakEntity<Workspace>,
-    _subscriptions: [Subscription; 2],
+    /// The lane the form was opened for; the PR is for it even if another
+    /// lane is shown by the time it is submitted.
+    lane: LaneRef,
+    _subscriptions: [Subscription; 3],
 }
 
 impl CreatePrModal {
-    pub(super) fn new(
+    pub(in crate::workspace) fn new(
         workspace: WeakEntity<Workspace>,
+        lane: LaneRef,
         repo: Arc<dyn GitRepo>,
         base: Option<String>,
         window: &mut Window,
@@ -72,7 +78,16 @@ impl CreatePrModal {
                 },
             )
         };
-        let _subscriptions = [on_input(&title, window, cx), on_input(&base, window, cx)];
+        let on_body = cx.subscribe_in(&body, window, |this, _, event: &InputEvent, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.clear_failure(cx);
+            }
+        });
+        let _subscriptions = [
+            on_input(&title, window, cx),
+            on_input(&base, window, cx),
+            on_body,
+        ];
 
         // The last commit's subject is the usual title; read off the UI
         // thread and used only if the user has not typed one meanwhile.
@@ -100,6 +115,7 @@ impl CreatePrModal {
             draft: false,
             state: CreateState::Editing,
             workspace,
+            lane,
             _subscriptions,
         }
     }
@@ -121,6 +137,7 @@ impl CreatePrModal {
 
     fn toggle_draft(&mut self, cx: &mut Context<Self>) {
         self.draft = !self.draft;
+        self.clear_failure(cx);
         cx.notify();
     }
 
@@ -155,7 +172,16 @@ impl CreatePrModal {
         cx.notify();
         let me = cx.weak_entity();
         let handle = window.window_handle();
-        workspace.update(cx, |ws, cx| ws.create_pr(request, me, handle, cx));
+        let lane = self.lane;
+        workspace.update(cx, |ws, cx| ws.create_pr(lane, request, me, handle, cx));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn failure(&self) -> Option<&str> {
+        match &self.state {
+            CreateState::Failed(message) => Some(message.as_ref()),
+            CreateState::Editing | CreateState::Creating => None,
+        }
     }
 
     /// The workspace reports a failure; the form stays open with it.

@@ -199,18 +199,47 @@ fn lane_with(cx: &mut TestAppContext, published: bool) -> (GitFixture, LaneRef) 
     (f, id)
 }
 
-fn create(f: &GitFixture, cx: &mut TestAppContext) {
-    let request = crate::workspace::github_ops::create::CreatePrRequest {
+fn request(base: Option<&str>) -> crate::workspace::github_ops::create::CreatePrRequest {
+    crate::workspace::github_ops::create::CreatePrRequest {
         title: "Add it".into(),
         body: String::new(),
-        base: None,
+        base: base.map(str::to_owned),
         draft: false,
-    };
-    let window = f.window.into();
+    }
+}
+
+/// A Create PR form for `lane`, submitted with `base`; the form is returned
+/// so a test can read what it was told.
+fn create_with(
+    f: &GitFixture,
+    lane: LaneRef,
+    base: Option<&str>,
+    cx: &mut TestAppContext,
+) -> gpui::Entity<crate::workspace::github_ops::create_modal::CreatePrModal> {
+    let window: gpui::AnyWindowHandle = f.window.into();
+    let ws = f.ws.downgrade();
+    let root = f.root.clone();
+    let modal = cx
+        .update_window(window, |_, window, cx| {
+            let repo = crate::git_host::GitHost::global(cx).open(&root);
+            cx.new(|cx| {
+                crate::workspace::github_ops::create_modal::CreatePrModal::new(
+                    ws, lane, repo, None, window, cx,
+                )
+            })
+        })
+        .unwrap();
+    let weak = modal.downgrade();
     f.ws.update(cx, |ws, cx| {
-        ws.create_pr(request, gpui::WeakEntity::new_invalid(), window, cx)
+        ws.create_pr(lane, request(base), weak, window, cx)
     });
     cx.run_until_parked();
+    modal
+}
+
+fn create(f: &GitFixture, lane: LaneRef, cx: &mut TestAppContext) -> Option<String> {
+    let modal = create_with(f, lane, None, cx);
+    modal.read_with(cx, |modal, _| modal.failure().map(str::to_owned))
 }
 
 fn toasts(f: &GitFixture, cx: &mut TestAppContext) -> Vec<String> {
@@ -224,20 +253,33 @@ fn toasts(f: &GitFixture, cx: &mut TestAppContext) -> Vec<String> {
     })
 }
 
+fn pushes(f: &GitFixture) -> Vec<crate::lane::git::GitCall> {
+    f.fake
+        .calls()
+        .into_iter()
+        .filter(|call| {
+            matches!(
+                call,
+                crate::lane::git::GitCall::Push { .. } | crate::lane::git::GitCall::PushHead { .. }
+            )
+        })
+        .collect()
+}
+
 #[gpui::test]
-fn an_unpublished_branch_is_pushed_before_its_pr_opens(cx: &mut TestAppContext) {
+fn an_unpublished_branch_is_pushed_with_its_upstream_before_its_pr_opens(cx: &mut TestAppContext) {
     let gh = crate::test_support::fake_gh(cx);
     let (f, id) = lane_with(cx, false);
-    create(&f, cx);
-    let pushed = f.fake.calls().into_iter().any(|call| {
-        call == crate::lane::git::GitCall::PushHead {
+    assert_eq!(create(&f, id, cx), None);
+    assert_eq!(
+        pushes(&f),
+        vec![crate::lane::git::GitCall::PushHead {
             repo: f.root.clone(),
             remote: "origin".into(),
             branch: "feat".into(),
             set_upstream: true,
-        }
-    });
-    assert!(pushed, "{:?}", f.fake.calls());
+        }]
+    );
     assert_eq!(gh.count(GhOp::CreatePr), 1);
     tick(cx);
     assert_eq!(
@@ -248,29 +290,28 @@ fn an_unpublished_branch_is_pushed_before_its_pr_opens(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
-fn a_published_branch_with_nothing_new_is_not_pushed(cx: &mut TestAppContext) {
+fn a_published_branch_is_pushed_explicitly_without_touching_its_upstream(cx: &mut TestAppContext) {
+    // A cached ahead count can miss commits; an explicit push to the same
+    // branch is a no-op when there are none, so it always runs.
     let gh = crate::test_support::fake_gh(cx);
-    let (f, _) = lane_with(cx, true);
-    create(&f, cx);
-    let pushes = f
-        .fake
-        .calls()
-        .into_iter()
-        .filter(|call| {
-            matches!(
-                call,
-                crate::lane::git::GitCall::Push { .. } | crate::lane::git::GitCall::PushHead { .. }
-            )
-        })
-        .count();
-    assert_eq!(pushes, 0);
+    let (f, id) = lane_with(cx, true);
+    assert_eq!(create(&f, id, cx), None);
+    assert_eq!(
+        pushes(&f),
+        vec![crate::lane::git::GitCall::PushHead {
+            repo: f.root.clone(),
+            remote: "origin".into(),
+            branch: "feat".into(),
+            set_upstream: false,
+        }]
+    );
     assert_eq!(gh.count(GhOp::CreatePr), 1);
 }
 
 #[gpui::test]
-fn a_failed_push_opens_no_pr_and_says_so(cx: &mut TestAppContext) {
+fn a_failed_push_opens_no_pr_and_the_form_says_so(cx: &mut TestAppContext) {
     let gh = crate::test_support::fake_gh(cx);
-    let (f, _) = lane_with(cx, false);
+    let (f, id) = lane_with(cx, false);
     f.fake.fail(
         f.root.clone(),
         crate::lane::git::GitOp::PushHead,
@@ -280,8 +321,9 @@ fn a_failed_push_opens_no_pr_and_says_so(cx: &mut TestAppContext) {
         },
     );
     let before = toasts(&f, cx).len();
-    create(&f, cx);
+    let failure = create(&f, id, cx);
     assert_eq!(gh.count(GhOp::CreatePr), 0);
+    assert!(failure.is_some_and(|m| m.contains("rejected")));
     assert_eq!(toasts(&f, cx).len(), before + 1);
 }
 
@@ -295,12 +337,68 @@ fn a_gh_failure_keeps_its_message(cx: &mut TestAppContext) {
             stderr: "a pull request for branch feat already exists".into(),
         },
     );
-    let (f, _) = lane_with(cx, true);
-    create(&f, cx);
+    let (f, id) = lane_with(cx, true);
+    let failure = create(&f, id, cx);
+    assert!(failure.is_some_and(|m| m.contains("already exists")));
+    assert!(toasts(&f, cx).iter().any(|t| t.contains("already exists")));
+}
+
+#[gpui::test]
+fn a_held_git_lock_fails_the_form_instead_of_hanging_it(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, id) = lane_with(cx, true);
+    let window: gpui::AnyWindowHandle = f.window.into();
+    let ws = f.ws.downgrade();
+    let root = f.root.clone();
+    let modal = cx
+        .update_window(window, |_, window, cx| {
+            let repo = crate::git_host::GitHost::global(cx).open(&root);
+            cx.new(|cx| {
+                crate::workspace::github_ops::create_modal::CreatePrModal::new(
+                    ws, id, repo, None, window, cx,
+                )
+            })
+        })
+        .unwrap();
+    let weak = modal.downgrade();
+    // A Fetch holds the repository lock until its background run returns.
+    f.ws.update(cx, |ws, cx| {
+        ws.on_fetch(cx);
+        ws.create_pr(id, request(None), weak, window, cx);
+    });
+    cx.run_until_parked();
     assert!(
-        toasts(&f, cx).iter().any(|t| t.contains("already exists")),
-        "gh's stderr reaches the report"
+        modal.read_with(cx, |modal, _| modal.failure().is_some()),
+        "the form hears why"
     );
+    assert_eq!(gh.count(GhOp::CreatePr), 0);
+    assert!(pushes(&f).is_empty());
+}
+
+#[gpui::test]
+fn a_branch_that_pushes_to_its_own_base_is_refused(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, id) = lane_with(cx, true);
+    let modal = create_with(&f, id, Some("feat"), cx);
+    let failure = modal.read_with(cx, |modal, _| modal.failure().map(str::to_owned));
+    assert!(failure.is_some_and(|m| m.contains("base")));
+    assert!(pushes(&f).is_empty(), "nothing is pushed onto the base");
+    assert_eq!(gh.count(GhOp::CreatePr), 0);
+}
+
+#[gpui::test]
+fn the_form_creates_for_its_own_lane_not_the_one_shown_later(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, id) = lane_with(cx, false);
+    let elsewhere = LaneRef {
+        project: id.project,
+        lane: id.lane + 1000,
+    };
+    // Submitting for a lane that is not shown still reads that lane's path:
+    // here it has none, so the form fails rather than using the active one.
+    let modal = create_with(&f, elsewhere, None, cx);
+    assert!(modal.read_with(cx, |modal, _| modal.failure().is_some()));
+    assert_eq!(gh.count(GhOp::CreatePr), 0);
 }
 
 // ---- Sending a PR's problems to the lane's agent ----

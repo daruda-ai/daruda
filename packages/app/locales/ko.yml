@@ -1098,6 +1098,7 @@ error:
   git_push_failed: "git push 실패"
   git_push_target_failed: "이 브랜치의 push 대상을 읽지 못했습니다"
   github_pr_create_failed: "Pull request 만들기 실패"
+  github_git_busy: "다른 git 작업이 실행 중입니다. 끝난 뒤 다시 시도하세요"
   github_no_agent_pane: "보낼 곳이 없습니다. 이 worktree에 에이전트 채팅을 여세요"
   github_lane_changed: "로그를 읽는 동안 worktree가 바뀌어 보내지 않았습니다"
   github_send_failed: "에이전트 패인이 텍스트를 받지 않았습니다"

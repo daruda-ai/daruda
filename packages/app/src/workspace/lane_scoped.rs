@@ -22,9 +22,8 @@ pub(in crate::workspace) struct LaneScoped {
     /// through `github_ops::link`; never persisted, since the next poll
     /// answers it again.
     pub pr: Option<crate::github::PrLink>,
-    /// Logs or comments for the PR are being read for the agent; the
-    /// strip's send buttons wait.
-    pub pr_sending: bool,
+    /// What is under way for the lane's PR; the strip's buttons wait on it.
+    pub pr_work: PrWork,
     /// Expanded-sidebar disclosure for this app session, independent of rail grouping.
     pub show_individual_panes: bool,
 }
@@ -37,6 +36,17 @@ pub(in crate::workspace) struct FileTreeLaneState {
     pub reload_queue: Option<FilesReloadQueue>,
     pub visible_cache: Option<Arc<Vec<VisibleEntry>>>,
     pub gitignore: Option<GitignoreSet>,
+}
+
+/// Work on a lane's pull request that its buttons must not repeat.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum PrWork {
+    #[default]
+    Idle,
+    /// Logs or comments are being read for the agent.
+    Sending,
+    /// A PR was created and the poller has not linked it yet.
+    AwaitingNewPr,
 }
 
 /// Whether a refresh of one axis is running, and whether another request

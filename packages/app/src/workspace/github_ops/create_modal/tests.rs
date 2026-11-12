@@ -15,7 +15,11 @@ fn build(
     let handle = git.open(Path::new("/fake/repo"));
     let base = base.map(str::to_owned);
     let window = cx.add_window(|window, cx| {
-        CreatePrModal::new(WeakEntity::new_invalid(), handle, base, window, cx)
+        let lane = daruda_store::project::LaneRef {
+            project: 0,
+            lane: 0,
+        };
+        CreatePrModal::new(WeakEntity::new_invalid(), lane, handle, base, window, cx)
     });
     let modal = window.root(cx).unwrap();
     cx.run_until_parked();

@@ -13,6 +13,7 @@ use crate::gh_host::GhHost;
 use crate::github::PrLink;
 use crate::surface::strings::error as s;
 use crate::workspace::Workspace;
+use crate::workspace::lane_scoped::PrWork;
 use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Why a check has no log in the prompt; read by the agent, not the user.
@@ -120,14 +121,18 @@ impl Workspace {
         else {
             return;
         };
-        if self.lane_scoped_mut(lane).pr_sending {
+        if self
+            .lane_scoped
+            .get(&lane)
+            .is_some_and(|state| state.pr_work == PrWork::Sending)
+        {
             return;
         }
         if self.pr_send_target(cx).is_none() {
             self.report_pr_send(s::github_no_agent_pane(), ErrorSeverity::Warning, cx);
             return;
         }
-        self.lane_scoped_mut(lane).pr_sending = true;
+        self.lane_scoped_mut(lane).pr_work = PrWork::Sending;
         cx.notify();
         let gh = GhHost::global(cx);
         cx.spawn_in(window, async move |this, cx| {
@@ -161,8 +166,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(state) = self.lane_scoped.get_mut(&lane) {
-            state.pr_sending = false;
+        if let Some(state) = self.lane_scoped.get_mut(&lane)
+            && state.pr_work == PrWork::Sending
+        {
+            state.pr_work = PrWork::Idle;
         }
         cx.notify();
         let prompt = match built {
