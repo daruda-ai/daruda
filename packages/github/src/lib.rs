@@ -21,7 +21,7 @@ mod system;
 pub use backend::Gh;
 pub use error::{FailureKind, GhError};
 pub use model::{
-    ActionsJob, CheckRollup, CheckRun, CheckStatus, FailedCheck, PrState, PrSummary, RepoId,
+    ActionsJob, CheckRollup, CheckRun, CheckStatus, FailedCheck, NewPr, PrState, PrSummary, RepoId,
     ReviewDecision,
 };
 pub use system::SystemGh;

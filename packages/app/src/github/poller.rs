@@ -108,6 +108,17 @@ impl PrPoller {
         );
     }
 
+    /// The default branch the last answer for `repo` named.
+    pub(crate) fn default_branch(repo: &RepoId, cx: &App) -> Option<String> {
+        cx.try_global::<Self>()?
+            .repos
+            .get(repo)?
+            .last
+            .as_ref()?
+            .default_branch
+            .clone()
+    }
+
     /// What is known about `gh` for `host`.
     pub(crate) fn availability(host: &str, cx: &App) -> GhAvailability {
         cx.try_global::<Self>()

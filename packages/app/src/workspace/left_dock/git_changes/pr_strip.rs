@@ -5,8 +5,8 @@ use daruda_github::{CheckRollup, PrState};
 use gpui::{AnyElement, ClickEvent, Context, IntoElement, div, prelude::*, px};
 
 use crate::surface::strings::git as s;
-use crate::ui::Sizable as _;
 use crate::ui::theme;
+use crate::ui::{Disableable as _, Sizable as _};
 use crate::workspace::github_ops::strip::PrStrip;
 use crate::workspace::github_ops::tone::PrTone;
 use crate::workspace::layout::{Dock, LeftDockSnapshot};
@@ -59,7 +59,17 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
         .text_size(px(metrics.text(theme::GIT_BADGE_FONT_SIZE)));
     let workspace = snap.workspace.clone();
     match &snap.pr_strip {
-        PrStrip::Hidden | PrStrip::NoPr => None,
+        PrStrip::Hidden => None,
+        PrStrip::NoPr => {
+            let create = crate::ui::button_compact_sized("pr-create", s::pr_create_btn(), metrics)
+                .disabled(snap.git_op_in_flight)
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.open_create_pr_modal(window, cx));
+                    }
+                }));
+            Some(row.justify_end().child(create).into_any_element())
+        }
         PrStrip::Missing { host } | PrStrip::LoggedOut { host } => {
             let message = if matches!(snap.pr_strip, PrStrip::Missing { .. }) {
                 s::pr_gh_missing()

@@ -9,7 +9,7 @@ use daruda_core::process::{CaptureError, CaptureLimits, Captured, command_on_pat
 use crate::availability::GhAuth;
 use crate::backend::Gh;
 use crate::query::{RepoPrs, parse_prs_for_branches, prs_for_branches_query};
-use crate::{GhError, RepoId};
+use crate::{GhError, NewPr, RepoId};
 
 const LIMITS: CaptureLimits = CaptureLimits {
     timeout: Duration::from_secs(30),
@@ -29,7 +29,18 @@ impl SystemGh {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.run_in(None, args)
+    }
+
+    fn run_in<I, S>(&self, cwd: Option<&std::path::Path>, args: I) -> Result<Captured, GhError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         let mut command = command_on_path("gh", None);
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
         command
             .args(args)
             // A missing login or unknown host must fail, not wait on a prompt.
@@ -52,7 +63,15 @@ impl SystemGh {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let out = self.run(args)?;
+        self.stdout_in(None, args)
+    }
+
+    fn stdout_in<I, S>(&self, cwd: Option<&std::path::Path>, args: I) -> Result<String, GhError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let out = self.run_in(cwd, args)?;
         if !out.status.success() {
             return Err(GhError::Exit {
                 code: out.status.code(),
@@ -105,6 +124,36 @@ impl Gh for SystemGh {
             all.by_branch.extend(part.by_branch);
         }
         Ok(all)
+    }
+
+    fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {
+        let mut args = vec![
+            "pr".to_owned(),
+            "create".to_owned(),
+            "--repo".to_owned(),
+            repo.qualified(),
+            "--head".to_owned(),
+            new.head.clone(),
+            "--title".to_owned(),
+            new.title.clone(),
+            "--body".to_owned(),
+            new.body.clone(),
+        ];
+        if let Some(base) = &new.base {
+            args.push("--base".to_owned());
+            args.push(base.clone());
+        }
+        if new.draft {
+            args.push("--draft".to_owned());
+        }
+        let out = self.stdout_in(Some(&new.worktree), &args)?;
+        // gh prints the new PR's URL as its last line.
+        out.lines()
+            .rev()
+            .map(str::trim)
+            .find(|line| line.starts_with("https://"))
+            .map(str::to_owned)
+            .ok_or_else(|| GhError::Parse(format!("no PR URL in: {}", out.trim())))
     }
 }
 

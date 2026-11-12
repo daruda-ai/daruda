@@ -179,3 +179,126 @@ fn turning_the_feature_off_stops_polling_and_clears_links(cx: &mut TestAppContex
     assert_eq!(linked(&f, id, cx), None);
     assert_eq!(gh.count(GhOp::PrsForBranches), 1, "no request while off");
 }
+
+// ---- Creating a pull request ----
+
+fn lane_with(cx: &mut TestAppContext, published: bool) -> (GitFixture, LaneRef) {
+    let f = GitFixture::open(cx, &daruda_config::Config::default(), |repo: FakeRepo| {
+        repo.push_target(PushTarget {
+            remote: "origin".into(),
+            url: "git@github.com:o/r.git".into(),
+            branch: "feat".into(),
+            published,
+        })
+    });
+    let id = f.ws.read_with(cx, |ws, _| ws.active_ref());
+    f.ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
+    cx.run_until_parked();
+    let (window, ws) = (f.window, f.ws.downgrade());
+    cx.update(|cx| crate::window_registry::WindowRegistry::register(window.into(), ws, cx));
+    (f, id)
+}
+
+fn create(f: &GitFixture, cx: &mut TestAppContext) {
+    let request = crate::workspace::github_ops::create::CreatePrRequest {
+        title: "Add it".into(),
+        body: String::new(),
+        base: None,
+        draft: false,
+    };
+    let window = f.window.into();
+    f.ws.update(cx, |ws, cx| {
+        ws.create_pr(request, gpui::WeakEntity::new_invalid(), window, cx)
+    });
+    cx.run_until_parked();
+}
+
+fn toasts(f: &GitFixture, cx: &mut TestAppContext) -> Vec<String> {
+    f.ws.read_with(cx, |ws, cx| {
+        ws.toast_layer
+            .read(cx)
+            .queue
+            .iter()
+            .map(|toast| format!("{:?}", toast.report))
+            .collect()
+    })
+}
+
+#[gpui::test]
+fn an_unpublished_branch_is_pushed_before_its_pr_opens(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, id) = lane_with(cx, false);
+    create(&f, cx);
+    let pushed = f.fake.calls().into_iter().any(|call| {
+        call == crate::lane::git::GitCall::PushSetUpstream {
+            repo: f.root.clone(),
+            remote: "origin".into(),
+            branch: "feat".into(),
+        }
+    });
+    assert!(pushed, "{:?}", f.fake.calls());
+    assert_eq!(gh.count(GhOp::CreatePr), 1);
+    tick(cx);
+    assert_eq!(
+        linked(&f, id, cx),
+        Some((1, PrState::Open)),
+        "the poller finds it"
+    );
+}
+
+#[gpui::test]
+fn a_published_branch_with_nothing_new_is_not_pushed(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, _) = lane_with(cx, true);
+    create(&f, cx);
+    let pushes = f
+        .fake
+        .calls()
+        .into_iter()
+        .filter(|call| {
+            matches!(
+                call,
+                crate::lane::git::GitCall::Push { .. }
+                    | crate::lane::git::GitCall::PushSetUpstream { .. }
+            )
+        })
+        .count();
+    assert_eq!(pushes, 0);
+    assert_eq!(gh.count(GhOp::CreatePr), 1);
+}
+
+#[gpui::test]
+fn a_failed_push_opens_no_pr_and_says_so(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, _) = lane_with(cx, false);
+    f.fake.fail(
+        f.root.clone(),
+        crate::lane::git::GitOp::PushSetUpstream,
+        crate::lane::git::FakeFailure::Exit {
+            code: Some(1),
+            stderr: "rejected".into(),
+        },
+    );
+    let before = toasts(&f, cx).len();
+    create(&f, cx);
+    assert_eq!(gh.count(GhOp::CreatePr), 0);
+    assert_eq!(toasts(&f, cx).len(), before + 1);
+}
+
+#[gpui::test]
+fn a_gh_failure_keeps_its_message(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    gh.fail(
+        GhOp::CreatePr,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "a pull request for branch feat already exists".into(),
+        },
+    );
+    let (f, _) = lane_with(cx, true);
+    create(&f, cx);
+    assert!(
+        toasts(&f, cx).iter().any(|t| t.contains("already exists")),
+        "gh's stderr reaches the report"
+    );
+}

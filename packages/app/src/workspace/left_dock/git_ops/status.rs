@@ -30,7 +30,7 @@ impl Workspace {
 
     /// The working directory of a git lane, or `None` for a missing or
     /// non-git one — which no git read axis reads.
-    pub(super) fn git_lane_path(&self, target: LaneRef) -> Option<PathBuf> {
+    pub(in crate::workspace) fn git_lane_path(&self, target: LaneRef) -> Option<PathBuf> {
         self.lane_for(target)
             .filter(|lane| {
                 lane.is_git()

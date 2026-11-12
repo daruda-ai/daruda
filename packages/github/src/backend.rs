@@ -5,7 +5,7 @@
 
 use crate::availability::GhAuth;
 use crate::query::RepoPrs;
-use crate::{GhError, RepoId};
+use crate::{GhError, NewPr, RepoId};
 
 pub trait Gh: Send + Sync {
     /// Whether `gh` is installed and logged in to `host`.
@@ -13,4 +13,6 @@ pub trait Gh: Send + Sync {
     /// The pull requests whose head is each of `branches` in `repo`, plus the
     /// repository's default branch.
     fn prs_for_branches(&self, repo: &RepoId, branches: &[String]) -> Result<RepoPrs, GhError>;
+    /// Open a pull request; answers its URL.
+    fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError>;
 }

@@ -87,6 +87,20 @@ pub struct FailedCheck {
     pub job: Option<ActionsJob>,
 }
 
+/// A pull request to open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewPr {
+    /// The branch on the repository's side, already pushed.
+    pub head: String,
+    /// `None` lets GitHub pick the repository's default branch.
+    pub base: Option<String>,
+    pub title: String,
+    pub body: String,
+    pub draft: bool,
+    /// The lane's worktree; `gh` runs there so it reads the same remotes.
+    pub worktree: std::path::PathBuf,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrSummary {
     pub number: u64,

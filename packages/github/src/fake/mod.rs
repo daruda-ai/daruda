@@ -5,6 +5,7 @@
 //! |---|---|
 //! | `auth` | `Ready` |
 //! | `prs_for_branches` | default branch `main`, no PRs for any branch |
+//! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL |
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -12,13 +13,14 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use crate::availability::GhAuth;
 use crate::backend::Gh;
 use crate::query::RepoPrs;
-use crate::{GhError, PrSummary, RepoId};
+use crate::{CheckRollup, GhError, NewPr, PrState, PrSummary, RepoId};
 
 /// A request the code under test made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GhCall {
     Auth { host: String },
     PrsForBranches { repo: RepoId, branches: Vec<String> },
+    CreatePr { repo: RepoId, new: NewPr },
 }
 
 /// One [`Gh`] method, for aiming failures.
@@ -26,6 +28,7 @@ pub enum GhCall {
 pub enum GhOp {
     Auth,
     PrsForBranches,
+    CreatePr,
 }
 
 /// A cloneable description of a [`GhError`], turned into a fresh error on
@@ -120,6 +123,7 @@ impl GhCall {
         match self {
             Self::Auth { .. } => GhOp::Auth,
             Self::PrsForBranches { .. } => GhOp::PrsForBranches,
+            Self::CreatePr { .. } => GhOp::CreatePr,
         }
     }
 }
@@ -168,6 +172,40 @@ impl Gh for FakeGh {
             ),
             by_branch,
         })
+    }
+
+    fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {
+        let mut state = self.lock();
+        state.calls.push(GhCall::CreatePr {
+            repo: repo.clone(),
+            new: new.clone(),
+        });
+        if let Some(failure) = state.failures.get(&GhOp::CreatePr) {
+            return Err(failure.to_error());
+        }
+        let prs = state.prs.entry(repo.clone()).or_default();
+        let number = prs.iter().map(|pr| pr.number).max().unwrap_or(0) + 1;
+        let url = format!(
+            "https://{}/{}/{}/pull/{number}",
+            repo.host, repo.owner, repo.name
+        );
+        prs.push(PrSummary {
+            number,
+            url: url.clone(),
+            title: new.title.clone(),
+            state: if new.draft {
+                PrState::Draft
+            } else {
+                PrState::Open
+            },
+            head_branch: new.head.clone(),
+            cross_repo: false,
+            checks: CheckRollup::None,
+            failed: Vec::new(),
+            review: None,
+            updated_at: String::new(),
+        });
+        Ok(url)
     }
 }
 

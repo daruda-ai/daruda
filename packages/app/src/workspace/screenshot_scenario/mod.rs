@@ -117,6 +117,7 @@ pub(crate) enum ScreenshotScenario {
     LeftDockGitPr,
     LeftDockGitGhMissing,
     LeftDockWorktreesPr,
+    CreatePrModal,
     /// Open the command palette (`CommandPaletteState::open`).
     CommandPalette,
     /// Open the Lane switcher with a real candidate whose label is
@@ -826,11 +827,21 @@ pub(crate) fn drive(
         ScreenshotScenario::LeftDockGit => {
             workspace.update(cx, |ws, cx| ws.seed_left_dock_git_for_shot(window, cx));
         }
-        ScreenshotScenario::LeftDockGitPr | ScreenshotScenario::LeftDockGitGhMissing => {
-            let linked = scenario == ScreenshotScenario::LeftDockGitPr;
+        ScreenshotScenario::LeftDockGitPr
+        | ScreenshotScenario::LeftDockGitGhMissing
+        | ScreenshotScenario::CreatePrModal => {
+            use crate::workspace::github_ops::screenshot::PrShot;
+            let shot = match scenario {
+                ScreenshotScenario::LeftDockGitPr => PrShot::Linked,
+                ScreenshotScenario::LeftDockGitGhMissing => PrShot::GhMissing,
+                _ => PrShot::NoPr,
+            };
             workspace.update(cx, |ws, cx| {
                 ws.seed_left_dock_git_for_shot(window, cx);
-                ws.seed_pr_for_shot(linked, cx);
+                ws.seed_pr_for_shot(shot, cx);
+                if shot == PrShot::NoPr {
+                    ws.open_create_pr_modal(window, cx);
+                }
             });
         }
         ScreenshotScenario::LeftDockWorktreesPr => {

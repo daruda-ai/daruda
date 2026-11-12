@@ -45,6 +45,25 @@ fn scripted_prs_answer_per_branch_and_calls_are_logged() {
 }
 
 #[test]
+fn a_created_pr_is_found_by_the_next_lookup() {
+    let gh = FakeGh::new();
+    gh.set_prs(&repo(), vec![pr(4, "old")]);
+    let new = NewPr {
+        head: "feat".into(),
+        base: None,
+        title: "Add it".into(),
+        body: String::new(),
+        draft: true,
+        worktree: "/w".into(),
+    };
+    let url = gh.create_pr(&repo(), &new).unwrap();
+    assert_eq!(url, "https://github.com/o/r/pull/5");
+    let found = gh.prs_for_branches(&repo(), &["feat".to_owned()]).unwrap();
+    let pr = &found.by_branch["feat"][0];
+    assert_eq!((pr.number, pr.state), (5, PrState::Draft));
+}
+
+#[test]
 fn an_injected_failure_lasts_until_cleared() {
     let gh = FakeGh::new();
     gh.set_auth("ghe.corp", GhAuth::LoggedOut);

@@ -44,6 +44,17 @@ fn pr(number: u64, title: &str, state: PrState, checks: CheckRollup) -> PrSummar
     }
 }
 
+/// What the active lane's PR looks like in a capture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum PrShot {
+    /// A PR whose checks fail.
+    Linked,
+    /// GitHub answers; the branch has no PR yet.
+    NoPr,
+    /// `gh` is not installed.
+    GhMissing,
+}
+
 impl Workspace {
     fn seed_push_target_for_shot(&mut self, target: LaneRef, branch: &str) {
         self.lane_scoped_mut(target).git.push_target = Some(PushTarget {
@@ -54,18 +65,16 @@ impl Workspace {
         });
     }
 
-    /// The active lane pushing to GitHub: with a PR whose checks fail, or with
-    /// `gh` missing.
-    pub(in crate::workspace) fn seed_pr_for_shot(&mut self, linked: bool, cx: &mut Context<Self>) {
+    /// The active lane pushing to GitHub, its PR as `shot` says.
+    pub(in crate::workspace) fn seed_pr_for_shot(&mut self, shot: PrShot, cx: &mut Context<Self>) {
         let active = self.active;
         self.seed_push_target_for_shot(active, "sidebar-sizing");
-        let availability = if linked {
-            GhAvailability::Ready
-        } else {
-            GhAvailability::Missing
+        let availability = match shot {
+            PrShot::Linked | PrShot::NoPr => GhAvailability::Ready,
+            PrShot::GhMissing => GhAvailability::Missing,
         };
         PrPoller::seed_for_shot(HOST, availability, cx);
-        if linked {
+        if shot == PrShot::Linked {
             self.lane_scoped_mut(active).pr = Some(PrLink {
                 repo: repo(),
                 pr: pr(
