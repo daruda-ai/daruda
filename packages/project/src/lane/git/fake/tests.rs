@@ -280,6 +280,7 @@ fn a_scripted_push_target_is_answered_and_an_upstream_push_logged() {
         url: "git@github.com:o/r.git".into(),
         branch: "feat".into(),
         published: false,
+        has_upstream: false,
     };
     let git = FakeGit::new()
         .with(FakeRepo::at(ROOT).branch("feat"))

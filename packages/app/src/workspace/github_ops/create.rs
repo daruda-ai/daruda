@@ -34,6 +34,8 @@ pub(crate) struct CreatePrRequest {
 
 #[derive(Debug)]
 pub(crate) enum CreatePrError {
+    /// The lane was closed before the form was submitted.
+    LaneGone,
     /// Detached HEAD, no remote, or a remote that is not a GitHub repository.
     NoTarget,
     /// The branch pushes to the PR's own base.
@@ -46,6 +48,7 @@ pub(crate) enum CreatePrError {
 impl std::fmt::Display for CreatePrError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::LaneGone => write!(f, "the worktree is no longer open"),
             Self::NoTarget => write!(f, "the branch has no GitHub remote to push to"),
             Self::HeadIsBase(branch) => {
                 write!(f, "the branch pushes to {branch}, the pull request's base")
@@ -58,6 +61,21 @@ impl std::fmt::Display for CreatePrError {
 }
 
 impl std::error::Error for CreatePrError {}
+
+impl CreatePrError {
+    /// What the form says: daruda's own reasons translated, git's and gh's
+    /// words kept as they came.
+    fn form_message(&self) -> String {
+        match self {
+            Self::LaneGone => s::github_pr_lane_gone(),
+            Self::NoTarget => s::github_pr_no_remote(),
+            Self::HeadIsBase(branch) => s::github_pr_head_is_base(branch),
+            Self::Read(_) | Self::Push(_) | Self::Gh(_) => {
+                format!("{}: {self}", s::github_pr_create_failed())
+            }
+        }
+    }
+}
 
 /// A lane base as `gh --base` takes it: without the push remote's prefix,
 /// and not a commit, which no PR can target.
@@ -114,7 +132,7 @@ impl Workspace {
             return;
         }
         let Some(path) = self.git_lane_path(lane) else {
-            fail_modal(modal, CreatePrError::NoTarget.to_string(), cx);
+            fail_modal(modal, CreatePrError::LaneGone.form_message(), cx);
             return;
         };
         // With no base named, GitHub picks the default branch; guard against
@@ -138,14 +156,19 @@ impl Workspace {
                     .map_err(CreatePrError::Read)?
                     .ok_or(CreatePrError::NoTarget)?;
                 let repo_id = parse_remote(&push.url).ok_or(CreatePrError::NoTarget)?;
+                // A typed base may carry the remote's prefix (`origin/feat`).
                 let base = request.base.as_deref().or(default_base.as_deref());
+                let base = base.map(|b| b.strip_prefix(&format!("{}/", push.remote)).unwrap_or(b));
                 if base == Some(push.branch.as_str()) {
                     return Err(CreatePrError::HeadIsBase(push.branch));
                 }
                 // An explicit refspec to the branch the PR names: a no-op when
                 // the remote is already at HEAD, so it never skips commits a
                 // cached ahead count missed.
-                repo.push_head(&push.remote, &push.branch, !push.published)
+                // `-u` only for a branch with no upstream yet: an existing one
+                // (in a fork workflow, the repository it came from) stays.
+                let set_upstream = !push.published && !push.has_upstream;
+                repo.push_head(&push.remote, &push.branch, set_upstream)
                     .map_err(CreatePrError::Push)?;
                 let new = NewPr {
                     head: push.branch,
@@ -188,7 +211,7 @@ impl Workspace {
                         .dedup("github.create_pr")
                         .build();
                     ws.report_error(report, cx);
-                    fail_modal(modal, format!("{}: {e}", s::github_pr_create_failed()), cx);
+                    fail_modal(modal, e.form_message(), cx);
                 }
             },
         );

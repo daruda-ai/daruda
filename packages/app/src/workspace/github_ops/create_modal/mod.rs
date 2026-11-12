@@ -45,7 +45,7 @@ pub(crate) struct CreatePrModal {
 }
 
 impl CreatePrModal {
-    pub(in crate::workspace) fn new(
+    pub(super) fn new(
         workspace: WeakEntity<Workspace>,
         lane: LaneRef,
         repo: Arc<dyn GitRepo>,
@@ -174,6 +174,19 @@ impl CreatePrModal {
         let handle = window.window_handle();
         let lane = self.lane;
         workspace.update(cx, |ws, cx| ws.create_pr(lane, request, me, handle, cx));
+    }
+
+    /// [`Self::new`] for workspace tests, which build the form without
+    /// opening a dialog.
+    #[cfg(test)]
+    pub(in crate::workspace) fn new_for_test(
+        workspace: WeakEntity<Workspace>,
+        lane: LaneRef,
+        repo: Arc<dyn GitRepo>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new(workspace, lane, repo, None, window, cx)
     }
 
     #[cfg(test)]

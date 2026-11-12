@@ -25,14 +25,22 @@ pub(crate) struct PrDemand {
 /// Set `state.pr`, reporting whether it changed. A link arriving ends the
 /// wait after Create PR.
 fn replace_pr(state: &mut LaneScoped, link: Option<PrLink>) -> bool {
-    if link.is_some() && state.pr_work == PrWork::AwaitingNewPr {
-        state.pr_work = PrWork::Idle;
+    if link.is_some() {
+        end_wait(state);
     }
     if state.pr == link {
         return false;
     }
     state.pr = link;
     true
+}
+
+/// Stop waiting for a PR just created: it arrived, or the branch or the
+/// feature it was created under is gone.
+fn end_wait(state: &mut LaneScoped) {
+    if state.pr_work == PrWork::AwaitingNewPr {
+        state.pr_work = PrWork::Idle;
+    }
 }
 
 impl Workspace {
@@ -107,6 +115,7 @@ impl Workspace {
     pub(crate) fn clear_pr_links(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
         for state in self.lane_scoped.values_mut() {
+            end_wait(state);
             changed |= replace_pr(state, None);
         }
         if changed {
@@ -135,6 +144,7 @@ impl Workspace {
         };
         state.git.push_target = found.clone();
         if moved {
+            end_wait(state);
             replace_pr(state, None);
             if let Some(repo) = found.as_ref().and_then(|push| parse_remote(&push.url)) {
                 crate::github::PrPoller::nudge(repo, cx);

@@ -72,6 +72,7 @@ mod tests {
             url: "git@github.com:o/r.git".into(),
             branch: branch.into(),
             published: true,
+            has_upstream: false,
         }
     }
 

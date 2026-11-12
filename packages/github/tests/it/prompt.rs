@@ -28,6 +28,7 @@ fn pr() -> PrSummary {
 
 fn check(name: &str) -> FailedCheck {
     FailedCheck {
+        workflow: None,
         name: name.into(),
         details_url: Some("https://github.com/cli/cli/actions/runs/1/job/2".into()),
         job: None,
@@ -108,6 +109,7 @@ fn the_prompt_quotes_each_check_and_says_when_a_log_is_missing() {
             },
             CheckLog {
                 check: FailedCheck {
+                    workflow: None,
                     name: "pull-kubernetes-e2e".into(),
                     details_url: Some("https://prow.k8s.io/view/1".into()),
                     job: None,
@@ -119,6 +121,41 @@ fn the_prompt_quotes_each_check_and_says_when_a_log_is_missing() {
     assert!(prompt.starts_with("Pull request #14927 (Multi-account draft) has failing CI checks."));
     assert!(prompt.contains("## build (windows-latest)\nDetails: https://github.com/cli/cli/actions/runs/1/job/2\n```\n##[group]Run go test"));
     assert!(prompt.contains("## pull-kubernetes-e2e\nDetails: https://prow.k8s.io/view/1\n(no log: not a GitHub Actions check)"));
+}
+
+#[test]
+fn many_long_failures_stay_within_the_budget() {
+    let log = fixture();
+    let logs: Vec<CheckLog> = (0..40)
+        .map(|i| CheckLog {
+            check: check(&format!("job {i}")),
+            log: Ok(log.clone()),
+        })
+        .collect();
+    let prompt = failed_checks(&pr(), &logs);
+    assert!(
+        prompt.chars().count() <= 30_000,
+        "{}",
+        prompt.chars().count()
+    );
+    assert!(
+        prompt.contains("more failing checks omitted"),
+        "the rest are counted"
+    );
+}
+
+#[test]
+fn same_named_jobs_read_apart_by_workflow() {
+    let mut ci = check("build");
+    ci.workflow = Some("CI".into());
+    let prompt = failed_checks(
+        &pr(),
+        &[CheckLog {
+            check: ci,
+            log: Err("x".into()),
+        }],
+    );
+    assert!(prompt.contains("## CI / build\n"), "{prompt}");
 }
 
 #[test]

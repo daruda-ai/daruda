@@ -29,6 +29,7 @@ fn pr(number: u64, head: &str, title: &str, state: PrState, checks: CheckRollup)
     let failed = match checks {
         CheckRollup::Failing { failed } => (0..failed)
             .map(|i| FailedCheck {
+                workflow: None,
                 name: format!("build ({i})"),
                 details_url: None,
                 job: None,
@@ -76,6 +77,7 @@ impl Workspace {
             url: "git@github.com:daruda/daruda.git".into(),
             branch: branch.into(),
             published: true,
+            has_upstream: false,
         });
     }
 

@@ -131,11 +131,48 @@ fn huge_comments_stay_within_the_budget() {
     };
     let prompt = review_threads(&pr(), &threads).unwrap();
     assert!(
-        prompt.chars().count() <= 30_100,
+        prompt.chars().count() <= 30_000,
         "{}",
         prompt.chars().count()
     );
     assert!(prompt.contains("the prompt is full"));
+}
+
+#[test]
+fn one_thread_longer_than_the_budget_is_cut_not_dropped() {
+    let replies = (0..20)
+        .map(|_| comment(Some("rev"), &"y".repeat(5_000)))
+        .collect();
+    let threads = ReviewThreads {
+        threads: vec![ReviewThread {
+            path: "src/big.rs".into(),
+            lines: Some((1, 2)),
+            outdated: false,
+            comments: replies,
+            more_comments: false,
+        }],
+        truncated: false,
+    };
+    let prompt = review_threads(&pr(), &threads).unwrap();
+    assert!(
+        prompt.contains("In src/big.rs:L1-L2:"),
+        "the thread is still there"
+    );
+    assert!(
+        prompt.chars().count() <= 30_000,
+        "{}",
+        prompt.chars().count()
+    );
+}
+
+#[test]
+fn a_thread_with_more_replies_than_read_says_so() {
+    let json = r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},
+        "nodes":[{"isResolved":false,"isOutdated":false,"path":"a.rs","line":3,"startLine":null,
+        "originalLine":3,"originalStartLine":null,"comments":{"totalCount":25,
+        "nodes":[{"author":{"login":"rev"},"body":"first"}]}}]}}}}}"#;
+    let threads = parse_review_threads(json).unwrap();
+    assert!(threads.threads[0].more_comments, "25 replies, 1 read");
 }
 
 #[test]

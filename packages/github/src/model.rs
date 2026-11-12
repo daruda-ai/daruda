@@ -96,6 +96,8 @@ pub struct ActionsJob {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FailedCheck {
+    /// The Actions workflow, for a check run that belongs to one.
+    pub workflow: Option<String>,
     pub name: String,
     pub details_url: Option<String>,
     /// `None` for a check outside GitHub Actions, which has no log to fetch.

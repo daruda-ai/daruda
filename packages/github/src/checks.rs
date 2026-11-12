@@ -66,6 +66,7 @@ pub fn summarize(runs: &[CheckRun]) -> (CheckRollup, Vec<FailedCheck>) {
         .iter()
         .filter(|run| run.status == CheckStatus::Failure)
         .map(|run| FailedCheck {
+            workflow: run.workflow.clone(),
             name: run.name.clone(),
             details_url: run.details_url.clone(),
             job: run.details_url.as_deref().and_then(actions_job),

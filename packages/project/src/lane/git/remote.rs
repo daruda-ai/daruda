@@ -16,6 +16,10 @@ pub struct PushTarget {
     /// Whether `refs/remotes/<remote>/<branch>` exists, i.e. the branch has
     /// been pushed (or fetched) at least once.
     pub published: bool,
+    /// The branch already has an upstream (`branch.<b>.remote` and `.merge`).
+    /// A first push must not replace it: in a fork workflow it names the
+    /// repository the branch came from, not the one it pushes to.
+    pub has_upstream: bool,
 }
 
 /// `None` when HEAD is detached or no remote can be chosen.
@@ -28,6 +32,8 @@ pub(crate) fn push_target(wt: &Path) -> Result<Option<PushTarget>, GitError> {
     let Some((remote, remote_branch)) = resolve(&branch, &entries) else {
         return Ok(None);
     };
+    let has_upstream = last(&entries, &format!("branch.{branch}.remote")).is_some()
+        && last(&entries, &format!("branch.{branch}.merge")).is_some();
     let url = run_git(wt, ["remote", "get-url", "--push", remote.as_str()])?
         .trim()
         .to_owned();
@@ -38,6 +44,7 @@ pub(crate) fn push_target(wt: &Path) -> Result<Option<PushTarget>, GitError> {
         url,
         branch: remote_branch,
         published,
+        has_upstream,
     }))
 }
 
@@ -99,9 +106,10 @@ fn last<'a>(entries: &[(&str, &'a str)], key: &str) -> Option<&'a str> {
 
 /// Pick `(remote, remote branch)` for `branch`: `pushRemote`, then
 /// `remote.pushDefault`, then the upstream remote, then `origin`, then the
-/// only remote. An upstream of `.` (a local branch) is skipped; a push remote
-/// given as a URL rather than a remote name answers `None`, since no
-/// repository can be read from it here.
+/// only remote. An upstream of `.` (a local branch, which `git push` would
+/// push into this same repository) is passed over for a remote; any other
+/// name that is not a configured remote, such as a URL, answers `None`, since
+/// git would push to it and no repository can be read from it here.
 ///
 /// The remote branch is the upstream's only under `push.default=upstream`
 /// (or its old name `tracking`) when pushing to the upstream remote. Every
@@ -121,10 +129,13 @@ fn resolve(branch: &str, entries: &[(&str, &str)]) -> Option<(String, String)> {
     let remote = match explicit {
         Some(name) if is_remote(&name) => name,
         Some(_) => return None,
-        None => upstream_remote
-            .filter(is_remote)
-            .or_else(|| remotes.iter().copied().find(|r| *r == "origin"))
-            .or_else(|| (remotes.len() == 1).then(|| remotes[0]))?,
+        None => match upstream_remote {
+            Some(name) if is_remote(&name) => Some(name),
+            Some(name) if name != "." => return None,
+            _ => None,
+        }
+        .or_else(|| remotes.iter().copied().find(|r| *r == "origin"))
+        .or_else(|| (remotes.len() == 1).then(|| remotes[0]))?,
     };
 
     let follows_upstream = matches!(last(entries, "push.default"), Some("upstream" | "tracking"));

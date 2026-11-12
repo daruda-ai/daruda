@@ -53,6 +53,21 @@ fn the_push_remote_and_branch_follow_gits_precedence() {
             Some(("up", "other")),
         ),
         (
+            "push.default=tracking is upstream's old name",
+            vec![
+                origin,
+                ("push.default", "tracking"),
+                ("branch.feat.remote", "origin"),
+                ("branch.feat.merge", "refs/heads/other"),
+            ],
+            Some(("origin", "other")),
+        ),
+        (
+            "an upstream given as a URL cannot be read",
+            vec![origin, ("branch.feat.remote", "https://h/o/r.git")],
+            None,
+        ),
+        (
             "push.default=current keeps the local name",
             vec![
                 origin,
@@ -147,9 +162,17 @@ fn push_target_reads_a_real_repository() {
     );
     assert_eq!(before.url, url);
 
+    assert!(!before.has_upstream);
     push_head(&work, "origin", "feat", true).unwrap();
     let after = push_target(&work).unwrap().unwrap();
-    assert!(after.published, "pushed with -u");
+    assert!(after.published);
+    assert!(after.has_upstream, "-u set the upstream");
+    assert_eq!(
+        run_git(&work, ["config", "branch.feat.merge"])
+            .unwrap()
+            .trim(),
+        "refs/heads/feat"
+    );
 
     // A tag named like the branch does not confuse the branch name.
     run_git(&work, ["tag", "feat"]).unwrap();

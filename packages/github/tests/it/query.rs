@@ -36,6 +36,11 @@ fn a_real_answer_parses_per_branch() {
     assert_eq!(pr.review, Some(ReviewDecision::ReviewRequired));
     assert_eq!(pr.checks, CheckRollup::Failing { failed: 1 });
     assert_eq!(pr.failed[0].name, "build (windows-latest)");
+    assert_eq!(
+        pr.failed[0].workflow.as_deref(),
+        Some("Unit and Integration Tests"),
+        "the workflow name the query reads"
+    );
     let job = pr.failed[0].job.expect("an Actions job");
     assert_eq!((job.run, job.job), (41_720_844_033, 126_212_878_432));
 

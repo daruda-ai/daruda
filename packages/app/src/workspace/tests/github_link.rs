@@ -46,6 +46,7 @@ fn lane_pushing_feat(cx: &mut TestAppContext) -> (GitFixture, LaneRef) {
             url: "git@github.com:O/R.git".into(),
             branch: "feat".into(),
             published: true,
+            has_upstream: false,
         })
     });
     let id = f.ws.read_with(cx, |ws, _| ws.active_ref());
@@ -189,6 +190,7 @@ fn lane_with(cx: &mut TestAppContext, published: bool) -> (GitFixture, LaneRef) 
             url: "git@github.com:o/r.git".into(),
             branch: "feat".into(),
             published,
+            has_upstream: false,
         })
     });
     let id = f.ws.read_with(cx, |ws, _| ws.active_ref());
@@ -223,8 +225,8 @@ fn create_with(
         .update_window(window, |_, window, cx| {
             let repo = crate::git_host::GitHost::global(cx).open(&root);
             cx.new(|cx| {
-                crate::workspace::github_ops::create_modal::CreatePrModal::new(
-                    ws, lane, repo, None, window, cx,
+                crate::workspace::github_ops::create_modal::CreatePrModal::new_for_test(
+                    ws, lane, repo, window, cx,
                 )
             })
         })
@@ -354,8 +356,8 @@ fn a_held_git_lock_fails_the_form_instead_of_hanging_it(cx: &mut TestAppContext)
         .update_window(window, |_, window, cx| {
             let repo = crate::git_host::GitHost::global(cx).open(&root);
             cx.new(|cx| {
-                crate::workspace::github_ops::create_modal::CreatePrModal::new(
-                    ws, id, repo, None, window, cx,
+                crate::workspace::github_ops::create_modal::CreatePrModal::new_for_test(
+                    ws, id, repo, window, cx,
                 )
             })
         })
@@ -387,18 +389,23 @@ fn a_branch_that_pushes_to_its_own_base_is_refused(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn the_form_creates_for_its_own_lane_not_the_one_shown_later(cx: &mut TestAppContext) {
+fn create_pr_uses_the_lane_it_is_given_not_the_one_shown(cx: &mut TestAppContext) {
     let gh = crate::test_support::fake_gh(cx);
     let (f, id) = lane_with(cx, false);
     let elsewhere = LaneRef {
         project: id.project,
         lane: id.lane + 1000,
     };
-    // Submitting for a lane that is not shown still reads that lane's path:
-    // here it has none, so the form fails rather than using the active one.
+    // The form passes the lane it was opened for. Given a lane that is not
+    // shown, and here no longer exists, nothing falls back to the active one.
     let modal = create_with(&f, elsewhere, None, cx);
-    assert!(modal.read_with(cx, |modal, _| modal.failure().is_some()));
+    let failure = modal.read_with(cx, |modal, _| modal.failure().map(str::to_owned));
+    assert_eq!(
+        failure.as_deref(),
+        Some(crate::surface::strings::error::github_pr_lane_gone().as_str())
+    );
     assert_eq!(gh.count(GhOp::CreatePr), 0);
+    assert!(pushes(&f).is_empty());
 }
 
 // ---- Sending a PR's problems to the lane's agent ----
@@ -408,11 +415,13 @@ fn failing_pr() -> PrSummary {
     failing.checks = CheckRollup::Failing { failed: 2 };
     failing.failed = vec![
         daruda_github::FailedCheck {
+            workflow: None,
             name: "build".into(),
             details_url: Some("https://github.com/o/r/actions/runs/11/job/22".into()),
             job: Some(daruda_github::ActionsJob { run: 11, job: 22 }),
         },
         daruda_github::FailedCheck {
+            workflow: None,
             name: "prow".into(),
             details_url: Some("https://prow.example/1".into()),
             job: None,
@@ -551,6 +560,7 @@ fn push_target(url: &str, branch: &str) -> PushTarget {
         url: url.into(),
         branch: branch.into(),
         published: true,
+        has_upstream: false,
     }
 }
 
@@ -617,6 +627,11 @@ fn recheck_picks_up_a_login_made_meanwhile(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_poll_that_finds_no_login_is_not_rechecked_at_once(cx: &mut TestAppContext) {
     let gh = gh_with_open_pr(cx);
+    let (_f, _) = lane_pushing_feat(cx);
+    tick(cx);
+    assert_eq!(gh.count(GhOp::Auth), 1);
+    // Long after the auth check, the login is revoked and a poll finds out.
+    cx.executor().advance_clock(Duration::from_secs(6 * 60));
     gh.fail(
         GhOp::PrsForBranches,
         GhFailure::Exit {
@@ -624,10 +639,8 @@ fn a_poll_that_finds_no_login_is_not_rechecked_at_once(cx: &mut TestAppContext) 
             stderr: "gh auth login".into(),
         },
     );
-    let (_f, _) = lane_pushing_feat(cx);
     tick(cx);
-    assert_eq!(gh.count(GhOp::Auth), 1);
-    assert_eq!(gh.count(GhOp::PrsForBranches), 1);
+    let polls = gh.count(GhOp::PrsForBranches);
     tick(cx);
     tick(cx);
     assert_eq!(
@@ -637,8 +650,43 @@ fn a_poll_that_finds_no_login_is_not_rechecked_at_once(cx: &mut TestAppContext) 
     );
     assert_eq!(
         gh.count(GhOp::PrsForBranches),
-        1,
+        polls,
         "a logged-out host is not polled"
+    );
+}
+
+#[gpui::test]
+fn moving_the_branch_ends_the_wait_after_create(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, id) = lane_with(cx, true);
+    // The PR is made, but the poll that would link it cannot reach GitHub.
+    gh.fail(
+        GhOp::PrsForBranches,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "error connecting to api.github.com".into(),
+        },
+    );
+    assert_eq!(create(&f, id, cx), None);
+    let work = |cx: &mut TestAppContext| {
+        f.ws.read_with(cx, |ws, _| ws.lane_scoped.get(&id).map(|s| s.pr_work))
+    };
+    assert_eq!(
+        work(cx),
+        Some(crate::workspace::lane_scoped::PrWork::AwaitingNewPr)
+    );
+
+    f.fake.add_repo(
+        FakeRepo::at(&f.root)
+            .branch("other")
+            .push_target(push_target("git@github.com:o/r.git", "other")),
+    );
+    f.ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        work(cx),
+        Some(crate::workspace::lane_scoped::PrWork::Idle),
+        "Create works on the new branch"
     );
 }
 
@@ -664,7 +712,7 @@ fn a_rate_limit_grows_the_pause_once_per_round(cx: &mut TestAppContext) {
     cx.executor().advance_clock(Duration::from_secs(5 * 60 + 1));
     tick(cx);
     assert_eq!(gh.count(GhOp::PrsForBranches), setup + 4);
-    // Counted per answer that would be the fourth failure, an 8-minute pause.
+    // A per-answer count would have paused 8 minutes and skipped this round.
     cx.executor().advance_clock(Duration::from_secs(5 * 60 + 1));
     tick(cx);
     assert_eq!(gh.count(GhOp::PrsForBranches), setup + 6);
