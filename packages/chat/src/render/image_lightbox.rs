@@ -39,11 +39,37 @@ fn lightbox_margin_top(viewport_height: f32) -> f32 {
     viewport_height * (1.0 - theme::MERMAID_LIGHTBOX_VIEWPORT_FRACTION) / 2.0
 }
 
+enum LightboxImage {
+    Plain(CachedImage),
+    Resource(crate::view::resource_image_cache::ResourceModalLease),
+}
+
+impl std::ops::Deref for LightboxImage {
+    type Target = CachedImage;
+    fn deref(&self) -> &CachedImage {
+        match self {
+            Self::Plain(image) => image,
+            Self::Resource(image) => image,
+        }
+    }
+}
+
 pub fn open(image: &CachedImage, window: &mut Window, cx: &mut App) {
+    open_image(LightboxImage::Plain(image.clone()), window, cx);
+}
+
+pub(crate) fn open_resource(
+    image: crate::view::resource_image_cache::ResourceImageLease,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    open_image(LightboxImage::Resource(image.into_modal()), window, cx);
+}
+
+fn open_image(image: LightboxImage, window: &mut Window, cx: &mut App) {
     let viewport = window.viewport_size();
     let width = lightbox_width(image.logical_width(), f32::from(viewport.width));
     let margin_top = lightbox_margin_top(f32::from(viewport.height));
-    let image = image.clone();
     let entity = cx.new(|cx_modal| ImageLightbox {
         image,
         focus_handle: cx_modal.focus_handle(),
@@ -72,7 +98,7 @@ pub fn open(image: &CachedImage, window: &mut Window, cx: &mut App) {
 }
 
 pub(super) struct ImageLightbox {
-    image: CachedImage,
+    image: LightboxImage,
     focus_handle: FocusHandle,
     /// Tracks the body's scroll offset so the overlay [`Scrollbar`] (both
     /// axes) can drive and reflect it — a diagram wider or taller than the

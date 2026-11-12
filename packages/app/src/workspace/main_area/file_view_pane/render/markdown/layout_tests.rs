@@ -33,13 +33,23 @@ impl Engine {
     }
 }
 
-/// Parse, then run the resolve passes with loaders that never produce pixels.
-/// The probes assert on layout, not on bitmaps, but the slots still have to be
-/// stamped: the renderer resolves each image through the table those passes
-/// number, and a span left unresolved would index past its end.
+/// Resolve images through the file viewer's local/data loader. Missing fixtures
+/// keep their alt text; real image cases exercise the shipped decode path.
 fn parse_and_resolve(md: &str) -> (Vec<MdBlock>, MdImages) {
     let mut blocks = parse_markdown(md);
-    let rasters = resolve_all(&mut blocks, &mut |_| None, &mut |_| None);
+    let rasters = resolve_all(
+        &mut blocks,
+        &mut |url| {
+            let bytes =
+                crate::workspace::main_area::file_view_pane::image_source::load_image_source(
+                    url,
+                    &std::env::temp_dir(),
+                )
+                .ok()?;
+            daruda_content::visual::decode_image(&bytes).ok()
+        },
+        &mut |_| None,
+    );
     (blocks, MdImages::from_rasters(rasters))
 }
 
@@ -156,6 +166,7 @@ impl Render for Probe {
                         .text_size(px(theme::FILE_VIEWER_FONT_SIZE))
                         .child(
                             crate::ui::markdown("conformance", self.md.clone())
+                                .local_images(Some(&std::env::temp_dir()))
                                 .surface(theme::agent_chat_bg(cx))
                                 .color(theme::agent_chat_fg(cx))
                                 .debug_inline_bounds(move |bounds| {
@@ -713,5 +724,48 @@ fn text_beside_an_inline_image_wraps_like_text_without_one(cx: &mut TestAppConte
             beside_image, alone,
             "an inline image must not change how a {host}'s text wraps"
         );
+    }
+}
+
+/// The chat's opt-in local source must resolve the same bytes the file viewer
+/// uses, for all supported local URI spellings and inline data images.
+#[gpui::test]
+fn local_image_references_match_embedded_images_in_both_hosts(cx: &mut TestAppContext) {
+    use base64::Engine as _;
+    crate::test_support::init_gpui_component(cx);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("preview.png");
+    image::RgbaImage::from_pixel(160, 64, image::Rgba([16, 128, 192, 255]))
+        .save(&path)
+        .unwrap();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(std::fs::read(&path).unwrap());
+    let embedded = format!("![preview](data:image/png;base64,{encoded})");
+    let relative = daruda_core::path::strip_root(&path, &std::env::temp_dir()).unwrap();
+    let uris = [
+        relative.to_string_lossy().into_owned(),
+        path.to_string_lossy().into_owned(),
+        daruda_core::file_url::from_local_path(&path).unwrap(),
+    ];
+    for engine in Engine::ALL {
+        let expected = bounds_for_engine(cx, engine, &embedded, px(400.), "md-probe").unwrap();
+        let missing = bounds_for_engine(
+            cx,
+            engine,
+            "![preview](missing-preview.png)",
+            px(400.),
+            "md-probe",
+        )
+        .unwrap();
+        assert_ne!(
+            expected,
+            missing,
+            "{} must paint the embedded image",
+            engine.label()
+        );
+        for uri in &uris {
+            let md = format!("![preview](<{uri}>)");
+            let actual = bounds_for_engine(cx, engine, &md, px(400.), "md-probe").unwrap();
+            assert_eq!(actual, expected, "{}: {uri}", engine.label());
+        }
     }
 }

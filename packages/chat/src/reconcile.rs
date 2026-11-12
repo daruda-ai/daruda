@@ -81,6 +81,7 @@ impl ReconcileScope {
 }
 
 mod tool_images;
+pub(crate) use tool_images::ResourceImageError;
 
 fn output_content(item: &ChatItem) -> Option<(Cow<'_, str>, &[ToolOutputBlock])> {
     match item {
@@ -498,7 +499,7 @@ impl AgentChatView {
 /// tool call that left `items`, or a block that stopped qualifying. Shared so
 /// both reconcilers invalidate by the same rule; left behind, an entry would
 /// either freeze the old content on screen or leak for the session.
-fn stale_keys<'a>(
+pub(crate) fn stale_keys<'a>(
     cached: impl Iterator<Item = &'a String>,
     live: &HashSet<String>,
     scope: &ReconcileScope,

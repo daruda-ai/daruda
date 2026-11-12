@@ -337,6 +337,13 @@ agent_chat:
   # asynchronously on the background executor via `reconcile_tool_images`, so
   # this dimmed one-line stand-in covers the brief gap before the real image
   # (or, on decode failure, `agent_chat_tool_media_label`) replaces it.
+  tool_image_read_failed: "Cannot read this image file."
+  tool_image_not_file: "The image path is not a regular file."
+  tool_image_too_large: "Image preview unavailable: file exceeds 8 MiB."
+  tool_image_decode_limit: "Image preview unavailable: exceeds 4096 pixels per side or the 64 MiB decoding limit."
+  tool_image_decode_failed: "Image preview unavailable: unsupported format or invalid image data."
+  tool_image_render_failed: "Image preview unavailable: could not prepare the image for display."
+  tool_image_budget: "Preview paused: image memory budget is full. Scroll to the image again or open the file."
   tool_image_placeholder: "[image]"
   tool_media_label: "[%{mime} · %{size}]"
   tool_media_label_no_mime: "[%{size}]"

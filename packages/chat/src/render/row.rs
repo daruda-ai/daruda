@@ -54,7 +54,7 @@ pub(super) fn render_row(
                     fold_context_at(&key, *ix, &this.items, this.turn_boundary, &this.live_units),
                 );
                 let markdown = MarkdownRender::new(
-                    RenderAssets::of(&this.assets),
+                    RenderAssets::of(&this.assets, this.cwd.as_ref()),
                     this.dim_amount,
                     AgentChatMarkdownLinks::new(cx.weak_entity()),
                 );
@@ -87,7 +87,7 @@ pub(super) fn render_row(
                 text,
                 thought_icon(),
                 MarkdownRender::new(
-                    RenderAssets::of(&this.assets),
+                    RenderAssets::of(&this.assets, this.cwd.as_ref()),
                     this.dim_amount,
                     AgentChatMarkdownLinks::new(cx.weak_entity()),
                 ),
@@ -157,7 +157,7 @@ pub(super) fn render_row(
                         cx,
                     ),
                     MarkdownRender::new(
-                        RenderAssets::of(&this.assets),
+                        RenderAssets::of(&this.assets, this.cwd.as_ref()),
                         this.dim_amount,
                         AgentChatMarkdownLinks::new(cx.weak_entity()),
                     ),
@@ -242,7 +242,7 @@ fn render_agent_item(
             &this.command_analysis,
             row.filter_revealed,
             this.turn_boundary,
-            RenderAssets::of(&this.assets),
+            RenderAssets::of(&this.assets, this.cwd.as_ref()),
             &this.fold,
             &this.activity.tool_started_at,
             this.tail_calls.value(),

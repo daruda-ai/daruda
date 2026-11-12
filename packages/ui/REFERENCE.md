@@ -86,6 +86,26 @@ pub use gpui_component::{ActiveTheme, Disableable, WindowExt};
 
 ---
 
+Markdown hosts may opt into `Markdown::local_images` with their local
+document directory, or `None` to allow only absolute paths and file URLs. Relative paths, absolute paths and local `file://` URLs
+then use the bounded local raster loader (8 MiB encoded, 4096 pixels per
+side, 64 MiB decode allocation, one frame); inline data and HTTP images keep their existing
+sources. Remote hosts must leave this unset.
+
+Local raster caches belong to `MarkdownStates` (or keyed state for an
+unretained body), with a 256 MiB budget and at most two reserved decoders.
+Oldest residents are retired before admitting replacements; weak image
+bindings do not keep pixels alive after a host reset or close. Background
+metadata checks detect length or modification-time changes every 500 ms and
+refresh resident successes and actively requested failures. Viewport leases
+unregister their paths and consumers on release without owning the cache;
+resident pixels survive viewport remounts, while evicted images stay idle
+until a new lease requests them. Entries without residents, workers or live
+leases are removed. Lease identity includes the host cache so a reset also
+replaces the binding for a continuously visible body. Changed body text or base directory also
+replaces its lease, releasing obsolete image paths. Local rasters never enter GPUI's
+process-wide asset cache.
+
 ## Three wrapper shapes
 
 Pick the smallest shape that fits the underlying widget.
@@ -310,7 +330,7 @@ The patches this package's wrappers depend on:
 | `Input::from_state` + public `TextInputState`; `Input::{input_padding, editor_background, show_scrollbar}` | `input`, `code_editor` (`TextState`, `FieldState`, `file_viewer_editor`, `embedded_code_viewer`) |
 | `LineDecoration`, `set_line_decorations`, `set_highlight_override`, `scroll_size`, `display_rows`, `move_cursor_to_end` | editor callers through `code_editor`'s re-exports: the diff and output embeds, the file viewer and its scrollbar, the composer |
 | `ThemeStyle::new` + `bold` / `italic`, `query_compilations` | `theme::syntax`, `highlighter` |
-| `TextView::{code_block_render, debug_inline_bounds}`, `markdown-task-checkbox` selector, loose/tight list spacing | `markdown` and the app's Markdown conformance probe |
+| `TextView::{code_block_render, debug_inline_bounds, image_source_with_fallback}`, `markdown-task-checkbox` selector, loose/tight list spacing | `markdown` and the app's Markdown conformance probe |
 | `take_right_clicked_link(cx, window, at)` | window-scoped, one-shot URL retrieval during the chat menu's mouse-down bubble handler; independent Markdown hosts need no Root layer |
 | Left-button gates on scrollbar and resize-handle presses | `scrollbar` (`a_right_press_on_the_track_does_not_jump_the_view`) |
 

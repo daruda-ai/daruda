@@ -2718,10 +2718,11 @@ pub(crate) struct NodeContext {
 
 impl NodeContext {
     fn image_source(&self, image: &ImageNode) -> ImageSource {
-        match &self.image_source {
-            Some(resolve) => resolve(&image.url),
-            None => image.source(),
-        }
+        // daruda patch: a host may override only local paths and keep cached data URLs.
+        self.image_source
+            .as_ref()
+            .and_then(|resolve| resolve(&image.url))
+            .unwrap_or_else(|| image.source())
     }
 
     pub(super) fn add_ref(&mut self, identifier: SharedString, link: LinkMark) {
@@ -5884,6 +5885,44 @@ mod tests {
 
         // No rows at all (a table still streaming in): an empty snapshot.
         assert_eq!(Table::default().table_data(), TableData::default());
+    }
+
+    #[test]
+    fn selective_image_sources_preserve_embedded_images_and_override_local_paths() {
+        let context = NodeContext {
+            image_source: Some(Arc::new(|uri| {
+                (uri.as_ref() == "preview.png")
+                    .then(|| gpui::ImageSource::from(std::path::PathBuf::from("/work/preview.png")))
+            })),
+            ..Default::default()
+        };
+        let inline = ImageNode {
+            url: "data:image/png;base64,aW1hZ2U=".into(),
+            ..Default::default()
+        };
+        let gpui::ImageSource::Image(first) = context.image_source(&inline) else {
+            panic!("data URLs keep their embedded source");
+        };
+        let gpui::ImageSource::Image(second) = context.image_source(&inline) else {
+            panic!("data URLs remain embedded on redraw");
+        };
+        assert!(Arc::ptr_eq(&first, &second));
+        let local = ImageNode {
+            url: "preview.png".into(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            context.image_source(&local),
+            gpui::ImageSource::Resource(gpui::Resource::Path(_))
+        ));
+        let remote = ImageNode {
+            url: "https://example.com/image.png".into(),
+            ..Default::default()
+        };
+        assert!(matches!(
+            context.image_source(&remote),
+            gpui::ImageSource::Resource(gpui::Resource::Uri(_))
+        ));
     }
 
     #[test]

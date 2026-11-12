@@ -70,14 +70,6 @@ pub(super) type ToolImages = std::sync::Arc<
     std::sync::Mutex<std::collections::HashMap<u64, Option<daruda_ui::CachedImage>>>,
 >;
 
-/// Decoded local-image `ResourceLink`s keyed by tool output block identity.
-/// `Some` = decoded & GPU-ready; `None` = a cached read/decode failure. Kept
-/// separate from `ToolImages` because the source is a mutable path rather than
-/// immutable inline base64 content.
-pub(super) type ResourceImages = std::sync::Arc<
-    std::sync::Mutex<std::collections::HashMap<String, Option<daruda_ui::CachedImage>>>,
->;
-
 /// The `AgentChatView::assets` caches the render pass reads, borrowed as one
 /// parameter instead of one each threaded through `render_item` → `tool_card` →
 /// `output_block_view` (and `tool_card`'s recursion into flattened subagent
@@ -89,13 +81,14 @@ pub(super) struct RenderAssets<'a> {
     pub(super) diff_stats: &'a DiffStats,
     pub(super) output_editors: &'a OutputEditors,
     pub(super) tool_images: &'a ToolImages,
-    pub(super) resource_images: &'a ResourceImages,
+    pub(super) resource_images: &'a crate::view::resource_image_cache::ResourceImageCache,
     pub(super) mermaid_images: &'a MermaidImages,
     pub(super) markdown_states: &'a daruda_ui::MarkdownStates,
+    pub(super) image_cwd: Option<&'a daruda_store::project::PaneCwd>,
 }
 
 impl<'a> RenderAssets<'a> {
-    fn of(assets: &'a AssetCache) -> Self {
+    fn of(assets: &'a AssetCache, cwd: Option<&'a daruda_store::project::PaneCwd>) -> Self {
         Self {
             diff_editors: &assets.diff_editors,
             diff_stats: &assets.diff_stats,
@@ -104,6 +97,7 @@ impl<'a> RenderAssets<'a> {
             resource_images: &assets.resource_images,
             mermaid_images: &assets.mermaid_images,
             markdown_states: &assets.markdown_states,
+            image_cwd: cwd,
         }
     }
 }
@@ -236,9 +230,20 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
         // behind the list and non-interactive, so it never intercepts mouse.
         let bounds_capture = {
             let view = cx.entity();
+            let image_viewport = content.assets.resource_images.viewport().clone();
+            let has_rows = !content.rows.is_empty();
             canvas(
-                move |bounds, _window, cx| {
+                move |bounds, window, cx| {
+                    image_viewport.begin_frame(bounds);
                     view.update(cx, |v, _| v.list_bounds = Some(bounds));
+                    if has_rows {
+                        // SAFETY: prepaint only stages geometry; cache transitions wait
+                        // until all card bounds are collected and the window is available.
+                        let view = view.clone();
+                        window.defer(cx, move |window, cx| {
+                            view.update(cx, |v, cx| v.sync_resource_image_viewport(window, cx));
+                        });
+                    }
                 },
                 |_, _, _, _| {},
             )
@@ -265,9 +270,17 @@ pub(super) fn render(view: &AgentChatView, cx: &mut Context<AgentChatView>) -> i
     // Capture pane-root width even when the transcript list is absent.
     let width_capture = {
         let view = cx.entity();
+        let needs_image_release = content.assets.resource_images.needs_release();
         canvas(
-            move |bounds, _window, cx| {
+            move |bounds, window, cx| {
                 view.update(cx, |v, cx| v.set_pane_width(bounds.size.width, cx));
+                if needs_image_release {
+                    // SAFETY: release queued textures after paint, using the live window.
+                    let view = view.clone();
+                    window.defer(cx, move |window, cx| {
+                        view.update(cx, |v, cx| v.sync_resource_image_viewport(window, cx));
+                    });
+                }
             },
             |_, _, _, _| {},
         )

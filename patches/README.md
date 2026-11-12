@@ -919,3 +919,13 @@ accessor so `daruda_ui::markdown` can select syntax appearance against its own
 surface. This changes visibility only: registry-generation invalidation and
 bounded callback reuse remain vendor-owned. Re-vendor by retaining the public
 visibility and the host-palette regression in `ui/src/markdown/highlight.rs`.
+
+## Selective Markdown image sources
+
+`gpui-base::TextView::image_source_with_fallback` lets hosts override local
+image paths while returning `None` for existing URI and data-image handling.
+`NodeContext` retains `ImageNode`'s cached decoded data images on that path;
+`image_source` remains an authoritative override for existing callers.
+The chat Markdown wrapper opts in for local sessions, including absolute
+paths when no pane directory exists. Remote sessions keep URI handling.
+Guarded by `selective_image_sources_preserve_embedded_images_and_override_local_paths`.

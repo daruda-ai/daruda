@@ -23,12 +23,29 @@ use gpui_base::TextViewState;
 /// scoped by its element path, so it must be unique across the host's bodies:
 /// two bodies sharing one would share, and keep replacing, one document.
 #[derive(Clone, Default)]
-pub struct MarkdownStates(Rc<RefCell<HashMap<ElementId, Entity<TextViewState>>>>);
+pub struct MarkdownStates(
+    Rc<RefCell<HashMap<ElementId, Entity<TextViewState>>>>,
+    Rc<RefCell<Option<super::images::ImageStore>>>,
+);
 
 impl MarkdownStates {
-    /// Drop every retained document.
+    /// Drop retained documents and their local-image cache.
     pub fn clear(&self) {
         self.0.borrow_mut().clear();
+        self.1.borrow_mut().take();
+    }
+
+    pub(super) fn local_image_store(
+        &self,
+        window: &gpui::Window,
+        cx: &mut App,
+    ) -> super::images::ImageStore {
+        if let Some(store) = self.1.borrow().as_ref() {
+            return store.clone();
+        }
+        let store = super::images::ImageStore::new(window, cx);
+        *self.1.borrow_mut() = Some(store.clone());
+        store
     }
 
     /// The document for `id`, holding `text`. A text that extends the previous

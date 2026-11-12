@@ -8,6 +8,7 @@
 
 pub mod diff;
 pub mod link_target;
+pub mod local_image;
 mod mermaid_contrast;
 mod mermaid_host_theme;
 mod mermaid_label_geometry;

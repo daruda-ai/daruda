@@ -1,12 +1,11 @@
 use daruda_acp::{ChatItem, DiffView, ToolCallItem, ToolKindView, ToolOutputBlock, ToolStatusView};
 use daruda_store::project::PaneCwd;
 use gpui::TestAppContext;
+use std::collections::HashSet;
 
 use super::super::view::tests::make_test_view;
 use super::super::window_access::WindowAccess;
-use super::tool_images::{
-    MAX_RESOURCE_IMAGE_BYTES, MAX_RESOURCE_IMAGE_PREVIEWS, load_resource_image, resource_image_path,
-};
+use super::tool_images::{MAX_RESOURCE_IMAGE_BYTES, load_resource_image, resource_image_path};
 use super::{ReconcileScope, mermaid_key};
 use daruda_transcript::fold_mode::{FoldMode, FoldPreset};
 use daruda_ui::diff_editor::DiffColors;
@@ -184,28 +183,48 @@ fn write_test_png(path: &std::path::Path) {
 fn resource_image_candidates_are_local_rasters_only() {
     let cwd = std::path::Path::new("/work/project");
     assert_eq!(
-        resource_image_path("shots/result.PNG", None, cwd),
+        resource_image_path("shots/result.PNG", None, Some(cwd)),
         Some(cwd.join("shots/result.PNG"))
     );
     assert_eq!(
-        resource_image_path("artifact", Some("image/png"), cwd),
+        resource_image_path("artifact", Some("image/png"), Some(cwd)),
         Some(cwd.join("artifact"))
     );
-    assert!(resource_image_path("notes.txt", None, cwd).is_none());
-    assert!(resource_image_path("picture.png", Some("text/plain"), cwd).is_none());
-    assert!(
-        resource_image_path("https://example.com/picture.png", Some("image/png"), cwd).is_none()
+    assert!(resource_image_path("notes.txt", None, Some(cwd)).is_none());
+    assert_eq!(
+        resource_image_path("picture.png", Some("application/octet-stream"), Some(cwd)),
+        Some(cwd.join("picture.png"))
     );
-    assert!(resource_image_path("mcp://server/picture.png", Some("image/png"), cwd).is_none());
+    assert!(
+        resource_image_path(
+            "https://example.com/picture.png",
+            Some("image/png"),
+            Some(cwd)
+        )
+        .is_none()
+    );
+    assert!(
+        resource_image_path("mcp://server/picture.png", Some("image/png"), Some(cwd)).is_none()
+    );
 }
 
 #[test]
-fn resource_image_loader_authorizes_and_bounds_local_files() {
+fn resource_image_loader_reads_outside_cwd_and_temp_roots() {
+    let images = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+    let image_path = images.path().join("preview.png");
+    write_test_png(&image_path);
+
+    let loaded = load_resource_image(&image_path).expect("image outside pane cwd");
+    assert_eq!((loaded.width, loaded.height), (2, 1));
+}
+
+#[test]
+fn resource_image_loader_bounds_local_files() {
     let dir = tempfile::tempdir().unwrap();
     let image_path = dir.path().join("preview.png");
     write_test_png(&image_path);
 
-    let loaded = load_resource_image(&image_path, dir.path()).expect("valid local PNG");
+    let loaded = load_resource_image(&image_path).expect("valid local PNG");
     assert_eq!((loaded.width, loaded.height), (2, 1));
 
     let too_large = dir.path().join("large.png");
@@ -213,16 +232,31 @@ fn resource_image_loader_authorizes_and_bounds_local_files() {
         .unwrap()
         .set_len(MAX_RESOURCE_IMAGE_BYTES + 1)
         .unwrap();
-    assert!(load_resource_image(&too_large, dir.path()).is_none());
+    assert!(matches!(
+        load_resource_image(&too_large),
+        Err(super::ResourceImageError::TooLarge)
+    ));
 
-    #[cfg(unix)]
-    assert!(
-        super::tool_images::authorized_resource_image_path(
-            std::path::Path::new("/etc/hosts"),
-            dir.path()
-        )
-        .is_none()
-    );
+    let too_wide = dir.path().join("wide.png");
+    image::RgbaImage::from_pixel(4097, 1, image::Rgba([16, 32, 48, 255]))
+        .save(&too_wide)
+        .unwrap();
+    assert!(matches!(
+        load_resource_image(&too_wide),
+        Err(super::ResourceImageError::DecodeLimit)
+    ));
+
+    assert!(load_resource_image(dir.path()).is_err());
+    assert!(matches!(
+        load_resource_image(&dir.path().join("missing.png")),
+        Err(super::ResourceImageError::Read)
+    ));
+    let invalid = dir.path().join("invalid.png");
+    std::fs::write(&invalid, b"not an image").unwrap();
+    assert!(matches!(
+        load_resource_image(&invalid),
+        Err(super::ResourceImageError::Decode)
+    ));
 }
 
 #[gpui::test]
@@ -234,6 +268,9 @@ fn settled_local_resource_link_is_loaded_into_the_render_cache(cx: &mut TestAppC
     let window = make_test_view(cx);
     let view = window.root(cx).expect("the view is the window root");
     view.update(cx, |v, cx| {
+        v.assets
+            .resource_images
+            .set_visible(HashSet::from([KEY.to_owned()]));
         v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
         v.items = vec![settled_tool(
             "call_1",
@@ -245,7 +282,7 @@ fn settled_local_resource_link_is_loaded_into_the_render_cache(cx: &mut TestAppC
         )];
         v.reconcile_tool_images(&ReconcileScope::All, cx);
         assert!(
-            v.assets.resource_image_sources.is_empty(),
+            v.assets.resource_images.source_count() == 0,
             "a collapsed card must not allocate a preview"
         );
     });
@@ -258,10 +295,7 @@ fn settled_local_resource_link_is_loaded_into_the_render_cache(cx: &mut TestAppC
 
     view.read_with(cx, |v, _| {
         assert!(
-            matches!(
-                v.assets.resource_images.lock().unwrap().get(KEY),
-                Some(Some(_))
-            ),
+            matches!(v.assets.resource_images.entries().get(KEY), Some(Ok(_))),
             "the background file read must land a GPU-ready preview"
         );
     });
@@ -276,6 +310,9 @@ fn turn_settle_revisits_a_resource_link_that_arrived_live(cx: &mut TestAppContex
     let window = make_test_view(cx);
     let view = window.root(cx).expect("the view is the window root");
     view.update(cx, |v, cx| {
+        v.assets
+            .resource_images
+            .set_visible(HashSet::from([KEY.to_owned()]));
         v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
         v.fold.set_mode(all_tools_expanded());
         v.items = vec![tool_named(
@@ -287,7 +324,7 @@ fn turn_settle_revisits_a_resource_link_that_arrived_live(cx: &mut TestAppContex
             }],
         )];
         v.reconcile_tool_images(&ReconcileScope::All, cx);
-        assert!(v.assets.resource_image_sources.is_empty());
+        assert!(v.assets.resource_images.source_count() == 0);
 
         v.apply_event(
             daruda_acp::AcpEvent::TurnEnded {
@@ -304,8 +341,8 @@ fn turn_settle_revisits_a_resource_link_that_arrived_live(cx: &mut TestAppContex
 
     view.read_with(cx, |v, _| {
         assert!(matches!(
-            v.assets.resource_images.lock().unwrap().get(KEY),
-            Some(Some(_))
+            v.assets.resource_images.entries().get(KEY),
+            Some(Ok(_))
         ));
     });
 }
@@ -327,6 +364,9 @@ fn a_cancel_ack_revisits_a_resource_link_that_landed_after_the_stop(cx: &mut Tes
     let window = make_test_view(cx);
     let view = window.root(cx).expect("the view is the window root");
     view.update(cx, |v, cx| {
+        v.assets
+            .resource_images
+            .set_visible(HashSet::from([KEY.to_owned()]));
         v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
         v.fold.set_mode(all_tools_expanded());
         v.set_turn_in_flight();
@@ -348,7 +388,7 @@ fn a_cancel_ack_revisits_a_resource_link_that_landed_after_the_stop(cx: &mut Tes
             cx,
         );
         assert!(
-            v.assets.resource_image_sources.is_empty(),
+            v.assets.resource_images.source_count() == 0,
             "a live call is not eligible yet"
         );
 
@@ -367,8 +407,8 @@ fn a_cancel_ack_revisits_a_resource_link_that_landed_after_the_stop(cx: &mut Tes
 
     view.read_with(cx, |v, _| {
         assert!(matches!(
-            v.assets.resource_images.lock().unwrap().get(KEY),
-            Some(Some(_))
+            v.assets.resource_images.entries().get(KEY),
+            Some(Ok(_))
         ));
     });
 }
@@ -386,6 +426,9 @@ fn a_finished_restore_revisits_a_resource_link_the_replay_left_live(cx: &mut Tes
     let window = make_test_view(cx);
     let view = window.root(cx).expect("the view is the window root");
     view.update(cx, |v, cx| {
+        v.assets
+            .resource_images
+            .set_visible(HashSet::from([KEY.to_owned()]));
         v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
         v.fold.set_mode(all_tools_expanded());
         v.begin_connect(Some("sess-1".into()), cx);
@@ -399,7 +442,7 @@ fn a_finished_restore_revisits_a_resource_link_the_replay_left_live(cx: &mut Tes
         )];
         v.reconcile_tool_images(&ReconcileScope::All, cx);
         assert!(
-            v.assets.resource_image_sources.is_empty(),
+            v.assets.resource_images.source_count() == 0,
             "a call the replay left live is not eligible yet"
         );
 
@@ -421,8 +464,8 @@ fn a_finished_restore_revisits_a_resource_link_the_replay_left_live(cx: &mut Tes
 
     view.read_with(cx, |v, _| {
         assert!(matches!(
-            v.assets.resource_images.lock().unwrap().get(KEY),
-            Some(Some(_))
+            v.assets.resource_images.entries().get(KEY),
+            Some(Ok(_))
         ));
     });
 }
@@ -439,6 +482,9 @@ fn an_aborted_restore_revisits_a_resource_link_the_replay_left_live(cx: &mut Tes
     let window = make_test_view(cx);
     let view = window.root(cx).expect("the view is the window root");
     view.update(cx, |v, cx| {
+        v.assets
+            .resource_images
+            .set_visible(HashSet::from([KEY.to_owned()]));
         v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
         v.fold.set_mode(all_tools_expanded());
         v.begin_connect(Some("sess-1".into()), cx);
@@ -451,7 +497,7 @@ fn an_aborted_restore_revisits_a_resource_link_the_replay_left_live(cx: &mut Tes
             }],
         )];
         v.reconcile_tool_images(&ReconcileScope::All, cx);
-        assert!(v.assets.resource_image_sources.is_empty());
+        assert!(v.assets.resource_images.source_count() == 0);
 
         v.abort_restore(cx);
     });
@@ -459,8 +505,8 @@ fn an_aborted_restore_revisits_a_resource_link_the_replay_left_live(cx: &mut Tes
 
     view.read_with(cx, |v, _| {
         assert!(matches!(
-            v.assets.resource_images.lock().unwrap().get(KEY),
-            Some(Some(_))
+            v.assets.resource_images.entries().get(KEY),
+            Some(Ok(_))
         ));
     });
 }
@@ -474,6 +520,9 @@ fn stop_revisits_a_resource_link_without_waiting_for_an_ack(cx: &mut TestAppCont
     let window = make_test_view(cx);
     let view = window.root(cx).expect("the view is the window root");
     view.update(cx, |v, cx| {
+        v.assets
+            .resource_images
+            .set_visible(HashSet::from([KEY.to_owned()]));
         v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
         v.fold.set_mode(all_tools_expanded());
         v.items = vec![tool_named(
@@ -491,17 +540,17 @@ fn stop_revisits_a_resource_link_without_waiting_for_an_ack(cx: &mut TestAppCont
 
     view.read_with(cx, |v, _| {
         assert!(matches!(
-            v.assets.resource_images.lock().unwrap().get(KEY),
-            Some(Some(_))
+            v.assets.resource_images.entries().get(KEY),
+            Some(Ok(_))
         ));
     });
 }
 
 #[gpui::test]
-fn expanded_resource_preview_cache_stays_bounded(cx: &mut TestAppContext) {
+fn every_expanded_resource_gets_a_preview(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
     let mut items = Vec::new();
-    for ix in 0..MAX_RESOURCE_IMAGE_PREVIEWS + 2 {
+    for ix in 0..6 {
         let path = dir.path().join(format!("preview-{ix}.png"));
         write_test_png(&path);
         items.push(settled_tool(
@@ -517,7 +566,7 @@ fn expanded_resource_preview_cache_stays_bounded(cx: &mut TestAppContext) {
     let window = make_test_view(cx);
     let view = window.root(cx).expect("the view is the window root");
     view.update(cx, |v, cx| {
-        v.cwd = Some(PaneCwd::Local(dir.path().to_path_buf()));
+        v.cwd = None;
         v.fold.set_mode(all_tools_expanded());
         v.items = items;
         v.reconcile_tool_images(&ReconcileScope::All, cx);
@@ -525,15 +574,282 @@ fn expanded_resource_preview_cache_stays_bounded(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     view.read_with(cx, |v, _| {
-        assert!(v.assets.resource_image_inflight.is_empty());
-        assert_eq!(
-            v.assets.resource_image_sources.len(),
-            MAX_RESOURCE_IMAGE_PREVIEWS
+        assert!(
+            v.assets.resource_images.entries().is_empty(),
+            "expanded offscreen images must not decode"
         );
-        assert_eq!(
-            v.assets.resource_images.lock().unwrap().len(),
-            MAX_RESOURCE_IMAGE_PREVIEWS
+    });
+    view.update(cx, |v, cx| {
+        v.assets
+            .resource_images
+            .set_visible((0..6).map(|ix| format!("call_{ix}#0")).collect());
+        v.reconcile_tool_images(&ReconcileScope::All, cx);
+    });
+    cx.run_until_parked();
+    view.read_with(cx, |v, _| {
+        assert!(v.assets.resource_images.inflight_count() == 0);
+        assert_eq!(v.assets.resource_images.source_count(), 6);
+        let images = v.assets.resource_images.entries();
+        assert_eq!(images.len(), 6);
+        assert!(images.values().all(Result::is_ok));
+    });
+    view.update(cx, |v, cx| {
+        let oldest = v.assets.resource_images.oldest().unwrap().clone();
+        assert_eq!(v.assets.resource_images.evict_oldest(), Some(8));
+        v.reconcile_tool_images(&ReconcileScope::All, cx);
+        assert!(!v.assets.resource_images.entries().contains_key(&oldest));
+        assert!(
+            v.assets.resource_images.inflight_count() == 0,
+            "an evicted visible image must not immediately reload"
         );
+    });
+    let show = |key: &str, cx: &mut TestAppContext| {
+        window
+            .update(cx, |v, window, cx| {
+                let bounds = gpui::Bounds::new(
+                    gpui::point(gpui::px(0.), gpui::px(0.)),
+                    gpui::size(gpui::px(100.), gpui::px(100.)),
+                );
+                v.assets.resource_images.viewport().begin_frame(bounds);
+                v.assets.resource_images.viewport().record(key, bounds);
+                v.sync_resource_image_viewport(window, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+    };
+    show("call_5#0", cx);
+    show("call_0#0", cx);
+    view.read_with(cx, |v, _| {
+        let images = v.assets.resource_images.entries();
+        assert_eq!(images.len(), 1, "offscreen bitmap buffers must be evicted");
+        assert!(matches!(images.get("call_0#0"), Some(Ok(_))));
+        assert_eq!(
+            v.assets.resource_images.geometry_count(),
+            6,
+            "evicted images keep their row geometry"
+        );
+    });
+    show("call_5#0", cx);
+    view.read_with(cx, |v, _| {
+        let images = v.assets.resource_images.entries();
+        assert_eq!(images.len(), 1);
+        assert!(
+            matches!(images.get("call_5#0"), Some(Ok(_))),
+            "scrolling back must reload the evicted preview"
+        );
+        assert!(!v.assets.resource_images.needs_release());
+    });
+    window
+        .update(cx, |v, _, _| {
+            v.assets.resource_images.discard("call_5#0");
+            v.assets
+                .resource_images
+                .cache("call_5#0".into(), Err(super::ResourceImageError::Budget));
+        })
+        .unwrap();
+    show("call_5#0", cx);
+    view.read_with(cx, |v, _| {
+        assert!(
+            matches!(
+                v.assets.resource_images.entries().get("call_5#0"),
+                Some(Ok(_))
+            ),
+            "releasing memory must retry budget failures without another scroll"
+        );
+    });
+}
+
+#[gpui::test]
+fn a_new_preview_replaces_old_residents_when_the_budget_is_full(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("new.png");
+    write_test_png(&path);
+    let window = make_test_view(cx);
+    let view = window.root(cx).unwrap();
+    window
+        .update(cx, |v, window, cx| {
+            v.fold.set_mode(all_tools_expanded());
+            v.items = (0..65)
+                .map(|ix| {
+                    settled_tool(
+                        &format!("call_{ix}"),
+                        vec![ToolOutputBlock::ResourceLink {
+                            uri: path.to_string_lossy().into_owned(),
+                            name: "preview.png".into(),
+                            mime: None,
+                        }],
+                    )
+                })
+                .collect();
+            v.reconcile_tool_images(&ReconcileScope::All, cx);
+            // Each resident accounts for 4 MiB. Sharing an unpainted raster fixture
+            // exercises the real budget without allocating 256 MiB in the test.
+            let image = daruda_ui::CachedImage::from_raster(daruda_content::visual::RasterImage {
+                width: 1024,
+                height: 1024,
+                bgra: vec![0; 4 * 1024 * 1024],
+                scale: 1.,
+            })
+            .unwrap();
+            for ix in 0..64 {
+                v.assets
+                    .resource_images
+                    .cache(format!("call_{ix}#0"), Ok(image.clone()));
+            }
+            v.assets
+                .resource_images
+                .set_visible((0..65).map(|ix| format!("call_{ix}#0")).collect());
+            v.reconcile_tool_images(&ReconcileScope::All, cx);
+            assert!(v.assets.resource_images.is_deferred("call_0#0"));
+            assert!(!v.assets.resource_images.is_deferred("call_63#0"));
+            let bounds = gpui::Bounds::new(
+                gpui::point(gpui::px(0.), gpui::px(0.)),
+                gpui::size(gpui::px(100.), gpui::px(100.)),
+            );
+            v.assets.resource_images.viewport().begin_frame(bounds);
+            for ix in 0..65 {
+                v.assets
+                    .resource_images
+                    .viewport()
+                    .record(&format!("call_{ix}#0"), bounds);
+            }
+            v.sync_resource_image_viewport(window, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    view.read_with(cx, |v, _| {
+        let images = v.assets.resource_images.entries();
+        assert!(
+            matches!(images.get("call_64#0"), Some(Ok(_))),
+            "the new preview must load instead of receiving a budget failure"
+        );
+        assert!(!images.contains_key("call_0#0"));
+        assert!(images.contains_key("call_63#0"));
+        assert!(v.assets.resource_images.resident_bytes() <= 256 * 1024 * 1024);
+        assert!(v.assets.resource_images.inflight_count() == 0);
+    });
+}
+
+#[gpui::test]
+fn painted_residents_delay_admission_instead_of_failing_it(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("new.png");
+    write_test_png(&path);
+    let window = make_test_view(cx);
+    let view = window.root(cx).unwrap();
+    let frame = window
+        .update(cx, |v, window, cx| {
+            v.fold.set_mode(all_tools_expanded());
+            v.items = (0..65)
+                .map(|ix| {
+                    settled_tool(
+                        &format!("call_{ix}"),
+                        vec![ToolOutputBlock::ResourceLink {
+                            uri: path.to_string_lossy().into_owned(),
+                            name: "preview.png".into(),
+                            mime: None,
+                        }],
+                    )
+                })
+                .collect();
+            v.reconcile_tool_images(&ReconcileScope::All, cx);
+            let image = daruda_ui::CachedImage::from_raster(daruda_content::visual::RasterImage {
+                width: 1024,
+                height: 1024,
+                bgra: vec![0; 4 * 1024 * 1024],
+                scale: 1.,
+            })
+            .unwrap();
+            for ix in 0..64 {
+                v.assets
+                    .resource_images
+                    .cache(format!("call_{ix}#0"), Ok(image.clone()));
+            }
+            // The previous frame's click listeners still hold every visible card.
+            let frame: Vec<_> = (0..64)
+                .map(|ix| {
+                    v.assets
+                        .resource_images
+                        .lookup(&format!("call_{ix}#0"))
+                        .unwrap()
+                        .unwrap()
+                })
+                .collect();
+            let bounds = gpui::Bounds::new(
+                gpui::point(gpui::px(0.), gpui::px(0.)),
+                gpui::size(gpui::px(100.), gpui::px(100.)),
+            );
+            v.assets.resource_images.viewport().begin_frame(bounds);
+            for ix in 0..65 {
+                v.assets
+                    .resource_images
+                    .viewport()
+                    .record(&format!("call_{ix}#0"), bounds);
+            }
+            v.sync_resource_image_viewport(window, cx);
+            frame
+        })
+        .unwrap();
+    cx.run_until_parked();
+    view.read_with(cx, |v, _| {
+        assert!(
+            v.assets.resource_images.lookup("call_64#0").is_none(),
+            "a frame pin expiring on repaint must not surface a budget failure"
+        );
+    });
+    drop(frame);
+    cx.run_until_parked();
+    window
+        .update(cx, |v, window, cx| {
+            // The wake-up repaint ran without card probes; restore the visible set.
+            let bounds = gpui::Bounds::new(
+                gpui::point(gpui::px(0.), gpui::px(0.)),
+                gpui::size(gpui::px(100.), gpui::px(100.)),
+            );
+            v.assets.resource_images.viewport().begin_frame(bounds);
+            for ix in 0..65 {
+                v.assets
+                    .resource_images
+                    .viewport()
+                    .record(&format!("call_{ix}#0"), bounds);
+            }
+            v.sync_resource_image_viewport(window, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    view.read_with(cx, |v, _| {
+        assert!(matches!(
+            v.assets.resource_images.lookup("call_64#0"),
+            Some(Ok(_))
+        ));
+        assert!(v.assets.resource_images.resident_bytes() <= 256 * 1024 * 1024);
+    });
+}
+
+#[gpui::test]
+fn remote_resource_paths_never_read_local_files(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("preview.png");
+    write_test_png(&path);
+    let window = make_tools_expanded_view(cx);
+    let view = window.root(cx).unwrap();
+    view.update(cx, |v, cx| {
+        v.cwd = Some(PaneCwd::Remote("/remote/work".into()));
+        v.items = vec![settled_tool(
+            "call_1",
+            vec![ToolOutputBlock::ResourceLink {
+                uri: path.to_string_lossy().into_owned(),
+                name: "preview.png".into(),
+                mime: Some("image/png".into()),
+            }],
+        )];
+        v.reconcile_tool_images(&ReconcileScope::All, cx);
+    });
+    cx.run_until_parked();
+    view.read_with(cx, |v, _| {
+        assert!(v.assets.resource_images.source_count() == 0);
+        assert!(v.assets.resource_images.inflight_count() == 0);
+        assert!(v.assets.resource_images.entries().is_empty());
     });
 }
 
@@ -667,7 +983,7 @@ fn settled_tool_with_diff(id: &str) -> ChatItem {
 /// Every card's tool rule set to `expanded`, on both turn positions so the
 /// single-item fixture matches whichever one it derives.
 fn all_tools_expanded() -> FoldMode {
-    FoldMode::from_tokens(["auto", "past.tool=expanded", "last.tool=expanded"])
+    FoldMode::from_tokens(["expanded", "past.tool=expanded", "last.tool=expanded"])
 }
 
 /// A fold *mode* edit moves the derived default for every card at once, so
@@ -1204,4 +1520,34 @@ fn reconcile_mermaid_scans_a_subagent_prompt(cx: &mut TestAppContext) {
             "the prompt's mermaid fence must be picked up for rasterization"
         );
     });
+}
+
+#[gpui::test]
+fn viewport_maintenance_does_not_discover_inline_image_payloads(cx: &mut TestAppContext) {
+    let window = make_test_view(cx);
+    window
+        .update(cx, |v, window, cx| {
+            v.fold.set_mode(all_tools_expanded());
+            v.items = vec![settled_tool(
+                "inline",
+                vec![ToolOutputBlock::Image {
+                    data: "fresh payload not visited by resource maintenance".into(),
+                    mime: "image/png".into(),
+                }],
+            )];
+            let bounds = gpui::Bounds::new(
+                gpui::point(gpui::px(0.), gpui::px(0.)),
+                gpui::size(gpui::px(100.), gpui::px(100.)),
+            );
+            v.assets.resource_images.viewport().begin_frame(bounds);
+            v.assets
+                .resource_images
+                .viewport()
+                .record("inline#0", bounds);
+            v.sync_resource_image_viewport(window, cx);
+            assert!(v.assets.tool_image_inflight.is_empty());
+            assert!(v.assets.tool_images.lock().unwrap().is_empty());
+        })
+        .unwrap();
+    cx.run_until_parked();
 }

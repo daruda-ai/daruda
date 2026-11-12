@@ -27,6 +27,7 @@ const ICON_ANSWER: &str = "icons/ui/task-alt.svg";
 pub(super) struct MarkdownRender<'a> {
     pub(super) mermaid_images: &'a MermaidImages,
     pub(super) states: &'a MarkdownStates,
+    pub(super) image_cwd: Option<&'a daruda_store::project::PaneCwd>,
     pub(super) dim: f32,
     pub(super) links: AgentChatMarkdownLinks,
 }
@@ -36,6 +37,7 @@ impl<'a> MarkdownRender<'a> {
         Self {
             mermaid_images: assets.mermaid_images,
             states: assets.markdown_states,
+            image_cwd: assets.image_cwd,
             dim,
             links,
         }
@@ -231,15 +233,21 @@ pub(super) fn pane_markdown(
     text: impl Into<gpui::SharedString>,
     color: gpui::Hsla,
     states: &MarkdownStates,
+    image_cwd: Option<&daruda_store::project::PaneCwd>,
     cx: &App,
 ) -> daruda_ui::Markdown {
-    crate::localized::markdown(id, text)
+    let markdown = crate::localized::markdown(id, text)
         .retained_in(states)
         .color(color)
         .surface(theme::agent_chat_bg(cx))
         .font_family(theme::agent_chat_font_family(cx))
         .text_size(px(theme::agent_chat_font_size(cx)))
-        .line_height(theme::agent_chat_line_height(cx))
+        .line_height(theme::agent_chat_line_height(cx));
+    match image_cwd {
+        Some(daruda_store::project::PaneCwd::Remote(_)) => markdown,
+        Some(daruda_store::project::PaneCwd::Local(base)) => markdown.local_images(Some(base)),
+        None => markdown.local_images(None),
+    }
 }
 
 /// The assistant prose body — drag-selectable rendered markdown with mermaid
@@ -256,6 +264,7 @@ pub(super) fn assistant_markdown(
         text.to_string(),
         theme::dim_toward_gray(theme::agent_chat_fg(cx), markdown.dim),
         markdown.states,
+        markdown.image_cwd,
         cx,
     )
     .code_block_render(mermaid_code_block_render(
@@ -403,6 +412,7 @@ fn thought_body(
         text.to_string(),
         theme::dim_toward_gray(color, markdown.dim),
         markdown.states,
+        markdown.image_cwd,
         cx,
     )
     .code_block_render(mermaid_code_block_render(

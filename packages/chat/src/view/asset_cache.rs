@@ -1,11 +1,9 @@
 //! Rendering artifacts derived from the conversation: the async-built ones the
 //! reconcilers fill and `render/` reads, and the Markdown parses `render/` keeps.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
-use crate::render::{
-    DiffEditors, DiffStats, MermaidImages, OutputEditors, ResourceImages, ToolImages,
-};
+use crate::render::{DiffEditors, DiffStats, MermaidImages, OutputEditors, ToolImages};
 
 /// Async-built rendering artifacts derived from the conversation: read-only
 /// diff editors, read-only verbatim tool-output editors, rasterized mermaid
@@ -49,19 +47,7 @@ pub(crate) struct AssetCache {
     /// Content hashes with a decode currently spawned, so
     /// `reconcile_tool_images` doesn't re-spawn one still decoding.
     pub(crate) tool_image_inflight: HashSet<u64>,
-    /// Decoded local image resources by `"{tool_call_id}#{block_index}"`.
-    pub(crate) resource_images: ResourceImages,
-    /// Fingerprint of the resource URI + MIME currently represented by each
-    /// cache entry, so a replaced streamed block invalidates the old bitmap.
-    pub(crate) resource_image_sources: HashMap<String, u64>,
-    /// Least-recently reconciled to most-recently reconciled resource keys.
-    /// Keeps the decoded cache bounded even when a transcript contains many
-    /// expanded image-producing tools.
-    pub(crate) resource_image_order: VecDeque<String>,
-    /// Fingerprint currently being read for each resource block. Storing the
-    /// value as well as the key prevents a late old task overwriting a newer
-    /// source at the same block index.
-    pub(crate) resource_image_inflight: HashMap<String, u64>,
+    pub(crate) resource_images: super::resource_image_cache::ResourceImageCache,
     /// Parsed Markdown bodies by element id. The one cache the render pass
     /// fills rather than a reconciler: it takes the place of GPUI keyed state,
     /// which drops a body's parse the first frame the virtualized list does not
@@ -89,12 +75,7 @@ impl AssetCache {
         if let Ok(mut m) = self.tool_images.lock() {
             m.clear();
         }
-        self.resource_image_sources.clear();
-        self.resource_image_order.clear();
-        self.resource_image_inflight.clear();
-        if let Ok(mut m) = self.resource_images.lock() {
-            m.clear();
-        }
+        self.resource_images.clear();
     }
 
     pub(crate) fn clear_mermaid(&mut self) {

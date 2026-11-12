@@ -61,6 +61,7 @@ pub(super) fn handoff_row(
                         record.clone(),
                         muted,
                         markdown.states,
+                        markdown.image_cwd,
                         cx,
                     )
                     .link_click_handler(markdown.links.handler()),

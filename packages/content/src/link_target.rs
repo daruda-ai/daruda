@@ -88,18 +88,14 @@ fn declared_mime(mime: Option<&str>) -> Option<&str> {
     mime.map(str::trim).filter(|mime| !mime.is_empty())
 }
 
-/// Whether a resource renders as an image: by its declared MIME when the
-/// tool sent one, else by extension. The inline preview and the click both
-/// ask this, so a previewed image never opens as text.
+/// Recognize supported image MIME types or extensions. Adapters may declare
+/// generic or inaccurate MIME metadata; the decoder validates the actual bytes.
 pub fn is_image_resource(path: &Path, mime: Option<&str>) -> bool {
-    declared_mime(mime).map_or_else(
-        || {
-            path.extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(is_image_extension)
-        },
-        is_supported_image_mime,
-    )
+    declared_mime(mime).is_some_and(is_supported_image_mime)
+        || path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(is_image_extension)
 }
 
 fn is_binary_extension(extension: &str) -> bool {
@@ -199,8 +195,7 @@ fn on_local_disk(path: &Path) -> Option<PathBuf> {
     (!PathStyle::local().is_network_or_device(spelled)).then(|| path.to_path_buf())
 }
 
-/// [`kind_of`], with a declared MIME overriding the extension's say on
-/// whether a file is an image — the same rule as [`is_image_resource`].
+/// [`kind_of`], with the same MIME-or-extension image rule as the preview.
 fn resource_kind(path: &Path, mime: Option<&str>) -> LocalKind {
     let kind = kind_of(path);
     if declared_mime(mime).is_none() {
@@ -209,8 +204,6 @@ fn resource_kind(path: &Path, mime: Option<&str>) -> LocalKind {
     match kind {
         LocalKind::Directory | LocalKind::Missing => kind,
         _ if is_image_resource(path, mime) => LocalKind::Image,
-        // Declared as something other than an image: the OS picks the handler.
-        LocalKind::Image => LocalKind::Binary,
         other => other,
     }
 }
@@ -488,10 +481,10 @@ mod tests {
         );
     }
 
-    /// The preview trusts a declared MIME over the extension, so the click
-    /// has to as well — or a previewed image opens as text.
+    /// Image extensions recover from inaccurate tool MIME metadata; the opener
+    /// and preview must still agree.
     #[test]
-    fn a_declared_mime_decides_whether_a_resource_is_an_image() {
+    fn image_mime_or_extension_enables_resource_images() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("artifact"), b"x").unwrap();
         std::fs::write(dir.path().join("picture.png"), b"x").unwrap();
@@ -509,7 +502,11 @@ mod tests {
         assert_eq!(kind("artifact", None), LocalKind::Text);
         assert_eq!(kind("artifact", Some("image/png")), LocalKind::Image);
         assert_eq!(kind("picture.png", None), LocalKind::Image);
-        assert_eq!(kind("picture.png", Some("text/plain")), LocalKind::Binary);
+        assert_eq!(kind("picture.png", Some("text/plain")), LocalKind::Image);
+        assert_eq!(
+            kind("picture.png", Some("application/octet-stream")),
+            LocalKind::Image
+        );
         assert_eq!(kind("gone.png", Some("image/png")), LocalKind::Missing);
     }
 

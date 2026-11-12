@@ -16,10 +16,23 @@ fn write_fixture(root: &Path) -> std::io::Result<(PathBuf, String)> {
         &design,
         "# Design and scope\n\nKeep file opening and path policy in the host.\n",
     )?;
+    let preview = root.join("local preview.png");
+    image::RgbaImage::from_fn(240, 120, |x, y| {
+        if x < 80 {
+            image::Rgba([32, 96, 160, 255])
+        } else if y < 60 {
+            image::Rgba([64, 160, 128, 255])
+        } else {
+            image::Rgba([224, 160, 64, 255])
+        }
+    })
+    .save(&preview)
+    .map_err(std::io::Error::other)?;
     let text = format!(
-        "Saved the documents outside the repository.\n\n- [Implementation plan](<{}>)\n- [Design and scope](<{}>)\n\nBoth links open read-only reference files. Right-click a link to copy its path or reveal it in the file manager.",
+        "Saved the documents outside the repository.\n\n- [Implementation plan](<{}>)\n- [Design and scope](<{}>)\n\nBoth links open read-only reference files. Right-click a link to copy its path or reveal it in the file manager.\n\n![Local image preview](<{}>)",
         plan.display(),
         design.display(),
+        preview.display(),
     );
     Ok((plan, text))
 }
@@ -49,12 +62,50 @@ impl Workspace {
             None,
             move |view, window, cx| {
                 view.seed_transcript(
-                    vec![daruda_acp::ChatItem::AssistantText {
-                        text,
-                        streaming: false,
-                        message_id: None,
-                        phase: Default::default(),
-                    }],
+                    vec![
+                        daruda_acp::ChatItem::AssistantText {
+                            text,
+                            streaming: false,
+                            message_id: None,
+                            phase: Default::default(),
+                        },
+                        daruda_acp::ChatItem::ToolCall(daruda_acp::ToolCallItem {
+                            id: "missing-image".into(),
+                            title: "View local and missing images".into(),
+                            kind: daruda_acp::ToolKindView::Read,
+                            tool_name: None,
+                            status: daruda_acp::ToolStatusView::Completed,
+                            diffs: Vec::new(),
+                            output: vec![
+                                daruda_acp::ToolOutputBlock::ResourceLink {
+                                    uri: root
+                                        .join("local preview.png")
+                                        .to_string_lossy()
+                                        .into_owned(),
+                                    name: "local preview.png".into(),
+                                    mime: Some("application/octet-stream".into()),
+                                },
+                                daruda_acp::ToolOutputBlock::ResourceLink {
+                                    uri: root.join("missing.png").to_string_lossy().into_owned(),
+                                    name: "missing.png".into(),
+                                    mime: Some("image/png".into()),
+                                },
+                            ],
+                            raw_input: None,
+                            locations: Vec::new(),
+                            parent_tool_id: None,
+                            exit: None,
+                        }),
+                    ],
+                    window,
+                    cx,
+                );
+                view.set_fold_mode(
+                    daruda_transcript::fold_mode::FoldMode::from_tokens([
+                        "expanded",
+                        "past.tool=expanded",
+                        "last.tool=expanded",
+                    ]),
                     window,
                     cx,
                 );

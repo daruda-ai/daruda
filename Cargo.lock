@@ -1954,6 +1954,7 @@ dependencies = [
  "schemars 1.2.3",
  "serde",
  "serde_json",
+ "tempfile",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-highlight",

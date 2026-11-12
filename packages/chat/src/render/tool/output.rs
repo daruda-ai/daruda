@@ -119,6 +119,7 @@ pub(in crate::render) fn output_block_view(
                 text.clone(),
                 plain_color,
                 context.assets.markdown_states,
+                context.assets.image_cwd,
                 cx,
             )
             .link_click_handler(context.links.handler())
@@ -217,7 +218,7 @@ pub(in crate::render) fn output_block_view(
             )))
             .into_any_element(),
         ToolOutputBlock::ResourceLink { uri, name, mime } => {
-            let cached = resource_images.lock().unwrap().get(&key).cloned();
+            let cached = resource_images.lookup(&key);
             // Through the pane's link opener, not the platform's: Codex sends
             // a bare path with no scheme, which `open_url` refuses silently,
             // and only the workspace knows the pane's cwd and the file's kind.
@@ -234,7 +235,18 @@ pub(in crate::render) fn output_block_view(
             });
             let uri_for_menu = uri.clone();
             let mime_for_menu = mime.clone();
+            let viewport = context.assets.resource_images.viewport().clone();
+            let probe_key = key.clone();
             let card = div()
+                .relative()
+                .child(
+                    gpui::canvas(
+                        move |bounds, _, _| viewport.record(&probe_key, bounds),
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .inset_0(),
+                )
                 .flex()
                 .flex_col()
                 .gap(px(theme::GAP_SM))
@@ -249,17 +261,35 @@ pub(in crate::render) fn output_block_view(
                         cx,
                     )
                 });
+            let placeholder = context
+                .assets
+                .resource_images
+                .dimensions(&key)
+                .map(|dimensions| {
+                    div()
+                        .w(px(dimensions.width))
+                        .max_w_full()
+                        .aspect_ratio(dimensions.aspect_ratio)
+                });
             match cached {
-                Some(Some(image)) => card
-                    .child(zoomable_image(
+                Some(Ok(image)) => card
+                    .child(zoomable_resource_image(
                         SharedString::from(format!("agent-chat-tool-link-image-{tool_id}-{ix}")),
-                        &image,
+                        image,
                     ))
                     .child(link)
                     .into_any_element(),
-                // Missing, still loading, or failed: the original resource
-                // link remains usable and no permanent placeholder is shown.
-                Some(None) | None => card.child(link).into_any_element(),
+                Some(Err(error)) => card
+                    .children(placeholder)
+                    .child(
+                        div()
+                            .text_color(theme::dim_toward_gray(theme::agent_chat_fg_muted(cx), dim))
+                            .text_size(px(theme::agent_chat_font_size(cx)))
+                            .child(resource_image_error_label(error)),
+                    )
+                    .child(link)
+                    .into_any_element(),
+                None => card.children(placeholder).child(link).into_any_element(),
             }
         }
     }
@@ -280,4 +310,34 @@ pub(super) fn zoomable_image(id: impl Into<ElementId>, image: &CachedImage) -> A
         })
         .child(image.block())
         .into_any_element()
+}
+
+fn zoomable_resource_image(
+    id: impl Into<ElementId>,
+    image: crate::view::resource_image_cache::ResourceImageLease,
+) -> AnyElement {
+    let block = image.block();
+    div()
+        .id(id)
+        .w(px(image.block_width()))
+        .max_w_full()
+        .cursor_pointer()
+        .on_click(move |_, window, cx| {
+            super::super::image_lightbox::open_resource(image.clone(), window, cx)
+        })
+        .child(block)
+        .into_any_element()
+}
+
+fn resource_image_error_label(error: crate::reconcile::ResourceImageError) -> String {
+    use crate::reconcile::ResourceImageError;
+    match error {
+        ResourceImageError::Read => s::agent_chat::tool_image_read_failed(),
+        ResourceImageError::NotFile => s::agent_chat::tool_image_not_file(),
+        ResourceImageError::TooLarge => s::agent_chat::tool_image_too_large(),
+        ResourceImageError::DecodeLimit => s::agent_chat::tool_image_decode_limit(),
+        ResourceImageError::Decode => s::agent_chat::tool_image_decode_failed(),
+        ResourceImageError::Render => s::agent_chat::tool_image_render_failed(),
+        ResourceImageError::Budget => s::agent_chat::tool_image_budget(),
+    }
 }

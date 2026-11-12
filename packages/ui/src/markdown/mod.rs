@@ -20,6 +20,7 @@ use gpui_component::ActiveTheme as _;
 use crate::{icons, theme};
 
 mod highlight;
+mod images;
 mod states;
 mod style;
 
@@ -47,6 +48,7 @@ pub struct Markdown {
     code_block_render: Option<CodeBlockRender>,
     link_click_handler: Option<LinkClickHandler>,
     retained_in: Option<MarkdownStates>,
+    local_images: Option<images::LocalImages>,
     copy_tooltips: CopyTooltips,
     #[cfg(any(test, feature = "test-support"))]
     debug_inline_bounds: Option<DebugInlineBounds>,
@@ -133,6 +135,17 @@ impl Markdown {
         self
     }
 
+    /// Enable local image files, optionally resolving relative paths against `base`.
+    /// Without a base, only absolute paths and local file URLs are resolved.
+    /// Hosts must opt in only for local documents; remote sessions keep their
+    /// URI loader. Inline data and HTTP images retain their existing behavior.
+    pub fn local_images(mut self, base: Option<&std::path::Path>) -> Self {
+        self.local_images = Some(images::LocalImages {
+            base: base.map(std::path::Path::to_path_buf),
+        });
+        self
+    }
+
     /// Keep this body's parse in `states` rather than in keyed state, so it
     /// survives frames in which the element is not drawn — a row a virtualized
     /// list has scrolled out of its overdraw.
@@ -166,6 +179,7 @@ impl RenderOnce for Markdown {
         let surface = self.surface.unwrap_or_else(|| cx.theme().background);
         let style = self.text_view_style(color, surface, window.rem_size(), cx);
         let base_id = self.id.clone();
+        let image_text = self.text.clone();
         let view = match &self.retained_in {
             Some(states) => TextView::new(&states.state_for(&self.id, &self.text, cx)),
             None => TextView::markdown(self.id, self.text),
@@ -184,6 +198,28 @@ impl RenderOnce for Markdown {
             view = view.text_size(size).line_height(relative(
                 self.line_height.unwrap_or(theme::MD_VIEW_LINE_HEIGHT),
             ));
+        }
+        if let Some(local) = self.local_images {
+            let store = match &self.retained_in {
+                Some(states) => states.local_image_store(window, cx),
+                None => window
+                    .use_keyed_state(
+                        ElementId::Name(format!("{base_id}-local-image-store").into()),
+                        cx,
+                        |window, cx| images::ImageStore::new(window, cx),
+                    )
+                    .read(cx)
+                    .clone(),
+            };
+            let text = image_text;
+            let binding = window.use_keyed_state(store.lease_id(&base_id), cx, |_, cx| {
+                images::ImageLeaseBinding::new(&store, text.clone(), local.base.clone(), cx)
+            });
+            let lease = binding.update(cx, |binding, cx| {
+                binding.lease(&store, text, local.base.as_deref(), cx)
+            });
+            let sources = store.sources(local.base, &lease);
+            view = view.image_source_with_fallback(move |uri| sources.source(uri));
         }
         if let Some(cbr) = self.code_block_render {
             view = view.code_block_render(move |cb, window, cx| {
@@ -289,6 +325,7 @@ pub fn markdown(
         code_block_render: None,
         link_click_handler: None,
         retained_in: None,
+        local_images: None,
         copy_tooltips,
         #[cfg(any(test, feature = "test-support"))]
         debug_inline_bounds: None,

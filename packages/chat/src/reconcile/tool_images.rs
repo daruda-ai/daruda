@@ -1,10 +1,9 @@
-//! Tool-output image decoding: inline `Image` blocks and bounded, authorized
+//! Tool-output image decoding: inline `Image` blocks and bounded
 //! previews of local-image resource links.
 
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use daruda_acp::{ChatItem, ToolOutputBlock};
@@ -16,24 +15,22 @@ use gpui::Context;
 use super::super::agent_chat_helpers::{TurnBoundary, tool_image_key};
 use super::super::output_editor::output_editor_key;
 use super::super::view::AgentChatView;
-use super::{ReconcileScope, output_content, stale_keys};
+use super::{ReconcileScope, output_content};
 
 /// Local resource previews are a fallback for adapter-emitted file links, not
 /// a general URI fetcher. Keep reads bounded before bytes reach an image
 /// decoder; decoded allocations are bounded separately in
 /// `visual::decode_image_bounded`.
-pub(super) const MAX_RESOURCE_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
-/// Bound both retained textures and work spawned by an expand-all/replay. The
-/// latest expanded previews win; older resources remain usable as links.
-pub(super) const MAX_RESOURCE_IMAGE_PREVIEWS: usize = 4;
-const MAX_RESOURCE_IMAGE_INFLIGHT: usize = 2;
-const MAX_RESOURCE_IMAGE_DIMENSION: u32 = 4096;
-const MAX_RESOURCE_IMAGE_ALLOC_BYTES: u64 = 64 * 1024 * 1024;
-
+#[cfg(test)]
+pub(super) use daruda_content::local_image::MAX_BYTES as MAX_RESOURCE_IMAGE_BYTES;
 /// Resolved by the same rules the resource link's click uses, so the preview
 /// and the opener cannot disagree about which file — or whether an image.
-pub(super) fn resource_image_path(uri: &str, mime: Option<&str>, cwd: &Path) -> Option<PathBuf> {
-    let path = link_target::resource_path(uri, Some(cwd))?;
+pub(super) fn resource_image_path(
+    uri: &str,
+    mime: Option<&str>,
+    cwd: Option<&Path>,
+) -> Option<PathBuf> {
+    let path = link_target::resource_path(uri, cwd)?;
     link_target::is_image_resource(&path, mime).then_some(path)
 }
 
@@ -44,46 +41,40 @@ fn resource_image_source(uri: &str, mime: Option<&str>) -> u64 {
     hasher.finish()
 }
 
-/// Canonicalization closes symlink escapes. Restricting reads to the pane cwd
-/// and OS temp roots keeps an untrusted resource link from turning the GUI into
-/// an arbitrary local-file reader; Codex `view_image` outputs live in temp.
-pub(super) fn authorized_resource_image_path(path: &Path, cwd: &Path) -> Option<PathBuf> {
-    let path = daruda_core::path::canonicalize(path).ok()?;
-    let cwd = daruda_core::path::canonicalize(cwd).ok()?;
-    if path.starts_with(cwd) {
-        return Some(path);
-    }
-
-    let temp_roots =
-        std::iter::once(std::env::temp_dir()).chain(cfg!(unix).then(|| PathBuf::from("/tmp")));
-    temp_roots
-        .into_iter()
-        .filter_map(|root| daruda_core::path::canonicalize(root).ok())
-        .any(|root| path.starts_with(root))
-        .then_some(path)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ResourceImageError {
+    Read,
+    NotFile,
+    TooLarge,
+    DecodeLimit,
+    Decode,
+    Render,
+    Budget,
 }
 
-pub(super) fn load_resource_image(path: &Path, cwd: &Path) -> Option<visual::RasterImage> {
-    let path = authorized_resource_image_path(path, cwd)?;
-    let file = std::fs::File::open(path).ok()?;
-    let metadata = file.metadata().ok()?;
-    if !metadata.is_file() || metadata.len() > MAX_RESOURCE_IMAGE_BYTES {
-        return None;
+impl std::fmt::Display for ResourceImageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Read => "unable to read image file",
+            Self::NotFile => "image path is not a regular file",
+            Self::TooLarge => "image exceeds the encoded size limit",
+            Self::DecodeLimit => "image exceeds the dimension or memory limit",
+            Self::Decode => "unsupported or invalid image data",
+            Self::Render => "unable to prepare image for rendering",
+            Self::Budget => "resource image memory budget is full",
+        })
     }
+}
 
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take(MAX_RESOURCE_IMAGE_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    if bytes.len() as u64 > MAX_RESOURCE_IMAGE_BYTES {
-        return None;
-    }
-    visual::decode_image_bounded(
-        &bytes,
-        MAX_RESOURCE_IMAGE_DIMENSION,
-        MAX_RESOURCE_IMAGE_ALLOC_BYTES,
-    )
-    .ok()
+pub(super) fn load_resource_image(path: &Path) -> Result<visual::RasterImage, ResourceImageError> {
+    use daruda_content::local_image::LocalImageError;
+    daruda_content::local_image::load(path).map_err(|error| match error {
+        LocalImageError::Read => ResourceImageError::Read,
+        LocalImageError::NotFile => ResourceImageError::NotFile,
+        LocalImageError::TooLarge => ResourceImageError::TooLarge,
+        LocalImageError::DecodeLimit => ResourceImageError::DecodeLimit,
+        LocalImageError::Decode => ResourceImageError::Decode,
+    })
 }
 
 impl AgentChatView {
@@ -93,10 +84,15 @@ impl AgentChatView {
     /// theming (tool images are rendered as-is, not re-themed). Local resource
     /// files are read only after the call settles, on the background executor.
     ///
-    /// A decode failure caches `None` under the key rather than leaving it
-    /// absent, so malformed content is not retried forever. Inline images show
-    /// their media descriptor; resource images retain their original link.
+    /// Failures are cached so malformed content is not retried forever. Inline
+    /// images show their media descriptor; resource images show a reason and
+    /// retain their original link.
     pub(crate) fn reconcile_tool_images(&mut self, scope: &ReconcileScope, cx: &mut Context<Self>) {
+        self.reconcile_inline_images(scope, cx);
+        self.reconcile_resource_images(scope, cx);
+    }
+
+    fn reconcile_inline_images(&mut self, scope: &ReconcileScope, cx: &mut Context<Self>) {
         // Collect the not-yet-cached, not-in-flight images first; the spawn
         // re-enters the view, which can't happen while the `items` borrow is
         // live.
@@ -120,95 +116,6 @@ impl AgentChatView {
                     continue;
                 }
                 pending.push((key, data.clone()));
-            }
-        }
-
-        let local_cwd = self
-            .cwd
-            .as_ref()
-            .and_then(daruda_store::project::PaneCwd::as_local)
-            .map(Path::to_path_buf);
-        let mut resource_live = HashSet::new();
-        let mut resource_candidates: Vec<(String, u64, PathBuf, PathBuf)> = Vec::new();
-        if let Some(cwd) = local_cwd.as_ref() {
-            let boundary = TurnBoundary::of(&self.items);
-            for (item_ix, item) in self.items.iter().enumerate() {
-                let Some((id, output)) = output_content(item) else {
-                    continue;
-                };
-                if !scope.covers(&id)
-                    || matches!(item, ChatItem::ToolCall(tc) if tc.status.is_live())
-                    || !self.tool_body_on_screen(item_ix, item, boundary)
-                {
-                    continue;
-                }
-                for (ix, block) in output.iter().enumerate() {
-                    let ToolOutputBlock::ResourceLink { uri, mime, .. } = block else {
-                        continue;
-                    };
-                    let Some(path) = resource_image_path(uri, mime.as_deref(), cwd) else {
-                        continue;
-                    };
-                    let key = output_editor_key(&id, ix);
-                    let source = resource_image_source(uri, mime.as_deref());
-                    resource_candidates.push((key, source, path, cwd.clone()));
-                }
-            }
-        }
-
-        // Preserve the most recent expanded resources deterministically. In a
-        // full pass this also keeps the LRU walk below from briefly evicting and
-        // re-adding every retained key when the transcript has more candidates
-        // than the cache can hold.
-        if resource_candidates.len() > MAX_RESOURCE_IMAGE_PREVIEWS {
-            resource_candidates.drain(..resource_candidates.len() - MAX_RESOURCE_IMAGE_PREVIEWS);
-        }
-        resource_live.extend(resource_candidates.iter().map(|(key, ..)| key.clone()));
-
-        let stale = stale_keys(
-            self.assets.resource_image_sources.keys(),
-            &resource_live,
-            scope,
-        );
-        for key in stale {
-            self.assets.resource_image_sources.remove(&key);
-            self.assets
-                .resource_image_order
-                .retain(|cached| cached != &key);
-            self.assets.resource_images.lock().unwrap().remove(&key);
-        }
-
-        let mut resource_pending: Vec<(String, u64, PathBuf, PathBuf)> = Vec::new();
-        for (key, source, path, cwd) in resource_candidates {
-            let source_changed = self.assets.resource_image_sources.get(&key) != Some(&source);
-            if source_changed {
-                self.assets
-                    .resource_image_sources
-                    .insert(key.clone(), source);
-                self.assets.resource_images.lock().unwrap().remove(&key);
-            }
-
-            self.assets
-                .resource_image_order
-                .retain(|cached| cached != &key);
-            self.assets.resource_image_order.push_back(key.clone());
-            while self.assets.resource_image_order.len() > MAX_RESOURCE_IMAGE_PREVIEWS {
-                let Some(evicted) = self.assets.resource_image_order.pop_front() else {
-                    break;
-                };
-                self.assets.resource_image_sources.remove(&evicted);
-                self.assets.resource_images.lock().unwrap().remove(&evicted);
-            }
-
-            let cached = self
-                .assets
-                .resource_images
-                .lock()
-                .unwrap()
-                .contains_key(&key);
-            let in_flight = self.assets.resource_image_inflight.get(&key);
-            if !cached && in_flight.is_none() {
-                resource_pending.push((key, source, path, cwd));
             }
         }
 
@@ -261,53 +168,100 @@ impl AgentChatView {
             })
             .detach();
         }
+    }
 
-        let available =
-            MAX_RESOURCE_IMAGE_INFLIGHT.saturating_sub(self.assets.resource_image_inflight.len());
-        let to_spawn: Vec<_> = resource_pending
+    pub(crate) fn reconcile_resource_images(
+        &mut self,
+        scope: &ReconcileScope,
+        cx: &mut Context<Self>,
+    ) {
+        let local_cwd = self
+            .cwd
+            .as_ref()
+            .and_then(daruda_store::project::PaneCwd::as_local)
+            .map(Path::to_path_buf);
+        let mut resource_live = HashSet::new();
+        let mut resource_candidates: Vec<(String, u64, PathBuf)> = Vec::new();
+        if !matches!(&self.cwd, Some(daruda_store::project::PaneCwd::Remote(_))) {
+            let boundary = TurnBoundary::of(&self.items);
+            for (item_ix, item) in self.items.iter().enumerate() {
+                let Some((id, output)) = output_content(item) else {
+                    continue;
+                };
+                if !scope.covers(&id)
+                    || matches!(item, ChatItem::ToolCall(tc) if tc.status.is_live())
+                    || !self.tool_body_on_screen(item_ix, item, boundary)
+                {
+                    continue;
+                }
+                for (ix, block) in output.iter().enumerate() {
+                    let ToolOutputBlock::ResourceLink { uri, mime, .. } = block else {
+                        continue;
+                    };
+                    let Some(path) =
+                        resource_image_path(uri, mime.as_deref(), local_cwd.as_deref())
+                    else {
+                        continue;
+                    };
+                    let key = output_editor_key(&id, ix);
+                    let source = resource_image_source(uri, mime.as_deref());
+                    resource_candidates.push((key, source, path));
+                }
+            }
+        }
+
+        resource_live.extend(resource_candidates.iter().map(|(key, ..)| key.clone()));
+
+        self.assets
+            .resource_images
+            .reconcile_sources(&resource_live, scope);
+        let resource_pending: Vec<_> = resource_candidates
             .into_iter()
-            .filter(|(key, source, ..)| self.assets.resource_image_sources.get(key) == Some(source))
-            .take(available)
+            .filter(|(key, source, _)| self.assets.resource_images.wants(key, *source))
             .collect();
-        for (key, source, path, cwd) in to_spawn {
-            self.assets
-                .resource_image_inflight
-                .insert(key.clone(), source);
-
+        if self.assets.resource_images.slots() == 0
+            && self.assets.resource_images.inflight_count() == 0
+            && !resource_pending.is_empty()
+        {
+            // Frame-pinned discards release once the next paint drops their
+            // listeners; that release wakes maintenance, which retries admission.
+            if self.assets.resource_images.prepare_admission() {
+                cx.notify();
+                return;
+            }
+            for (key, ..) in resource_pending {
+                self.assets
+                    .resource_images
+                    .cache(key, Err(ResourceImageError::Budget));
+            }
+            self.resync_all_row_heights("resource-image-budget");
+            cx.notify();
+            return;
+        }
+        for (key, source, path) in resource_pending {
+            let Some(job) = self.assets.resource_images.reserve(key, source) else {
+                break;
+            };
             cx.spawn(async move |this, cx| {
                 let raster = cx
                     .background_executor()
                     .spawn(async move {
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            load_resource_image(&path, &cwd)
+                            load_resource_image(&path)
                         }))
-                        .ok()
-                        .flatten()
+                        .unwrap_or(Err(ResourceImageError::Decode))
                     })
                     .await;
-                // SILENT-OK: view/window dropped before the read resolved.
+                // SILENT-OK: view dropped before its decoder resolved.
                 let _ = this.update(cx, |view, cx| {
-                    // Only the task that owns this slot may clear it. A newer
-                    // source at the same block index waits until this read
-                    // finishes, keeping the global concurrency bound honest.
-                    if view.assets.resource_image_inflight.get(&key) != Some(&source) {
-                        return;
-                    }
-                    view.assets.resource_image_inflight.remove(&key);
-                    if view.assets.resource_image_sources.get(&key) == Some(&source) {
-                        let cached = raster.and_then(CachedImage::from_raster);
-                        view.assets
-                            .resource_images
-                            .lock()
-                            .unwrap()
-                            .insert(key, cached);
+                    let cached = raster.and_then(|raster| {
+                        CachedImage::from_raster(raster).ok_or(ResourceImageError::Render)
+                    });
+                    if view.assets.resource_images.complete(job, cached) {
                         view.resync_all_row_heights("resource-image");
-                        cx.notify();
                     }
-                    // Fill the next queued preview now that one of the bounded
-                    // decoder slots is free. The pass is idempotent for every
-                    // cached/in-flight entry.
-                    view.reconcile_tool_images(&ReconcileScope::All, cx);
+                    cx.notify();
+                    view.reconcile_resource_images(&ReconcileScope::All, cx);
                 });
             })
             .detach();

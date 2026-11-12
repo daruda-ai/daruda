@@ -94,7 +94,7 @@ impl RenderContext {
     where
         F: Fn(&SharedUri) -> ImageSource + Send + Sync + 'static,
     {
-        self.node.image_source = Some(Arc::new(resolver));
+        self.node.image_source = Some(Arc::new(move |uri| Some(resolver(uri))));
         self
     }
 
