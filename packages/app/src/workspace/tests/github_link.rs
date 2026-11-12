@@ -382,3 +382,64 @@ fn without_an_agent_pane_nothing_is_fetched(cx: &mut TestAppContext) {
     assert_eq!(gh.count(GhOp::FailedLog), 0);
     assert_eq!(toasts(&f, cx).len(), before + 1, "the user hears why");
 }
+
+fn send_reviews_with_a_chat(f: &GitFixture, cx: &mut TestAppContext) -> String {
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.split_focused_pane_kind(
+                super::NewPaneKind::AgentChat,
+                super::SplitDirection::Horizontal,
+                window,
+                cx,
+            );
+            ws.send_review_comments(window, cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    f.ws.read_with(cx, |ws, cx| {
+        ws.input_dock.input.read(cx).value().to_string()
+    })
+}
+
+#[gpui::test]
+fn open_review_threads_land_in_the_agent_input(cx: &mut TestAppContext) {
+    let (f, gh) = linked_failing_lane(cx);
+    gh.set_review_threads(
+        7,
+        daruda_github::ReviewThreads {
+            threads: vec![daruda_github::ReviewThread {
+                path: "src/a.rs".into(),
+                lines: Some((3, 5)),
+                outdated: false,
+                comments: vec![daruda_github::ReviewComment {
+                    author: Some("rev".into()),
+                    body: "Name this better.".into(),
+                }],
+            }],
+            truncated: false,
+        },
+    );
+    let input = send_reviews_with_a_chat(&f, cx);
+    assert!(
+        input.contains("In src/a.rs:L3-L5:\n> rev: Name this better."),
+        "{input}"
+    );
+    assert_eq!(gh.count(GhOp::ReviewThreads), 1);
+}
+
+#[gpui::test]
+fn no_open_thread_sends_nothing_and_says_so(cx: &mut TestAppContext) {
+    let (f, _gh) = linked_failing_lane(cx);
+    let before = toasts(&f, cx);
+    let input = send_reviews_with_a_chat(&f, cx);
+    assert!(input.is_empty(), "nothing was inserted: {input}");
+    let after = toasts(&f, cx);
+    assert!(
+        after.len() > before.len()
+            && after
+                .last()
+                .is_some_and(|t| t.contains("no unresolved review comments")),
+        "{after:?}"
+    );
+}

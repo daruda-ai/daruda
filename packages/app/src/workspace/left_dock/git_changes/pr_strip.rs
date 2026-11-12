@@ -123,6 +123,21 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                 CheckRollup::Failing { failed } if pr.state.is_active() => failed,
                 _ => 0,
             };
+            let review = pr.state.is_active().then(|| {
+                let workspace = snap.workspace.clone();
+                crate::ui::button_compact_sized(
+                    "pr-review-comments",
+                    s::pr_review_comments_btn(),
+                    metrics,
+                )
+                .loading(snap.pr_sending)
+                .disabled(snap.pr_sending)
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.send_review_comments(window, cx));
+                    }
+                }))
+            });
             let fix = (failed > 0 && !pr.failed.is_empty()).then(|| {
                 let workspace = snap.workspace.clone();
                 crate::ui::button_compact_sized(
@@ -155,14 +170,17 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                     |d, label| d.child(div().flex_none().text_color(subtle).child(label)),
                 )
                 .child(open);
-            let actions = fix.map(|fix| {
+            let actions = (fix.is_some() || review.is_some()).then(|| {
                 div()
                     .flex()
                     .flex_row()
+                    .flex_wrap()
                     .justify_end()
+                    .gap(px(metrics.space(theme::GIT_REMOTE_BTN_GAP)))
                     .px(px(metrics.space(theme::GIT_HEADER_PAD_X)))
                     .pb(px(metrics.space(theme::GIT_HEADER_PAD_Y)))
-                    .child(fix)
+                    .when_some(review, |d, review| d.child(review))
+                    .when_some(fix, |d, fix| d.child(fix))
             });
             Some(
                 div()

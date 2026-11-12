@@ -1,13 +1,16 @@
-//! Handing a pull request's problems to the lane's agent: the prompt goes
-//! into the agent's input, never submitted, so the user reads it first.
+//! Handing a pull request's problems (failing checks, open review threads)
+//! to the lane's agent: the prompt goes into the agent's input, never
+//! submitted, so the user reads it first.
 
-use daruda_github::prompt::{CheckLog, failed_checks};
+use daruda_github::Gh;
+use daruda_github::prompt::{CheckLog, failed_checks, review_threads};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::project::LaneRef;
 use gpui::{App, Context, Window};
 
 use crate::gh_host::GhHost;
+use crate::github::PrLink;
 use crate::surface::strings::error as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
@@ -52,6 +55,63 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let has_failures = self
+            .lane_scoped
+            .get(&self.active)
+            .and_then(|state| state.pr.as_ref())
+            .is_some_and(|link| !link.pr.failed.is_empty());
+        if !has_failures {
+            return;
+        }
+        self.send_pr_prompt(
+            |gh, link| {
+                let logs: Vec<CheckLog> = link
+                    .pr
+                    .failed
+                    .iter()
+                    .map(|check| CheckLog {
+                        check: check.clone(),
+                        log: match check.job {
+                            Some(job) => gh.failed_log(&link.repo, job).map_err(|e| e.to_string()),
+                            None => Err(NOT_ACTIONS.to_owned()),
+                        },
+                    })
+                    .collect();
+                Ok(Some(failed_checks(&link.pr, &logs)))
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Read the unresolved review threads and put the address-them prompt
+    /// into the active lane's agent input.
+    pub(in crate::workspace) fn send_review_comments(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.send_pr_prompt(
+            |gh, link| {
+                let threads = gh
+                    .review_threads(&link.repo, link.pr.number)
+                    .map_err(|e| e.to_string())?;
+                Ok(review_threads(&link.pr, &threads))
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// The one path both buttons take: find a target first, build the
+    /// prompt off the UI thread with `build` (`Ok(None)`: nothing to send),
+    /// then deliver it if the lane is still the one shown.
+    fn send_pr_prompt(
+        &mut self,
+        build: impl FnOnce(&dyn Gh, &PrLink) -> Result<Option<String>, String> + Send + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let lane = self.active;
         let Some(link) = self
             .lane_scoped
@@ -60,7 +120,7 @@ impl Workspace {
         else {
             return;
         };
-        if link.pr.failed.is_empty() || self.lane_scoped_mut(lane).pr_sending {
+        if self.lane_scoped_mut(lane).pr_sending {
             return;
         }
         if self.pr_send_target(cx).is_none() {
@@ -71,28 +131,12 @@ impl Workspace {
         cx.notify();
         let gh = GhHost::global(cx);
         cx.spawn_in(window, async move |this, cx| {
-            let prompt = cx
+            let built = cx
                 .background_executor()
-                .spawn(async move {
-                    let logs: Vec<CheckLog> = link
-                        .pr
-                        .failed
-                        .iter()
-                        .map(|check| CheckLog {
-                            check: check.clone(),
-                            log: match check.job {
-                                Some(job) => {
-                                    gh.failed_log(&link.repo, job).map_err(|e| e.to_string())
-                                }
-                                None => Err(NOT_ACTIONS.to_owned()),
-                            },
-                        })
-                        .collect();
-                    failed_checks(&link.pr, &logs)
-                })
+                .spawn(async move { build(gh.as_ref(), &link) })
                 .await;
             let delivered = this.update_in(cx, |ws, window, cx| {
-                ws.deliver_pr_prompt(lane, prompt, window, cx);
+                ws.deliver_pr_prompt(lane, built, window, cx);
             });
             if let Err(e) = delivered {
                 LogWriter::log(
@@ -113,7 +157,7 @@ impl Workspace {
     fn deliver_pr_prompt(
         &mut self,
         lane: LaneRef,
-        prompt: String,
+        built: Result<Option<String>, String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -121,6 +165,23 @@ impl Workspace {
             state.pr_sending = false;
         }
         cx.notify();
+        let prompt = match built {
+            Ok(Some(prompt)) => prompt,
+            Ok(None) => {
+                self.report_pr_send(s::github_no_open_comments(), ErrorSeverity::Info, cx);
+                return;
+            }
+            Err(reason) => {
+                let report = ErrorReport::new(s::github_read_failed())
+                    .severity(ErrorSeverity::Warning)
+                    .message(reason)
+                    .at(file!(), line!())
+                    .dedup("github.send.read")
+                    .build();
+                self.report_error(report, cx);
+                return;
+            }
+        };
         if self.active != lane {
             self.report_pr_send(s::github_lane_changed(), ErrorSeverity::Warning, cx);
             return;

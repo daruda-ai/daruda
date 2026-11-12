@@ -23,6 +23,6 @@ pub use backend::Gh;
 pub use error::{FailureKind, GhError};
 pub use model::{
     ActionsJob, CheckRollup, CheckRun, CheckStatus, FailedCheck, NewPr, PrState, PrSummary, RepoId,
-    ReviewDecision,
+    ReviewComment, ReviewDecision, ReviewThread, ReviewThreads,
 };
 pub use system::SystemGh;

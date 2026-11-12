@@ -10,7 +10,10 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::checks::{check_run_status, rollup_from_state, status_context_status, summarize};
-use crate::{CheckRollup, CheckRun, GhError, PrState, PrSummary, ReviewDecision};
+use crate::{
+    CheckRollup, CheckRun, GhError, PrState, PrSummary, ReviewComment, ReviewDecision,
+    ReviewThread, ReviewThreads,
+};
 
 /// PRs fetched per branch: enough to find an open one among old closed ones.
 const PRS_PER_BRANCH: u32 = 5;
@@ -86,6 +89,124 @@ pub fn parse_prs_for_branches(json: &str, branches: &[String]) -> Result<RepoPrs
         default_branch,
         by_branch,
     })
+}
+
+/// Unresolved review threads of one pull request, bound to `$owner`,
+/// `$name` and `$number`.
+pub const REVIEW_THREADS_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
+    repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
+    reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved isOutdated path \
+    line startLine originalLine originalStartLine \
+    comments(first: 20) { nodes { author { login } body } } } } } } }";
+
+/// Parse the answer to [`REVIEW_THREADS_QUERY`], keeping the unresolved
+/// threads. An outdated thread has no current line; where it was written is
+/// used instead.
+pub fn parse_review_threads(json: &str) -> Result<ReviewThreads, GhError> {
+    let response: ThreadsResponse = serde_json::from_str(json).map_err(parse_error)?;
+    let Some(connection) = response
+        .data
+        .and_then(|d| d.repository)
+        .and_then(|r| r.pull_request)
+        .map(|pr| pr.review_threads)
+    else {
+        let messages: Vec<String> = response
+            .errors
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.message)
+            .collect();
+        return Err(GhError::Parse(format!(
+            "no pull request in the answer: {}",
+            messages.join("; ")
+        )));
+    };
+    let threads = connection
+        .nodes
+        .into_iter()
+        .filter(|thread| !thread.is_resolved)
+        .map(|thread| {
+            let end = thread.line.or(thread.original_line);
+            let start = thread.start_line.or(thread.original_start_line).or(end);
+            ReviewThread {
+                path: thread.path,
+                lines: end.zip(start).map(|(end, start)| (start.min(end), end)),
+                outdated: thread.is_outdated,
+                comments: thread
+                    .comments
+                    .nodes
+                    .into_iter()
+                    .map(|c| ReviewComment {
+                        author: c.author.map(|a| a.login),
+                        body: c.body,
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+    Ok(ReviewThreads {
+        threads,
+        truncated: connection.page_info.has_next_page,
+    })
+}
+
+#[derive(Deserialize)]
+struct ThreadsResponse {
+    data: Option<ThreadsData>,
+    errors: Option<Vec<ApiError>>,
+}
+
+#[derive(Deserialize)]
+struct ThreadsData {
+    repository: Option<ThreadsRepository>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadsRepository {
+    pull_request: Option<ThreadsPr>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadsPr {
+    review_threads: ThreadConnection,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadConnection {
+    page_info: PageInfo,
+    nodes: Vec<ThreadNode>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadNode {
+    is_resolved: bool,
+    is_outdated: bool,
+    path: String,
+    line: Option<u32>,
+    start_line: Option<u32>,
+    original_line: Option<u32>,
+    original_start_line: Option<u32>,
+    comments: CommentConnection,
+}
+
+#[derive(Deserialize)]
+struct CommentConnection {
+    nodes: Vec<CommentNode>,
+}
+
+#[derive(Deserialize)]
+struct CommentNode {
+    author: Option<Author>,
+    body: String,
+}
+
+#[derive(Deserialize)]
+struct Author {
+    login: String,
 }
 
 fn parse_error(error: serde_json::Error) -> GhError {

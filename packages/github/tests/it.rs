@@ -5,4 +5,5 @@ mod it {
     mod prompt;
     mod query;
     mod remote_parse;
+    mod review;
 }

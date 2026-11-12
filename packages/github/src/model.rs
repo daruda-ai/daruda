@@ -87,6 +87,33 @@ pub struct FailedCheck {
     pub job: Option<ActionsJob>,
 }
 
+/// One comment in a review thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewComment {
+    /// `None` for a deleted account.
+    pub author: Option<String>,
+    pub body: String,
+}
+
+/// An unresolved review thread on a pull request's diff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewThread {
+    pub path: String,
+    /// The commented lines, first to last; `None` for a file-level comment.
+    pub lines: Option<(u32, u32)>,
+    /// The diff moved since; `lines` are where it was written.
+    pub outdated: bool,
+    pub comments: Vec<ReviewComment>,
+}
+
+/// The unresolved threads of a pull request.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ReviewThreads {
+    pub threads: Vec<ReviewThread>,
+    /// GitHub had more threads than one request reads.
+    pub truncated: bool,
+}
+
 /// A pull request to open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewPr {

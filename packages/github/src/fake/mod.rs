@@ -7,6 +7,7 @@
 //! | `prs_for_branches` | default branch `main`, no PRs for any branch |
 //! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL |
 //! | `failed_log` | exit 1, as for a run that has no failed log |
+//! | `review_threads` | none |
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -14,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use crate::availability::GhAuth;
 use crate::backend::Gh;
 use crate::query::RepoPrs;
-use crate::{ActionsJob, CheckRollup, GhError, NewPr, PrState, PrSummary, RepoId};
+use crate::{ActionsJob, CheckRollup, GhError, NewPr, PrState, PrSummary, RepoId, ReviewThreads};
 
 /// A request the code under test made.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +24,7 @@ pub enum GhCall {
     PrsForBranches { repo: RepoId, branches: Vec<String> },
     CreatePr { repo: RepoId, new: NewPr },
     FailedLog { repo: RepoId, job: ActionsJob },
+    ReviewThreads { repo: RepoId, number: u64 },
 }
 
 /// One [`Gh`] method, for aiming failures.
@@ -32,6 +34,7 @@ pub enum GhOp {
     PrsForBranches,
     CreatePr,
     FailedLog,
+    ReviewThreads,
 }
 
 /// A cloneable description of a [`GhError`], turned into a fresh error on
@@ -69,6 +72,7 @@ struct FakeState {
     default_branches: HashMap<RepoId, String>,
     prs: HashMap<RepoId, Vec<PrSummary>>,
     logs: HashMap<(u64, u64), String>,
+    threads: HashMap<u64, ReviewThreads>,
     failures: HashMap<GhOp, GhFailure>,
     calls: Vec<GhCall>,
 }
@@ -97,6 +101,11 @@ impl FakeGh {
     /// What `failed_log` prints for `job`.
     pub fn set_failed_log(&self, job: ActionsJob, log: &str) {
         self.lock().logs.insert((job.run, job.job), log.to_owned());
+    }
+
+    /// The unresolved threads of PR `number`, whatever its repository.
+    pub fn set_review_threads(&self, number: u64, threads: ReviewThreads) {
+        self.lock().threads.insert(number, threads);
     }
 
     /// Fail every later call of `op` until [`FakeGh::clear_failure`].
@@ -134,6 +143,7 @@ impl GhCall {
             Self::PrsForBranches { .. } => GhOp::PrsForBranches,
             Self::CreatePr { .. } => GhOp::CreatePr,
             Self::FailedLog { .. } => GhOp::FailedLog,
+            Self::ReviewThreads { .. } => GhOp::ReviewThreads,
         }
     }
 }
@@ -201,6 +211,18 @@ impl Gh for FakeGh {
                 code: Some(1),
                 stderr: "log not found".to_owned(),
             })
+    }
+
+    fn review_threads(&self, repo: &RepoId, number: u64) -> Result<ReviewThreads, GhError> {
+        let mut state = self.lock();
+        state.calls.push(GhCall::ReviewThreads {
+            repo: repo.clone(),
+            number,
+        });
+        if let Some(failure) = state.failures.get(&GhOp::ReviewThreads) {
+            return Err(failure.to_error());
+        }
+        Ok(state.threads.get(&number).cloned().unwrap_or_default())
     }
 
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {
