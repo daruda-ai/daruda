@@ -178,13 +178,14 @@ impl GitRepo for FakeHandle {
         let call = GitCall::Push { repo: self.repo() };
         self.write(GitOp::Push, call, |_| ())
     }
-    fn push_set_upstream(&self, remote: &str, branch: &str) -> Result<(), GitError> {
-        let call = GitCall::PushSetUpstream {
+    fn push_head(&self, remote: &str, branch: &str, set_upstream: bool) -> Result<(), GitError> {
+        let call = GitCall::PushHead {
             repo: self.repo(),
             remote: remote.to_owned(),
             branch: branch.to_owned(),
+            set_upstream,
         };
-        self.write(GitOp::PushSetUpstream, call, |_| ())
+        self.write(GitOp::PushHead, call, |_| ())
     }
     fn fetch(&self) -> Result<(), GitError> {
         let call = GitCall::Fetch { repo: self.repo() };

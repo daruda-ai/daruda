@@ -144,7 +144,7 @@ impl Workspace {
             move || {
                 match step {
                     PushFirst::Publish => repo
-                        .push_set_upstream(&push.remote, &push.branch)
+                        .push_head(&push.remote, &push.branch, true)
                         .map_err(CreatePrError::Push)?,
                     PushFirst::Update => repo.push().map_err(CreatePrError::Push)?,
                     PushFirst::Nothing => {}

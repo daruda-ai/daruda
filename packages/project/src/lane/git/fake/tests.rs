@@ -287,13 +287,14 @@ fn a_scripted_push_target_is_answered_and_an_upstream_push_logged() {
     assert_eq!(git.open(Path::new(ROOT)).push_target().unwrap(), None);
     let repo = git.open(Path::new("/fake/other"));
     assert_eq!(repo.push_target().unwrap(), Some(target));
-    repo.push_set_upstream("origin", "feat").unwrap();
+    repo.push_head("origin", "feat", true).unwrap();
     assert_eq!(
         git.calls(),
-        vec![GitCall::PushSetUpstream {
+        vec![GitCall::PushHead {
             repo: PathBuf::from("/fake/other"),
             remote: "origin".into(),
             branch: "feat".into(),
+            set_upstream: true,
         }]
     );
 }

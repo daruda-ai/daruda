@@ -58,10 +58,11 @@ pub enum GitCall {
     Push {
         repo: PathBuf,
     },
-    PushSetUpstream {
+    PushHead {
         repo: PathBuf,
         remote: String,
         branch: String,
+        set_upstream: bool,
     },
     Fetch {
         repo: PathBuf,
@@ -120,7 +121,7 @@ pub enum GitOp {
     Commit,
     CommitAmend,
     Push,
-    PushSetUpstream,
+    PushHead,
     Fetch,
     Pull,
     AddLane,

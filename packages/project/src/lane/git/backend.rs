@@ -65,9 +65,9 @@ pub trait GitRepo: Send + Sync {
     fn commit(&self, message: &str) -> Result<(), GitError>;
     fn commit_amend(&self, message: &str) -> Result<(), GitError>;
     fn push(&self) -> Result<(), GitError>;
-    /// `git push -u <remote> HEAD:refs/heads/<branch>`, for a branch
-    /// [`push_target`](Self::push_target) reports unpublished.
-    fn push_set_upstream(&self, remote: &str, branch: &str) -> Result<(), GitError>;
+    /// `git push [-u] <remote> HEAD:refs/heads/<branch>`, to the place
+    /// [`push_target`](Self::push_target) named.
+    fn push_head(&self, remote: &str, branch: &str, set_upstream: bool) -> Result<(), GitError>;
     fn fetch(&self) -> Result<(), GitError>;
     fn pull(&self) -> Result<(), GitError>;
 
@@ -190,8 +190,8 @@ impl GitRepo for SystemRepo {
     fn push(&self) -> Result<(), GitError> {
         status::git_push(&self.path)
     }
-    fn push_set_upstream(&self, remote: &str, branch: &str) -> Result<(), GitError> {
-        remote::push_set_upstream(&self.path, remote, branch)
+    fn push_head(&self, remote: &str, branch: &str, set_upstream: bool) -> Result<(), GitError> {
+        remote::push_head(&self.path, remote, branch, set_upstream)
     }
     fn fetch(&self) -> Result<(), GitError> {
         status::git_fetch(&self.path)

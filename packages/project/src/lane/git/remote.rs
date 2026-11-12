@@ -41,15 +41,29 @@ pub(crate) fn push_target(wt: &Path) -> Result<Option<PushTarget>, GitError> {
     }))
 }
 
-/// `git push -u <remote> HEAD:refs/heads/<branch>`.
-pub(crate) fn push_set_upstream(wt: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
+/// `git push [-u] <remote> HEAD:refs/heads/<branch>`: an explicit refspec,
+/// so it pushes where [`push_target`] said whatever `push.default` would do,
+/// and is a no-op when the remote branch is already at HEAD.
+pub(crate) fn push_head(
+    wt: &Path,
+    remote: &str,
+    branch: &str,
+    set_upstream: bool,
+) -> Result<(), GitError> {
     let refspec = format!("HEAD:refs/heads/{branch}");
-    run_git(wt, ["push", "-u", remote, refspec.as_str()]).map(|_| ())
+    let mut args = vec!["push"];
+    if set_upstream {
+        args.push("-u");
+    }
+    args.extend([remote, refspec.as_str()]);
+    run_git(wt, args).map(|_| ())
 }
 
 fn current_branch(wt: &Path) -> Result<Option<String>, GitError> {
-    match run_git(wt, ["symbolic-ref", "--quiet", "--short", "HEAD"]) {
-        Ok(name) => Ok(Some(name.trim().to_owned())),
+    // The full name, not `--short`: a tag named like the branch makes the
+    // short form `heads/<branch>`.
+    match run_git(wt, ["symbolic-ref", "--quiet", "HEAD"]) {
+        Ok(name) => Ok(name.trim().strip_prefix("refs/heads/").map(str::to_owned)),
         // Exit 1 with `--quiet` is a detached HEAD, not a failure.
         Err(GitError::Exit { code: Some(1), .. }) => Ok(None),
         Err(e) => Err(e),
@@ -85,8 +99,13 @@ fn last<'a>(entries: &[(&str, &'a str)], key: &str) -> Option<&'a str> {
 
 /// Pick `(remote, remote branch)` for `branch`: `pushRemote`, then
 /// `remote.pushDefault`, then the upstream remote, then `origin`, then the
-/// only remote. A name that is not a configured remote (`.`, a URL) is skipped.
-/// The remote branch is the upstream's when pushing to the upstream remote.
+/// only remote. An upstream of `.` (a local branch) is skipped; a push remote
+/// given as a URL rather than a remote name answers `None`, since no
+/// repository can be read from it here.
+///
+/// The remote branch is the upstream's only under `push.default=upstream`
+/// (or its old name `tracking`) when pushing to the upstream remote. Every
+/// other mode, `simple` the default among them, pushes to the same name.
 fn resolve(branch: &str, entries: &[(&str, &str)]) -> Option<(String, String)> {
     // A remote with several `url` lines is still one remote.
     let mut remotes: Vec<&str> = entries
@@ -97,21 +116,22 @@ fn resolve(branch: &str, entries: &[(&str, &str)]) -> Option<(String, String)> {
     remotes.dedup();
     let is_remote = |name: &&str| remotes.contains(name);
     let upstream_remote = last(entries, &format!("branch.{branch}.remote"));
-    let remote = [
-        last(entries, &format!("branch.{branch}.pushremote")),
-        last(entries, "remote.pushdefault"),
-        upstream_remote,
-    ]
-    .into_iter()
-    .flatten()
-    .find(is_remote)
-    .or_else(|| remotes.iter().copied().find(|r| *r == "origin"))
-    .or_else(|| (remotes.len() == 1).then(|| remotes[0]))?;
+    let explicit = last(entries, &format!("branch.{branch}.pushremote"))
+        .or_else(|| last(entries, "remote.pushdefault"));
+    let remote = match explicit {
+        Some(name) if is_remote(&name) => name,
+        Some(_) => return None,
+        None => upstream_remote
+            .filter(is_remote)
+            .or_else(|| remotes.iter().copied().find(|r| *r == "origin"))
+            .or_else(|| (remotes.len() == 1).then(|| remotes[0]))?,
+    };
 
+    let follows_upstream = matches!(last(entries, "push.default"), Some("upstream" | "tracking"));
     let merged = last(entries, &format!("branch.{branch}.merge"))
         .and_then(|merge| merge.strip_prefix("refs/heads/"));
     let remote_branch = match (upstream_remote, merged) {
-        (Some(upstream), Some(merged)) if upstream == remote => merged,
+        (Some(upstream), Some(merged)) if follows_upstream && upstream == remote => merged,
         _ => branch,
     };
     Some((remote.to_owned(), remote_branch.to_owned()))

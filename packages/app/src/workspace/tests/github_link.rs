@@ -230,10 +230,11 @@ fn an_unpublished_branch_is_pushed_before_its_pr_opens(cx: &mut TestAppContext) 
     let (f, id) = lane_with(cx, false);
     create(&f, cx);
     let pushed = f.fake.calls().into_iter().any(|call| {
-        call == crate::lane::git::GitCall::PushSetUpstream {
+        call == crate::lane::git::GitCall::PushHead {
             repo: f.root.clone(),
             remote: "origin".into(),
             branch: "feat".into(),
+            set_upstream: true,
         }
     });
     assert!(pushed, "{:?}", f.fake.calls());
@@ -258,8 +259,7 @@ fn a_published_branch_with_nothing_new_is_not_pushed(cx: &mut TestAppContext) {
         .filter(|call| {
             matches!(
                 call,
-                crate::lane::git::GitCall::Push { .. }
-                    | crate::lane::git::GitCall::PushSetUpstream { .. }
+                crate::lane::git::GitCall::Push { .. } | crate::lane::git::GitCall::PushHead { .. }
             )
         })
         .count();
@@ -273,7 +273,7 @@ fn a_failed_push_opens_no_pr_and_says_so(cx: &mut TestAppContext) {
     let (f, _) = lane_with(cx, false);
     f.fake.fail(
         f.root.clone(),
-        crate::lane::git::GitOp::PushSetUpstream,
+        crate::lane::git::GitOp::PushHead,
         crate::lane::git::FakeFailure::Exit {
             code: Some(1),
             stderr: "rejected".into(),

@@ -32,20 +32,47 @@ fn the_push_remote_and_branch_follow_gits_precedence() {
         ("only another remote", vec![up], Some(("up", "feat"))),
         ("two remotes, none chosen", vec![up, fork], None),
         (
-            "upstream remote and renamed branch",
+            "an upstream named differently pushes to the same name by default",
             vec![
                 origin,
                 up,
+                ("branch.feat.remote", "up"),
+                ("branch.feat.merge", "refs/heads/main"),
+            ],
+            Some(("up", "feat")),
+        ),
+        (
+            "push.default=upstream follows the upstream's name",
+            vec![
+                origin,
+                up,
+                ("push.default", "upstream"),
                 ("branch.feat.remote", "up"),
                 ("branch.feat.merge", "refs/heads/other"),
             ],
             Some(("up", "other")),
         ),
         (
+            "push.default=current keeps the local name",
+            vec![
+                origin,
+                ("push.default", "current"),
+                ("branch.feat.remote", "origin"),
+                ("branch.feat.merge", "refs/heads/main"),
+            ],
+            Some(("origin", "feat")),
+        ),
+        (
+            "a push remote given as a URL cannot be read",
+            vec![origin, ("branch.feat.pushremote", "git@github.com:o/r.git")],
+            None,
+        ),
+        (
             "pushDefault beats the upstream remote, keeping the local name",
             vec![
                 origin,
                 fork,
+                ("push.default", "upstream"),
                 ("remote.pushdefault", "fork"),
                 ("branch.feat.remote", "origin"),
                 ("branch.feat.merge", "refs/heads/other"),
@@ -120,9 +147,15 @@ fn push_target_reads_a_real_repository() {
     );
     assert_eq!(before.url, url);
 
-    push_set_upstream(&work, "origin", "feat").unwrap();
+    push_head(&work, "origin", "feat", true).unwrap();
     let after = push_target(&work).unwrap().unwrap();
     assert!(after.published, "pushed with -u");
+
+    // A tag named like the branch does not confuse the branch name.
+    run_git(&work, ["tag", "feat"]).unwrap();
+    assert_eq!(push_target(&work).unwrap().unwrap().branch, "feat");
+    // Pushing again with nothing new is a no-op, not an error.
+    push_head(&work, "origin", "feat", false).unwrap();
 
     // Detached HEAD has no branch to push.
     run_git(&work, ["checkout", "--detach"]).unwrap();
