@@ -19,6 +19,7 @@ mod env_lines;
 mod flow;
 mod general;
 mod git;
+mod github;
 mod logs;
 mod notifications;
 mod orchestrator;

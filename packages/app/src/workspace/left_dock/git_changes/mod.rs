@@ -8,6 +8,7 @@
 use crate::ui::Sizable as _;
 mod against_base_section;
 mod file_row;
+pub(in crate::workspace::left_dock) mod pr_strip;
 #[cfg(feature = "screenshot")]
 mod screenshot;
 pub(super) mod unified_list;
@@ -72,6 +73,9 @@ pub(in crate::workspace) fn render(snap: &LeftDockSnapshot, cx: &mut Context<Doc
         .track_focus(&panel_focus);
 
     body = body.child(view_header(active_id, &branch, snap, cx));
+    if let Some(strip) = pr_strip::pr_strip(snap, cx) {
+        body = body.child(strip);
+    }
 
     let base_rows = unified_list::base_rows(
         snap.git_against_base.as_deref(),

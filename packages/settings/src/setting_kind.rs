@@ -110,6 +110,7 @@ pub(crate) enum BoolSetting {
     GitConfirmCommit,
     GitConfirmPush,
     GitDefaultCommitMessage,
+    GithubEnabled,
     TelegramEnabled,
     OrchestratorEnabled,
     StopOnOverage,
@@ -256,7 +257,7 @@ impl SelectSetting {
 
 impl BoolSetting {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 29] = [
+    pub(crate) const ALL: [Self; 30] = [
         Self::AgentUseModifierToSend,
         Self::AgentUseReadingWidth,
         Self::AgentToolSummaryLabels,
@@ -281,6 +282,7 @@ impl BoolSetting {
         Self::GitConfirmCommit,
         Self::GitConfirmPush,
         Self::GitDefaultCommitMessage,
+        Self::GithubEnabled,
         Self::ClaudeStatusEnabled,
         Self::AgentHooksInstalled,
         Self::TelegramEnabled,
@@ -317,6 +319,7 @@ impl BoolSetting {
             Self::GitConfirmCommit => (),
             Self::GitConfirmPush => (),
             Self::GitDefaultCommitMessage => (),
+            Self::GithubEnabled => (),
             Self::ClaudeStatusEnabled => (),
             Self::AgentHooksInstalled => (),
             Self::TelegramEnabled => (),

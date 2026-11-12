@@ -75,6 +75,38 @@ pub(super) fn git_badge_for(
     })
 }
 
+/// The badges a lane row shows right of its label.
+pub(in crate::workspace::left_dock::projects) struct LaneBadges {
+    pub git: Option<GitBadgeData>,
+    pub pr: Option<PrBadgeData>,
+}
+
+/// A lane's pull request on its row: the number, and how its checks read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct PrBadgeData {
+    pub number: u64,
+    pub tone: crate::workspace::github_ops::tone::PrTone,
+    /// Open or draft; a merged or closed PR's number reads quieter.
+    pub active: bool,
+}
+
+pub(super) fn pr_badge_for(
+    snap: &LeftDockSnapshot,
+    project_id: ProjectId,
+    id: LaneId,
+) -> Option<PrBadgeData> {
+    let target = daruda_store::project::LaneRef {
+        project: project_id,
+        lane: id,
+    };
+    let pr = &snap.pr_cache.get(&target)?.pr;
+    Some(PrBadgeData {
+        number: pr.number,
+        tone: crate::workspace::github_ops::tone::PrTone::of(pr),
+        active: pr.state.is_active(),
+    })
+}
+
 /// Icon + short label for an inaccessible lane / project state. Only
 /// the non-`Present` variants are meaningful here; `Present` returns
 /// `None` so callers render the normal row. The icon doubles as the

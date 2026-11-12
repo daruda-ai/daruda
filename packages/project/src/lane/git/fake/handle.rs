@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use super::super::base::{self, AgainstBase, BaseProblem, BaseTips, ResolvedBase};
-use super::super::{GitDirs, GitError, GitRepo, GitTracking, GitWorktreeStatus, MergeOutcome};
+use super::super::{
+    GitDirs, GitError, GitRepo, GitTracking, GitWorktreeStatus, MergeOutcome, PushTarget,
+};
 use super::{FakeRepo, FakeState, GitCall, GitOp, lock, not_a_repo};
 
 pub(super) struct FakeHandle {
@@ -110,6 +112,9 @@ impl GitRepo for FakeHandle {
     fn dirs(&self) -> Result<GitDirs, GitError> {
         self.read(GitOp::Dirs, |repo| Ok(repo.dirs_answer()))
     }
+    fn push_target(&self) -> Result<Option<PushTarget>, GitError> {
+        self.read(GitOp::PushTarget, |repo| Ok(repo.push_target_answer()))
+    }
 
     fn add(&self, path: &Path) -> Result<(), GitError> {
         let call = GitCall::Add {
@@ -172,6 +177,15 @@ impl GitRepo for FakeHandle {
     fn push(&self) -> Result<(), GitError> {
         let call = GitCall::Push { repo: self.repo() };
         self.write(GitOp::Push, call, |_| ())
+    }
+    fn push_head(&self, remote: &str, branch: &str, set_upstream: bool) -> Result<(), GitError> {
+        let call = GitCall::PushHead {
+            repo: self.repo(),
+            remote: remote.to_owned(),
+            branch: branch.to_owned(),
+            set_upstream,
+        };
+        self.write(GitOp::PushHead, call, |_| ())
     }
     fn fetch(&self) -> Result<(), GitError> {
         let call = GitCall::Fetch { repo: self.repo() };

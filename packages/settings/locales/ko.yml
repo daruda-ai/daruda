@@ -99,6 +99,8 @@ settings:
   label_git_confirm_push: "push 전에 확인"
   label_git_default_commit_message: "빈 메시지는 \"Update <파일>\"로 커밋"
   hint_git_default_commit_message: "끄면 빈 메시지는 거부됩니다."
+  label_github_enabled: "GitHub pull request 표시"
+  hint_github_enabled: "worktree마다 pull request와 체크 상태를 gh CLI로 읽어 보여 줍니다."
   card_status_bar: "상태바"
   search_heading: "“%{query}” 검색 결과"
   search_none: "“%{query}”에 맞는 설정이 없습니다."

@@ -58,6 +58,12 @@ pub enum GitCall {
     Push {
         repo: PathBuf,
     },
+    PushHead {
+        repo: PathBuf,
+        remote: String,
+        branch: String,
+        set_upstream: bool,
+    },
     Fetch {
         repo: PathBuf,
     },
@@ -104,6 +110,7 @@ pub enum GitOp {
     HeadMessage,
     DefaultBranch,
     Dirs,
+    PushTarget,
     Add,
     AddPaths,
     AddAll,
@@ -114,6 +121,7 @@ pub enum GitOp {
     Commit,
     CommitAmend,
     Push,
+    PushHead,
     Fetch,
     Pull,
     AddLane,
@@ -186,6 +194,7 @@ fn fatal(message: String) -> GitError {
 /// | `show_staged`, `show_at`, `head_message` | exit 128 | exit 128 (nothing there) |
 /// | `default_branch` | `None` | [`FakeRepo::branch`] |
 /// | `dirs` | exit 128 | `<root>/.git` for both |
+/// | `push_target` | exit 128 | `None` (no remote) |
 /// | `base_tips` | exit 128 as `BaseProblem::Git` | `NotFound(name)` |
 /// | `changes_since` | exit 128 as `BaseProblem::Git` | no files, no commits |
 /// | `init` | logged, `Ok` (registers nothing) | logged, `Ok` |

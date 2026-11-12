@@ -421,6 +421,8 @@ bash ./scripts/lint-modal-fields.sh --self-test
 ./scripts/lint-env-literals.sh --self-test
 bash ./scripts/lint-real-git-tests.sh
 bash ./scripts/lint-real-git-tests.sh --self-test
+bash ./scripts/lint-real-gh-tests.sh
+bash ./scripts/lint-real-gh-tests.sh --self-test
 ./scripts/lint-file-size.sh
 ./scripts/lint-mark-dirty-direct-call.sh
 ./scripts/lint-fold-header.sh
@@ -833,6 +835,7 @@ daruda/
 │   ├── core/                   # daruda_core: shared utilities, no daruda_* or GPUI deps
 │   ├── flow/                   # daruda_flow: declarative ACP flow engine
 │   ├── flow-edit/              # daruda_flow_edit: source-preserving flow-file edits
+│   ├── github/                 # daruda_github: GitHub pull requests through the gh CLI
 │   ├── project/                # daruda_project: runtime Project/Lane model, git ops
 │   ├── runlog/                 # daruda_runlog: crash-consistent event-sourced run log
 │   ├── store/                  # daruda_store: persistence and observability

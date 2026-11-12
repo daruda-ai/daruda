@@ -29,6 +29,7 @@ mod git_commit_flow;
 mod git_discard;
 mod git_fixture;
 mod git_remote;
+mod github_link;
 mod keep_awake;
 mod kept_worktree;
 mod lane_unread;

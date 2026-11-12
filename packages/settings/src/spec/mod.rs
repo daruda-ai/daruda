@@ -382,6 +382,13 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.git.default_commit_message,
     },
     BoolSpec {
+        setting: BoolSetting::GithubEnabled,
+        get: |w| w.github_enabled,
+        set: |w, v| w.github_enabled = v,
+        patch: SettingsPatch::GithubEnabled,
+        show: |c| c.github.enabled,
+    },
+    BoolSpec {
         setting: BoolSetting::NotifyHook,
         get: |w| w.notify_hook,
         set: |w, v| w.notify_hook = v,

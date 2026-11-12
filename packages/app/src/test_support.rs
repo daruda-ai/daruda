@@ -46,6 +46,16 @@ pub(crate) fn fake_git(cx: &mut TestAppContext) -> crate::lane::git::FakeGit {
     fake
 }
 
+/// Install a fresh [`FakeGh`](daruda_github::fake::FakeGh) as the app's gh
+/// backend and return a clone sharing its state. Call it before building a
+/// workspace: construction keeps a backend that is already installed.
+pub(crate) fn fake_gh(cx: &mut TestAppContext) -> daruda_github::fake::FakeGh {
+    let fake = daruda_github::fake::FakeGh::new();
+    let backend = std::sync::Arc::new(fake.clone());
+    cx.update(|cx| crate::gh_host::GhHost::set_global(backend, cx));
+    fake
+}
+
 /// The one `git worktree add` the code under test asked for.
 #[derive(Debug)]
 pub(crate) struct AddedLane {

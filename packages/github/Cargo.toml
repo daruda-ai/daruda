@@ -1,0 +1,21 @@
+[package]
+name = "daruda_github"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+license.workspace = true
+description = "GitHub pull requests for daruda lanes through the gh CLI — repository parsing, PR matching, check rollup (GPUI-free)"
+
+[lints]
+workspace = true
+
+[features]
+# `FakeGh`, for crates whose tests must not reach GitHub with the user's
+# credentials. Never a shipping default.
+test-support = []
+
+[dependencies]
+daruda_core = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

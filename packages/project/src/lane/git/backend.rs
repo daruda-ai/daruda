@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use super::base::{self, AgainstBase, BaseProblem, BaseTips};
 use super::{
-    GitDirs, GitError, GitTracking, GitWorktreeStatus, MergeOutcome, RepoProbe, discard, status,
+    GitDirs, GitError, GitTracking, GitWorktreeStatus, MergeOutcome, PushTarget, RepoProbe,
+    discard, remote, status,
 };
 
 /// Factory for repository handles plus the operations that precede one.
@@ -40,6 +41,9 @@ pub trait GitRepo: Send + Sync {
     fn head_message(&self) -> Result<String, GitError>;
     fn default_branch(&self) -> Option<String>;
     fn dirs(&self) -> Result<GitDirs, GitError>;
+    /// Where `git push` sends the current branch. `None` when HEAD is
+    /// detached or no remote can be chosen.
+    fn push_target(&self) -> Result<Option<PushTarget>, GitError>;
 
     /// `path` is absolute or relative to [`path`](Self::path).
     fn add(&self, path: &Path) -> Result<(), GitError>;
@@ -61,6 +65,9 @@ pub trait GitRepo: Send + Sync {
     fn commit(&self, message: &str) -> Result<(), GitError>;
     fn commit_amend(&self, message: &str) -> Result<(), GitError>;
     fn push(&self) -> Result<(), GitError>;
+    /// `git push [-u] <remote> HEAD:refs/heads/<branch>`, to the place
+    /// [`push_target`](Self::push_target) named.
+    fn push_head(&self, remote: &str, branch: &str, set_upstream: bool) -> Result<(), GitError>;
     fn fetch(&self) -> Result<(), GitError>;
     fn pull(&self) -> Result<(), GitError>;
 
@@ -148,6 +155,9 @@ impl GitRepo for SystemRepo {
     fn dirs(&self) -> Result<GitDirs, GitError> {
         super::git_dirs(&self.path)
     }
+    fn push_target(&self) -> Result<Option<PushTarget>, GitError> {
+        remote::push_target(&self.path)
+    }
 
     fn add(&self, path: &Path) -> Result<(), GitError> {
         status::git_add(&self.path, path)
@@ -179,6 +189,9 @@ impl GitRepo for SystemRepo {
     }
     fn push(&self) -> Result<(), GitError> {
         status::git_push(&self.path)
+    }
+    fn push_head(&self, remote: &str, branch: &str, set_upstream: bool) -> Result<(), GitError> {
+        remote::push_head(&self.path, remote, branch, set_upstream)
     }
     fn fetch(&self) -> Result<(), GitError> {
         status::git_fetch(&self.path)

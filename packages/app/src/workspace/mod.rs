@@ -73,6 +73,7 @@ pub(in crate::workspace) mod flow_request;
 mod flow_rows;
 pub(in crate::workspace) mod flow_runs;
 mod frame_ops;
+pub(crate) mod github_ops;
 mod group_ops;
 pub(in crate::workspace) mod group_select_modal;
 mod lane_ops;

@@ -26,6 +26,14 @@ const NAME_LANDING: &str = "landing";
 const NAME_SETTINGS: &str = "settings";
 /// CLI token for the Settings window showing a failed action's banner.
 const NAME_LEFT_DOCK_GIT: &str = "left-dock-git";
+/// The Git Changes panel over a lane whose PR has failing checks.
+const NAME_LEFT_DOCK_GIT_PR: &str = "left-dock-git-pr";
+/// The Git Changes panel telling the user to install `gh`.
+const NAME_LEFT_DOCK_GIT_GH_MISSING: &str = "left-dock-git-gh-missing";
+/// The worktree list with PR badges in each check state.
+const NAME_LEFT_DOCK_WORKTREES_PR: &str = "left-dock-worktrees-pr";
+/// The Create PR form over a lane with no pull request yet.
+const NAME_CREATE_PR_MODAL: &str = "create-pr-modal";
 const NAME_SETTINGS_ERROR: &str = "settings-error";
 /// CLI token for Settings with a search query typed: the results page.
 const NAME_SETTINGS_SEARCH: &str = "settings-search";
@@ -271,6 +279,10 @@ impl ScreenshotScenario {
             NAME_LEFT_DOCK_PANE_HOVER => Some(Self::LeftDockPaneHover),
             NAME_LEFT_DOCK_PROJECT_ALIAS => Some(Self::LeftDockProjectAlias),
             NAME_LEFT_DOCK_GIT => Some(Self::LeftDockGit),
+            NAME_LEFT_DOCK_GIT_PR => Some(Self::LeftDockGitPr),
+            NAME_LEFT_DOCK_GIT_GH_MISSING => Some(Self::LeftDockGitGhMissing),
+            NAME_LEFT_DOCK_WORKTREES_PR => Some(Self::LeftDockWorktreesPr),
+            NAME_CREATE_PR_MODAL => Some(Self::CreatePrModal),
             NAME_LEFT_DOCK_WORKTREES => Some(Self::LeftDockWorktrees),
             NAME_LEFT_DOCK_RAIL => Some(Self::LeftDockRail),
             NAME_LEFT_DOCK_EXPANDED => Some(Self::LeftDockExpanded),

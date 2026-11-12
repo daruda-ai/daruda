@@ -114,6 +114,10 @@ pub(crate) enum ScreenshotScenario {
     LeftDockProjectAlias,
     LeftDockWorktrees,
     LeftDockGit,
+    LeftDockGitPr,
+    LeftDockGitGhMissing,
+    LeftDockWorktreesPr,
+    CreatePrModal,
     /// Open the command palette (`CommandPaletteState::open`).
     CommandPalette,
     /// Open the Lane switcher with a real candidate whose label is
@@ -822,6 +826,30 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::LeftDockGit => {
             workspace.update(cx, |ws, cx| ws.seed_left_dock_git_for_shot(window, cx));
+        }
+        ScreenshotScenario::LeftDockGitPr
+        | ScreenshotScenario::LeftDockGitGhMissing
+        | ScreenshotScenario::CreatePrModal => {
+            use crate::workspace::github_ops::screenshot::PrShot;
+            let shot = match scenario {
+                ScreenshotScenario::LeftDockGitPr => PrShot::Linked,
+                ScreenshotScenario::LeftDockGitGhMissing => PrShot::GhMissing,
+                _ => PrShot::NoPr,
+            };
+            workspace.update(cx, |ws, cx| {
+                ws.seed_left_dock_git_for_shot(window, cx);
+                ws.seed_pr_for_shot(shot, cx);
+                if shot == PrShot::NoPr {
+                    ws.open_create_pr_modal(window, cx);
+                }
+            });
+        }
+        ScreenshotScenario::LeftDockWorktreesPr => {
+            workspace.update(cx, |ws, cx| {
+                // The expanded dock: lane rows, where the badges live.
+                ws.seed_left_dock_for_shot(false, true, false, window, cx);
+                ws.seed_lane_prs_for_shot(cx);
+            });
         }
         ScreenshotScenario::LeftDockGroups
         | ScreenshotScenario::LeftDockWorktrees

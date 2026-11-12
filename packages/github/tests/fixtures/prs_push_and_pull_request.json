@@ -1,0 +1,482 @@
+{
+ "data": {
+  "repository": {
+   "defaultBranchRef": {
+    "name": "master"
+   },
+   "b0": {
+    "nodes": [
+     {
+      "number": 3113,
+      "url": "https://github.com/serde-rs/serde/pull/3113",
+      "title": "Resolve deprecated_attributes_without_since pedantic clippy lint",
+      "state": "MERGED",
+      "isDraft": false,
+      "headRefName": "deprecatedsince",
+      "isCrossRepository": false,
+      "reviewDecision": null,
+      "updatedAt": "2026-10-29T06:09:55Z",
+      "statusCheckRollup": {
+       "state": "SUCCESS",
+       "contexts": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+         {
+          "__typename": "CheckRun",
+          "name": "Test suite",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795678920",
+          "startedAt": "2026-10-16T03:28:51Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Test suite",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666729",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Test suite (windows)",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795679140",
+          "startedAt": "2026-10-16T03:29:08Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Test suite (windows)",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666585",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust stable",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795679108",
+          "startedAt": "2026-10-16T03:29:04Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust stable",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666838",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust beta",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795679044",
+          "startedAt": "2026-10-16T03:29:01Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust beta",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666757",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust nightly",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795679092",
+          "startedAt": "2026-10-16T03:28:51Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust nightly",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666677",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust nightly (windows)",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795679148",
+          "startedAt": "2026-10-16T03:29:06Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust nightly (windows)",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666845",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust 1.56.0",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795679206",
+          "startedAt": "2026-10-16T03:29:09Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust 1.56.0",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666828",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust 1.60.0",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795679056",
+          "startedAt": "2026-10-16T03:28:51Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust 1.60.0",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666814",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust 1.71.0",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795679107",
+          "startedAt": "2026-10-16T03:29:05Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Rust 1.71.0",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666759",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Minimal versions",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795679269",
+          "startedAt": "2026-10-16T03:29:12Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Minimal versions",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666816",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Documentation",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795679166",
+          "startedAt": "2026-10-16T03:29:09Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Documentation",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666789",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Clippy",
+          "status": "COMPLETED",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795680351",
+          "startedAt": "2026-10-16T03:28:50Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Clippy",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666684",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Miri",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795679070",
+          "startedAt": "2026-10-16T03:29:09Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Miri",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666751",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Outdated",
+          "status": "COMPLETED",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845717101/job/116795680326",
+          "startedAt": "2026-10-16T03:28:50Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "pull_request",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         },
+         {
+          "__typename": "CheckRun",
+          "name": "Outdated",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/serde-rs/serde/actions/runs/38845713145/job/116795666672",
+          "startedAt": "2026-10-16T03:28:48Z",
+          "checkSuite": {
+           "workflowRun": {
+            "event": "push",
+            "workflow": {
+             "name": "CI"
+            }
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    ]
+   }
+  }
+ }
+}

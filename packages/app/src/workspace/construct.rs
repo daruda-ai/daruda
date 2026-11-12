@@ -103,6 +103,7 @@ impl Workspace {
         crate::ui::theme::DarudaTheme::init(cx);
         crate::settings_store::SettingsStore::init(cx);
         crate::git_host::GitHost::init_if_missing(cx);
+        crate::gh_host::GhHost::init_if_missing(cx);
         crate::overage_policy::OveragePolicy::sync(cx);
 
         let ws_weak = cx.entity().downgrade();

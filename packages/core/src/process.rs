@@ -6,6 +6,7 @@
 //! does it lives here.
 
 use std::ffi::OsStr;
+mod capture;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -18,6 +19,8 @@ use windows as backend;
 mod unsupported;
 #[cfg(not(any(unix, windows)))]
 use unsupported as backend;
+
+pub use capture::{CaptureError, CaptureLimits, Captured, run_captured};
 
 /// The OS-provided archive extractor. Windows' bsdtar understands Node's ZIP
 /// archives; a Git installation's GNU tar may shadow it on PATH.

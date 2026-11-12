@@ -849,6 +849,7 @@ daruda (app)  →  daruda_terminal  →  ghostty_vt  →  ghostty_vt_sys
              →  daruda_project    →  daruda_config, daruda_store, daruda_core  # GPUI-free Project/Lane
              →  daruda_content    →  merman, resvg, image   # GPUI-free image + mermaid pipeline
              →  daruda_control_types  →  daruda_store, daruda_core   # GPUI-free control contract, PaneRef
+             →  daruda_github     →  daruda_core   # GPUI-free GitHub PRs through the gh CLI
              →  daruda_ui         →  daruda_terminal, daruda_config, gpui_component, ferrum_flow  # widgets
              →  daruda_transcript →  daruda_acp, daruda_config, daruda_ui   # transcript presentation, shared by chat + Settings
              →  daruda_chat       →  daruda_transcript, daruda_acp, daruda_content, daruda_ui, daruda_config, daruda_store, daruda_core  # the chat pane view

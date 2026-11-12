@@ -14,7 +14,7 @@ use crate::workspace::root_menu::RootContextMenuExt as _;
 use super::agent_badges::agent_status_cell;
 use super::drag::{DragGhost, DragPayload};
 
-use super::{GitBadgeData, availability_badge, availability_chip};
+use super::{GitBadgeData, LaneBadges, PrBadgeData, availability_badge, availability_chip};
 
 /// GitHub-Desktop-style badge cluster rendered on the right of a
 /// lane row's label. Layout (left to right, each group omitted when
@@ -81,11 +81,42 @@ fn git_badge_view(
         })
 }
 
+/// `#N` with the checks glyph before it, left of the git cluster.
+fn pr_badge_view(
+    badge: PrBadgeData,
+    metrics: theme::UiMetrics,
+    cx: &gpui::App,
+) -> impl IntoElement {
+    let t = theme::current(cx);
+    let text = if badge.active {
+        t.text_muted
+    } else {
+        t.text_subtle
+    };
+    let glyph = crate::workspace::left_dock::git_changes::pr_strip::tone_glyph(badge.tone, cx);
+    div()
+        .flex_none()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(metrics.space(theme::GIT_BADGE_ARROW_NUM_GAP)))
+        .text_size(px(metrics.text(theme::GIT_BADGE_FONT_SIZE)))
+        .text_color(text)
+        .when_some(glyph, |d, (path, color)| {
+            d.child(
+                crate::ui::icons::icon(path)
+                    .with_size(px(metrics.icon(theme::GIT_BADGE_ARROW_SIZE)))
+                    .text_color(color),
+            )
+        })
+        .child(crate::surface::strings::git::pr_number(badge.number))
+}
+
 pub(in crate::workspace::left_dock::projects) fn worktree_row(
     wt: &Lane,
     project_id: ProjectId,
     is_active: bool,
-    git_badge: Option<GitBadgeData>,
+    badges: LaneBadges,
     snap: &LeftDockSnapshot,
     cx: &mut Context<Dock>,
 ) -> impl IntoElement {
@@ -161,7 +192,10 @@ pub(in crate::workspace::left_dock::projects) fn worktree_row(
                     label_inactive
                 })
                 .child(div().flex_1().text_ellipsis().child(label.clone()))
-                .when_some(git_badge.filter(|_| !is_unavailable), |d, badge| {
+                .when_some(badges.pr.filter(|_| !is_unavailable), |d, badge| {
+                    d.child(pr_badge_view(badge, snap.metrics, cx))
+                })
+                .when_some(badges.git.filter(|_| !is_unavailable), |d, badge| {
                     d.child(git_badge_view(
                         badge,
                         snap.metrics,

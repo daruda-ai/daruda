@@ -20,6 +20,7 @@ pub(super) mod init;
 pub(in crate::workspace) mod lock;
 pub(super) mod nav;
 mod pane_status;
+mod push_target;
 mod recovery;
 pub(super) mod status;
 pub(in crate::workspace) mod watch;

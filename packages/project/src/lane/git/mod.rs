@@ -21,6 +21,8 @@ mod command;
 mod environment;
 pub use environment::GitEnvironmentFailure;
 pub mod discard;
+mod remote;
+pub use remote::PushTarget;
 mod status;
 
 pub use backend::{Git, GitRepo, SystemGit};
@@ -36,8 +38,7 @@ pub use status::{GitFileEntry, GitTracking, GitWorktreeStatus};
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Lane entry parsed from `git worktree list --porcelain`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,16 +97,11 @@ impl std::fmt::Display for GitError {
 /// poll overhead is invisible.
 const RUN_GIT_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Granularity of the `try_wait` loop. 50 ms is short enough to make
-/// short git commands feel synchronous, long enough that polling cost
-/// stays well under 1% of CPU.
-const RUN_GIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
-
 impl std::error::Error for GitError {}
 
 /// Run `git <args>` in `cwd` with a `RUN_GIT_TIMEOUT` deadline. Returns
-/// stdout as a String on success. If the deadline elapses, the child is
-/// killed (`Child::kill`) and the call returns `GitError::Timeout` —
+/// stdout as a String on success. If the deadline elapses, git and the
+/// helpers it forked are killed and the call returns `GitError::Timeout` —
 /// callers must treat this distinctly from a clean failure (e.g. the
 /// commit/push state is unknown when this fires).
 pub(super) fn run_git<I, S>(cwd: &Path, args: I) -> Result<String, GitError>
@@ -123,134 +119,33 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    use std::thread;
-
     // Pre-spawn guard: surface a clear "git not on PATH" error instead
     // of an opaque spawn failure when git isn't installed.
     which::which("git").map_err(|_| GitError::NotFound)?;
 
     let mut command = git_command(cwd);
-    command
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // git forks helpers of its own (ssh, askpass, credential) — a timeout has
-    // to reach those, not just git.
-    daruda_core::process::lead_own_group(&mut command);
-    let mut child = command.spawn().map_err(GitError::Spawn)?;
-    let group = match daruda_core::process::Group::try_adopt(child.id()) {
-        Ok(group) => group,
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(GitError::Spawn(error));
-        }
+    command.args(args);
+    // git forks helpers of its own (ssh, askpass, credential); the runner
+    // ends them together with git when a bound is crossed.
+    let limits = daruda_core::process::CaptureLimits {
+        timeout,
+        stdout: 64 * 1024 * 1024,
+        stderr: 1024 * 1024,
     };
-
-    // Drain stdout/stderr concurrently so the child never blocks on a
-    // full pipe buffer while we're polling `try_wait`. Each handle
-    // returns captured bytes or a limit failure. Helpers can retain a pipe
-    // after root exit, so the drain below also has its own deadline.
-    // Invariant: Stdio::piped() was set above; stdlib guarantees Some after successful spawn().
-    let stdout = child.stdout.take().expect("piped stdout");
-    let stderr = child.stderr.take().expect("piped stderr");
-    let (output_tx, output_rx) = std::sync::mpsc::channel();
-    let stderr_tx = output_tx.clone();
-    let stdout_thread = thread::spawn(move || {
-        let _ = output_tx.send((true, capture_git_output(stdout, 64 * 1024 * 1024)));
-    });
-    let stderr_thread = thread::spawn(move || {
-        let _ = stderr_tx.send((false, capture_git_output(stderr, 1024 * 1024)));
-    });
-
-    let started = Instant::now();
-    let mut captured = Vec::with_capacity(2);
-    let status = loop {
-        while let Ok((is_stdout, result)) = output_rx.try_recv() {
-            match result {
-                Ok(bytes) => captured.push((is_stdout, bytes)),
-                Err(error) => {
-                    terminate_git(&mut child, &group)?;
-                    return Err(error);
-                }
-            }
+    let out = daruda_core::process::run_captured(command, limits).map_err(|e| match e {
+        daruda_core::process::CaptureError::Spawn(e) => GitError::Spawn(e),
+        daruda_core::process::CaptureError::Timeout(d) => GitError::Timeout(d),
+        daruda_core::process::CaptureError::Overflow { limit } => {
+            GitError::Parse(format!("git output exceeded {limit} bytes"))
         }
-        match child.try_wait() {
-            Ok(Some(s)) => break s,
-            Ok(None) => {
-                if started.elapsed() >= timeout {
-                    // The whole tree, so no helper is left holding the pipes
-                    // the drain threads read. Unreaped until the `wait`
-                    // below, so the pid is still ours to name.
-                    let termination = terminate_git(&mut child, &group);
-                    // Still detached rather than joined: a timeout is already
-                    // a failure path and the caller gets `Timeout` now, not
-                    // after the OS has finished tearing the pipes down.
-                    drop(stdout_thread);
-                    drop(stderr_thread);
-                    termination?;
-                    return Err(GitError::Timeout(timeout));
-                }
-                thread::sleep(RUN_GIT_POLL_INTERVAL);
-            }
-            Err(e) => {
-                terminate_git(&mut child, &group)?;
-                return Err(GitError::Spawn(e));
-            }
-        }
-    };
-
-    // Root exit does not guarantee EOF: helpers can inherit either pipe.
-    let drain_deadline = (started + timeout).min(Instant::now() + Duration::from_secs(2));
-    let mut stdout_buf = Vec::new();
-    let mut stderr_buf = Vec::new();
-    for _ in captured.len()..2 {
-        let (is_stdout, result) = output_rx
-            .recv_timeout(drain_deadline.saturating_duration_since(Instant::now()))
-            .map_err(|_| GitError::Timeout(timeout))?;
-        captured.push((is_stdout, result?));
-    }
-    for (is_stdout, bytes) in captured {
-        if is_stdout {
-            stdout_buf = bytes;
-        } else {
-            stderr_buf = bytes;
-        }
-    }
-    let _ = stdout_thread.join();
-    let _ = stderr_thread.join();
-
-    if !status.success() {
+    })?;
+    if !out.status.success() {
         return Err(GitError::Exit {
-            code: status.code(),
-            stderr: String::from_utf8_lossy(&stderr_buf).into_owned(),
+            code: out.status.code(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
         });
     }
-    String::from_utf8(stdout_buf).map_err(|_| GitError::Utf8)
-}
-
-fn terminate_git(
-    child: &mut std::process::Child,
-    group: &daruda_core::process::Group,
-) -> Result<(), GitError> {
-    group.try_terminate_child(child).map_err(GitError::Spawn)
-}
-
-fn capture_git_output(mut reader: impl std::io::Read, limit: usize) -> Result<Vec<u8>, GitError> {
-    let mut bytes = Vec::new();
-    let mut chunk = [0; 8192];
-    loop {
-        let count = reader.read(&mut chunk).map_err(GitError::Spawn)?;
-        if count == 0 {
-            return Ok(bytes);
-        }
-        if count > limit.saturating_sub(bytes.len()) {
-            return Err(GitError::Parse(format!(
-                "git output exceeded {limit} bytes"
-            )));
-        }
-        bytes.extend_from_slice(&chunk[..count]);
-    }
+    String::from_utf8(out.stdout).map_err(|_| GitError::Utf8)
 }
 
 /// `git init` in `path`. Used by the Git Changes view's "Initialize

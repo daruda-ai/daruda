@@ -1,5 +1,6 @@
 use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 // Temp-dir helpers — each test gets a unique path so parallel
 // runs don't collide. The directory is created on demand and

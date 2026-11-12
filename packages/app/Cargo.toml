@@ -31,6 +31,8 @@ screenshot = [
     "gpui_macos/test-support",
     "daruda_chat/screenshot",
     "daruda_settings/screenshot",
+    # Captures answer for GitHub from a scripted FakeGh, never the real CLI.
+    "daruda_github/test-support",
 ]
 
 # `daruda --replay-acp-log <path>` — replay a captured ACP wire log into a live
@@ -63,6 +65,7 @@ daruda_content = { workspace = true }
 daruda_control_types = { workspace = true }
 daruda_flow = { workspace = true }
 daruda_flow_edit = { workspace = true }
+daruda_github = { workspace = true }
 daruda_project = { workspace = true }
 daruda_settings = { workspace = true }
 daruda_terminal = { workspace = true }
@@ -168,6 +171,9 @@ daruda_chat = { workspace = true, features = ["test-support"] }
 # stays off unless a test opts in at runtime, so this binary runs real git
 # exactly as a release build does.
 daruda_project = { workspace = true, features = ["test-support"] }
+# `FakeGh`, the only gh app tests use: no test reaches GitHub with the
+# developer's own login.
+daruda_github = { workspace = true, features = ["test-support"] }
 # A store that never touches the developer's own `config.toml`, and read-back
 # hooks on an open Settings.
 daruda_settings = { workspace = true, features = ["test-support"] }

@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use super::super::base::{AgainstBase, BaseProblem, BaseTips};
 use super::super::{
-    GitDirs, GitError, GitTracking, GitWorktreeInfo, GitWorktreeStatus, MergeOutcome, RepoProbe,
+    GitDirs, GitError, GitTracking, GitWorktreeInfo, GitWorktreeStatus, MergeOutcome, PushTarget,
+    RepoProbe,
 };
 use super::fatal;
 
@@ -20,6 +21,7 @@ pub struct FakeRepo {
     pub(super) status: Option<GitWorktreeStatus>,
     pub(super) worktrees: Option<Vec<GitWorktreeInfo>>,
     dirs: Option<GitDirs>,
+    push_target: Option<PushTarget>,
     diffs: HashMap<(PathBuf, bool), String>,
     untracked_diffs: HashMap<PathBuf, String>,
     staged_blobs: HashMap<PathBuf, Vec<u8>>,
@@ -43,6 +45,7 @@ impl FakeRepo {
             status: None,
             worktrees: None,
             dirs: None,
+            push_target: None,
             diffs: HashMap::new(),
             untracked_diffs: HashMap::new(),
             staged_blobs: HashMap::new(),
@@ -85,6 +88,10 @@ impl FakeRepo {
     }
     pub fn dirs(mut self, dirs: GitDirs) -> Self {
         self.dirs = Some(dirs);
+        self
+    }
+    pub fn push_target(mut self, target: PushTarget) -> Self {
+        self.push_target = Some(target);
         self
     }
     /// What `diff(path, staged)` prints for exactly that path and side.
@@ -193,6 +200,9 @@ impl FakeRepo {
             git_dir: self.root.join(".git"),
             common_dir: self.root.join(".git"),
         })
+    }
+    pub(super) fn push_target_answer(&self) -> Option<PushTarget> {
+        self.push_target.clone()
     }
     pub(super) fn base_tips_answer(&self, base_name: &str) -> Result<BaseTips, BaseProblem> {
         self.base_tips

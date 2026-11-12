@@ -19,6 +19,7 @@ pub mod flow;
 pub mod font;
 pub mod general;
 pub mod git;
+pub mod github;
 pub mod keybindings;
 pub mod left_dock;
 pub mod logs;
@@ -71,6 +72,7 @@ pub use config_file::{
 };
 use config_file::{deserialize_config, patch_section};
 pub use git::GitConfig;
+pub use github::GithubConfig;
 
 /// `value` clamped to `[min, max]`, or `fallback` when it is NaN. TOML reads
 /// `nan` as a float and `f32::clamp` passes NaN through, so a NaN size, width
@@ -169,6 +171,7 @@ pub struct Config {
     pub notifications: NotificationsConfig,
     pub clipboard: ClipboardConfig,
     pub git: GitConfig,
+    pub github: GithubConfig,
     pub usage: UsageConfig,
     pub panels: PanelsConfig,
     pub status_bar: StatusBarConfig,
@@ -234,6 +237,7 @@ impl Default for Config {
             notifications: Default::default(),
             clipboard: Default::default(),
             git: Default::default(),
+            github: Default::default(),
             usage: Default::default(),
             panels: Default::default(),
             status_bar: Default::default(),

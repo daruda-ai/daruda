@@ -327,6 +327,10 @@ pub(super) fn bool(setting: BoolSetting) -> RowCopy {
             label: s::settings::label_git_default_commit_message,
             hint: s::settings::hint_git_default_commit_message,
         },
+        BoolSetting::GithubEnabled => RowCopy {
+            label: s::settings::label_github_enabled,
+            hint: s::settings::hint_github_enabled,
+        },
         BoolSetting::NotifyHook => RowCopy {
             label: s::settings::label_notify_hook,
             hint: s::settings::hint_notify_hook,
