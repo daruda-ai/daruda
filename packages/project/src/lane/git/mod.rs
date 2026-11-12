@@ -21,6 +21,8 @@ mod command;
 mod environment;
 pub use environment::GitEnvironmentFailure;
 pub mod discard;
+mod remote;
+pub use remote::PushTarget;
 mod status;
 
 pub use backend::{Git, GitRepo, SystemGit};

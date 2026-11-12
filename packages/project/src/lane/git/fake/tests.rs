@@ -272,3 +272,28 @@ fn a_lane_on_its_scripted_base_branch_has_no_comparison() {
         Err(BaseProblem::NotFound("main".into()))
     );
 }
+
+#[test]
+fn a_scripted_push_target_is_answered_and_an_upstream_push_logged() {
+    let target = crate::lane::git::PushTarget {
+        remote: "origin".into(),
+        url: "git@github.com:o/r.git".into(),
+        branch: "feat".into(),
+        published: false,
+    };
+    let git = FakeGit::new()
+        .with(FakeRepo::at(ROOT).branch("feat"))
+        .with(FakeRepo::at("/fake/other").push_target(target.clone()));
+    assert_eq!(git.open(Path::new(ROOT)).push_target().unwrap(), None);
+    let repo = git.open(Path::new("/fake/other"));
+    assert_eq!(repo.push_target().unwrap(), Some(target));
+    repo.push_set_upstream("origin", "feat").unwrap();
+    assert_eq!(
+        git.calls(),
+        vec![GitCall::PushSetUpstream {
+            repo: PathBuf::from("/fake/other"),
+            remote: "origin".into(),
+            branch: "feat".into(),
+        }]
+    );
+}
