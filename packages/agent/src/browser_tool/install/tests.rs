@@ -188,6 +188,28 @@ fn install_replaces_a_same_size_tampered_binary() {
 }
 
 #[test]
+fn read_capped_refuses_an_oversized_body() {
+    // (label, body, cap, accepted whole)
+    let rows: &[(&str, &[u8], u64, bool)] = &[
+        ("under the cap", b"ab", 3, true),
+        ("exactly the cap", b"abc", 3, true),
+        ("one byte over", b"abcd", 3, false),
+        ("empty", b"", 0, true),
+    ];
+    for (label, body, max, accepted) in rows {
+        let result = read_capped(*body, *max);
+        if *accepted {
+            assert_eq!(result.unwrap(), *body, "{label}");
+        } else {
+            assert!(
+                matches!(&result, Err(InstallError::Download(m)) if m.contains("exceeds")),
+                "{label}: {result:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn tail_keeps_the_last_characters() {
     let rows: &[(&str, &str, usize, &str)] = &[
         ("shorter than the cap", "abc", 5, "abc"),

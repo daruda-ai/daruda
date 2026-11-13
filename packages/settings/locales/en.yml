@@ -100,7 +100,7 @@ settings:
   label_github_enabled: "Show GitHub pull requests"
   hint_github_enabled: "Each worktree shows its pull request and checks, read through the gh CLI."
   label_browser_enabled: "Browser tool for agents"
-  hint_browser_enabled: "Download agent-browser and give each local worktree's agent chats their own browser. Applies to chats connected after it is turned on."
+  hint_browser_enabled: "Download agent-browser and give each local worktree's agent chats — including Task and remote-control chats — their own browser. Applies to chats connected after it is turned on."
   card_status_bar: "Status bar"
   search_heading: "Results for “%{query}”"
   search_none: "No settings match “%{query}”."

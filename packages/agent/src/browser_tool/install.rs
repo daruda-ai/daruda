@@ -70,15 +70,24 @@ impl Fetch for HttpFetch {
             .get(url)
             .call()
             .map_err(|e| InstallError::Download(e.to_string()))?;
-        let mut bytes = Vec::new();
-        response
-            .into_body()
-            .into_reader()
-            .take(MAX_DOWNLOAD_BYTES)
-            .read_to_end(&mut bytes)
-            .map_err(|e| InstallError::Download(e.to_string()))?;
-        Ok(bytes)
+        read_capped(response.into_body().into_reader(), MAX_DOWNLOAD_BYTES)
     }
+}
+
+/// Reads all of `reader`, refusing a body over `max` bytes rather than
+/// truncating it into a checksum mismatch.
+fn read_capped(reader: impl std::io::Read, max: u64) -> Result<Vec<u8>, InstallError> {
+    let mut bytes = Vec::new();
+    reader
+        .take(max.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|e| InstallError::Download(e.to_string()))?;
+    if bytes.len() as u64 > max {
+        return Err(InstallError::Download(format!(
+            "response exceeds {max} bytes"
+        )));
+    }
+    Ok(bytes)
 }
 
 pub struct ProcessRun;

@@ -52,7 +52,9 @@ pub enum SocketDirError {
 }
 
 /// The release asset for a host, or `None` when upstream ships none.
-/// `os`/`arch` use `std::env::consts` values; `musl` is the Linux host libc.
+/// `os`/`arch` use `std::env::consts` values. `musl` is the build target's
+/// libc (`cfg!(target_env = "musl")`), not a host probe: a glibc build runs
+/// only on a glibc host, and a musl release runs wherever a musl build does.
 pub fn target(os: &str, arch: &str, musl: bool) -> Option<Asset> {
     match (os, arch, musl) {
         ("macos", "aarch64", _) => Some(pinned::DARWIN_ARM64),

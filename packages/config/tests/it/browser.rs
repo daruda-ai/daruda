@@ -18,5 +18,8 @@ fn a_project_layer_cannot_turn_the_tool_on() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("project.toml");
     std::fs::write(&path, "[browser]\nenabled = true\n").unwrap();
-    assert!(!ProjectConfig::load_from(&path).overrides_anything());
+    let project = ProjectConfig::load_from(&path);
+
+    assert!(!project.overrides_anything());
+    assert!(!Config::default().resolve(&project).browser.enabled);
 }

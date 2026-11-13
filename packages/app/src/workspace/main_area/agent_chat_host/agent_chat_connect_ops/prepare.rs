@@ -283,13 +283,9 @@ impl Workspace {
         })
     }
 
-    /// The MCP servers a session planned for `pane_id` is offered.
-    ///
-    /// The orchestrator's pane gets only the control server, through
-    /// `control`. Any other pane whose lane runs on this machine gets the
-    /// browser for `local_root`; a remote adapter could not run the local
-    /// binary, so a remote lane gets none. A CLI snapshot replays one
-    /// recorded session read-only, so it is offered nothing.
+    /// The MCP servers for `pane_id`: the orchestrator's pane gets only
+    /// `control`; a local lane's pane gets the browser, which a remote adapter
+    /// could not run; a read-only CLI snapshot gets nothing.
     fn session_mcp_servers(
         &self,
         pane_id: PaneId,
