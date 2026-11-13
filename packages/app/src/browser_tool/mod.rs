@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use daruda_agent::browser_tool::install::{self, InstallError, InstallStage};
-use daruda_agent::browser_tool::{self, Asset, McpLaunch};
+use daruda_agent::browser_tool::{self, Asset, BrowserToolError, McpLaunch};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use futures::StreamExt as _;
@@ -65,10 +65,40 @@ pub(crate) struct BrowserTool {
     host: Host,
 }
 
-/// No release exists for this host, or one can be installed.
+/// The tool cannot run in this process, or it can be installed.
 enum Host {
-    Unsupported { notified: bool },
+    /// Notified once per process, the first time the setting turns on.
+    Unusable {
+        reason: Unusable,
+        notified: bool,
+    },
     Supported(Supported),
+}
+
+enum Unusable {
+    /// Upstream ships no release for this host.
+    Platform,
+    /// The socket directory cannot hold a session socket, for every lane alike.
+    SocketDir(BrowserToolError),
+}
+
+impl Unusable {
+    fn report(&self) -> ErrorReport {
+        match self {
+            Self::Platform => ErrorReport::new(s::unsupported_platform())
+                .severity(ErrorSeverity::Warning)
+                .with_context("os", std::env::consts::OS)
+                .with_context("arch", std::env::consts::ARCH)
+                .dedup("browser_tool.unsupported")
+                .build(),
+            Self::SocketDir(error) => ErrorReport::new(s::socket_dir_invalid())
+                .severity(ErrorSeverity::Warning)
+                .from_error(error)
+                .at(file!(), line!())
+                .dedup("browser_tool.socket_dir")
+                .build(),
+        }
+    }
 }
 
 pub(crate) struct Supported {
@@ -93,8 +123,12 @@ impl BrowserTool {
         cx.set_global(tool);
     }
 
-    /// A host with a release: the cache decides whether it starts `Ready`.
+    /// A host with a release: the cache decides whether it starts `Ready`,
+    /// unless `socket_dir` makes every launch fail.
     pub(crate) fn supported(installer: Arc<dyn Installer>, socket_dir: PathBuf) -> Self {
+        if let Err(error) = browser_tool::check_socket_dir(&socket_dir, socket_path_limit()) {
+            return Self::unusable(Unusable::SocketDir(error));
+        }
         let state = match installer.cached() {
             Some(binary) => BrowserToolState::Ready(binary),
             None => BrowserToolState::Absent,
@@ -104,6 +138,13 @@ impl BrowserTool {
             socket_dir,
             state,
         }))
+    }
+
+    fn unusable(reason: Unusable) -> Self {
+        Self::with_host(Host::Unusable {
+            reason,
+            notified: false,
+        })
     }
 
     /// Starts as off, so a setting already on at startup counts as turning on.
@@ -125,22 +166,17 @@ impl BrowserTool {
         if tool.enabled == enabled {
             return;
         }
-        cx.global_mut::<Self>().enabled = enabled;
+        let tool = cx.global_mut::<Self>();
+        tool.enabled = enabled;
         if !enabled {
             return;
         }
-        match &cx.global::<Self>().host {
-            Host::Unsupported { notified: false } => {
-                cx.global_mut::<Self>().host = Host::Unsupported { notified: true };
-                surface(
-                    ErrorReport::new(s::unsupported_platform())
-                        .severity(ErrorSeverity::Warning)
-                        .with_context("os", std::env::consts::OS)
-                        .with_context("arch", std::env::consts::ARCH)
-                        .dedup("browser_tool.unsupported")
-                        .build(),
-                    cx,
-                );
+        match &mut tool.host {
+            Host::Unusable { reason, notified } => {
+                if !std::mem::replace(notified, true) {
+                    let report = reason.report();
+                    surface(report, cx);
+                }
             }
             Host::Supported(supported)
                 if matches!(
@@ -217,21 +253,16 @@ pub(crate) fn launch_for_lane(lane_root: &Path, cx: &App) -> Option<McpLaunch> {
     else {
         return None;
     };
-    let limit = cfg!(unix).then_some(browser_tool::UNIX_SOCKET_PATH_LIMIT);
-    match browser_tool::launch(binary, socket_dir, lane_root, limit) {
-        Ok(launch) => Some(launch),
-        Err(error) => {
-            LogWriter::log(
-                ErrorReport::new("Browser tool cannot launch for this lane")
-                    .severity(ErrorSeverity::Warning)
-                    .from_error(&error)
-                    .at(file!(), line!())
-                    .dedup("browser_tool.launch")
-                    .build(),
-            );
-            None
-        }
-    }
+    let launch = browser_tool::launch(binary, socket_dir, lane_root, socket_path_limit());
+    // `supported` checked this socket directory, the only input `launch` can
+    // reject, so a `Supported` host never gets here.
+    debug_assert!(launch.is_ok(), "{launch:?}");
+    launch.ok()
+}
+
+/// Upstream binds a Unix socket only on Unix hosts.
+fn socket_path_limit() -> Option<usize> {
+    cfg!(unix).then_some(browser_tool::UNIX_SOCKET_PATH_LIMIT)
 }
 
 /// Toast in the focused workspace (or any open one); the log alone when no
@@ -263,7 +294,7 @@ fn host_tool(target: Option<Asset>, tool_dir: PathBuf, socket_dir: PathBuf) -> B
             }),
             socket_dir,
         ),
-        None => BrowserTool::with_host(Host::Unsupported { notified: false }),
+        None => BrowserTool::unusable(Unusable::Platform),
     }
 }
 
@@ -280,7 +311,7 @@ fn default_tool(target: Option<Asset>) -> BrowserTool {
 /// that wants a tool builds one with [`host_tool`] or [`BrowserTool::supported`].
 #[cfg(test)]
 fn default_tool(_target: Option<Asset>) -> BrowserTool {
-    BrowserTool::with_host(Host::Unsupported { notified: false })
+    BrowserTool::unusable(Unusable::Platform)
 }
 
 #[cfg(test)]

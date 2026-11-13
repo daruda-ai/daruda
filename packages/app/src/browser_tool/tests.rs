@@ -81,7 +81,7 @@ fn toggle(enabled: bool, cx: &mut TestAppContext) {
 fn state(cx: &mut TestAppContext) -> BrowserToolState {
     cx.update(|cx| match &cx.global::<BrowserTool>().host {
         Host::Supported(supported) => supported.state.clone(),
-        Host::Unsupported { .. } => panic!("expected a supported host"),
+        Host::Unusable { .. } => panic!("expected a supported host"),
     })
 }
 
@@ -109,7 +109,10 @@ fn the_host_target_decides_support(cx: &mut TestAppContext) {
     let unsupported = host_tool(None, dir.path().to_path_buf(), socket_dir());
     assert!(matches!(
         unsupported.host,
-        Host::Unsupported { notified: false }
+        Host::Unusable {
+            reason: Unusable::Platform,
+            notified: false
+        }
     ));
 
     cx.update(|cx| {
@@ -119,9 +122,50 @@ fn the_host_target_decides_support(cx: &mut TestAppContext) {
         BrowserTool::settings_changed(cx);
         assert!(matches!(
             cx.global::<BrowserTool>().host,
-            Host::Unsupported { notified: true }
+            Host::Unusable {
+                reason: Unusable::Platform,
+                notified: true
+            }
         ));
     });
+}
+
+/// Only Unix hosts limit the socket path.
+#[cfg(unix)]
+#[gpui::test]
+fn an_overlong_socket_dir_makes_the_tool_unusable(cx: &mut TestAppContext) {
+    let installer = FakeInstaller::new(None, vec![Ok(binary())]);
+    let long = PathBuf::from(format!(
+        "/{}",
+        "s".repeat(browser_tool::UNIX_SOCKET_PATH_LIMIT)
+    ));
+    cx.update(|cx| {
+        SettingsStore::init(cx);
+        set_enabled(false, cx);
+        cx.set_global(BrowserTool::supported(installer.clone(), long));
+    });
+    let notified = |cx: &mut TestAppContext| {
+        cx.update(|cx| match &cx.global::<BrowserTool>().host {
+            Host::Unusable {
+                reason: Unusable::SocketDir(BrowserToolError::SocketPathTooLong { .. }),
+                notified,
+            } => *notified,
+            _ => panic!("expected an unusable socket directory"),
+        })
+    };
+    assert!(!notified(cx));
+
+    toggle(true, cx);
+    assert!(notified(cx));
+    toggle(false, cx);
+    toggle(true, cx);
+
+    assert!(notified(cx));
+    assert_eq!(installer.calls(), 0);
+    assert!(
+        cx.update(|cx| launch_for_lane(Path::new("/work/repo"), cx))
+            .is_none()
+    );
 }
 
 #[gpui::test]

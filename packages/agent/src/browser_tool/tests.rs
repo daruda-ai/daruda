@@ -218,3 +218,46 @@ fn launch_enforces_only_a_given_socket_path_limit() {
         }
     }
 }
+
+#[test]
+fn check_socket_dir_bounds_the_session_socket_path() {
+    // `<dir>/daruda-<12 hex>.sock` adds 25 bytes to the directory.
+    let fits = PathBuf::from(format!("/{}", "s".repeat(UNIX_SOCKET_PATH_LIMIT - 26)));
+    let long = PathBuf::from(format!("/{}", "s".repeat(UNIX_SOCKET_PATH_LIMIT - 25)));
+    let rows: &[(&str, &Path, Option<usize>, Option<usize>)] = &[
+        (
+            "exactly at the limit",
+            &fits,
+            Some(UNIX_SOCKET_PATH_LIMIT),
+            None,
+        ),
+        (
+            "one byte over",
+            &long,
+            Some(UNIX_SOCKET_PATH_LIMIT),
+            Some(UNIX_SOCKET_PATH_LIMIT + 1),
+        ),
+        ("no limit", &long, None, None),
+    ];
+    for (label, dir, limit, too_long) in rows {
+        match (check_socket_dir(dir, *limit), too_long) {
+            (Ok(value), None) => assert_eq!(Path::new(value), *dir, "{label}"),
+            (Err(BrowserToolError::SocketPathTooLong { len, limit }), Some(expected)) => {
+                assert_eq!(len, *expected, "{label}");
+                assert_eq!(limit, UNIX_SOCKET_PATH_LIMIT, "{label}");
+            }
+            (other, _) => panic!("{label}: {other:?}"),
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn check_socket_dir_rejects_a_non_utf8_directory() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let dir = Path::new(std::ffi::OsStr::from_bytes(b"/tmp/\xff"));
+    assert!(matches!(
+        check_socket_dir(dir, None),
+        Err(BrowserToolError::NonUtf8SocketDir(path)) if path == dir
+    ));
+}

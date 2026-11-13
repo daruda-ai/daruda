@@ -101,24 +101,37 @@ pub struct McpLaunch {
     pub env: Vec<(String, String)>,
 }
 
+/// Whether `socket_dir` can hold every lane's session socket, returning it as
+/// the environment value. Session names have a fixed length, so the
+/// directory alone decides; [`launch`] applies the same rule.
+///
 /// `socket_path_limit` is [`UNIX_SOCKET_PATH_LIMIT`] where upstream binds a
 /// Unix socket and `None` elsewhere; the caller decides from its platform.
+pub fn check_socket_dir(
+    socket_dir: &Path,
+    socket_path_limit: Option<usize>,
+) -> Result<&str, BrowserToolError> {
+    if let Some(limit) = socket_path_limit {
+        let socket = format!("{SESSION_PREFIX}{}.sock", "0".repeat(SESSION_HASH_LEN));
+        let len = socket_dir.join(socket).as_os_str().len();
+        if len > limit {
+            return Err(BrowserToolError::SocketPathTooLong { len, limit });
+        }
+    }
+    socket_dir
+        .to_str()
+        .ok_or_else(|| BrowserToolError::NonUtf8SocketDir(socket_dir.to_path_buf()))
+}
+
+/// Fails only as [`check_socket_dir`] does for the same arguments.
 pub fn launch(
     binary: &Path,
     socket_dir: &Path,
     lane_root: &Path,
     socket_path_limit: Option<usize>,
 ) -> Result<McpLaunch, BrowserToolError> {
+    let socket_dir_value = check_socket_dir(socket_dir, socket_path_limit)?;
     let session = session_name(lane_root);
-    if let Some(limit) = socket_path_limit {
-        let len = socket_dir.join(format!("{session}.sock")).as_os_str().len();
-        if len > limit {
-            return Err(BrowserToolError::SocketPathTooLong { len, limit });
-        }
-    }
-    let socket_dir_value = socket_dir
-        .to_str()
-        .ok_or_else(|| BrowserToolError::NonUtf8SocketDir(socket_dir.to_path_buf()))?;
     Ok(McpLaunch {
         command: binary.to_path_buf(),
         args: vec!["mcp".to_owned()],

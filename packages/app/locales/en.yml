@@ -2762,3 +2762,4 @@ browser_tool:
   install_failed: "Could not install the browser tool"
   installed: "Browser tool installed. Agent chats connected from now on can use it."
   unsupported_platform: "The browser tool is not supported on this platform"
+  socket_dir_invalid: "The browser tool cannot run here: its socket path is too long or not valid UTF-8."
