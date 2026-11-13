@@ -12,8 +12,8 @@ use serde::Deserialize;
 
 use crate::checks::{check_run_status, rollup_from_state, status_context_status, summarize};
 use crate::{
-    CheckKind, CheckRollup, CheckRun, GhError, PrFilter, PrListItem, PrState, PrSummary, RepoId,
-    ReviewComment, ReviewDecision, ReviewThread, ReviewThreads,
+    CheckKind, CheckRollup, CheckRun, GhError, PrFilter, PrListItem, PrSearch, PrState, PrSummary,
+    RepoId, ReviewComment, ReviewDecision, ReviewThread, ReviewThreads,
 };
 
 /// PRs fetched per branch: enough to find an open one among old closed ones.
@@ -99,10 +99,11 @@ pub(crate) fn parse_prs_for_branches(json: &str, branches: &[String]) -> Result<
     })
 }
 
-/// The search text for open pull requests of `repos` matching `filter`.
+/// The search text for open pull requests of `repos` matching `filter`,
+/// most recently updated first so a truncated answer keeps the live ones.
 /// Archived repositories take no new work, so their PRs are left out.
 pub(crate) fn search_string(repos: &[RepoId], filter: PrFilter) -> String {
-    let mut text = String::from("is:pr is:open archived:false");
+    let mut text = String::from("is:pr is:open archived:false sort:updated-desc");
     for repo in repos {
         text.push_str(&format!(" repo:{}/{}", repo.owner(), repo.name()));
     }
@@ -118,14 +119,14 @@ pub(crate) fn search_string(repos: &[RepoId], filter: PrFilter) -> String {
 pub(crate) fn search_prs_query() -> String {
     format!(
         "query($q: String!) {{ search(query: $q, type: ISSUE, first: {SEARCH_RESULTS}) {{ \
-         nodes {{ ... on PullRequest {{ ...pr repository {{ nameWithOwner }} \
+         issueCount nodes {{ ... on PullRequest {{ ...pr repository {{ nameWithOwner }} \
          author {{ login }} baseRefName comments {{ totalCount }} }} }} }} }} {}",
         pr_fragment()
     )
 }
 
 /// Parse the answer to [`search_prs_query`] asked of `host`.
-pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<Vec<PrListItem>, GhError> {
+pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<PrSearch, GhError> {
     let response: SearchResponse = serde_json::from_str(json).map_err(parse_error)?;
     let Some(search) = response.data.and_then(|d| d.search) else {
         return Err(GhError::Parse(format!(
@@ -133,7 +134,8 @@ pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<Vec<PrListItem>
             api_messages(response.errors)
         )));
     };
-    search
+    let truncated = search.issue_count as usize > search.nodes.len();
+    let items = search
         .nodes
         .into_iter()
         .map(|node| {
@@ -155,7 +157,14 @@ pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<Vec<PrListItem>
                 pr: node.pr.into_summary()?,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, GhError>>()?;
+    Ok(PrSearch { items, truncated })
+}
+
+/// Order list items most recently updated first. `updated_at` is RFC 3339
+/// in UTC, so string order is time order; the sort is stable for ties.
+pub(crate) fn newest_first(items: &mut [PrListItem]) {
+    items.sort_by(|a, b| b.pr.updated_at.cmp(&a.pr.updated_at));
 }
 
 /// Unresolved review threads of one pull request, bound to `$owner`,
@@ -303,7 +312,9 @@ struct SearchData {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SearchConnection {
+    issue_count: u32,
     nodes: Vec<SearchNode>,
 }
 

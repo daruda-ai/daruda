@@ -1,5 +1,5 @@
 use super::*;
-use crate::{CheckRollup, PrState};
+use crate::{CheckRollup, PrSearch, PrState};
 
 fn repo() -> RepoId {
     RepoId::new("github.com", "o", "r")
@@ -89,13 +89,24 @@ fn a_scripted_list_answers_only_the_searched_repositories() {
         comments: 0,
     };
     let gh = FakeGh::new();
-    gh.set_pr_list(PrFilter::Mine, vec![item(&repo(), 1), item(&other, 2)]);
+    gh.set_pr_list(
+        PrFilter::Mine,
+        vec![item(&repo(), 1), item(&other, 2), item(&repo(), 3)],
+    );
+    gh.set_search_truncated(PrFilter::Mine, true);
     let found = gh
         .search_prs("github.com", &[repo()], PrFilter::Mine)
         .unwrap();
-    assert_eq!(found, vec![item(&repo(), 1)]);
+    assert_eq!(
+        found,
+        PrSearch {
+            items: vec![item(&repo(), 3), item(&repo(), 1)],
+            truncated: true,
+        },
+        "own repositories, most recently updated first"
+    );
     let unscripted = gh.search_prs("github.com", &[repo()], PrFilter::AllOpen);
-    assert!(unscripted.unwrap().is_empty());
+    assert_eq!(unscripted.unwrap(), PrSearch::default());
     assert_eq!(gh.count(GhOp::SearchPrs), 2);
     assert_eq!(
         gh.calls()[0],

@@ -219,6 +219,15 @@ pub struct PrListItem {
     pub comments: u32,
 }
 
+/// What a list search found.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PrSearch {
+    /// Most recently updated first.
+    pub items: Vec<PrListItem>,
+    /// GitHub matched more pull requests than one search answers.
+    pub truncated: bool,
+}
+
 impl PrSummary {
     /// The PR's page, if `url` is one a browser may be handed: whatever host
     /// answered, a `file:` or script URL must not reach the system opener.

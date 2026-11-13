@@ -5,7 +5,7 @@
 
 use crate::availability::GhAuth;
 use crate::query::RepoPrs;
-use crate::{ActionsJob, GhError, NewPr, PrFilter, PrListItem, RepoId, ReviewThreads};
+use crate::{ActionsJob, GhError, NewPr, PrFilter, PrSearch, RepoId, ReviewThreads};
 
 pub trait Gh: Send + Sync {
     /// Whether `gh` is installed and logged in to `host`.
@@ -14,14 +14,15 @@ pub trait Gh: Send + Sync {
     /// repository's default branch.
     fn prs_for_branches(&self, repo: &RepoId, branches: &[String]) -> Result<RepoPrs, GhError>;
     /// The open pull requests of `repos`, all on `host`, that match
-    /// `filter`, in the order GitHub's search answers; at most 50 per 20
-    /// repositories, the rest left out. No repositories sends no request.
+    /// `filter`, most recently updated first; at most 50 per 20
+    /// repositories, the rest left out and marked `truncated`. No
+    /// repositories sends no request.
     fn search_prs(
         &self,
         host: &str,
         repos: &[RepoId],
         filter: PrFilter,
-    ) -> Result<Vec<PrListItem>, GhError>;
+    ) -> Result<PrSearch, GhError>;
     /// Open a pull request; answers its URL.
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError>;
     /// The log of the failed steps of one Actions job.

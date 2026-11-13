@@ -9,10 +9,10 @@ use daruda_core::process::{CaptureError, CaptureLimits, Captured, command_on_pat
 use crate::availability::GhAuth;
 use crate::backend::Gh;
 use crate::query::{
-    REVIEW_THREADS_QUERY, RepoPrs, parse_prs_for_branches, parse_review_threads, parse_search_prs,
-    prs_for_branches_query, search_prs_query, search_string,
+    REVIEW_THREADS_QUERY, RepoPrs, newest_first, parse_prs_for_branches, parse_review_threads,
+    parse_search_prs, prs_for_branches_query, search_prs_query, search_string,
 };
-use crate::{ActionsJob, GhError, NewPr, PrFilter, PrListItem, RepoId, ReviewThreads};
+use crate::{ActionsJob, GhError, NewPr, PrFilter, PrSearch, RepoId, ReviewThreads};
 
 const LIMITS: CaptureLimits = CaptureLimits {
     timeout: Duration::from_secs(30),
@@ -149,7 +149,7 @@ impl Gh for SystemGh {
         host: &str,
         repos: &[RepoId],
         filter: PrFilter,
-    ) -> Result<Vec<PrListItem>, GhError> {
+    ) -> Result<PrSearch, GhError> {
         // A `repo:` qualifier names a repository on the host asked, so one
         // from another host would list a stranger's repository instead.
         let repos: Vec<RepoId> = repos
@@ -157,7 +157,7 @@ impl Gh for SystemGh {
             .filter(|repo| repo.host().eq_ignore_ascii_case(host))
             .cloned()
             .collect();
-        let mut all = Vec::new();
+        let mut all = PrSearch::default();
         for chunk in repos.chunks(REPOS_PER_SEARCH) {
             let json = self.stdout([
                 "api".to_owned(),
@@ -169,8 +169,11 @@ impl Gh for SystemGh {
                 "-f".to_owned(),
                 format!("q={}", search_string(chunk, filter)),
             ])?;
-            all.extend(parse_search_prs(&json, host)?);
+            let part = parse_search_prs(&json, host)?;
+            all.items.extend(part.items);
+            all.truncated |= part.truncated;
         }
+        newest_first(&mut all.items);
         Ok(all)
     }
 
@@ -255,7 +258,7 @@ mod tests {
         let other_host = [RepoId::new("ghe.corp", "o", "r")];
         for (label, repos) in [("none", &[][..]), ("other host only", &other_host[..])] {
             let found = SystemGh.search_prs("github.com", repos, PrFilter::AllOpen);
-            assert_eq!(found.unwrap(), Vec::new(), "{label}");
+            assert_eq!(found.unwrap(), PrSearch::default(), "{label}");
         }
     }
 }

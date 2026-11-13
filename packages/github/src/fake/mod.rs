@@ -5,7 +5,7 @@
 //! |---|---|
 //! | `auth` | `Ready` |
 //! | `prs_for_branches` | default branch `main`, no PRs for any branch |
-//! | `search_prs` | none |
+//! | `search_prs` | none, not truncated |
 //! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL |
 //! | `failed_log` | exit 1, as for a run that has no failed log |
 //! | `review_threads` | none |
@@ -15,10 +15,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::availability::GhAuth;
 use crate::backend::Gh;
-use crate::query::RepoPrs;
+use crate::query::{RepoPrs, newest_first};
 use crate::{
-    ActionsJob, CheckRollup, GhError, NewPr, PrFilter, PrListItem, PrState, PrSummary, RepoId,
-    ReviewThreads,
+    ActionsJob, CheckRollup, GhError, NewPr, PrFilter, PrListItem, PrSearch, PrState, PrSummary,
+    RepoId, ReviewThreads,
 };
 
 /// A request the code under test made.
@@ -96,6 +96,7 @@ struct FakeState {
     default_branches: HashMap<RepoId, String>,
     prs: HashMap<RepoId, Vec<PrSummary>>,
     lists: HashMap<PrFilter, Vec<PrListItem>>,
+    truncated: HashMap<PrFilter, bool>,
     logs: HashMap<(u64, u64), String>,
     threads: HashMap<u64, ReviewThreads>,
     failures: HashMap<GhOp, GhFailure>,
@@ -127,6 +128,11 @@ impl FakeGh {
     /// its repositories.
     pub fn set_pr_list(&self, filter: PrFilter, items: Vec<PrListItem>) {
         self.lock().lists.insert(filter, items);
+    }
+
+    /// Whether `search_prs` with `filter` reports more than it answered.
+    pub fn set_search_truncated(&self, filter: PrFilter, truncated: bool) {
+        self.lock().truncated.insert(filter, truncated);
     }
 
     /// What `failed_log` prints for `job`.
@@ -231,7 +237,7 @@ impl Gh for FakeGh {
         host: &str,
         repos: &[RepoId],
         filter: PrFilter,
-    ) -> Result<Vec<PrListItem>, GhError> {
+    ) -> Result<PrSearch, GhError> {
         let mut state = self.lock();
         state.calls.push(GhCall::SearchPrs {
             host: host.to_owned(),
@@ -241,7 +247,7 @@ impl Gh for FakeGh {
         if let Some(failure) = state.failures.get(&GhOp::SearchPrs) {
             return Err(failure.to_error());
         }
-        Ok(state
+        let mut items: Vec<PrListItem> = state
             .lists
             .get(&filter)
             .into_iter()
@@ -250,7 +256,12 @@ impl Gh for FakeGh {
                 item.repo.host().eq_ignore_ascii_case(host) && repos.contains(&item.repo)
             })
             .cloned()
-            .collect())
+            .collect();
+        newest_first(&mut items);
+        Ok(PrSearch {
+            items,
+            truncated: state.truncated.get(&filter).copied().unwrap_or(false),
+        })
     }
 
     fn failed_log(&self, repo: &RepoId, job: ActionsJob) -> Result<String, GhError> {
