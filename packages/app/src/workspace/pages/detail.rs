@@ -7,6 +7,7 @@ use gpui::{App, Context, Window};
 use super::Page;
 use super::flows::detail::{FlowDetailId, FlowsPage};
 use super::pull_requests::PullRequestsPage;
+use super::pull_requests::detail::PrDetailId;
 use super::tasks::{TaskEditorId, TasksPage};
 use crate::surface::strings;
 use crate::workspace::Workspace;
@@ -26,6 +27,7 @@ pub(in crate::workspace) struct PageDetails {
 pub(in crate::workspace) enum PageDetailId {
     TaskEditor(TaskEditorId),
     Flow(FlowDetailId),
+    PullRequest(PrDetailId),
 }
 
 impl PageDetailId {
@@ -33,6 +35,7 @@ impl PageDetailId {
         match self {
             Self::TaskEditor(_) => Page::Tasks,
             Self::Flow(_) => Page::Flows,
+            Self::PullRequest(_) => Page::PullRequests,
         }
     }
 }
@@ -43,8 +46,7 @@ impl Workspace {
         match page {
             Page::Tasks => self.task_detail_id().map(PageDetailId::TaskEditor),
             Page::Flows => self.flow_detail_id().map(PageDetailId::Flow),
-            // Its rows open nothing yet.
-            Page::PullRequests => None,
+            Page::PullRequests => self.pr_detail_id().map(PageDetailId::PullRequest),
         }
     }
 
@@ -58,6 +60,8 @@ impl Workspace {
                 let (_, view) = self.flow_graph(detail)?;
                 DirtyItem::of_flow_graph(detail, &view, cx)
             }
+            // A pull request's detail only shows what GitHub said.
+            PageDetailId::PullRequest(_) => None,
         }
     }
 
@@ -209,6 +213,7 @@ impl Workspace {
         self.mutate_durable(cx, |ws, _| match id {
             PageDetailId::TaskEditor(_) => ws.pages.tasks.detail = None,
             PageDetailId::Flow(_) => ws.pages.flows.detail = None,
+            PageDetailId::PullRequest(_) => ws.pages.pull_requests.detail = None,
         });
         cx.notify();
     }

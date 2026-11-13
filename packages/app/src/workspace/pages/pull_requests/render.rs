@@ -260,7 +260,21 @@ fn render_row(
                 .into_any_element(),
         })
         .id(SharedString::from(format!("pr-row-{}", row.key)))
+        .debug_selector({
+            let key = row.key.clone();
+            move || format!("pr-row-{key}")
+        })
+        .cursor_pointer()
         .hover(|style| style.bg(t.overlay_hover))
+        .on_click({
+            let workspace = snap.workspace.clone();
+            let item = row.item.as_ref().clone();
+            move |_, window, cx| {
+                if let Some(ws) = workspace.upgrade() {
+                    ws.update(cx, |ws, cx| ws.open_pr_detail(item.clone(), window, cx));
+                }
+            }
+        })
         .into_any_element()
 }
 

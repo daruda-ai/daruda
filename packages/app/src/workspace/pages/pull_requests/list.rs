@@ -138,6 +138,8 @@ pub(in crate::workspace) struct PrRow {
     pub lane: RowLaneSlot,
     /// Only a URL a browser may be handed.
     pub url: Option<String>,
+    /// What clicking the row opens.
+    pub item: Box<PrListItem>,
 }
 
 /// What the page body shows.
@@ -278,6 +280,7 @@ fn row(item: &PrListItem, inputs: &PageInputs<'_>) -> PrRow {
         comments: item.comments,
         lane: lane_slot(item, inputs),
         url: pr.web_url().map(str::to_owned),
+        item: Box::new(item.clone()),
     }
 }
 
@@ -300,13 +303,13 @@ fn lane_slot(item: &PrListItem, inputs: &PageInputs<'_>) -> RowLaneSlot {
 
 /// Whole seconds since `updated_at` (RFC 3339), or `None` if GitHub's
 /// timestamp does not parse. A clock behind GitHub's reads as now.
-fn age_seconds(updated_at: &str, now: DateTime<Utc>) -> Option<u64> {
+pub(super) fn age_seconds(updated_at: &str, now: DateTime<Utc>) -> Option<u64> {
     let then = DateTime::parse_from_rfc3339(updated_at).ok()?;
     let seconds = (now - then.with_timezone(&Utc)).num_seconds().max(0);
     u64::try_from(seconds).ok()
 }
 
-fn age_label(seconds: u64) -> String {
+pub(super) fn age_label(seconds: u64) -> String {
     match age::bucket(seconds) {
         AgeBucket::JustNow => s::updated_now(),
         AgeBucket::Minutes(n) => s::updated_minutes(n),

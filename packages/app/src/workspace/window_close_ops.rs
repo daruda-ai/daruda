@@ -306,6 +306,8 @@ impl Workspace {
                     None => false,
                 })
             }
+            // Never a dirty target: a pull request's detail holds no edits.
+            DirtyTarget::Detail(PageDetailId::PullRequest(_)) => gpui::Task::ready(true),
         }
     }
 

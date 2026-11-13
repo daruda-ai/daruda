@@ -1,6 +1,8 @@
 //! Handing a pull request's problems (failing checks, open review threads)
-//! to the lane's agent: the prompt goes into the agent's input, never
-//! submitted, so the user reads it first.
+//! to a lane's agent: the prompt goes into the agent's input, never
+//! submitted, so the user reads it first. The Git panel sends about the
+//! active lane's pull request; the Pull requests page about the lane linked
+//! to the one it shows.
 
 use daruda_github::prompt::{CheckLog, NoLog, failed_checks, review_threads};
 use daruda_github::{Gh, GhError};
@@ -28,15 +30,23 @@ fn best_target(
         .map(|(pane, _)| pane)
 }
 
+/// Where a pull request's problems are sent: the lane whose agent works on
+/// it, and the pull request as last read.
+#[derive(Debug, Clone)]
+pub(in crate::workspace) struct PrSendTarget {
+    pub lane: LaneRef,
+    pub link: PrLink,
+}
+
 impl Workspace {
-    /// The pane the prompt goes to: a writable agent chat, the focused one
-    /// first, then one in the active tab, then one in another tab.
+    /// The pane in `lane` the prompt goes to: a writable agent chat, the
+    /// focused one first, then one in the active tab, then one in another tab.
     ///
     /// Never a terminal: a shell's line editor turns bracketed paste on too,
     /// so a terminal cannot tell an agent CLI from a prompt where Enter would
     /// run each line of a pasted log.
-    pub(in crate::workspace) fn pr_send_target(&self, cx: &App) -> Option<PaneId> {
-        let runtime = self.active_runtime();
+    fn pr_send_target(&self, lane: LaneRef, cx: &App) -> Option<PaneId> {
+        let runtime = self.main_area.runtimes.get(&lane)?;
         let chats = runtime
             .panes
             .iter()
@@ -44,26 +54,68 @@ impl Workspace {
                 pane.agent_chat_view()
                     .is_some_and(|view| !view.read(cx).is_read_only())
             })
-            .filter_map(|pane| Some((pane.id, self.tab_index_for_pane(pane.id)?)));
+            .filter_map(|pane| {
+                let tab = runtime
+                    .tabs
+                    .iter()
+                    .position(|tab| tab.layout.pane_ids().contains(&pane.id))?;
+                Some((pane.id, tab))
+            });
         best_target(chats, runtime.focused_pane_id, runtime.active_tab_index)
     }
 
-    /// Read the failing checks' logs and put the fix-it prompt into the
-    /// active lane's agent input.
+    /// The active lane and its linked pull request, which the Git panel's
+    /// buttons send about.
+    fn active_pr_target(&self) -> Option<PrSendTarget> {
+        let link = self.lane_scoped.get(&self.active)?.pr.link()?.clone();
+        Some(PrSendTarget {
+            lane: self.active,
+            link,
+        })
+    }
+
+    /// Whether a send for `lane` is under way, so its buttons stay inert.
+    pub(in crate::workspace) fn is_sending_pr(&self, lane: LaneRef) -> bool {
+        self.lane_scoped
+            .get(&lane)
+            .is_some_and(|state| state.pr.is_sending())
+    }
+
+    /// The Git panel's Fix checks: the active lane's pull request.
     pub(in crate::workspace) fn send_failed_checks(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let has_failures = self
-            .lane_scoped
-            .get(&self.active)
-            .and_then(|state| state.pr.link())
-            .is_some_and(|link| !link.pr.failed.is_empty());
-        if !has_failures {
+        if let Some(target) = self.active_pr_target() {
+            self.send_failed_checks_to(target, window, cx);
+        }
+    }
+
+    /// The Git panel's Review comments: the active lane's pull request.
+    pub(in crate::workspace) fn send_review_comments(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(target) = self.active_pr_target() {
+            self.send_review_comments_to(target, window, cx);
+        }
+    }
+
+    /// Read the failing checks' logs and put the fix-it prompt into the
+    /// agent input of `target`'s lane.
+    pub(in crate::workspace) fn send_failed_checks_to(
+        &mut self,
+        target: PrSendTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if target.link.pr.failed.is_empty() {
             return;
         }
         self.send_pr_prompt(
+            target,
             |gh, link| {
                 let logs: Vec<CheckLog> = link
                     .pr
@@ -87,13 +139,15 @@ impl Workspace {
     }
 
     /// Read the unresolved review threads and put the address-them prompt
-    /// into the active lane's agent input.
-    pub(in crate::workspace) fn send_review_comments(
+    /// into the agent input of `target`'s lane.
+    pub(in crate::workspace) fn send_review_comments_to(
         &mut self,
+        target: PrSendTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.send_pr_prompt(
+            target,
             |gh, link| {
                 let threads = gh.review_threads(&link.repo, link.pr.number)?;
                 Ok(review_threads(&link.pr, &threads))
@@ -103,34 +157,29 @@ impl Workspace {
         );
     }
 
-    /// The one path both buttons take: find a target first, build the
+    /// The one path every button takes: find a target first, build the
     /// prompt off the UI thread with `build` (`Ok(None)`: nothing to send),
     /// then deliver it if the lane is still the one shown.
     fn send_pr_prompt(
         &mut self,
+        target: PrSendTarget,
         build: impl FnOnce(&dyn Gh, &PrLink) -> Result<Option<String>, GhError> + Send + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let lane = self.active;
-        let Some(link) = self
-            .lane_scoped
-            .get(&lane)
-            .and_then(|state| state.pr.link().cloned())
-        else {
-            return;
-        };
+        let PrSendTarget { lane, link } = target;
         // A send already under way answers the click; no target warning.
-        if self
-            .lane_scoped
-            .get(&lane)
-            .is_some_and(|state| state.pr.is_sending())
-        {
+        if self.is_sending_pr(lane) {
             return;
         }
-        if self.pr_send_target(cx).is_none() {
+        if self.pr_send_target(lane, cx).is_none() {
             self.report_pr_send(s::github_no_agent_pane(), ErrorSeverity::Warning, cx);
             return;
+        }
+        // The prompt lands in the lane's chat input unsent, for the user to
+        // read first, so that lane is shown before anything is read.
+        if self.active != lane || self.workspace_page.is_some() {
+            self.activate_lane(lane, window, cx);
         }
         self.lane_scoped_mut(lane).pr.begin_send();
         cx.notify();
@@ -191,7 +240,7 @@ impl Workspace {
             self.report_pr_send(s::github_lane_changed(), ErrorSeverity::Warning, cx);
             return;
         }
-        let Some(pane) = self.pr_send_target(cx) else {
+        let Some(pane) = self.pr_send_target(lane, cx) else {
             self.report_pr_send(s::github_no_agent_pane(), ErrorSeverity::Warning, cx);
             return;
         };

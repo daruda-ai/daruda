@@ -793,6 +793,8 @@ pub const TASK_EDIT_FOOTER_H: f32 = 48.0;
 pub const TASK_EDIT_MAX_WIDTH: f32 = 800.0;
 pub const TASK_EDIT_PREVIEW_MIN_H: f32 = 240.0;
 pub const TASK_EDIT_PROMPT_ROWS: usize = 10;
+/// The Pull requests detail's summary column: merge, reviews, worktree.
+pub const PR_DETAIL_SIDE_W: f32 = 240.0;
 pub const TASK_EDIT_NOTES_ROWS: usize = 4;
 pub const LIST_ROW_RADIUS: f32 = RADIUS_SM;
 pub const LIST_ROW_PAD_X: f32 = PAD_STANDARD;

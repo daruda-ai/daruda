@@ -119,6 +119,7 @@ pub(crate) enum ScreenshotScenario {
     LeftDockWorktreesPr,
     CreatePrModal,
     PullRequestsList,
+    PullRequestsDetail,
     /// Open the command palette (`CommandPaletteState::open`).
     CommandPalette,
     /// Open the Lane switcher with a real candidate whose label is
@@ -849,6 +850,12 @@ pub(crate) fn drive(
             workspace.update(cx, |ws, cx| {
                 ws.seed_left_dock_for_shot(false, true, false, window, cx);
                 ws.seed_pr_page_for_shot(cx);
+            });
+        }
+        ScreenshotScenario::PullRequestsDetail => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_left_dock_for_shot(false, true, false, window, cx);
+                ws.seed_pr_detail_for_shot(window, cx);
             });
         }
         ScreenshotScenario::LeftDockWorktreesPr => {

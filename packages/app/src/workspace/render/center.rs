@@ -70,6 +70,12 @@ pub(super) fn render_center_content(
     }
     if let Some(page) = &ws.workspace_page
         && page.page == crate::workspace::pages::Page::PullRequests
+        && let Some(detail) = &ws.pages.pull_requests.detail_snapshot
+    {
+        return crate::workspace::pages::pull_requests::detail_render::render(detail, cx);
+    }
+    if let Some(page) = &ws.workspace_page
+        && page.page == crate::workspace::pages::Page::PullRequests
         && let Some(snap) = &ws.pages.pull_requests.snapshot
     {
         return crate::workspace::pages::render::pr_content(page, snap, cx);

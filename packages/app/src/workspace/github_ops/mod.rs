@@ -7,7 +7,7 @@ pub(crate) mod create_modal;
 pub(in crate::workspace) mod lane_pr;
 pub(crate) mod link;
 pub(crate) mod pr_list;
-mod review_send;
+pub(in crate::workspace) mod review_send;
 #[cfg(feature = "screenshot")]
 pub(in crate::workspace) mod screenshot;
 pub(crate) mod strip;

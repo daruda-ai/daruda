@@ -10,12 +10,17 @@ use super::Page;
 use crate::github::PrPoller;
 use crate::workspace::Workspace;
 
+pub(in crate::workspace) mod detail;
+pub(in crate::workspace) mod detail_render;
+pub(in crate::workspace) mod detail_view;
 mod lane;
 pub(in crate::workspace) mod list;
 pub(in crate::workspace) mod render;
 
 use std::collections::BTreeSet;
 
+use detail::PrDetailState;
+use detail_view::PrDetailView;
 use list::{LaneFacts, PageInputs, PrKey, PrPageList};
 
 /// What the page remembers while it is not on screen. Never persisted.
@@ -25,8 +30,12 @@ pub(in crate::workspace) struct PullRequestsPage {
     /// Pull requests a worktree is being made for, so their rows do not
     /// offer to make a second one.
     creating: BTreeSet<PrKey>,
-    /// Staged each frame while the page is on screen; `None` otherwise.
+    /// Staged each frame while the page shows its list; `None` otherwise.
     pub(in crate::workspace) snapshot: Option<PrPageSnapshot>,
+    /// The pull request shown over the list, if any.
+    pub(in crate::workspace) detail: Option<PrDetailState>,
+    /// Staged each frame while the page shows its detail; `None` otherwise.
+    pub(in crate::workspace) detail_snapshot: Option<PrDetailView>,
 }
 
 impl Default for PullRequestsPage {
@@ -35,6 +44,8 @@ impl Default for PullRequestsPage {
             filter: PrFilter::Mine,
             creating: BTreeSet::new(),
             snapshot: None,
+            detail: None,
+            detail_snapshot: None,
         }
     }
 }
@@ -70,11 +81,27 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Stage what the page draws this frame. Only while it is on screen:
-    /// the rows cost a pass over every lane and pull request.
+    /// Stage what the page draws this frame: its detail when it holds one,
+    /// its list otherwise. Only while it is on screen: the rows cost a pass
+    /// over every lane and pull request.
     pub(in crate::workspace) fn stage_pr_page(&mut self, cx: &Context<Self>) {
         let shown = self.active_page() == Some(Page::PullRequests);
-        self.pages.pull_requests.snapshot = shown.then(|| PrPageSnapshot {
+        let detail = self
+            .pages
+            .pull_requests
+            .detail
+            .as_ref()
+            .filter(|_| shown)
+            .map(|state| {
+                let lane = self.pr_detail_lane(&state.item);
+                let sending = lane
+                    .as_ref()
+                    .is_some_and(|lane| self.is_sending_pr(lane.lane));
+                detail_view::view(state, lane.as_ref(), sending, chrono::Utc::now())
+            });
+        let list = shown && detail.is_none();
+        self.pages.pull_requests.detail_snapshot = detail;
+        self.pages.pull_requests.snapshot = list.then(|| PrPageSnapshot {
             workspace: cx.weak_entity(),
             list: self.pr_page_list(cx),
         });

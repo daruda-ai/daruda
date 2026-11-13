@@ -106,8 +106,9 @@ fn skip_escape(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
 /// The failing part of a `gh run view --log-failed` log, cleaned: the
 /// `job<TAB>step<TAB>timestamp` prefix and control characters removed, cut
 /// to the step that reported the first `##[error]` (everything after it is
-/// post-job cleanup), with its middle elided when long.
-pub(crate) fn clean_log(raw: &str) -> String {
+/// post-job cleanup), with its middle elided when long. The prompt quotes
+/// it, and the Pull requests page shows it under a failed check.
+pub fn clean_log(raw: &str) -> String {
     let lines: Vec<String> = raw
         .lines()
         .map(|line| strip_control(strip_prefix(line)))

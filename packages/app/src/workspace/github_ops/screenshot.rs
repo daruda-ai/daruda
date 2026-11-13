@@ -8,11 +8,12 @@ use std::sync::Arc;
 use daruda_github::availability::{GhAuth, GhAvailability};
 use daruda_github::fake::FakeGh;
 use daruda_github::{
-    CheckRollup, FailedCheck, GITHUB_HOST, PrFilter, PrListItem, PrState, PrSummary, RepoId,
-    ReviewDecision,
+    ActionsJob, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus,
+    FailedCheck, GITHUB_HOST, MergeMethod, Mergeability, PrDetail, PrFilter, PrListItem, PrState,
+    PrSummary, RepoId, ReviewDecision, ReviewerState,
 };
 use daruda_store::project::LaneRef;
-use gpui::Context;
+use gpui::{Context, Window};
 
 use crate::gh_host::GhHost;
 use crate::github::{PrLink, PrLookup, PrPoller};
@@ -173,8 +174,12 @@ fn list_item(summary: PrSummary, author: &str, comments: u32) -> PrListItem {
 impl Workspace {
     /// The Pull requests page over two repositories: two pull requests linked
     /// to worktrees, a draft without one, a fork PR with its review worktree,
-    /// and a repository with nothing open.
-    pub(in crate::workspace) fn seed_pr_page_for_shot(&mut self, cx: &mut Context<Self>) {
+    /// and a repository with nothing open. Answers the `gh` it installs, and
+    /// the row of the active worktree's failing pull request.
+    pub(in crate::workspace) fn seed_pr_page_for_shot(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> (FakeGh, PrListItem) {
         let project = self.active.project;
         let (fix, review) = (LaneRef { project, lane: 78 }, LaneRef { project, lane: 79 });
         if let Some(record) = self.project_for_mut(project) {
@@ -288,19 +293,110 @@ impl Workspace {
         let gh = FakeGh::new();
         gh.set_auth(GITHUB_HOST, GhAuth::Ready);
         gh.set_prs(&repo(), vec![sidebar.clone(), scroll.clone()]);
+        let sidebar_row = list_item(sidebar.clone(), "comelf", 3);
         gh.set_pr_list(
             PrFilter::Mine,
             vec![
                 list_item(draft, "comelf", 0),
-                list_item(sidebar, "comelf", 3),
+                sidebar_row.clone(),
                 list_item(scroll, "comelf", 0),
                 list_item(fork, "contributor", 1),
                 list_item(unreviewed, "hanji", 2),
             ],
         );
-        GhHost::set_global(Arc::new(gh), cx);
+        GhHost::set_global(Arc::new(gh.clone()), cx);
         PrPoller::seed_for_shot(GITHUB_HOST, GhAvailability::Ready, cx);
         self.show_page(Page::PullRequests, cx);
         cx.notify();
+        (gh, sidebar_row)
+    }
+
+    /// The detail of the active worktree's pull request on its Checks tab,
+    /// with the first failing check's log open.
+    pub(in crate::workspace) fn seed_pr_detail_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (gh, row) = self.seed_pr_page_for_shot(cx);
+        let test = ActionsJob {
+            run: 9120,
+            job: 4410,
+        };
+        let clippy = ActionsJob {
+            run: 9120,
+            job: 4411,
+        };
+        let check =
+            |name: &str, status, job: Option<ActionsJob>, seconds: Option<u64>| CheckEntry {
+                run: CheckRun {
+                    kind: CheckKind::Run,
+                    workflow: Some("CI".into()),
+                    event: Some("pull_request".into()),
+                    name: name.into(),
+                    status,
+                    details_url: None,
+                    started_at: None,
+                    completed_at: None,
+                },
+                job,
+                duration: seconds.map(std::time::Duration::from_secs),
+            };
+        let failed = |name: &str, job| FailedCheck {
+            workflow: Some("CI".into()),
+            event: Some("pull_request".into()),
+            name: name.into(),
+            details_url: None,
+            job: Some(job),
+        };
+        let mut summary = row.pr.clone();
+        summary.failed = vec![
+            failed("test (ubuntu-latest)", test),
+            failed("clippy", clippy),
+        ];
+        let detail = PrDetail {
+            summary,
+            body: "Narrow docks clipped the worktree names.\n\n- Measure the label once per frame\n- Keep the badge column fixed".into(),
+            head_sha: "4f9c2e1".into(),
+            base_branch: "main".into(),
+            author: Some("comelf".into()),
+            mergeability: Mergeability::Blocked(BlockReason::Requirements),
+            methods: vec![MergeMethod::Merge, MergeMethod::Squash],
+            reviewers: vec![
+                ("hanji".into(), ReviewerState::ChangesRequested),
+                ("contributor".into(), ReviewerState::Commented),
+                ("woo-bot".into(), ReviewerState::Requested),
+            ],
+            checks: vec![
+                check("test (ubuntu-latest)", CheckStatus::Failure, Some(test), Some(252)),
+                check("clippy", CheckStatus::Failure, Some(clippy), Some(125)),
+                check("build (windows-latest)", CheckStatus::Pending, None, None),
+                check("fmt", CheckStatus::Success, None, Some(31)),
+                check("build (macos-14)", CheckStatus::Success, None, Some(400)),
+                check("docs preview", CheckStatus::Ignored, None, None),
+            ],
+            open_threads: 3,
+        };
+        gh.set_pr_detail(&row.repo, row.pr.number, detail);
+        gh.set_failed_log(
+            test,
+            "test (ubuntu-latest)\tRun tests\t2026-11-13T02:11:04.1Z ##[group]Run cargo test --locked -p daruda\n\
+             test (ubuntu-latest)\tRun tests\t2026-11-13T02:14:51.2Z test workspace::left_dock::narrow_dock_keeps_names ... FAILED\n\
+             test (ubuntu-latest)\tRun tests\t2026-11-13T02:14:51.3Z thread panicked at left_dock/tests.rs:212:5:\n\
+             test (ubuntu-latest)\tRun tests\t2026-11-13T02:14:51.3Z assertion `left == right` failed: label clipped\n\
+             test (ubuntu-latest)\tRun tests\t2026-11-13T02:14:52.0Z ##[error]Process completed with exit code 101.",
+        );
+        let item = row.clone();
+        self.open_pr_detail(row, window, cx);
+        if let Some(id) = self
+            .pages
+            .pull_requests
+            .detail
+            .as_ref()
+            .filter(|d| d.item == item)
+            .map(|d| d.id)
+        {
+            self.toggle_pr_check_log(id, test, cx);
+        }
     }
 }
