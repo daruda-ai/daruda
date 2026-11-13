@@ -170,6 +170,109 @@ fn legacy_session_meta_id_still_populates_a_recent_session() {
 }
 
 #[test]
+fn subagent_logs_count_usage_without_becoming_recent_sessions() {
+    for (label, source, child_session_id) in [
+        // Current rollouts carry the parent's session_id and the child's id.
+        (
+            "shared session",
+            json!({"subagent": {"thread_spawn": {
+                "parent_thread_id": "parent", "depth": 1
+            }}}),
+            "parent",
+        ),
+        // A child with its own session_id must also stay out of restore rows.
+        (
+            "independent session",
+            json!({"subagent": "review"}),
+            "child",
+        ),
+        ("string source", json!("subagent"), "child"),
+    ] {
+        let (_tmp, sessions, cache) = fixture();
+        let parent = session_meta_line("parent", "/Users/x/proj")
+            + &task_started_line(D1)
+            + &token_count_line(D1, 100);
+        let child = json!({"type": "session_meta", "payload": {
+            "id": "child", "session_id": child_session_id,
+            "cwd": "/Users/x/proj", "source": source
+        }})
+        .to_string()
+            + "\n"
+            + &task_started_line(D2)
+            + &token_count_line(D2, 50);
+        write_log(&sessions, "2026", "07", "20", "parent", &parent);
+        write_log(&sessions, "2026", "07", "21", "child", &child);
+
+        // Repeat to cover the persisted cache as well as the initial scan.
+        for _ in 0..2 {
+            let stats = update_activity(&sessions, &cache).unwrap();
+            assert_eq!(
+                stats.daily.iter().map(|d| d.turns).sum::<u64>(),
+                2,
+                "{label}"
+            );
+            assert_eq!(
+                stats.daily.iter().map(|d| d.tokens).sum::<u64>(),
+                150,
+                "{label}"
+            );
+            assert_eq!(stats.recent_sessions.len(), 1, "{label}");
+            assert_eq!(stats.recent_sessions[0].session_id, "parent", "{label}");
+            assert_eq!(
+                stats.recent_sessions[0].last_active,
+                chrono::DateTime::parse_from_rfc3339(D1).unwrap().into(),
+                "{label}"
+            );
+        }
+    }
+}
+
+#[test]
+fn duplicate_session_logs_keep_the_latest_recent_session() {
+    for (label, first_ts, second_ts) in [("newer file first", D2, D1), ("newer file last", D1, D2)]
+    {
+        let (_tmp, sessions, cache) = fixture();
+        for (name, ts) in [("a", first_ts), ("b", second_ts)] {
+            let body = session_meta_line("s1", "/Users/x/proj")
+                + &task_started_line(ts)
+                + &user_message_line(ts, ts);
+            write_log(&sessions, "2026", "07", "20", name, &body);
+        }
+        let stats = update_activity(&sessions, &cache).unwrap();
+        assert_eq!(stats.recent_sessions.len(), 1, "{label}");
+        assert_eq!(
+            stats.recent_sessions[0].prompt_preview.as_deref(),
+            Some(D2),
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn v3_cache_rebuild_excludes_previously_cached_subagents() {
+    let (_tmp, sessions, cache) = fixture();
+    let body = json!({"type": "session_meta", "payload": {
+        "session_id": "parent", "cwd": "/Users/x/proj",
+        "source": {"subagent": {"thread_spawn": {"parent_thread_id": "parent"}}}
+    }})
+    .to_string()
+        + "\n"
+        + &task_started_line(D1);
+    write_log(&sessions, "2026", "07", "20", "child", &body);
+    update_activity(&sessions, &cache).unwrap();
+    let mut old: Value = serde_json::from_str(&fs::read_to_string(&cache).unwrap()).unwrap();
+    old["version"] = json!(3);
+    for entry in old["files"].as_object_mut().unwrap().values_mut() {
+        entry.as_object_mut().unwrap().remove("is_subagent");
+    }
+    fs::write(&cache, old.to_string()).unwrap();
+
+    let stats = update_activity(&sessions, &cache).unwrap();
+    assert!(stats.recent_sessions.is_empty());
+    assert_eq!(stats.daily[0].turns, 1);
+}
+
+#[test]
 fn user_message_populates_the_prompt_preview() {
     let (_tmp, sessions, cache) = fixture();
     let body = session_meta_line("s1", "/Users/x/proj")

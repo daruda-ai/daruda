@@ -96,10 +96,10 @@ pub fn session_display_title<'a>(
 pub struct ActivityStats {
     /// Ascending by date.
     pub daily: Vec<DayActivity>,
-    /// Unsorted, uncapped — every session this scan resolved a `cwd` +
-    /// `session_id` for. Filtering to a caller's open Lanes and capping
-    /// to a display count is the caller's job; this module has no
-    /// concept of a Lane.
+    /// Restorable sessions with a cwd, session id, and activity timestamp;
+    /// child-agent logs are excluded. Duplicate ids retain the summary with
+    /// the latest activity timestamp. No chronological order or count limit
+    /// is guaranteed; callers filter to their Lanes, sort, and cap the list.
     pub recent_sessions: Vec<SessionSummary>,
 }
 

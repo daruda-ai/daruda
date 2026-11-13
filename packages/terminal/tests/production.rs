@@ -1,6 +1,7 @@
 //! The PTY spawn of a shipping binary, in a test binary of its own: ending
 //! isolation is process-global.
 
+#[cfg(unix)]
 use daruda_terminal::pty::{PtyConfig, spawn_pty};
 
 /// `cargo test` links the test-support stub into the app binary too, so a

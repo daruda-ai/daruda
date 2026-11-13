@@ -421,6 +421,47 @@ fn a_session_with_cwd_and_session_id_appears_in_recent_sessions() {
 }
 
 #[test]
+fn duplicate_session_logs_keep_the_latest_recent_session() {
+    for (label, first_ts, second_ts) in [("newer file first", D2, D1), ("newer file last", D1, D2)]
+    {
+        let (_tmp, projects, cache) = fixture();
+        for (name, ts) in [("a", first_ts), ("b", second_ts)] {
+            let body = user_line_with_cwd_and_branch(ts, "s1", "/Users/x/proj", ts)
+                + &custom_title_line("s1", ts)
+                + &last_prompt_line("s1", ts);
+            write_log(&projects, "p", name, &body);
+        }
+        write_log(
+            &projects,
+            "p",
+            "other",
+            &user_line_with_cwd(D1, "s2", "/Users/x/proj"),
+        );
+
+        for _ in 0..2 {
+            let stats = update_activity(&projects, &cache).unwrap();
+            assert_eq!(
+                stats.daily.iter().map(|d| d.turns).sum::<u64>(),
+                3,
+                "{label}"
+            );
+            assert_eq!(stats.recent_sessions.len(), 2, "{label}");
+            let session = stats
+                .recent_sessions
+                .iter()
+                .find(|s| s.session_id == "s1")
+                .unwrap();
+            assert_eq!(session.title.as_deref(), Some(D2), "{label}");
+            assert_eq!(session.prompt_preview.as_deref(), Some(D2), "{label}");
+            assert_eq!(session.git_branch.as_deref(), Some(D2), "{label}");
+            let expected: std::time::SystemTime =
+                chrono::DateTime::parse_from_rfc3339(D2).unwrap().into();
+            assert_eq!(session.last_active, expected, "{label}");
+        }
+    }
+}
+
+#[test]
 fn ai_title_sets_the_session_title() {
     let (_tmp, projects, cache) = fixture();
     let body = user_line_with_cwd(D1, "s1", "/Users/x/proj") + &ai_title_line("s1", "Fix the bug");

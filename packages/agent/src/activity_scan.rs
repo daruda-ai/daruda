@@ -5,7 +5,7 @@
 //! the same: keep a byte offset per file, parse only complete appended lines,
 //! cache derivative per-file state, and aggregate it into [`ActivityStats`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map::Entry};
 use std::fs;
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -53,6 +53,9 @@ pub(crate) struct FileEntry {
     /// Counts keyed by local date `"YYYY-MM-DD"`.
     pub(crate) days: BTreeMap<String, FileDayCounts>,
     pub(crate) session_id: Option<String>,
+    /// Child-agent logs contribute usage but are not user-restorable sessions.
+    #[serde(default)]
+    pub(crate) is_subagent: bool,
     pub(crate) cwd: Option<PathBuf>,
     pub(crate) title: Option<String>,
     pub(crate) title_is_custom: bool,
@@ -60,6 +63,25 @@ pub(crate) struct FileEntry {
     pub(crate) git_branch: Option<String>,
     /// Latest activity timestamp seen, epoch milliseconds.
     pub(crate) last_active_ms: Option<i64>,
+}
+
+impl FileEntry {
+    fn restorable_session(&self) -> Option<SessionSummary> {
+        if self.is_subagent {
+            return None;
+        }
+        let session_id = self.session_id.as_ref()?;
+        let cwd = self.cwd.as_ref()?;
+        let last_active_ms = self.last_active_ms?;
+        Some(SessionSummary {
+            session_id: session_id.clone(),
+            cwd: cwd.clone(),
+            title: self.title.clone(),
+            prompt_preview: self.prompt_preview.clone(),
+            git_branch: self.git_branch.clone(),
+            last_active: UNIX_EPOCH + Duration::from_millis(last_active_ms.max(0) as u64),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -206,24 +228,24 @@ struct DayAccum {
 
 fn aggregate(cache: &ActivityCache) -> ActivityStats {
     let mut per_day: BTreeMap<&str, DayAccum> = BTreeMap::new();
-    let mut recent_sessions = Vec::new();
+    let mut recent_sessions: BTreeMap<String, SessionSummary> = BTreeMap::new();
     for entry in cache.files.values() {
         for (date, counts) in &entry.days {
             let day = per_day.entry(date.as_str()).or_default();
             day.turns += counts.turns;
             day.tokens += counts.tokens;
         }
-        if let (Some(session_id), Some(cwd), Some(last_active_ms)) =
-            (&entry.session_id, &entry.cwd, entry.last_active_ms)
-        {
-            recent_sessions.push(SessionSummary {
-                session_id: session_id.clone(),
-                cwd: cwd.clone(),
-                title: entry.title.clone(),
-                prompt_preview: entry.prompt_preview.clone(),
-                git_branch: entry.git_branch.clone(),
-                last_active: UNIX_EPOCH + Duration::from_millis(last_active_ms.max(0) as u64),
-            });
+        if let Some(session) = entry.restorable_session() {
+            match recent_sessions.entry(session.session_id.clone()) {
+                Entry::Vacant(slot) => {
+                    slot.insert(session);
+                }
+                Entry::Occupied(mut slot) => {
+                    if session.last_active > slot.get().last_active {
+                        slot.insert(session);
+                    }
+                }
+            }
         }
     }
 
@@ -238,6 +260,6 @@ fn aggregate(cache: &ActivityCache) -> ActivityStats {
 
     ActivityStats {
         daily,
-        recent_sessions,
+        recent_sessions: recent_sessions.into_values().collect(),
     }
 }

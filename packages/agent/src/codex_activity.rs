@@ -37,7 +37,9 @@ use crate::activity_scan::{
 /// v3: recent sessions gained `prompt_preview` and `git_branch`, and
 /// `session_id` capture now matches real rollout files' `payload.session_id`
 /// field before falling back to the legacy assumed `payload.id`.
-const CODEX_CACHE_VERSION: u32 = 3;
+///
+/// v4: child-agent logs retain usage counts but no longer produce restore rows.
+const CODEX_CACHE_VERSION: u32 = 4;
 
 pub struct CodexActivity;
 
@@ -132,6 +134,10 @@ impl SessionLogFormat for CodexLogFormat {
         };
 
         if kind == "session_meta" {
+            if let Some(source) = record.pointer("/payload/source") {
+                entry.is_subagent |=
+                    source.get("subagent").is_some() || source.as_str() == Some("subagent");
+            }
             if entry.session_id.is_none()
                 && let Some(id) = record
                     .pointer("/payload/session_id")
