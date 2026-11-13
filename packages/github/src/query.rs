@@ -1,6 +1,6 @@
 //! The GraphQL request that finds the pull requests of several branches at
-//! once, the search that lists open pull requests across repositories, and
-//! the parsers for their answers.
+//! once, the search that lists open pull requests across repositories, the
+//! request for one pull request's detail, and the parsers for their answers.
 //!
 //! One aliased field per branch (`b0`, `b1`, ...) keeps the request count per
 //! repository, not per lane. Branch names travel as variables, never inside
@@ -15,6 +15,10 @@ use crate::{
     CheckKind, CheckRollup, CheckRun, GhError, PrFilter, PrListItem, PrSearch, PrState, PrSummary,
     RepoId, ReviewComment, ReviewDecision, ReviewThread, ReviewThreads,
 };
+
+mod detail;
+
+pub(crate) use detail::{parse_pr_detail, pr_detail_query};
 
 /// PRs fetched per branch: enough to find an open one among old closed ones.
 /// Fork PRs with the same head name count against it; `ref.associatedPullRequests`
@@ -59,7 +63,7 @@ fn pr_fragment() -> String {
         "fragment pr on PullRequest {{ number url title state isDraft headRefName \
          isCrossRepository reviewDecision updatedAt statusCheckRollup {{ state \
          contexts(first: {CHECKS_PER_PR}) {{ pageInfo {{ hasNextPage }} nodes {{ __typename \
-         ... on CheckRun {{ name status conclusion detailsUrl startedAt \
+         ... on CheckRun {{ name status conclusion detailsUrl startedAt completedAt \
          checkSuite {{ workflowRun {{ event workflow {{ name }} }} }} }} \
          ... on StatusContext {{ context state targetUrl createdAt }} }} }} }} }}"
     )
@@ -413,6 +417,8 @@ enum Context {
         details_url: Option<String>,
         started_at: Option<String>,
         #[serde(default)]
+        completed_at: Option<String>,
+        #[serde(default)]
         check_suite: Option<CheckSuite>,
     },
     #[serde(rename_all = "camelCase")]
@@ -451,6 +457,7 @@ impl Context {
                 conclusion,
                 details_url,
                 started_at,
+                completed_at,
                 check_suite,
             } => {
                 let run = check_suite.and_then(|suite| suite.workflow_run);
@@ -466,6 +473,7 @@ impl Context {
                     name,
                     details_url,
                     started_at,
+                    completed_at,
                 }
             }
             Self::StatusContext {
@@ -481,6 +489,7 @@ impl Context {
                 name: context,
                 details_url: target_url,
                 started_at: created_at,
+                completed_at: None,
             },
         }
     }
@@ -488,6 +497,11 @@ impl Context {
 
 impl PrNode {
     fn into_summary(self) -> Result<PrSummary, GhError> {
+        self.into_parts().map(|(summary, _)| summary)
+    }
+
+    /// The summary and the check runs it was added up from.
+    fn into_parts(self) -> Result<(PrSummary, Vec<CheckRun>), GhError> {
         let state = match (self.state.as_str(), self.is_draft) {
             ("OPEN", true) => PrState::Draft,
             ("OPEN", false) => PrState::Open,
@@ -501,8 +515,8 @@ impl PrNode {
             Some("REVIEW_REQUIRED") => Some(ReviewDecision::ReviewRequired),
             _ => None,
         };
-        let (checks, failed) = match self.status_check_rollup {
-            None => (CheckRollup::None, Vec::new()),
+        let (checks, failed, runs) = match self.status_check_rollup {
+            None => (CheckRollup::None, Vec::new(), Vec::new()),
             Some(rollup) => {
                 let runs: Vec<CheckRun> = rollup
                     .contexts
@@ -523,10 +537,10 @@ impl PrNode {
                     CheckRollup::Failing { .. } => failed,
                     _ => Vec::new(),
                 };
-                (checks, failed)
+                (checks, failed, runs)
             }
         };
-        Ok(PrSummary {
+        let summary = PrSummary {
             number: self.number,
             url: self.url,
             title: self.title,
@@ -537,7 +551,8 @@ impl PrNode {
             failed,
             review,
             updated_at: self.updated_at,
-        })
+        };
+        Ok((summary, runs))
     }
 }
 

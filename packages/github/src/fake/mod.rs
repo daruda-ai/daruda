@@ -9,6 +9,7 @@
 //! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL |
 //! | `failed_log` | exit 1, as for a run that has no failed log |
 //! | `review_threads` | none |
+//! | `pr_detail` | exit 1, as for a pull request that does not exist |
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -17,8 +18,8 @@ use crate::availability::GhAuth;
 use crate::backend::Gh;
 use crate::query::{RepoPrs, newest_first};
 use crate::{
-    ActionsJob, CheckRollup, GhError, NewPr, PrFilter, PrListItem, PrSearch, PrState, PrSummary,
-    RepoId, ReviewThreads,
+    ActionsJob, CheckRollup, GhError, NewPr, PrDetail, PrFilter, PrListItem, PrSearch, PrState,
+    PrSummary, RepoId, ReviewThreads,
 };
 
 /// A request the code under test made.
@@ -48,6 +49,10 @@ pub enum GhCall {
         repo: RepoId,
         number: u64,
     },
+    PrDetail {
+        repo: RepoId,
+        number: u64,
+    },
 }
 
 /// One [`Gh`] method, for aiming failures.
@@ -59,6 +64,7 @@ pub enum GhOp {
     CreatePr,
     FailedLog,
     ReviewThreads,
+    PrDetail,
 }
 
 /// A cloneable description of a [`GhError`], turned into a fresh error on
@@ -99,6 +105,7 @@ struct FakeState {
     truncated: HashMap<PrFilter, bool>,
     logs: HashMap<(u64, u64), String>,
     threads: HashMap<u64, ReviewThreads>,
+    details: HashMap<(RepoId, u64), PrDetail>,
     failures: HashMap<GhOp, GhFailure>,
     calls: Vec<GhCall>,
 }
@@ -145,6 +152,11 @@ impl FakeGh {
         self.lock().threads.insert(number, threads);
     }
 
+    /// What `pr_detail` answers for PR `number` of `repo`.
+    pub fn set_pr_detail(&self, repo: &RepoId, number: u64, detail: PrDetail) {
+        self.lock().details.insert((repo.clone(), number), detail);
+    }
+
     /// Fail every later call of `op` until [`FakeGh::clear_failure`].
     pub fn fail(&self, op: GhOp, failure: GhFailure) {
         self.lock().failures.insert(op, failure);
@@ -182,6 +194,7 @@ impl GhCall {
             Self::CreatePr { .. } => GhOp::CreatePr,
             Self::FailedLog { .. } => GhOp::FailedLog,
             Self::ReviewThreads { .. } => GhOp::ReviewThreads,
+            Self::PrDetail { .. } => GhOp::PrDetail,
         }
     }
 }
@@ -293,6 +306,25 @@ impl Gh for FakeGh {
             return Err(failure.to_error());
         }
         Ok(state.threads.get(&number).cloned().unwrap_or_default())
+    }
+
+    fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError> {
+        let mut state = self.lock();
+        state.calls.push(GhCall::PrDetail {
+            repo: repo.clone(),
+            number,
+        });
+        if let Some(failure) = state.failures.get(&GhOp::PrDetail) {
+            return Err(failure.to_error());
+        }
+        state
+            .details
+            .get(&(repo.clone(), number))
+            .cloned()
+            .ok_or_else(|| GhError::Exit {
+                code: Some(1),
+                stderr: format!("Could not resolve to a PullRequest with the number of {number}."),
+            })
     }
 
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {

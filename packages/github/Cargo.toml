@@ -17,5 +17,6 @@ test-support = []
 
 [dependencies]
 daruda_core = { workspace = true }
+humantime = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

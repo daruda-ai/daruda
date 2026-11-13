@@ -9,10 +9,11 @@ use daruda_core::process::{CaptureError, CaptureLimits, Captured, command_on_pat
 use crate::availability::GhAuth;
 use crate::backend::Gh;
 use crate::query::{
-    REVIEW_THREADS_QUERY, RepoPrs, newest_first, parse_prs_for_branches, parse_review_threads,
-    parse_search_prs, prs_for_branches_query, search_prs_query, search_string,
+    REVIEW_THREADS_QUERY, RepoPrs, newest_first, parse_pr_detail, parse_prs_for_branches,
+    parse_review_threads, parse_search_prs, pr_detail_query, prs_for_branches_query,
+    search_prs_query, search_string,
 };
-use crate::{ActionsJob, GhError, NewPr, PrFilter, PrSearch, RepoId, ReviewThreads};
+use crate::{ActionsJob, GhError, NewPr, PrDetail, PrFilter, PrSearch, RepoId, ReviewThreads};
 
 const LIMITS: CaptureLimits = CaptureLimits {
     timeout: Duration::from_secs(30),
@@ -207,6 +208,25 @@ impl Gh for SystemGh {
             format!("number={number}"),
         ])?;
         parse_review_threads(&json)
+    }
+
+    fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError> {
+        let json = self.stdout([
+            "api".to_owned(),
+            "graphql".to_owned(),
+            "--hostname".to_owned(),
+            repo.host().to_owned(),
+            "-f".to_owned(),
+            format!("query={}", pr_detail_query()),
+            "-f".to_owned(),
+            format!("owner={}", repo.owner()),
+            "-f".to_owned(),
+            format!("name={}", repo.name()),
+            // `-F`: the number must reach GraphQL as an Int.
+            "-F".to_owned(),
+            format!("number={number}"),
+        ])?;
+        parse_pr_detail(&json)
     }
 
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {

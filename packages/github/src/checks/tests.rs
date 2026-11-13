@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use crate::checks::{
-    actions_job, check_run_status, rollup_from_state, status_context_status, summarize,
+    actions_job, check_run_status, entries, rollup_from_state, status_context_status, summarize,
 };
 use crate::{ActionsJob, CheckKind, CheckRollup, CheckRun, CheckStatus};
 
@@ -12,6 +14,7 @@ fn run(name: &str, status: CheckStatus, started: &str) -> CheckRun {
         status,
         details_url: None,
         started_at: Some(started.into()),
+        completed_at: None,
     }
 }
 
@@ -234,4 +237,69 @@ fn an_incomplete_run_is_pending_whatever_its_conclusion() {
         check_run_status("IN_PROGRESS", Some("FAILURE")),
         CheckStatus::Pending
     );
+}
+
+#[test]
+fn the_check_list_reads_failing_running_passing_skipped() {
+    use CheckStatus::*;
+    let runs = [
+        run("pass-1", Success, "1"),
+        run("skip", Ignored, "1"),
+        run("run-1", Pending, "1"),
+        run("fail-1", Failure, "1"),
+        run("pass-2", Success, "1"),
+        status(run("fail-2", Failure, "1")),
+        queued("run-2"),
+    ];
+    let names: Vec<String> = entries(&runs).into_iter().map(|e| e.run.name).collect();
+    assert_eq!(
+        names,
+        [
+            "fail-1", "fail-2", "run-1", "run-2", "pass-1", "pass-2", "skip"
+        ],
+        "by status, GitHub's order within each"
+    );
+}
+
+#[test]
+fn the_check_list_and_the_rollup_count_the_same_latest_runs() {
+    use CheckStatus::*;
+    // A rerun that passed replaces the failure it reran, in both.
+    let runs = [run("test", Failure, "1"), run("test", Success, "2")];
+    let listed = entries(&runs);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].run.status, Success);
+    assert_eq!(summarize(&runs).0, CheckRollup::Passing);
+}
+
+#[test]
+fn an_entry_carries_its_job_and_how_long_it_took() {
+    let at = |started: &str, completed: Option<&str>| CheckRun {
+        details_url: Some("https://github.com/o/r/actions/runs/1/job/2".into()),
+        completed_at: completed.map(Into::into),
+        ..run("build", CheckStatus::Success, started)
+    };
+    let cases = [
+        (
+            "completed",
+            at("2026-11-09T23:21:50Z", Some("2026-11-09T23:22:57Z")),
+            Some(Duration::from_secs(67)),
+        ),
+        ("still running", at("2026-11-09T23:21:50Z", None), None),
+        (
+            "completed before it started, as skipped runs report",
+            at("2026-11-09T23:21:55Z", Some("2026-11-09T23:21:46Z")),
+            None,
+        ),
+        (
+            "malformed",
+            at("yesterday", Some("2026-11-09T23:21:46Z")),
+            None,
+        ),
+    ];
+    for (label, check, expected) in cases {
+        let entry = entries(&[check]).remove(0);
+        assert_eq!(entry.duration, expected, "{label}");
+        assert_eq!(entry.job, Some(ActionsJob { run: 1, job: 2 }), "{label}");
+    }
 }

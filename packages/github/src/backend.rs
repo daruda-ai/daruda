@@ -5,7 +5,7 @@
 
 use crate::availability::GhAuth;
 use crate::query::RepoPrs;
-use crate::{ActionsJob, GhError, NewPr, PrFilter, PrSearch, RepoId, ReviewThreads};
+use crate::{ActionsJob, GhError, NewPr, PrDetail, PrFilter, PrSearch, RepoId, ReviewThreads};
 
 pub trait Gh: Send + Sync {
     /// Whether `gh` is installed and logged in to `host`.
@@ -29,4 +29,6 @@ pub trait Gh: Send + Sync {
     fn failed_log(&self, repo: &RepoId, job: ActionsJob) -> Result<String, GhError>;
     /// The unresolved review threads of pull request `number`.
     fn review_threads(&self, repo: &RepoId, number: u64) -> Result<ReviewThreads, GhError>;
+    /// What pull request `number`'s page shows, in one request.
+    fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError>;
 }

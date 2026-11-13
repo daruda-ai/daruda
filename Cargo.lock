@@ -1833,6 +1833,7 @@ name = "daruda_github"
 version = "0.3.0"
 dependencies = [
  "daruda_core",
+ "humantime",
  "serde",
  "serde_json",
 ]

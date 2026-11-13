@@ -22,8 +22,9 @@ mod system;
 pub use backend::Gh;
 pub use error::{FailureKind, GhError};
 pub use model::{
-    ActionsJob, CheckKind, CheckRollup, CheckRun, CheckStatus, FailedCheck, GITHUB_HOST, NewPr,
-    PrFilter, PrListItem, PrSearch, PrState, PrSummary, RepoId, ReviewComment, ReviewDecision,
-    ReviewThread, ReviewThreads,
+    ActionsJob, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus,
+    FailedCheck, GITHUB_HOST, MergeMethod, Mergeability, NewPr, PrDetail, PrFilter, PrListItem,
+    PrSearch, PrState, PrSummary, RepoId, ReviewComment, ReviewDecision, ReviewThread,
+    ReviewThreads, ReviewerState,
 };
 pub use system::SystemGh;

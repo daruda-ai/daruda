@@ -1,5 +1,5 @@
 use super::*;
-use crate::{CheckRollup, PrSearch, PrState};
+use crate::{CheckRollup, Mergeability, PrSearch, PrState};
 
 fn repo() -> RepoId {
     RepoId::new("github.com", "o", "r")
@@ -114,6 +114,42 @@ fn a_scripted_list_answers_only_the_searched_repositories() {
             host: "github.com".into(),
             repos: vec![repo()],
             filter: PrFilter::Mine,
+        }
+    );
+}
+
+#[test]
+fn a_scripted_detail_answers_its_repository_and_number_only() {
+    let detail = PrDetail {
+        summary: pr(7, "a"),
+        body: String::new(),
+        head_sha: "abc".into(),
+        base_branch: "main".into(),
+        author: None,
+        mergeability: Mergeability::Ready,
+        methods: Vec::new(),
+        reviewers: Vec::new(),
+        checks: Vec::new(),
+        open_threads: 0,
+    };
+    let other = RepoId::new("github.com", "o", "other");
+    let gh = FakeGh::new();
+    gh.set_pr_detail(&repo(), 7, detail.clone());
+    assert_eq!(gh.pr_detail(&repo(), 7).unwrap(), detail);
+    let cases = [("other number", repo(), 8), ("other repository", other, 7)];
+    for (label, repo, number) in cases {
+        let answer = gh.pr_detail(&repo, number);
+        assert!(
+            matches!(answer, Err(GhError::Exit { code: Some(1), .. })),
+            "{label}: {answer:?}"
+        );
+    }
+    assert_eq!(gh.count(GhOp::PrDetail), 3);
+    assert_eq!(
+        gh.calls()[0],
+        GhCall::PrDetail {
+            repo: repo(),
+            number: 7
         }
     );
 }

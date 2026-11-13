@@ -6,8 +6,9 @@
 //! event and name, as GitHub lists them (`CI / test (push)`).
 
 use std::collections::HashMap;
+use std::time::Duration;
 
-use crate::{ActionsJob, CheckKind, CheckRollup, CheckRun, CheckStatus, FailedCheck};
+use crate::{ActionsJob, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus, FailedCheck};
 
 /// A check run's `status` and `conclusion`, as GitHub's GraphQL spells them.
 pub(crate) fn check_run_status(status: &str, conclusion: Option<&str>) -> CheckStatus {
@@ -46,21 +47,7 @@ pub(crate) fn rollup_from_state(state: &str) -> CheckRollup {
 
 /// Add `runs` up, returning the rollup and the failing checks behind it.
 pub(crate) fn summarize(runs: &[CheckRun]) -> (CheckRollup, Vec<FailedCheck>) {
-    let mut latest: HashMap<Key<'_>, &CheckRun> = HashMap::new();
-    for run in runs {
-        latest
-            .entry(key(run))
-            .and_modify(|kept| {
-                if is_newer(run, kept) {
-                    *kept = run;
-                }
-            })
-            .or_insert(run);
-    }
-    // Input order, so the failures read in the order GitHub listed them.
-    let counted: Vec<&CheckRun> = runs
-        .iter()
-        .filter(|run| std::ptr::eq(latest[&key(run)], *run))
+    let counted: Vec<&CheckRun> = latest(runs)
         .filter(|run| run.status != CheckStatus::Ignored)
         .collect();
     let failed: Vec<FailedCheck> = counted
@@ -86,6 +73,52 @@ pub(crate) fn summarize(runs: &[CheckRun]) -> (CheckRollup, Vec<FailedCheck>) {
         CheckRollup::Passing
     };
     (rollup, failed)
+}
+
+/// The checks of `runs` to list, one entry per check as [`summarize`]
+/// counts them: failing, then running, then passing, then skipped, each in
+/// GitHub's order.
+pub(crate) fn entries(runs: &[CheckRun]) -> Vec<CheckEntry> {
+    let mut entries: Vec<CheckEntry> = latest(runs)
+        .map(|run| CheckEntry {
+            run: run.clone(),
+            job: run.details_url.as_deref().and_then(actions_job),
+            duration: duration(run),
+        })
+        .collect();
+    entries.sort_by_key(|entry| match entry.run.status {
+        CheckStatus::Failure => 0,
+        CheckStatus::Pending => 1,
+        CheckStatus::Success => 2,
+        CheckStatus::Ignored => 3,
+    });
+    entries
+}
+
+/// The latest run of each check, in input order, so lists read in the order
+/// GitHub gave them.
+fn latest(runs: &[CheckRun]) -> impl Iterator<Item = &CheckRun> {
+    let mut latest: HashMap<Key<'_>, &CheckRun> = HashMap::new();
+    for run in runs {
+        latest
+            .entry(key(run))
+            .and_modify(|kept| {
+                if is_newer(run, kept) {
+                    *kept = run;
+                }
+            })
+            .or_insert(run);
+    }
+    runs.iter()
+        .filter(move |run| std::ptr::eq(latest[&key(run)], *run))
+}
+
+/// From start to completion. A completion before the start (clock skew
+/// between runners) or a malformed time gives none rather than a guess.
+fn duration(run: &CheckRun) -> Option<Duration> {
+    let started = humantime::parse_rfc3339(run.started_at.as_deref()?).ok()?;
+    let completed = humantime::parse_rfc3339(run.completed_at.as_deref()?).ok()?;
+    completed.duration_since(started).ok()
 }
 
 type Key<'a> = (CheckKind, Option<&'a str>, Option<&'a str>, &'a str);

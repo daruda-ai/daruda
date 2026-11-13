@@ -90,6 +90,9 @@ pub struct CheckRun {
     /// RFC 3339, so later runs sort after earlier ones as strings. `None`
     /// for a run still queued.
     pub started_at: Option<String>,
+    /// RFC 3339. `None` for a run not finished yet and for a commit status,
+    /// which reports no end.
+    pub completed_at: Option<String>,
 }
 
 /// What a single check counts as. The mapping from GitHub's values is
@@ -226,6 +229,89 @@ pub struct PrSearch {
     pub items: Vec<PrListItem>,
     /// GitHub matched more pull requests than one search answers.
     pub truncated: bool,
+}
+
+/// A way GitHub can merge a pull request, as its repository allows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+/// Whether a pull request can be merged now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mergeability {
+    /// GitHub would merge it; failing checks that are not required do not
+    /// stop a merge, and show in the check list instead.
+    Ready,
+    Blocked(BlockReason),
+    /// The head conflicts with the base.
+    Conflicting,
+    /// GitHub has not worked it out yet (it does so lazily, after a push),
+    /// or answered a value this crate does not know.
+    Unknown,
+}
+
+/// Why GitHub refuses to merge a pull request that has no conflict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockReason {
+    /// Branch protection: a required review or check is missing.
+    Requirements,
+    /// The base requires the head to be up to date with it first.
+    Behind,
+    /// A draft cannot be merged.
+    Draft,
+}
+
+/// Where one reviewer stands on a pull request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewerState {
+    /// Asked to review and has not reviewed since.
+    Requested,
+    Approved,
+    ChangesRequested,
+    Commented,
+    /// The latest review was dismissed.
+    Dismissed,
+    /// A review started and not yet submitted.
+    Pending,
+    /// A review state this crate does not know.
+    Other,
+}
+
+/// One check in a pull request's list: the latest run of each check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckEntry {
+    pub run: CheckRun,
+    /// The Actions job behind it, whose log can be fetched.
+    pub job: Option<ActionsJob>,
+    /// From start to completion; `None` until it completes, for a commit
+    /// status, and for times GitHub reports out of order.
+    pub duration: Option<std::time::Duration>,
+}
+
+/// What a pull request's page shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrDetail {
+    pub summary: PrSummary,
+    pub body: String,
+    /// The head commit, which a merge can be pinned to.
+    pub head_sha: String,
+    pub base_branch: String,
+    /// `None` for a deleted account.
+    pub author: Option<String>,
+    pub mergeability: Mergeability,
+    /// What the repository allows, in the order merge, squash, rebase.
+    pub methods: Vec<MergeMethod>,
+    /// Reviewers who reviewed, then those only asked to; a team reads
+    /// `org/team`. A request GitHub does not name to the caller is left out.
+    pub reviewers: Vec<(String, ReviewerState)>,
+    /// Failing, then running, then passing, then skipped; GitHub's order
+    /// within each. With more than 100 checks, those of the first page.
+    pub checks: Vec<CheckEntry>,
+    /// Unresolved review threads among the first 100.
+    pub open_threads: u32,
 }
 
 impl PrSummary {
