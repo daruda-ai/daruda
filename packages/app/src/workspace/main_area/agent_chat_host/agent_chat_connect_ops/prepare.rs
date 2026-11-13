@@ -286,7 +286,8 @@ impl Workspace {
     /// The orchestrator's pane gets only the control server, through
     /// `control`. Any other pane whose lane runs on this machine gets the
     /// browser for `local_root`; a remote adapter could not run the local
-    /// binary, so a remote lane gets none.
+    /// binary, so a remote lane gets none. A CLI snapshot replays one
+    /// recorded session read-only, so it is offered nothing.
     fn session_mcp_servers(
         &self,
         pane_id: PaneId,
@@ -294,21 +295,32 @@ impl Workspace {
         control: impl FnOnce(&mut App) -> Option<daruda_acp::McpServer>,
         cx: &mut Context<Self>,
     ) -> Vec<daruda_acp::McpServer> {
-        if self.offers_control_tools(pane_id, cx) {
-            return control(cx).into_iter().collect();
+        let servers = if self.offers_control_tools(pane_id, cx) {
+            control(cx).into_iter().collect()
+        } else {
+            local_root
+                .and_then(|root| crate::browser_tool::launch_for_lane(root, cx))
+                .map(|launch| {
+                    daruda_acp::stdio_mcp_server(
+                        BROWSER_MCP_SERVER_NAME.to_owned(),
+                        launch.command,
+                        launch.args,
+                        launch.env,
+                    )
+                })
+                .into_iter()
+                .collect()
+        };
+        if self.loads_snapshot(pane_id, cx) {
+            return Vec::new();
         }
-        local_root
-            .and_then(|root| crate::browser_tool::launch_for_lane(root, cx))
-            .map(|launch| {
-                daruda_acp::stdio_mcp_server(
-                    BROWSER_MCP_SERVER_NAME.to_owned(),
-                    launch.command,
-                    launch.args,
-                    launch.env,
-                )
-            })
-            .into_iter()
-            .collect()
+        servers
+    }
+
+    fn loads_snapshot(&self, pane_id: PaneId, cx: &App) -> bool {
+        self.agent_chat_view(pane_id)
+            .and_then(|view| view.read(cx).load_intent())
+            == Some(daruda_chat::view::LoadIntent::Snapshot)
     }
 
     /// Whether this pane's session may reach the control MCP server.

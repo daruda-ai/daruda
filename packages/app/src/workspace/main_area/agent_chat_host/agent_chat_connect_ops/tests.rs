@@ -296,6 +296,32 @@ mod browser {
     }
 
     #[gpui::test]
+    fn a_snapshot_chat_gets_no_servers(cx: &mut TestAppContext) {
+        let user = crate::test_support::workspace_with_agent_chat(cx);
+        browser_tool(true, true, cx);
+        assert_eq!(
+            offered(&user.workspace, user.pane(), cx).len(),
+            1,
+            "an interactive chat in this lane gets the browser"
+        );
+
+        user.workspace.update(cx, |ws, cx| {
+            ws.agent_chat_view(user.pane())
+                .expect("chat view")
+                .update(cx, |view, _| {
+                    view.set_access(daruda_store::tasks::AgentChatAccess::CliSnapshot(
+                        daruda_store::tasks::ExecutionRef {
+                            task_id: "fixture".into(),
+                            execution_id: "fixture".into(),
+                        },
+                    ));
+                });
+        });
+
+        assert!(offered(&user.workspace, user.pane(), cx).is_empty());
+    }
+
+    #[gpui::test]
     fn the_orchestrator_keeps_only_the_control_server(cx: &mut TestAppContext) {
         let orchestrator = crate::test_support::register_test_orchestrator(cx);
         cx.update(crate::orchestrator::seed_control_surface_for_test);

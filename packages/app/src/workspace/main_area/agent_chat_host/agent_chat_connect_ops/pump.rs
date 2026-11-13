@@ -82,7 +82,6 @@ impl Workspace {
             .and_then(|pane| pane.agent_chat_content())
             .is_some_and(|chat| chat.restore.requires_exact());
         let strict_restore = resume.is_some() && self.requires_exact_resume(pane_id, cx);
-        let snapshot = load_intent == Some(daruda_chat::view::LoadIntent::Snapshot);
 
         // A CLI snapshot mirrors one exact session; with nothing to load there
         // is nothing to show, and `session/new` would invent a conversation.
@@ -146,14 +145,11 @@ impl Workspace {
             mut initial_model,
             mut initial_modes,
             prepared,
-            mut mcp_servers,
+            mcp_servers,
         } = plan;
         if read_only {
             initial_model = None;
             initial_modes.clear();
-        }
-        if snapshot {
-            mcp_servers.clear();
         }
 
         // DIAG: an ACP adapter spawn that fails with `os error 2` means the
