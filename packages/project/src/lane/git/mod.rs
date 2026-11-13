@@ -22,7 +22,9 @@ mod environment;
 pub use environment::GitEnvironmentFailure;
 pub mod discard;
 mod remote;
+mod removal;
 pub use remote::PushTarget;
+pub use removal::{LaneRemovalState, RemovalError};
 mod status;
 
 pub use backend::{Git, GitRepo, SystemGit};
@@ -284,18 +286,9 @@ pub(crate) fn add_lane(
     Ok(())
 }
 
-/// `git worktree remove [--force] <path>`. The main lane of a
-/// repo cannot be removed — git rejects that with a clear message
-/// and we pass the error through.
-///
-/// A prior manual deletion (another terminal, a different git client, a
-/// previously interrupted removal) leaves nothing at `path` for git to
-/// remove — it fails with its generic "fatal" exit code (128) whose
-/// message text depends on the git process' locale (see `run_git`'s
-/// `LC_ALL=C` — belt-and-suspenders, not a substitute for this check).
-/// The outcome the caller wants (no worktree at `path`) is already true
-/// in that case, so `already_removed` recognizes it directly against
-/// the filesystem rather than matching git's stderr wording.
+/// Remove a linked worktree; Git rejects removing the main checkout.
+/// A missing checkout is success only after a successful listing confirms
+/// its registration is gone too. An unusable repository must still fail.
 pub(crate) fn remove_lane(repo_root: &Path, path: &Path, force: bool) -> Result<(), GitError> {
     let mut args: Vec<String> = vec!["worktree".into(), "remove".into()];
     if force {
@@ -304,21 +297,23 @@ pub(crate) fn remove_lane(repo_root: &Path, path: &Path, force: bool) -> Result<
     args.push(path.to_string_lossy().into_owned());
     match run_git(repo_root, args) {
         Ok(_) => Ok(()),
-        Err(GitError::Exit { code, .. }) if already_removed(code, path) => Ok(()),
+        Err(error @ GitError::Exit { code, .. }) if already_removed(code, path) => {
+            if removal::registered(repo_root, path)? {
+                Err(error)
+            } else {
+                Ok(())
+            }
+        }
         Err(e) => Err(e),
     }
 }
 
-/// Whether a `git worktree remove` failure should be treated as success
-/// because the worktree is already gone. Checked directly against the
-/// filesystem — locale- and git-version-independent — rather than by
-/// matching git's exit message, which can be translated. `code == 128` is
-/// git's generic fatal-error class; requiring it (alongside the path
-/// check) keeps this narrow to that class rather than swallowing an
-/// unrelated failure (a different exit code) that happens to coincide
-/// with a missing path.
+/// Recognize a candidate already-removed checkout without matching stderr.
+/// The caller must also verify that Git no longer lists its registration.
+/// Permission errors and dangling symlinks do not prove a path is missing.
 fn already_removed(code: Option<i32>, path: &Path) -> bool {
-    code == Some(128) && !path.exists()
+    code == Some(128)
+        && std::fs::symlink_metadata(path).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
 }
 
 /// `git branch -D <branch>` — force-delete a branch. Used by the
@@ -330,12 +325,12 @@ pub(crate) fn delete_branch(repo_root: &Path, branch: &str) -> Result<(), GitErr
     run_git(repo_root, ["branch", "-D", branch]).map(|_| ())
 }
 
-/// `git worktree list --porcelain`. Returns one entry per linked
+/// `git worktree list --porcelain -z`. Returns one entry per linked
 /// lane (including the main one). The porcelain format is
-/// stable: blank-line-separated records, each `key value` lines.
+/// stable: NUL-separated fields, with an empty field between records.
 /// Unknown keys are ignored so future git versions don't break us.
 pub(crate) fn list_worktrees(repo_root: &Path) -> Result<Vec<GitWorktreeInfo>, GitError> {
-    let stdout = run_git(repo_root, ["worktree", "list", "--porcelain"])?;
+    let stdout = run_git(repo_root, ["worktree", "list", "--porcelain", "-z"])?;
     parse_worktree_list(&stdout)
 }
 
@@ -405,8 +400,8 @@ fn parse_worktree_list(text: &str) -> Result<Vec<GitWorktreeInfo>, GitError> {
         }
     };
 
-    for line in text.lines() {
-        let line = line.trim_end();
+    // NUL records preserve newlines and trailing spaces inside paths.
+    for line in text.split('\0') {
         if line.is_empty() {
             flush(&mut cur, &mut out);
             continue;

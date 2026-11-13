@@ -238,6 +238,23 @@ impl GitRepo for FakeHandle {
         };
         self.write(GitOp::DeleteBranch, call, |_| ())
     }
+    fn lane_removal_state(
+        &self,
+        path: &Path,
+    ) -> Result<super::super::LaneRemovalState, super::super::RemovalError> {
+        self.read(GitOp::LaneRemovalState, |repo| {
+            Ok(repo.removal_state_answer(path))
+        })
+        .map_err(Into::into)
+    }
+    fn remove_orphaned_lane(&self, path: &Path) -> Result<(), super::super::RemovalError> {
+        let call = GitCall::RemoveOrphanedLane {
+            repo: self.repo(),
+            path: path.to_path_buf(),
+        };
+        self.write(GitOp::RemoveOrphanedLane, call, |_| ())
+            .map_err(Into::into)
+    }
     fn merge(&self, source_branch: &str) -> Result<MergeOutcome, GitError> {
         let call = GitCall::Merge {
             repo: self.repo(),

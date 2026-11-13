@@ -6,6 +6,7 @@ mod git;
 mod git_command;
 mod git_discard;
 mod git_remote;
+mod git_removal;
 mod history;
 mod lane;
 mod paths;

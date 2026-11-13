@@ -33,6 +33,7 @@ pub struct FakeRepo {
     diff_range: Option<String>,
     show_at: HashMap<(String, PathBuf), Vec<u8>>,
     merge_outcome: Option<MergeOutcome>,
+    removal_states: HashMap<PathBuf, super::super::LaneRemovalState>,
 }
 
 impl FakeRepo {
@@ -58,11 +59,28 @@ impl FakeRepo {
             diff_range: None,
             show_at: HashMap::new(),
             merge_outcome: None,
+            removal_states: HashMap::new(),
         }
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn lane_removal_state(
+        mut self,
+        path: impl Into<PathBuf>,
+        state: super::super::LaneRemovalState,
+    ) -> Self {
+        self.removal_states.insert(path.into(), state);
+        self
+    }
+
+    pub(super) fn removal_state_answer(&self, path: &Path) -> super::super::LaneRemovalState {
+        self.removal_states
+            .get(path)
+            .copied()
+            .unwrap_or(super::super::LaneRemovalState::Registered)
     }
 
     /// The checked-out branch, which unset `tracking`, `default_branch`, and

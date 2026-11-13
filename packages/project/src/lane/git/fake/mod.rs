@@ -86,6 +86,10 @@ pub enum GitCall {
         path: PathBuf,
         force: bool,
     },
+    RemoveOrphanedLane {
+        repo: PathBuf,
+        path: PathBuf,
+    },
     DeleteBranch {
         repo: PathBuf,
         branch: String,
@@ -133,6 +137,8 @@ pub enum GitOp {
     HasLocalBranch,
     AddLane,
     RemoveLane,
+    LaneRemovalState,
+    RemoveOrphanedLane,
     DeleteBranch,
     Merge,
     MergeAbort,

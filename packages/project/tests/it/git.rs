@@ -216,6 +216,13 @@ fn remove_lane_succeeds_when_the_worktree_was_already_removed_elsewhere() {
 }
 
 #[test]
+fn removing_a_missing_lane_does_not_hide_an_invalid_repository() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("already-gone");
+    assert!(open(dir.path()).remove_lane(&missing, false).is_err());
+}
+
+#[test]
 fn add_worktree_with_existing_branch_fails_cleanly() {
     if !require_git() {
         return;

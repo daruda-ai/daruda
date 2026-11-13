@@ -197,6 +197,12 @@ impl ScreenshotScenario {
         use super::super::right_dock::library_shot::LibraryShot;
         use super::super::right_dock::quick_entry_shot::QuickEntryShot;
         match name {
+            "remove-worktree-orphan" => Some(Self::RemoveWorktreeOrphan {
+                delete_folder: false,
+            }),
+            "remove-worktree-orphan-delete" => Some(Self::RemoveWorktreeOrphan {
+                delete_folder: true,
+            }),
             "library-layout-skills" => Some(Self::LibraryLayout(LibraryShot::Skills)),
             "library-layout-skills-project-empty" => {
                 Some(Self::LibraryLayout(LibraryShot::SkillsProjectEmpty))

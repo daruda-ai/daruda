@@ -118,6 +118,9 @@ pub(crate) enum ScreenshotScenario {
     LeftDockGitGhMissing,
     LeftDockWorktreesPr,
     CreatePrModal,
+    RemoveWorktreeOrphan {
+        delete_folder: bool,
+    },
     PullRequestsList,
     PullRequestsDetail,
     PullRequestsMerge,
@@ -390,6 +393,14 @@ pub(crate) fn drive(
 ) {
     workspace.update(cx, |ws, cx| ws.suspend_persistence_for_shot(cx));
     match scenario {
+        ScreenshotScenario::RemoveWorktreeOrphan { delete_folder } => {
+            super::left_dock::projects::remove_modal::open_for_shot(
+                workspace,
+                delete_folder,
+                window,
+                cx,
+            );
+        }
         ScreenshotScenario::AgentChatDiff => {
             workspace.update(cx, |ws, cx| ws.open_agent_chat_diff_for_shot(window, cx));
         }

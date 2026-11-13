@@ -209,8 +209,8 @@ fn tracking_output_picks_the_checked_out_row_and_survives_having_none() {
 
 #[test]
 fn parse_worktree_list_covers_porcelain_shapes() {
-    let wts =
-        parse_worktree_list("worktree /repo\nHEAD abcd1234\nbranch refs/heads/main\n\n").unwrap();
+    let parse = |text: &str| parse_worktree_list(&text.replace('\n', "\0"));
+    let wts = parse("worktree /repo\nHEAD abcd1234\nbranch refs/heads/main\n\n").unwrap();
     assert_eq!(wts.len(), 1);
     assert_eq!(wts[0].path, PathBuf::from("/repo"));
     assert_eq!(wts[0].branch.as_deref(), Some("main"));
@@ -227,28 +227,25 @@ HEAD bbb
 branch refs/heads/feat/sidebar
 
 ";
-    let wts = parse_worktree_list(sample).unwrap();
+    let wts = parse(sample).unwrap();
     assert_eq!(wts.len(), 2);
     assert_eq!(wts[0].branch.as_deref(), Some("main"));
     assert_eq!(wts[1].branch.as_deref(), Some("feat/sidebar"));
 
-    let wts = parse_worktree_list("worktree /repo/wt-detached\nHEAD ccc\ndetached\n\n").unwrap();
+    let wts = parse("worktree /repo/wt-detached\nHEAD ccc\ndetached\n\n").unwrap();
     assert_eq!(wts.len(), 1);
     assert!(wts[0].branch.is_none());
 
-    let wts = parse_worktree_list("worktree /repo-bare\nHEAD ddd\nbare\n\n").unwrap();
+    let wts = parse("worktree /repo-bare\nHEAD ddd\nbare\n\n").unwrap();
     assert_eq!(wts.len(), 1);
     assert!(wts[0].bare);
 
     let sample = "worktree /repo\nHEAD abcd\nbranch refs/heads/main\nlocked locked-reason\nprunable stuff\n\n";
-    let wts = parse_worktree_list(sample).unwrap();
+    let wts = parse(sample).unwrap();
     assert_eq!(wts.len(), 1);
     assert_eq!(wts[0].path, PathBuf::from("/repo"));
 
-    assert!(matches!(
-        parse_worktree_list("HEAD abcd\n\n"),
-        Err(GitError::Parse(_))
-    ));
+    assert!(matches!(parse("HEAD abcd\n\n"), Err(GitError::Parse(_))));
 }
 
 #[test]

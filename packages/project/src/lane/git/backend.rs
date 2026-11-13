@@ -88,6 +88,14 @@ pub trait GitRepo: Send + Sync {
     /// `path` is the lane's absolute worktree directory: an already-removed
     /// lane is recognized by checking it on the filesystem.
     fn remove_lane(&self, path: &Path, force: bool) -> Result<(), GitError>;
+    /// Inspect registration and disk state without changing either.
+    fn lane_removal_state(
+        &self,
+        path: &Path,
+    ) -> Result<super::LaneRemovalState, super::RemovalError>;
+    /// Explicitly delete an unregistered leftover, rechecking repository and
+    /// filesystem boundaries immediately before deletion.
+    fn remove_orphaned_lane(&self, path: &Path) -> Result<(), super::RemovalError>;
     fn delete_branch(&self, branch: &str) -> Result<(), GitError>;
     fn merge(&self, source_branch: &str) -> Result<MergeOutcome, GitError>;
     fn merge_abort(&self) -> Result<(), GitError>;
@@ -221,6 +229,15 @@ impl GitRepo for SystemRepo {
     }
     fn remove_lane(&self, path: &Path, force: bool) -> Result<(), GitError> {
         super::remove_lane(&self.path, path, force)
+    }
+    fn lane_removal_state(
+        &self,
+        path: &Path,
+    ) -> Result<super::LaneRemovalState, super::RemovalError> {
+        super::removal::inspect(&self.path, path)
+    }
+    fn remove_orphaned_lane(&self, path: &Path) -> Result<(), super::RemovalError> {
+        super::removal::remove_orphan(&self.path, path)
     }
     fn delete_branch(&self, branch: &str) -> Result<(), GitError> {
         super::delete_branch(&self.path, branch)
