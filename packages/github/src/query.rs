@@ -1,5 +1,6 @@
 //! The GraphQL request that finds the pull requests of several branches at
-//! once, and the parser for its answer.
+//! once, the search that lists open pull requests across repositories, and
+//! the parsers for their answers.
 //!
 //! One aliased field per branch (`b0`, `b1`, ...) keeps the request count per
 //! repository, not per lane. Branch names travel as variables, never inside
@@ -11,8 +12,8 @@ use serde::Deserialize;
 
 use crate::checks::{check_run_status, rollup_from_state, status_context_status, summarize};
 use crate::{
-    CheckKind, CheckRollup, CheckRun, GhError, PrState, PrSummary, ReviewComment, ReviewDecision,
-    ReviewThread, ReviewThreads,
+    CheckKind, CheckRollup, CheckRun, GhError, PrFilter, PrListItem, PrState, PrSummary, RepoId,
+    ReviewComment, ReviewDecision, ReviewThread, ReviewThreads,
 };
 
 /// PRs fetched per branch: enough to find an open one among old closed ones.
@@ -22,6 +23,8 @@ use crate::{
 const PRS_PER_BRANCH: u32 = 5;
 /// Checks fetched per PR; beyond this GitHub's own rollup state is used.
 const CHECKS_PER_PR: u32 = 100;
+/// Pull requests one search answers; more are left out of the list.
+const SEARCH_RESULTS: u32 = 50;
 
 /// What [`crate::Gh::prs_for_branches`] answers.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -45,8 +48,15 @@ pub(crate) fn prs_for_branches_query(count: usize) -> String {
     }
     format!(
         "query({declarations}) {{ repository(owner: $owner, name: $name) {{ \
-         defaultBranchRef {{ name }}{fields} }} }} \
-         fragment pr on PullRequest {{ number url title state isDraft headRefName \
+         defaultBranchRef {{ name }}{fields} }} }} {}",
+        pr_fragment()
+    )
+}
+
+/// The PR fields [`PrNode`] reads, as fragment `pr`.
+fn pr_fragment() -> String {
+    format!(
+        "fragment pr on PullRequest {{ number url title state isDraft headRefName \
          isCrossRepository reviewDecision updatedAt statusCheckRollup {{ state \
          contexts(first: {CHECKS_PER_PR}) {{ pageInfo {{ hasNextPage }} nodes {{ __typename \
          ... on CheckRun {{ name status conclusion detailsUrl startedAt \
@@ -60,15 +70,9 @@ pub(crate) fn prs_for_branches_query(count: usize) -> String {
 pub(crate) fn parse_prs_for_branches(json: &str, branches: &[String]) -> Result<RepoPrs, GhError> {
     let response: Response = serde_json::from_str(json).map_err(parse_error)?;
     let Some(mut repository) = response.data.and_then(|d| d.repository) else {
-        let messages: Vec<String> = response
-            .errors
-            .unwrap_or_default()
-            .into_iter()
-            .map(|e| e.message)
-            .collect();
         return Err(GhError::Parse(format!(
             "no repository in the answer: {}",
-            messages.join("; ")
+            api_messages(response.errors)
         )));
     };
     let default_branch = repository
@@ -95,6 +99,65 @@ pub(crate) fn parse_prs_for_branches(json: &str, branches: &[String]) -> Result<
     })
 }
 
+/// The search text for open pull requests of `repos` matching `filter`.
+/// Archived repositories take no new work, so their PRs are left out.
+pub(crate) fn search_string(repos: &[RepoId], filter: PrFilter) -> String {
+    let mut text = String::from("is:pr is:open archived:false");
+    for repo in repos {
+        text.push_str(&format!(" repo:{}/{}", repo.owner(), repo.name()));
+    }
+    match filter {
+        PrFilter::Mine => text.push_str(" author:@me"),
+        PrFilter::ReviewRequested => text.push_str(" review-requested:@me"),
+        PrFilter::AllOpen => {}
+    }
+    text
+}
+
+/// The search for open pull requests, bound to `$q` ([`search_string`]).
+pub(crate) fn search_prs_query() -> String {
+    format!(
+        "query($q: String!) {{ search(query: $q, type: ISSUE, first: {SEARCH_RESULTS}) {{ \
+         nodes {{ ... on PullRequest {{ ...pr repository {{ nameWithOwner }} \
+         author {{ login }} baseRefName comments {{ totalCount }} }} }} }} }} {}",
+        pr_fragment()
+    )
+}
+
+/// Parse the answer to [`search_prs_query`] asked of `host`.
+pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<Vec<PrListItem>, GhError> {
+    let response: SearchResponse = serde_json::from_str(json).map_err(parse_error)?;
+    let Some(search) = response.data.and_then(|d| d.search) else {
+        return Err(GhError::Parse(format!(
+            "no search in the answer: {}",
+            api_messages(response.errors)
+        )));
+    };
+    search
+        .nodes
+        .into_iter()
+        .map(|node| {
+            let (owner, name) =
+                node.repository
+                    .name_with_owner
+                    .split_once('/')
+                    .ok_or_else(|| {
+                        GhError::Parse(format!(
+                            "repository {} is not owner/name",
+                            node.repository.name_with_owner
+                        ))
+                    })?;
+            Ok(PrListItem {
+                repo: RepoId::new(host, owner, name),
+                author: node.author.map(|a| a.login),
+                base_branch: node.base_ref_name,
+                comments: node.comments.total_count,
+                pr: node.pr.into_summary()?,
+            })
+        })
+        .collect()
+}
+
 /// Unresolved review threads of one pull request, bound to `$owner`,
 /// `$name` and `$number`.
 pub(crate) const REVIEW_THREADS_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
@@ -114,15 +177,9 @@ pub(crate) fn parse_review_threads(json: &str) -> Result<ReviewThreads, GhError>
         .and_then(|r| r.pull_request)
         .map(|pr| pr.review_threads)
     else {
-        let messages: Vec<String> = response
-            .errors
-            .unwrap_or_default()
-            .into_iter()
-            .map(|e| e.message)
-            .collect();
         return Err(GhError::Parse(format!(
             "no pull request in the answer: {}",
-            messages.join("; ")
+            api_messages(response.errors)
         )));
     };
     let threads = connection
@@ -223,6 +280,54 @@ struct Author {
 
 fn parse_error(error: serde_json::Error) -> GhError {
     GhError::Parse(error.to_string())
+}
+
+fn api_messages(errors: Option<Vec<ApiError>>) -> String {
+    let messages: Vec<String> = errors
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| e.message)
+        .collect();
+    messages.join("; ")
+}
+
+#[derive(Deserialize)]
+struct SearchResponse {
+    data: Option<SearchData>,
+    errors: Option<Vec<ApiError>>,
+}
+
+#[derive(Deserialize)]
+struct SearchData {
+    search: Option<SearchConnection>,
+}
+
+#[derive(Deserialize)]
+struct SearchConnection {
+    nodes: Vec<SearchNode>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchNode {
+    #[serde(flatten)]
+    pr: PrNode,
+    repository: NameWithOwner,
+    author: Option<Author>,
+    base_ref_name: String,
+    comments: TotalCount,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NameWithOwner {
+    name_with_owner: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TotalCount {
+    total_count: u32,
 }
 
 #[derive(Deserialize)]

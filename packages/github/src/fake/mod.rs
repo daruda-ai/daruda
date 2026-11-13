@@ -5,6 +5,7 @@
 //! |---|---|
 //! | `auth` | `Ready` |
 //! | `prs_for_branches` | default branch `main`, no PRs for any branch |
+//! | `search_prs` | none |
 //! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL |
 //! | `failed_log` | exit 1, as for a run that has no failed log |
 //! | `review_threads` | none |
@@ -15,16 +16,38 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use crate::availability::GhAuth;
 use crate::backend::Gh;
 use crate::query::RepoPrs;
-use crate::{ActionsJob, CheckRollup, GhError, NewPr, PrState, PrSummary, RepoId, ReviewThreads};
+use crate::{
+    ActionsJob, CheckRollup, GhError, NewPr, PrFilter, PrListItem, PrState, PrSummary, RepoId,
+    ReviewThreads,
+};
 
 /// A request the code under test made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GhCall {
-    Auth { host: String },
-    PrsForBranches { repo: RepoId, branches: Vec<String> },
-    CreatePr { repo: RepoId, new: NewPr },
-    FailedLog { repo: RepoId, job: ActionsJob },
-    ReviewThreads { repo: RepoId, number: u64 },
+    Auth {
+        host: String,
+    },
+    PrsForBranches {
+        repo: RepoId,
+        branches: Vec<String>,
+    },
+    SearchPrs {
+        host: String,
+        repos: Vec<RepoId>,
+        filter: PrFilter,
+    },
+    CreatePr {
+        repo: RepoId,
+        new: NewPr,
+    },
+    FailedLog {
+        repo: RepoId,
+        job: ActionsJob,
+    },
+    ReviewThreads {
+        repo: RepoId,
+        number: u64,
+    },
 }
 
 /// One [`Gh`] method, for aiming failures.
@@ -32,6 +55,7 @@ pub enum GhCall {
 pub enum GhOp {
     Auth,
     PrsForBranches,
+    SearchPrs,
     CreatePr,
     FailedLog,
     ReviewThreads,
@@ -71,6 +95,7 @@ struct FakeState {
     auth: HashMap<String, GhAuth>,
     default_branches: HashMap<RepoId, String>,
     prs: HashMap<RepoId, Vec<PrSummary>>,
+    lists: HashMap<PrFilter, Vec<PrListItem>>,
     logs: HashMap<(u64, u64), String>,
     threads: HashMap<u64, ReviewThreads>,
     failures: HashMap<GhOp, GhFailure>,
@@ -96,6 +121,12 @@ impl FakeGh {
     /// whose head is that branch.
     pub fn set_prs(&self, repo: &RepoId, prs: Vec<PrSummary>) {
         self.lock().prs.insert(repo.clone(), prs);
+    }
+
+    /// What `search_prs` with `filter` finds; each search answers those of
+    /// its repositories.
+    pub fn set_pr_list(&self, filter: PrFilter, items: Vec<PrListItem>) {
+        self.lock().lists.insert(filter, items);
     }
 
     /// What `failed_log` prints for `job`.
@@ -141,6 +172,7 @@ impl GhCall {
         match self {
             Self::Auth { .. } => GhOp::Auth,
             Self::PrsForBranches { .. } => GhOp::PrsForBranches,
+            Self::SearchPrs { .. } => GhOp::SearchPrs,
             Self::CreatePr { .. } => GhOp::CreatePr,
             Self::FailedLog { .. } => GhOp::FailedLog,
             Self::ReviewThreads { .. } => GhOp::ReviewThreads,
@@ -192,6 +224,33 @@ impl Gh for FakeGh {
             ),
             by_branch,
         })
+    }
+
+    fn search_prs(
+        &self,
+        host: &str,
+        repos: &[RepoId],
+        filter: PrFilter,
+    ) -> Result<Vec<PrListItem>, GhError> {
+        let mut state = self.lock();
+        state.calls.push(GhCall::SearchPrs {
+            host: host.to_owned(),
+            repos: repos.to_vec(),
+            filter,
+        });
+        if let Some(failure) = state.failures.get(&GhOp::SearchPrs) {
+            return Err(failure.to_error());
+        }
+        Ok(state
+            .lists
+            .get(&filter)
+            .into_iter()
+            .flatten()
+            .filter(|item| {
+                item.repo.host().eq_ignore_ascii_case(host) && repos.contains(&item.repo)
+            })
+            .cloned()
+            .collect())
     }
 
     fn failed_log(&self, repo: &RepoId, job: ActionsJob) -> Result<String, GhError> {

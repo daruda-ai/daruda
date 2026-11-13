@@ -23,6 +23,7 @@ pub use backend::Gh;
 pub use error::{FailureKind, GhError};
 pub use model::{
     ActionsJob, CheckKind, CheckRollup, CheckRun, CheckStatus, FailedCheck, GITHUB_HOST, NewPr,
-    PrState, PrSummary, RepoId, ReviewComment, ReviewDecision, ReviewThread, ReviewThreads,
+    PrFilter, PrListItem, PrState, PrSummary, RepoId, ReviewComment, ReviewDecision, ReviewThread,
+    ReviewThreads,
 };
 pub use system::SystemGh;

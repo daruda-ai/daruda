@@ -77,3 +77,32 @@ fn an_injected_failure_lasts_until_cleared() {
     assert!(gh.auth("github.com").is_ok());
     assert_eq!(gh.count(GhOp::Auth), 4);
 }
+
+#[test]
+fn a_scripted_list_answers_only_the_searched_repositories() {
+    let other = RepoId::new("github.com", "o", "other");
+    let item = |repo: &RepoId, number| PrListItem {
+        repo: repo.clone(),
+        pr: pr(number, "a"),
+        author: Some("me".into()),
+        base_branch: "main".into(),
+        comments: 0,
+    };
+    let gh = FakeGh::new();
+    gh.set_pr_list(PrFilter::Mine, vec![item(&repo(), 1), item(&other, 2)]);
+    let found = gh
+        .search_prs("github.com", &[repo()], PrFilter::Mine)
+        .unwrap();
+    assert_eq!(found, vec![item(&repo(), 1)]);
+    let unscripted = gh.search_prs("github.com", &[repo()], PrFilter::AllOpen);
+    assert!(unscripted.unwrap().is_empty());
+    assert_eq!(gh.count(GhOp::SearchPrs), 2);
+    assert_eq!(
+        gh.calls()[0],
+        GhCall::SearchPrs {
+            host: "github.com".into(),
+            repos: vec![repo()],
+            filter: PrFilter::Mine,
+        }
+    );
+}

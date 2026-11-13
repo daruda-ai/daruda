@@ -4,9 +4,15 @@
 //! rollup from `kubernetes/kubernetes` in the same answer shape.
 //! `prs_push_and_pull_request.json` is `serde-rs/serde` #3113, a same-repo
 //! PR whose workflow runs on both `push` and `pull_request`.
+//! `search_prs.json` answers `search_prs_query` (with `first: 3`, trimmed to
+//! two nodes) for `is:pr is:open archived:false repo:cli/cli`, 2026-11-13:
+//! a fork PR and a same-repository draft.
 
-use crate::query::{parse_prs_for_branches, prs_for_branches_query};
-use crate::{CheckRollup, GhError, PrState, ReviewDecision};
+use crate::query::{
+    parse_prs_for_branches, parse_search_prs, prs_for_branches_query, search_prs_query,
+    search_string,
+};
+use crate::{CheckRollup, GhError, PrFilter, PrState, RepoId, ReviewDecision};
 
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -142,4 +148,149 @@ fn the_query_binds_one_variable_per_branch() {
     assert!(query.contains("$b0: String!, $b1: String!"));
     assert!(query.contains("b1: pullRequests(headRefName: $b1"));
     assert!(!query.contains("$b2"));
+}
+
+#[test]
+fn a_real_search_answer_parses_fork_and_same_repository_prs() {
+    let items = parse_search_prs(&fixture("search_prs.json"), "github.com").unwrap();
+    let cli = RepoId::new("github.com", "cli", "cli");
+    assert_eq!(items.len(), 2);
+
+    let fork = &items[0];
+    assert_eq!(fork.repo, cli);
+    assert_eq!(fork.pr.number, 15003);
+    assert!(fork.pr.cross_repo);
+    assert_eq!(fork.pr.state, PrState::Open);
+    assert_eq!(fork.pr.checks, CheckRollup::Passing);
+    assert_eq!(fork.author.as_deref(), Some("pad895"));
+    assert_eq!(fork.base_branch, "trunk");
+    assert_eq!(fork.comments, 1);
+
+    let draft = &items[1];
+    assert_eq!(draft.repo, cli);
+    assert_eq!((draft.pr.number, draft.pr.state), (14927, PrState::Draft));
+    assert!(!draft.pr.cross_repo);
+    assert_eq!(draft.pr.checks, CheckRollup::Failing { failed: Some(1) });
+    assert_eq!(draft.pr.failed[0].name, "build (windows-latest)");
+    assert_eq!(
+        draft.base_branch,
+        "williammartin-multiaccount-draft-07-explain"
+    );
+    assert_eq!(draft.author.as_deref(), Some("williammartin"));
+}
+
+/// One search node; `repo`, `author` and `rollup` are raw JSON values.
+fn search_answer(repo: &str, author: &str, rollup: &str) -> String {
+    format!(
+        r#"{{"data":{{"search":{{"nodes":[{{"number":7,"url":"u","title":"t","state":"OPEN",
+        "isDraft":false,"headRefName":"h","isCrossRepository":false,"reviewDecision":null,
+        "updatedAt":"2026-01-01T00:00:00Z","statusCheckRollup":{rollup},
+        "repository":{{"nameWithOwner":{repo}}},"author":{author},"baseRefName":"main",
+        "comments":{{"totalCount":3}}}}]}}}}}}"#
+    )
+}
+
+#[test]
+fn search_nodes_parse_into_list_items() {
+    let truncated = r#"{"state":"PENDING","contexts":{"pageInfo":{"hasNextPage":true},
+        "nodes":[{"__typename":"CheckRun","name":"x","status":"COMPLETED",
+        "conclusion":"SUCCESS","detailsUrl":null,"startedAt":null}]}}"#;
+    let cases = [
+        (
+            "mixed-case repository and host are lowercased",
+            search_answer(r#""Octo-Org/Hello-World""#, r#"{"login":"Me"}"#, "null"),
+            "GHE.Corp",
+            RepoId::new("ghe.corp", "octo-org", "hello-world"),
+            Some("Me"),
+            CheckRollup::None,
+        ),
+        (
+            "a truncated check list defers to GitHub's state",
+            search_answer(r#""o/r""#, r#"{"login":"a"}"#, truncated),
+            "github.com",
+            RepoId::new("github.com", "o", "r"),
+            Some("a"),
+            CheckRollup::Pending,
+        ),
+        (
+            "a deleted author is none",
+            search_answer(r#""o/r""#, "null", "null"),
+            "github.com",
+            RepoId::new("github.com", "o", "r"),
+            None,
+            CheckRollup::None,
+        ),
+    ];
+    for (label, json, host, repo, author, checks) in cases {
+        let items = parse_search_prs(&json, host).unwrap_or_else(|e| panic!("{label}: {e}"));
+        let item = &items[0];
+        assert_eq!(item.repo, repo, "{label}");
+        assert_eq!(item.author.as_deref(), author, "{label}");
+        assert_eq!(item.pr.checks, checks, "{label}");
+        assert_eq!(
+            (item.comments, item.base_branch.as_str()),
+            (3, "main"),
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn a_bad_search_answer_is_a_parse_error() {
+    let cases = [
+        (
+            "an error answer carries GitHub's message",
+            r#"{"data":null,"errors":[{"message":"Something went wrong"}]}"#.to_owned(),
+            "Something went wrong",
+        ),
+        (
+            "a repository that is not owner/name",
+            search_answer(r#""noslash""#, "null", "null"),
+            "noslash",
+        ),
+    ];
+    for (label, json, expected) in cases {
+        let error = parse_search_prs(&json, "github.com").unwrap_err();
+        assert!(
+            matches!(&error, GhError::Parse(m) if m.contains(expected)),
+            "{label}: {error}"
+        );
+    }
+}
+
+#[test]
+fn the_search_text_names_every_repository_and_the_filter() {
+    let repos = [
+        RepoId::new("github.com", "a", "b"),
+        RepoId::new("github.com", "C", "D"),
+    ];
+    let base = "is:pr is:open archived:false repo:a/b repo:c/d";
+    let cases = [
+        (PrFilter::Mine, format!("{base} author:@me")),
+        (
+            PrFilter::ReviewRequested,
+            format!("{base} review-requested:@me"),
+        ),
+        (PrFilter::AllOpen, base.to_owned()),
+    ];
+    for (filter, expected) in cases {
+        assert_eq!(search_string(&repos, filter), expected, "{filter:?}");
+    }
+}
+
+#[test]
+fn the_search_query_names_every_field_the_parser_reads() {
+    let query = search_prs_query();
+    for field in [
+        "search(query: $q, type: ISSUE",
+        "... on PullRequest",
+        "...pr",
+        "fragment pr on PullRequest",
+        "nameWithOwner",
+        "author { login }",
+        "baseRefName",
+        "comments { totalCount }",
+    ] {
+        assert!(query.contains(field), "{field}");
+    }
 }

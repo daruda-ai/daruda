@@ -197,6 +197,28 @@ pub struct PrSummary {
     pub updated_at: String,
 }
 
+/// Which open pull requests a list search asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrFilter {
+    /// Authored by the logged-in user.
+    Mine,
+    /// Waiting on the logged-in user's review.
+    ReviewRequested,
+    AllOpen,
+}
+
+/// One open pull request in a list search, with the repository it is in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrListItem {
+    pub repo: RepoId,
+    pub pr: PrSummary,
+    /// `None` for a deleted account.
+    pub author: Option<String>,
+    pub base_branch: String,
+    /// Conversation comments, not review comments on the diff.
+    pub comments: u32,
+}
+
 impl PrSummary {
     /// The PR's page, if `url` is one a browser may be handed: whatever host
     /// answered, a `file:` or script URL must not reach the system opener.
