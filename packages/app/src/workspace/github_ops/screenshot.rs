@@ -22,6 +22,9 @@ use crate::workspace::Workspace;
 use crate::workspace::pages::Page;
 use crate::workspace::pages::pull_requests::detail::Load;
 
+/// An Enterprise host the captures' `gh` is not logged in to.
+const CORP_HOST: &str = "ghe.corp";
+
 fn repo() -> RepoId {
     RepoId::new(GITHUB_HOST, "daruda", "daruda")
 }
@@ -190,10 +193,11 @@ fn list_item(summary: PrSummary, author: &str, comments: u32) -> PrListItem {
 }
 
 impl Workspace {
-    /// The Pull requests page over two repositories: two pull requests linked
-    /// to worktrees, a draft without one, a fork PR with its review worktree,
-    /// and a repository with nothing open. Answers the `gh` it installs, and
-    /// the row of the active worktree's failing pull request.
+    /// The Pull requests page over three repositories: two pull requests
+    /// linked to worktrees, a draft without one, a fork PR with its review
+    /// worktree, a repository with nothing open, and one on an Enterprise
+    /// host `gh` is not logged in to. Answers the `gh` it installs, and the
+    /// row of the active worktree's failing pull request.
     pub(in crate::workspace) fn seed_pr_page_for_shot(
         &mut self,
         cx: &mut Context<Self>,
@@ -221,11 +225,24 @@ impl Workspace {
             lane: notes.lanes[0].id,
         };
         self.projects.push(notes);
+        let mut corp = crate::project::Project::bootstrap_placeholder(
+            self.next_project_id,
+            self.data_dir.clone(),
+        );
+        self.next_project_id += 1;
+        corp.name = "internal-tool".into();
+        corp.tab_order = self.projects.len() as u32;
+        let corp_lane = LaneRef {
+            project: corp.id,
+            lane: corp.lanes[0].id,
+        };
+        self.projects.push(corp);
 
         let active = self.active;
         self.seed_push_target_for_shot(active, "sidebar-study");
         self.seed_push_target_for_shot(fix, "fix-scroll");
         self.seed_push_to_for_shot(notes_lane, "git@github.com:woo/obsidian-sync.git", "main");
+        self.seed_push_to_for_shot(corp_lane, "git@ghe.corp:corp/internal-tool.git", "main");
         self.lane_scoped_mut(review).git.tracking = Some(GitTracking {
             branch: Some("pr-478".into()),
             upstream: None,
@@ -310,6 +327,7 @@ impl Workspace {
         }
         let gh = FakeGh::new();
         gh.set_auth(GITHUB_HOST, GhAuth::Ready);
+        gh.set_auth(CORP_HOST, GhAuth::LoggedOut);
         gh.set_prs(&repo(), vec![sidebar.clone(), scroll.clone()]);
         let sidebar_row = list_item(sidebar.clone(), "comelf", 3);
         gh.set_pr_list(
@@ -324,6 +342,7 @@ impl Workspace {
         );
         GhHost::set_global(Arc::new(gh.clone()), cx);
         PrPoller::seed_for_shot(GITHUB_HOST, GhAvailability::Ready, cx);
+        PrPoller::seed_for_shot(CORP_HOST, GhAvailability::LoggedOut, cx);
         self.show_page(Page::PullRequests, cx);
         cx.notify();
         (gh, sidebar_row)
