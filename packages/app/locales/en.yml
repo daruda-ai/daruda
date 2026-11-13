@@ -1133,7 +1133,10 @@ pull_requests:
   gh_logged_out: "Run “gh auth login --hostname %{host}” in a terminal to list this repository’s pull requests."
   rate_limited: "GitHub’s rate limit was reached; the list is asked again later."
   unreachable: "GitHub could not be reached; the list is asked again shortly."
-  search_failed: "The last search failed; it is tried again shortly."
+  # A group whose last search failed; its last rows stay, dimmed.
+  search_failed: "Couldn’t load this repository’s pull requests."
+  # Searches the window's hosts again now.
+  retry: "Try again"
   empty_no_repos: "No worktree in this window pushes to a GitHub repository."
   empty_disabled: "GitHub pull requests are turned off in Settings."
   state_open: "Open"

@@ -167,12 +167,6 @@ fn a_transient_failure_backs_off_and_grows() {
         sent(&mut schedule, w(), now + first - Duration::from_secs(1)),
         0
     );
-    schedule.refresh(key(PrFilter::Mine));
-    assert_eq!(
-        sent(&mut schedule, w(), now + first - Duration::from_secs(1)),
-        0,
-        "a refresh does not cut a backoff short"
-    );
     let retry = now + first;
     assert_eq!(sent(&mut schedule, w(), retry), 1);
     schedule.finish(
@@ -185,6 +179,38 @@ fn a_transient_failure_backs_off_and_grows() {
     assert!(second > first);
     assert_eq!(sent(&mut schedule, w(), retry + first), 0, "the pause grew");
     assert_eq!(sent(&mut schedule, w(), retry + second), 1);
+}
+
+#[test]
+fn a_refresh_asks_once_through_a_searchs_pause() {
+    let now = Instant::now();
+    let mut schedule = ListSchedule::default();
+    let w = || wanted(PrFilter::Mine, &["r"]);
+    sent(&mut schedule, w(), now);
+    schedule.finish(&key(PrFilter::Mine), Err(FailureKind::Transient), true, now);
+    let paused = now + Duration::from_secs(1);
+    assert_eq!(sent(&mut schedule, w(), paused), 0, "paused");
+
+    schedule.refresh(key(PrFilter::Mine));
+    assert_eq!(sent(&mut schedule, w(), paused), 1, "Try again asks now");
+    schedule.finish(
+        &key(PrFilter::Mine),
+        Err(FailureKind::Transient),
+        true,
+        paused,
+    );
+    let second = backoff_delay(2, BackoffReason::Transient);
+    assert_eq!(
+        sent(&mut schedule, w(), paused + second - Duration::from_secs(1)),
+        0,
+        "a failed retry grows the pause the cadence keeps"
+    );
+    assert_eq!(sent(&mut schedule, w(), paused + second), 1);
+
+    // A paused host is not asked, refresh or not.
+    schedule.refresh(key(PrFilter::Mine));
+    let due = schedule.begin(w(), |_| false, paused + second);
+    assert!(due.is_empty());
 }
 
 #[test]

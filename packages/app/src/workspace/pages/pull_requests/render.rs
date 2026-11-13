@@ -1,7 +1,9 @@
 //! The Pull requests page's header and body, drawn from its staged snapshot.
 
 use daruda_github::ReviewDecision;
-use gpui::{AnyElement, App, Div, FontWeight, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{
+    AnyElement, App, Div, FontWeight, Hsla, IntoElement, SharedString, div, prelude::*, px,
+};
 
 use super::PrPageSnapshot;
 use super::list::{
@@ -132,9 +134,13 @@ fn render_group(
         } => {
             let mut body: Vec<AnyElement> = Vec::new();
             if let Some(trouble) = trouble {
-                body.push(note(trouble_label(*trouble), cx).into_any_element());
+                body.push(trouble_note(group, *trouble, snap, cx));
             }
-            body.extend(rows.iter().map(|row| render_row(row, snap, layout, cx)));
+            let stale = trouble.is_some();
+            body.extend(
+                rows.iter()
+                    .map(|row| render_row(row, stale, snap, layout, cx)),
+            );
             if rows.is_empty() && trouble.is_none() {
                 body.push(note(s::empty_repo(), cx).into_any_element());
             }
@@ -170,6 +176,30 @@ fn trouble_label(trouble: Trouble) -> String {
     }
 }
 
+/// Why the rows may be out of date, with Try again when a search can be
+/// sent now.
+fn trouble_note(group: &PrGroup, trouble: Trouble, snap: &PrPageSnapshot, cx: &App) -> AnyElement {
+    let line = note(trouble_label(trouble), cx);
+    if !trouble.retryable() {
+        return line.into_any_element();
+    }
+    let workspace = snap.workspace.clone();
+    let selector = format!("pr-retry-{}", group.repo.qualified());
+    let retry = button_compact(SharedString::from(selector.clone()), s::retry())
+        .debug_selector(move || selector.clone())
+        .on_click(move |_, _, cx| {
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
+            }
+        });
+    line.flex()
+        .flex_wrap()
+        .items_center()
+        .gap(px(theme::GAP_LG))
+        .child(retry)
+        .into_any_element()
+}
+
 /// Why the host cannot be asked, with the Git panel's recheck beside it.
 fn blocked_note(group: &PrGroup, blocked: Blocked, snap: &PrPageSnapshot, cx: &App) -> AnyElement {
     let host = group.repo.host().to_owned();
@@ -196,14 +226,18 @@ fn blocked_note(group: &PrGroup, blocked: Blocked, snap: &PrPageSnapshot, cx: &A
         .into_any_element()
 }
 
+/// One pull request. A `stale` row is the last answer of a host that could
+/// not be asked since: every colour steps down to the subtle tier.
 fn render_row(
     row: &PrRow,
+    stale: bool,
     snap: &PrPageSnapshot,
     layout: &ListTable<PrColumn>,
     cx: &App,
 ) -> AnyElement {
     let t = theme::current(cx);
-    let glyph = tone_glyph(row.tone, cx);
+    let ink = |color: Hsla| if stale { t.text_subtle } else { color };
+    let glyph = tone_glyph(row.tone, cx).map(|(path, color)| (path, ink(color)));
     layout
         .row(|column, cell| match column {
             PrColumn::Tone => cell
@@ -217,7 +251,7 @@ fn render_row(
                     )
                 })
                 .into_any_element(),
-            PrColumn::Title => title(row, cell, cx),
+            PrColumn::Title => title(row, stale, cell, cx),
             PrColumn::Checks => cell
                 .when_some(glyph, |cell, (_, color)| cell.text_color(color))
                 .children(checks_label(row.checks))
@@ -229,7 +263,8 @@ fn render_row(
                         ReviewDecision::ChangesRequested => t.banner_warning_text,
                         ReviewDecision::ReviewRequired => t.text_subtle,
                     };
-                    cell.text_color(color).child(list::review_label(review))
+                    cell.text_color(ink(color))
+                        .child(list::review_label(review))
                 })
                 .into_any_element(),
             PrColumn::Comments => cell
@@ -240,7 +275,7 @@ fn render_row(
                 .text_color(if row.comments == 0 {
                     t.text_subtle
                 } else {
-                    t.text_muted
+                    ink(t.text_muted)
                 })
                 .tooltip(tooltip::text(s::comments(row.comments)))
                 .child(icons::icon(icons::SESSION).with_size(px(theme::CONTROL_ICON_SIZE)))
@@ -328,9 +363,10 @@ fn linked_lane(row: &PrRow, lane: &RowLane, snap: &PrPageSnapshot) -> AnyElement
     .into_any_element()
 }
 
-fn title(row: &PrRow, cell: Div, cx: &App) -> AnyElement {
+fn title(row: &PrRow, stale: bool, cell: Div, cx: &App) -> AnyElement {
     let t = theme::current(cx);
-    let chip = |label: String| Badge::new(label).text_color(t.text_muted);
+    let ink = |color: Hsla| if stale { t.text_subtle } else { color };
+    let chip = |label: String| Badge::new(label).text_color(ink(t.text_muted));
     cell.flex()
         .flex_col()
         .child(
@@ -343,7 +379,7 @@ fn title(row: &PrRow, cell: Div, cx: &App) -> AnyElement {
                     div()
                         .min_w_0()
                         .truncate()
-                        .text_color(t.text_body)
+                        .text_color(ink(t.text_body))
                         .child(row.title.clone()),
                 )
                 .when(row.draft, |line| line.child(chip(git_s::pr_state_draft())))

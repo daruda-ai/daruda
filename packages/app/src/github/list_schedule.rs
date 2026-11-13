@@ -59,15 +59,21 @@ struct ListState {
 
 impl ListState {
     fn is_due(&self, repos: &BTreeSet<RepoId>, now: Instant) -> bool {
-        if matches!(self.ask, Ask::InFlight(_)) || self.backoff.is_some_and(|b| now < b.until) {
+        match self.ask {
+            Ask::InFlight(_) => return false,
+            // A person asked: one request, which the pause after this
+            // search's own failures exists to space out, not to refuse.
+            // A paused host is still held off by `takes_requests`.
+            Ask::Requested => return true,
+            Ask::Idle => {}
+        }
+        if self.backoff.is_some_and(|b| now < b.until) {
             return false;
         }
         let Some(answer) = &self.answer else {
             return true;
         };
-        self.ask == Ask::Requested
-            || !repos.is_subset(&answer.repos)
-            || now.saturating_duration_since(answer.at) >= LIST_INTERVAL
+        !repos.is_subset(&answer.repos) || now.saturating_duration_since(answer.at) >= LIST_INTERVAL
     }
 }
 

@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
 use daruda_github::availability::{BackoffReason, GhAvailability};
-use daruda_github::fake::{FakeGh, GhCall, GhOp};
+use daruda_github::fake::{FakeGh, GhCall, GhFailure, GhOp};
 use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, PrSummary, RepoId};
 use daruda_store::project::LaneRef;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
@@ -250,6 +250,18 @@ fn a_group_says_what_its_host_allows() {
 }
 
 #[test]
+fn only_a_failed_search_offers_to_search_again() {
+    let cases = [
+        (Trouble::SearchFailed, true),
+        (Trouble::RateLimited, false),
+        (Trouble::Unreachable, false),
+    ];
+    for (trouble, retryable) in cases {
+        assert_eq!(trouble.retryable(), retryable, "{trouble:?}");
+    }
+}
+
+#[test]
 fn a_group_lists_only_its_own_repository() {
     let other = RepoId::new(HOST, "o", "other");
     let mut elsewhere = item(9, false);
@@ -445,6 +457,44 @@ fn clicking_a_rows_lane_goes_to_it(cx: &mut TestAppContext) {
         assert_eq!(ws.active, linked);
         assert_eq!(ws.active_page(), None, "the lane is what is shown now");
     });
+}
+
+#[gpui::test]
+fn a_failed_search_keeps_its_rows_and_try_again_searches_now(cx: &mut TestAppContext) {
+    let (f, gh, id) = linked_window(cx);
+    show_page(&f, cx);
+    gh.fail(
+        GhOp::SearchPrs,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "HTTP 502".into(),
+        },
+    );
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
+    cx.run_until_parked();
+    let list = f.ws.read_with(cx, |ws, cx| ws.pr_page_list(cx));
+    assert_eq!(
+        shape(&list),
+        Shape::Listed(vec![7, 8], Some(Trouble::SearchFailed)),
+        "the last rows stay under the failure"
+    );
+
+    gh.clear_failure(GhOp::SearchPrs);
+    gh.set_pr_list(PrFilter::Mine, vec![item(7, false)]);
+    let searched = gh.count(GhOp::SearchPrs);
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    let retry = vcx
+        .debug_bounds("pr-retry-github.com/o/r")
+        .expect("the failed group offers Try again");
+    vcx.simulate_click(retry.center(), Modifiers::default());
+    vcx.run_until_parked();
+    assert_eq!(gh.count(GhOp::SearchPrs), searched + 1);
+    assert_eq!(
+        rows(&f, &mut vcx),
+        vec![("github.com/o/r#7".to_owned(), Some(id))]
+    );
 }
 
 #[gpui::test]

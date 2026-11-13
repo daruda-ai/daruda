@@ -68,12 +68,24 @@ pub(in crate::workspace) enum Blocked {
     LoggedOut,
 }
 
-/// Why what a group shows may be out of date; it heals on its own.
+/// Why what a group shows may be out of date; it heals on its own. Rows
+/// shown with one are the last answer, drawn dimmed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::workspace) enum Trouble {
     RateLimited,
     Unreachable,
     SearchFailed,
+}
+
+impl Trouble {
+    /// Whether the group offers to search again now. A paused host is not
+    /// asked before its pause ends, so only a failed search can be retried.
+    pub(in crate::workspace) fn retryable(self) -> bool {
+        match self {
+            Self::SearchFailed => true,
+            Self::RateLimited | Self::Unreachable => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
