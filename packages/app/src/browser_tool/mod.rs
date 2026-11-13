@@ -63,6 +63,9 @@ pub(crate) struct BrowserTool {
     /// settings change, so installs and notices follow only its off-to-on edge.
     enabled: bool,
     host: Host,
+    /// Notices raised while no workspace window was open, such as the
+    /// startup check, which runs before the first window exists.
+    undelivered: Vec<ErrorReport>,
 }
 
 /// The tool cannot run in this process, or it can be installed.
@@ -152,6 +155,7 @@ impl BrowserTool {
         Self {
             enabled: false,
             host,
+            undelivered: Vec::new(),
         }
     }
 
@@ -265,13 +269,30 @@ fn socket_path_limit() -> Option<usize> {
     cfg!(unix).then_some(browser_tool::UNIX_SOCKET_PATH_LIMIT)
 }
 
-/// Toast in the focused workspace (or any open one); the log alone when no
-/// workspace window is open.
+/// Deliver the notices held for want of a window. Deferred: registration
+/// runs inside the new workspace's construction.
+pub(crate) fn on_window_registered(cx: &mut App) {
+    if cx
+        .try_global::<BrowserTool>()
+        .is_none_or(|tool| tool.undelivered.is_empty())
+    {
+        return;
+    }
+    cx.defer(|cx| {
+        let reports = std::mem::take(&mut cx.global_mut::<BrowserTool>().undelivered);
+        for report in reports {
+            surface(report, cx);
+        }
+    });
+}
+
+/// Toast in the focused workspace (or any open one); held until a workspace
+/// window registers when none is open.
 fn surface(report: ErrorReport, cx: &mut App) {
     let Some((_, workspace)) =
         WindowRegistry::active_workspace(cx).or_else(|| WindowRegistry::first_workspace(cx))
     else {
-        LogWriter::log(report);
+        cx.global_mut::<BrowserTool>().undelivered.push(report);
         return;
     };
     let shown = report.clone();
