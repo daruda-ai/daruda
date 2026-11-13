@@ -3450,31 +3450,30 @@ extern "C" fn step(view: *mut c_void) {
     }
 }
 
-/// Switches a window whose Metal link left a wake unserved to `CVDisplayLink`
-/// (see the workaround on [`MetalFrames`]).
+/// Switches a window whose Metal link stopped delivering updates to
+/// `CVDisplayLink` (see the workaround on [`MetalFrames`]).
 fn check_metal_stall(window_state: &Rc<Mutex<MacWindowState>>) {
     let mut lock = window_state.lock();
     let FrameSource::Metal(metal_frames) = &lock.frame_source else {
         return;
     };
     let metal_frames = metal_frames.clone();
-    // A window off screen gets no updates by design; its link is restarted
-    // when it becomes visible again.
-    if !lock
-        .native_window()
-        .occlusionState()
-        .contains(NSWindowOcclusionState::Visible)
-    {
-        metal_frames.forget_wait();
+    // The state can outlive its NSWindow, which must not be messaged then.
+    if lock.closed.load(Ordering::Acquire) {
         return;
     }
-    if !metal_frames.check_stall(scheduler::Instant::now()) {
+    let native_window = lock.native_window();
+    let stalled = metal_frames.check_stall(scheduler::Instant::now(), || {
+        native_window
+            .occlusionState()
+            .contains(NSWindowOcclusionState::Visible)
+    });
+    if !stalled {
         return;
     }
     log::warn!(
-        "CAMetalDisplayLink delivered no update within {:?} of a frame request; \
-         pacing this window with CVDisplayLink",
-        crate::display_link::METAL_UPDATE_STALL
+        "CAMetalDisplayLink delivered no update to a waiting frame request; \
+         pacing this window with CVDisplayLink"
     );
     lock.stop_display_link();
     lock.frame_source = FrameSource::DisplayLink(None);

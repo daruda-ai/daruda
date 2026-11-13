@@ -26,8 +26,9 @@ uninhabited-static compatibility override is unnecessary.
 
 GPUI compiles from `vendor/zed/crates/gpui` and its macOS platform from
 `vendor/zed/crates/gpui_macos`: pristine copies of the pinned zed
-revision (`vendor/zed/UPSTREAM`) with the patches below applied. `tools/vendor_gpui` is the only thing that writes that tree:
-it fetches the pinned rev, applies each `patches/gpui-*.patch`, and
+revision (`vendor/zed/UPSTREAM`) with the patches below applied.
+`tools/vendor_gpui` is the only thing that writes that tree: it fetches
+the pinned rev, applies each `patches/gpui-*.patch`, and
 `--check` — run by every CI job and by
 `scripts/apply-gpui-patch.sh`, kept as a compatibility entry point —
 fails on any drift between the tree and what fetch + patches produce.
@@ -127,7 +128,7 @@ unpatched gpui does not show a collapsed list item.
 Applied into `vendor/zed/crates/gpui_macos` by `tools/vendor_gpui`; the
 marker `METAL_UPDATE_STALL` is what to look for there. It is a
 `WORKAROUND`: the defect is in CoreAnimation or in how upstream drives it,
-and is reported upstream rather than fixed here.
+and is not yet understood. An upstream issue is drafted but not filed.
 
 On macOS 14+ each window is paced by a `CAMetalDisplayLink` (zed #65472).
 After a display reconfiguration — observed when a second display was
@@ -138,23 +139,27 @@ redrew only through the synchronous draw on activation. A later
 reconfiguration (display wake) brought updates back. The window was
 visible and the layer normal throughout.
 
-`MetalFrames` now records when a wake starts waiting for an update and
-schedules one check at a time. A wait still unserved after 500 ms on a
-visible window switches that window to the `CVDisplayLink` path, which
+`MetalFrames` records when a frame request (a wake, or attaching a new
+link, which owes an update) starts waiting, and schedules one check at a
+time. A wait still unserved after 500 ms on a visible window is only
+suspected: that check may have run straight after a long main-thread
+hitch, before the link's own callback. If the same wait is still unserved
+100 ms later, the window switches to the `CVDisplayLink` path, which
 upstream keeps for macOS 13, and logs a warning (daruda installs no `log`
 logger, so the warning is not persisted). The switch is permanent for the
 window: on Macs whose `nextDrawable` blocks (base M4/M5 on macOS 26+) that
-window's animation drops to 30 fps, which beats not drawing. An occluded
-window's wait is dropped instead, since no updates are expected there.
+window's animation drops to 30 fps, which beats not drawing. A check on an
+occluded window drops the wait instead, since no updates are expected
+there; a closed window is never messaged.
 
-`a_wake_without_an_update_for_the_stall_time_is_a_stall`
-(`display_link.rs`) covers the wait bookkeeping. The fallback itself was
-checked on a release build by forcing every unpause to stay paused under
-lldb: the check fired 527 ms after the first unserved wake, the window
-joined `CVDisplayLink`, and drawing continued with no further
-`needsUpdate`. `gpui_macos` is outside daruda's workspace, so its tests run
-from a scratch copy of `vendor/zed` with `[patch]` pointing `gpui` at the
-copy's `crates/gpui`.
+The `display_link.rs` tests cover the bookkeeping: a stall needs the
+expiry and its confirmation, an update or a detached link ends a wait, and
+an occluded check leaves later requests watched. `gpui_macos` is outside
+daruda's workspace, so no CI gate runs them: run them by hand from a
+scratch copy of `vendor/zed` with `[patch]` pointing `gpui` at the copy's
+`crates/gpui`. The fallback itself was checked on a release build by
+forcing every unpause to stay paused under lldb: the window joined
+`CVDisplayLink` and kept drawing with no further `needsUpdate`.
 
 Drop the patch when upstream detects or prevents the stall.
 

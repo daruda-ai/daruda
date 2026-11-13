@@ -11,6 +11,7 @@ fn workspace_retains_versions_features_and_target_dependencies() {
         [workspace.dependencies]
         local = { path = "crates/local", package = "actual", features = ["base"] }
         registry = { version = "1", default-features = false }
+        platform = "3"
         unused = "2"
     "#,
     )
@@ -24,9 +25,19 @@ fn workspace_retains_versions_features_and_target_dependencies() {
     "#,
     )
     .unwrap();
+    // A second member (the platform crate) shares `local` and adds its own.
+    let platform: Value = toml::from_str(
+        r#"
+        [dependencies]
+        local.workspace = true
+        [target.'cfg(target_os = "macos")'.dependencies]
+        platform.workspace = true
+    "#,
+    )
+    .unwrap();
     let result = workspace(
         &upstream,
-        &[gpui, toml::from_str("[dependencies]").unwrap()],
+        &[gpui, platform],
         "https://example.test/zed",
         "pinned",
     )
@@ -44,6 +55,7 @@ fn workspace_retains_versions_features_and_target_dependencies() {
         dependencies["registry"],
         upstream["workspace"]["dependencies"]["registry"]
     );
+    assert_eq!(dependencies["platform"].as_str(), Some("3"));
     assert!(dependencies.get("unused").is_none());
 }
 

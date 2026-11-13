@@ -304,30 +304,50 @@ fn unsubscribe(display_id: CGDirectDisplayID, subscriber_id: SubscriberId) {
 ///
 /// It also watches for a link that stops delivering updates altogether.
 /// WORKAROUND: after a display reconfiguration (seen when a second display
-/// was disconnected), an unpaused link, and new links on the same layer,
-/// delivered no updates until a later reconfiguration, so the window only
-/// redrew on activation. The cause is inside CoreAnimation and not yet
-/// understood, so the window falls back to `CVDisplayLink` instead.
+/// was disconnected) the link and new links on the same layer delivered no
+/// updates, so the window only redrew on activation - the cause is inside
+/// CoreAnimation and not understood, so the window falls back to
+/// `CVDisplayLink` instead of fixing the link.
 #[derive(Default)]
 pub struct MetalFrames {
     source: RefCell<Option<MetalFrameSource>>,
     /// Whether GPUI asked for a frame since the current update began.
     woken: Cell<bool>,
-    /// When the oldest wake that no update has served yet arrived.
-    waiting_since: Cell<Option<Instant>>,
+    /// The oldest frame request no update has served yet.
+    wait: Cell<Option<UpdateWait>>,
     /// Whether a stall check is scheduled.
     check_scheduled: Cell<bool>,
     /// Runs `check_stall` after the given delay; installed by the window.
     schedule_check: RefCell<Option<Box<dyn Fn(Duration)>>>,
 }
 
-/// How long a wake may go without an update before the link counts as stalled.
+#[derive(Clone, Copy)]
+struct UpdateWait {
+    since: Instant,
+    /// The wait already outlasted [`METAL_UPDATE_STALL`] at one check.
+    suspected: bool,
+}
+
+/// How long a frame request may go without an update before the link is
+/// suspected of stalling.
 pub const METAL_UPDATE_STALL: Duration = Duration::from_millis(500);
+
+/// How long a suspected link gets to deliver once the main thread is free.
+/// The first check can run straight after a long main-thread hitch, before
+/// the link's own callback, so only a second unserved check is a stall.
+const METAL_STALL_CONFIRMATION: Duration = Duration::from_millis(100);
 
 impl MetalFrames {
     pub fn replace(&self, source: Option<MetalFrameSource>) {
+        let attached = source.is_some();
         *self.source.borrow_mut() = source;
-        self.waiting_since.set(None);
+        self.wait.set(None);
+        // A new link starts unpaused and owes an update. GPUI wakes only when
+        // a window turns dirty, so a request pending before the swap would
+        // otherwise never be watched on the new link.
+        if attached {
+            self.wait_for_update(Instant::now());
+        }
     }
 
     pub fn is_attached(&self) -> bool {
@@ -351,8 +371,11 @@ impl MetalFrames {
     }
 
     fn wait_for_update(&self, now: Instant) {
-        if self.waiting_since.get().is_none() {
-            self.waiting_since.set(Some(now));
+        if self.wait.get().is_none() {
+            self.wait.set(Some(UpdateWait {
+                since: now,
+                suspected: false,
+            }));
         }
         self.schedule_check_after(METAL_UPDATE_STALL);
     }
@@ -367,30 +390,39 @@ impl MetalFrames {
         }
     }
 
-    /// Runs a scheduled check. Returns whether a wake has waited
-    /// [`METAL_UPDATE_STALL`] without an update; a younger wait schedules
-    /// the next check.
-    pub fn check_stall(&self, now: Instant) -> bool {
+    /// Runs a scheduled check and returns whether the link has stalled: a
+    /// request unserved for [`METAL_UPDATE_STALL`], and still unserved
+    /// [`METAL_STALL_CONFIRMATION`] later. `visible` is asked only when a
+    /// request is waiting; a window off screen gets no updates by design, so
+    /// its wait is dropped.
+    pub fn check_stall(&self, now: Instant, visible: impl FnOnce() -> bool) -> bool {
         self.check_scheduled.set(false);
-        let Some(since) = self.waiting_since.get() else {
+        let Some(wait) = self.wait.get() else {
             return false;
         };
-        let waited = now.saturating_duration_since(since);
-        if waited >= METAL_UPDATE_STALL {
+        if !visible() {
+            self.wait.set(None);
+            return false;
+        }
+        let waited = now.saturating_duration_since(wait.since);
+        if waited < METAL_UPDATE_STALL {
+            self.schedule_check_after(METAL_UPDATE_STALL - waited);
+            return false;
+        }
+        if wait.suspected {
             return true;
         }
-        self.schedule_check_after(METAL_UPDATE_STALL - waited);
+        self.wait.set(Some(UpdateWait {
+            suspected: true,
+            ..wait
+        }));
+        self.schedule_check_after(METAL_STALL_CONFIRMATION);
         false
-    }
-
-    /// Drops the pending wait, for a window that is not on screen to draw.
-    pub fn forget_wait(&self) {
-        self.waiting_since.set(None);
     }
 
     pub fn begin_frame(&self) {
         self.woken.set(false);
-        self.waiting_since.set(None);
+        self.wait.set(None);
     }
 
     /// Ends an update, pausing the link if GPUI neither used its drawable nor
@@ -681,52 +713,87 @@ mod tests {
         assert!(frames.end_frame(false), "an idle update pauses the link");
     }
 
-    #[test]
-    fn a_wake_without_an_update_for_the_stall_time_is_a_stall() {
+    fn frames_recording_checks() -> (MetalFrames, std::rc::Rc<RefCell<Vec<Duration>>>) {
         let frames = MetalFrames::default();
         let scheduled = std::rc::Rc::new(RefCell::new(Vec::new()));
         frames.set_stall_check({
             let scheduled = scheduled.clone();
             move |delay| scheduled.borrow_mut().push(delay)
         });
+        (frames, scheduled)
+    }
+
+    #[test]
+    fn a_request_unserved_past_the_stall_time_and_its_confirmation_is_a_stall() {
+        let (frames, scheduled) = frames_recording_checks();
         let start = Instant::now();
         let ms = |n| Duration::from_millis(n);
+        let visible = || true;
 
         frames.wait_for_update(start);
         frames.wait_for_update(start + ms(100));
         assert_eq!(
             *scheduled.borrow(),
             [METAL_UPDATE_STALL],
-            "one check covers every wake until it runs"
+            "one check covers every request until it runs"
         );
-
         assert!(
-            !frames.check_stall(start + ms(300)),
+            !frames.check_stall(start + ms(300), visible),
             "a younger wait is not a stall"
         );
         assert_eq!(
             scheduled.borrow().last(),
             Some(&ms(200)),
-            "the next check lands when the oldest wake reaches the stall time"
+            "the next check lands when the oldest request reaches the stall time"
         );
-        assert!(frames.check_stall(start + ms(500)), "the oldest wake counts");
-
-        frames.begin_frame();
         assert!(
-            !frames.check_stall(start + ms(2000)),
-            "an update serves every waiting wake"
+            !frames.check_stall(start + ms(500), visible),
+            "a first expiry only suspects the link: a main-thread hitch looks the same"
         );
+        assert_eq!(scheduled.borrow().last(), Some(&METAL_STALL_CONFIRMATION));
+        assert!(frames.check_stall(start + ms(600), visible));
+    }
 
-        frames.wait_for_update(start + ms(2000));
-        frames.replace(None);
+    #[test]
+    fn a_wait_ends_without_a_stall() {
+        let cases: [(&str, fn(&MetalFrames)); 3] = [
+            ("an update serves the request", |frames| frames.begin_frame()),
+            ("detaching the link drops the wait", |frames| frames.replace(None)),
+            ("a suspected wait served before confirmation", |frames| {
+                let start = Instant::now();
+                assert!(!frames.check_stall(start + Duration::from_millis(600), || true));
+                frames.begin_frame();
+            }),
+        ];
+        for (label, end_wait) in cases {
+            let (frames, _) = frames_recording_checks();
+            let start = Instant::now();
+            frames.wait_for_update(start);
+            end_wait(&frames);
+            let later = start + Duration::from_secs(5);
+            assert!(!frames.check_stall(later, || true), "{label}");
+        }
+    }
+
+    #[test]
+    fn an_occluded_check_drops_the_wait_and_later_requests_are_still_watched() {
+        let (frames, scheduled) = frames_recording_checks();
+        let start = Instant::now();
+        let ms = |n| Duration::from_millis(n);
+
+        frames.wait_for_update(start);
+        assert!(!frames.check_stall(start + ms(500), || false));
         assert!(
-            !frames.check_stall(start + ms(3000)),
-            "a replaced link starts without a wait"
+            !frames.check_stall(start + ms(5000), || panic!("no wait to judge")),
+            "the occluded wait is gone"
         );
 
-        frames.wait_for_update(start + ms(3000));
-        frames.forget_wait();
-        assert!(!frames.check_stall(start + ms(4000)));
+        frames.wait_for_update(start + ms(6000));
+        assert_eq!(
+            scheduled.borrow().len(),
+            2,
+            "an occluded check must not leave the next check blocked"
+        );
     }
 
     #[test]
