@@ -210,7 +210,7 @@ fn launch_enforces_only_a_given_socket_path_limit() {
         let result = launch(binary, dir, lane, *limit);
         match (result, too_long) {
             (Ok(_), None) => {}
-            (Err(BrowserToolError::SocketPathTooLong { len, limit }), Some(expected)) => {
+            (Err(SocketDirError::TooLong { len, limit }), Some(expected)) => {
                 assert_eq!(len, *expected, "{label}");
                 assert_eq!(limit, UNIX_SOCKET_PATH_LIMIT, "{label}");
             }
@@ -242,7 +242,7 @@ fn check_socket_dir_bounds_the_session_socket_path() {
     for (label, dir, limit, too_long) in rows {
         match (check_socket_dir(dir, *limit), too_long) {
             (Ok(value), None) => assert_eq!(Path::new(value), *dir, "{label}"),
-            (Err(BrowserToolError::SocketPathTooLong { len, limit }), Some(expected)) => {
+            (Err(SocketDirError::TooLong { len, limit }), Some(expected)) => {
                 assert_eq!(len, *expected, "{label}");
                 assert_eq!(limit, UNIX_SOCKET_PATH_LIMIT, "{label}");
             }
@@ -258,6 +258,6 @@ fn check_socket_dir_rejects_a_non_utf8_directory() {
     let dir = Path::new(std::ffi::OsStr::from_bytes(b"/tmp/\xff"));
     assert!(matches!(
         check_socket_dir(dir, None),
-        Err(BrowserToolError::NonUtf8SocketDir(path)) if path == dir
+        Err(SocketDirError::NonUtf8(path)) if path == dir
     ));
 }

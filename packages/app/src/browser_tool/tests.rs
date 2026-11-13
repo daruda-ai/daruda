@@ -147,7 +147,7 @@ fn an_overlong_socket_dir_makes_the_tool_unusable(cx: &mut TestAppContext) {
     let notified = |cx: &mut TestAppContext| {
         cx.update(|cx| match &cx.global::<BrowserTool>().host {
             Host::Unusable {
-                reason: Unusable::SocketDir(BrowserToolError::SocketPathTooLong { .. }),
+                reason: Unusable::SocketDir(SocketDirError::TooLong { .. }),
                 notified,
             } => *notified,
             _ => panic!("expected an unusable socket directory"),

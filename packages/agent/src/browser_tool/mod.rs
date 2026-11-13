@@ -38,10 +38,15 @@ pub enum BrowserToolError {
         expected: &'static str,
         actual: String,
     },
+}
+
+/// Why a socket directory cannot hold the lanes' session sockets.
+#[derive(Debug, thiserror::Error)]
+pub enum SocketDirError {
     #[error("agent-browser socket path is {len} bytes, over the {limit}-byte limit")]
-    SocketPathTooLong { len: usize, limit: usize },
+    TooLong { len: usize, limit: usize },
     #[error("agent-browser socket directory is not valid UTF-8: {}", .0.display())]
-    NonUtf8SocketDir(PathBuf),
+    NonUtf8(PathBuf),
 }
 
 /// The release asset for a host, or `None` when upstream ships none.
@@ -110,17 +115,17 @@ pub struct McpLaunch {
 pub fn check_socket_dir(
     socket_dir: &Path,
     socket_path_limit: Option<usize>,
-) -> Result<&str, BrowserToolError> {
+) -> Result<&str, SocketDirError> {
     if let Some(limit) = socket_path_limit {
         let socket = format!("{SESSION_PREFIX}{}.sock", "0".repeat(SESSION_HASH_LEN));
         let len = socket_dir.join(socket).as_os_str().len();
         if len > limit {
-            return Err(BrowserToolError::SocketPathTooLong { len, limit });
+            return Err(SocketDirError::TooLong { len, limit });
         }
     }
     socket_dir
         .to_str()
-        .ok_or_else(|| BrowserToolError::NonUtf8SocketDir(socket_dir.to_path_buf()))
+        .ok_or_else(|| SocketDirError::NonUtf8(socket_dir.to_path_buf()))
 }
 
 /// Fails only as [`check_socket_dir`] does for the same arguments.
@@ -129,7 +134,7 @@ pub fn launch(
     socket_dir: &Path,
     lane_root: &Path,
     socket_path_limit: Option<usize>,
-) -> Result<McpLaunch, BrowserToolError> {
+) -> Result<McpLaunch, SocketDirError> {
     let socket_dir_value = check_socket_dir(socket_dir, socket_path_limit)?;
     let session = session_name(lane_root);
     Ok(McpLaunch {

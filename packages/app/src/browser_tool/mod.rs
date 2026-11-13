@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use daruda_agent::browser_tool::install::{self, InstallError, InstallStage};
-use daruda_agent::browser_tool::{self, Asset, BrowserToolError, McpLaunch};
+use daruda_agent::browser_tool::{self, Asset, McpLaunch, SocketDirError};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use futures::StreamExt as _;
@@ -82,7 +82,7 @@ enum Unusable {
     /// Upstream ships no release for this host.
     Platform,
     /// The socket directory cannot hold a session socket, for every lane alike.
-    SocketDir(BrowserToolError),
+    SocketDir(SocketDirError),
 }
 
 impl Unusable {
