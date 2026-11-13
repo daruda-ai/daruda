@@ -24,7 +24,13 @@ fn workspace_retains_versions_features_and_target_dependencies() {
     "#,
     )
     .unwrap();
-    let result = workspace(&upstream, &gpui, "https://example.test/zed", "pinned").unwrap();
+    let result = workspace(
+        &upstream,
+        &[gpui, toml::from_str("[dependencies]").unwrap()],
+        "https://example.test/zed",
+        "pinned",
+    )
+    .unwrap();
     let dependencies = &result["workspace"]["dependencies"];
     assert_eq!(
         dependencies["local"]["git"].as_str(),
@@ -45,7 +51,7 @@ fn workspace_retains_versions_features_and_target_dependencies() {
 fn missing_workspace_dependency_is_an_error() {
     let upstream: Value = toml::from_str("[workspace.dependencies]").unwrap();
     let gpui: Value = toml::from_str("[dependencies]\nmissing.workspace = true").unwrap();
-    assert!(workspace(&upstream, &gpui, "url", "rev").is_err());
+    assert!(workspace(&upstream, &[gpui], "url", "rev").is_err());
 }
 
 #[test]
@@ -57,6 +63,7 @@ fn all_zed_consumers_must_share_the_pin_and_override() {
         gpui_platform = { git = "zed", rev = "pinned" }
         [patch.zed]
         gpui = { path = "vendor/zed/crates/gpui" }
+        gpui_macos = { path = "vendor/zed/crates/gpui_macos" }
     "#,
     )
     .unwrap();
@@ -64,6 +71,9 @@ fn all_zed_consumers_must_share_the_pin_and_override() {
     root["workspace"]["dependencies"]["gpui_platform"]["rev"] = "different".into();
     assert!(pinned_source(&root).is_err());
     root["workspace"]["dependencies"]["gpui_platform"]["rev"] = "pinned".into();
-    root["patch"]["zed"]["gpui"]["path"] = "unpatched".into();
-    assert!(pinned_source(&root).is_err());
+    for name in CRATES {
+        let mut unpatched = root.clone();
+        unpatched["patch"]["zed"][*name]["path"] = "unpatched".into();
+        assert!(pinned_source(&unpatched).is_err(), "{name}");
+    }
 }

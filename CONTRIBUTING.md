@@ -141,8 +141,8 @@ Ghostty sources invalidate the native build, including custom target directories
 This target mapping does not install cross-compilation SDKs or linkers for the
 rest of the application.
 
-GPUI's patched crate is checked in under `vendor/zed`, selected for all consumers
-by Cargo's `[patch]` table. Ordinary builds never modify the shared Cargo cache.
+GPUI's patched crates (`gpui`, `gpui_macos`) are checked in under
+`vendor/zed`, selected for all consumers by Cargo's `[patch]` table. Ordinary builds never modify the shared Cargo cache.
 The remaining Zed crates stay pinned to the same revision in `Cargo.toml`.
 
 To verify the vendored source after fetching dependencies:

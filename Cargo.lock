@@ -3318,7 +3318,6 @@ dependencies = [
 [[package]]
 name = "gpui_macos"
 version = "0.1.0"
-source = "git+https://github.com/zed-industries/zed?rev=decd2399b180b64dea2a4182f9ac63545a45e7a3#decd2399b180b64dea2a4182f9ac63545a45e7a3"
 dependencies = [
  "accesskit",
  "accesskit_macos",

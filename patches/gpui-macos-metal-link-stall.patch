@@ -1,0 +1,254 @@
+diff --git a/crates/gpui_macos/src/display_link.rs b/crates/gpui_macos/src/display_link.rs
+index 90a2597..737d0c6 100644
+--- a/crates/gpui_macos/src/display_link.rs
++++ b/crates/gpui_macos/src/display_link.rs
+@@ -301,34 +301,96 @@ fn unsubscribe(display_id: CGDirectDisplayID, subscriber_id: SubscriberId) {
+ /// nor asked for another frame, so an idle window acquires no drawables. GPUI
+ /// decides when frames are needed (including presenting after high-rate
+ /// input); this only stops the link between those decisions.
++///
++/// It also watches for a link that stops delivering updates altogether.
++/// WORKAROUND: after a display reconfiguration (seen when a second display
++/// was disconnected), an unpaused link, and new links on the same layer,
++/// delivered no updates until a later reconfiguration, so the window only
++/// redrew on activation. The cause is inside CoreAnimation and not yet
++/// understood, so the window falls back to `CVDisplayLink` instead.
+ #[derive(Default)]
+ pub struct MetalFrames {
+     source: RefCell<Option<MetalFrameSource>>,
+     /// Whether GPUI asked for a frame since the current update began.
+     woken: Cell<bool>,
++    /// When the oldest wake that no update has served yet arrived.
++    waiting_since: Cell<Option<Instant>>,
++    /// Whether a stall check is scheduled.
++    check_scheduled: Cell<bool>,
++    /// Runs `check_stall` after the given delay; installed by the window.
++    schedule_check: RefCell<Option<Box<dyn Fn(Duration)>>>,
+ }
+ 
++/// How long a wake may go without an update before the link counts as stalled.
++pub const METAL_UPDATE_STALL: Duration = Duration::from_millis(500);
++
+ impl MetalFrames {
+     pub fn replace(&self, source: Option<MetalFrameSource>) {
+         *self.source.borrow_mut() = source;
++        self.waiting_since.set(None);
+     }
+ 
+     pub fn is_attached(&self) -> bool {
+         self.source.borrow().is_some()
+     }
+ 
++    pub fn set_stall_check(&self, schedule: impl Fn(Duration) + 'static) {
++        *self.schedule_check.borrow_mut() = Some(Box::new(schedule));
++    }
++
+     pub fn wake(&self) {
+         self.woken.set(true);
+         // A source being replaced starts unpaused, so skipping it is safe.
+-        if let Ok(source) = self.source.try_borrow()
+-            && let Some(source) = source.as_ref()
+-        {
+-            source.set_paused(false);
++        let attached = match self.source.try_borrow() {
++            Ok(source) => source.as_ref().map(|source| source.set_paused(false)),
++            Err(_) => None,
++        };
++        if attached.is_some() {
++            self.wait_for_update(Instant::now());
++        }
++    }
++
++    fn wait_for_update(&self, now: Instant) {
++        if self.waiting_since.get().is_none() {
++            self.waiting_since.set(Some(now));
++        }
++        self.schedule_check_after(METAL_UPDATE_STALL);
++    }
++
++    fn schedule_check_after(&self, delay: Duration) {
++        if self.check_scheduled.get() {
++            return;
++        }
++        if let Some(schedule) = self.schedule_check.borrow().as_ref() {
++            self.check_scheduled.set(true);
++            schedule(delay);
++        }
++    }
++
++    /// Runs a scheduled check. Returns whether a wake has waited
++    /// [`METAL_UPDATE_STALL`] without an update; a younger wait schedules
++    /// the next check.
++    pub fn check_stall(&self, now: Instant) -> bool {
++        self.check_scheduled.set(false);
++        let Some(since) = self.waiting_since.get() else {
++            return false;
++        };
++        let waited = now.saturating_duration_since(since);
++        if waited >= METAL_UPDATE_STALL {
++            return true;
+         }
++        self.schedule_check_after(METAL_UPDATE_STALL - waited);
++        false
++    }
++
++    /// Drops the pending wait, for a window that is not on screen to draw.
++    pub fn forget_wait(&self) {
++        self.waiting_since.set(None);
+     }
+ 
+     pub fn begin_frame(&self) {
+         self.woken.set(false);
++        self.waiting_since.set(None);
+     }
+ 
+     /// Ends an update, pausing the link if GPUI neither used its drawable nor
+@@ -619,6 +681,54 @@ mod tests {
+         assert!(frames.end_frame(false), "an idle update pauses the link");
+     }
+ 
++    #[test]
++    fn a_wake_without_an_update_for_the_stall_time_is_a_stall() {
++        let frames = MetalFrames::default();
++        let scheduled = std::rc::Rc::new(RefCell::new(Vec::new()));
++        frames.set_stall_check({
++            let scheduled = scheduled.clone();
++            move |delay| scheduled.borrow_mut().push(delay)
++        });
++        let start = Instant::now();
++        let ms = |n| Duration::from_millis(n);
++
++        frames.wait_for_update(start);
++        frames.wait_for_update(start + ms(100));
++        assert_eq!(
++            *scheduled.borrow(),
++            [METAL_UPDATE_STALL],
++            "one check covers every wake until it runs"
++        );
++
++        assert!(
++            !frames.check_stall(start + ms(300)),
++            "a younger wait is not a stall"
++        );
++        assert_eq!(
++            scheduled.borrow().last(),
++            Some(&ms(200)),
++            "the next check lands when the oldest wake reaches the stall time"
++        );
++        assert!(frames.check_stall(start + ms(500)), "the oldest wake counts");
++
++        frames.begin_frame();
++        assert!(
++            !frames.check_stall(start + ms(2000)),
++            "an update serves every waiting wake"
++        );
++
++        frames.wait_for_update(start + ms(2000));
++        frames.replace(None);
++        assert!(
++            !frames.check_stall(start + ms(3000)),
++            "a replaced link starts without a wait"
++        );
++
++        frames.wait_for_update(start + ms(3000));
++        frames.forget_wait();
++        assert!(!frames.check_stall(start + ms(4000)));
++    }
++
+     #[test]
+     fn a_renderer_draws_normally_after_its_display_link_is_invalidated() {
+         if !MetalFrameSource::is_available() {
+diff --git a/crates/gpui_macos/src/window.rs b/crates/gpui_macos/src/window.rs
+index 32a6a54..f4acf16 100644
+--- a/crates/gpui_macos/src/window.rs
++++ b/crates/gpui_macos/src/window.rs
+@@ -638,8 +638,8 @@ unsafe fn apply_simple_fullscreen_plan(
+     }
+ }
+ 
+-/// What paces a window's frames. The choice depends only on the OS version,
+-/// so it is made once per window.
++/// What paces a window's frames. The OS version picks the source when the
++/// window opens; a stalled Metal link switches the window to `CVDisplayLink`.
+ enum FrameSource {
+     /// macOS 14+: a `CAMetalDisplayLink` that hands out each frame's drawable.
+     Metal(Rc<MetalFrames>),
+@@ -977,7 +977,8 @@ pub(crate) struct MacWindow(
+     Rc<Mutex<MacWindowState>>,
+     MainThreadMarker,
+     /// The Metal link's frame waker, kept outside the lock so waking never
+-    /// waits on it. `None` when a `CVDisplayLink` paces frames.
++    /// waits on it. `None` when a `CVDisplayLink` paces frames from the start;
++    /// after a stall fallback it stays but has no link to wake.
+     Option<Rc<MetalFrames>>,
+ );
+ 
+@@ -1109,6 +1110,7 @@ impl MacWindow {
+             assert!(!native_view.is_null());
+ 
+             let metal_frames = MetalFrameSource::is_available().then(Rc::<MetalFrames>::default);
++            let stall_executors = (foreground_executor.clone(), background_executor.clone());
+             let state = Rc::new(Mutex::new(MacWindowState {
+                 handle,
+                 foreground_executor,
+@@ -1166,6 +1168,22 @@ impl MacWindow {
+                 accesskit_adapter: None,
+                 sheet_parent: None,
+             }));
++            if let Some(metal_frames) = &metal_frames {
++                let window_state = Rc::downgrade(&state);
++                let (foreground, background) = stall_executors;
++                metal_frames.set_stall_check(move |delay| {
++                    let window_state = window_state.clone();
++                    let timer = background.timer(delay);
++                    foreground
++                        .spawn(async move {
++                            timer.await;
++                            if let Some(window_state) = window_state.upgrade() {
++                                check_metal_stall(&window_state);
++                            }
++                        })
++                        .detach();
++                });
++            }
+             let mut window = Self(state, marker, metal_frames);
+ 
+             (*native_window)
+@@ -3432,6 +3450,37 @@ extern "C" fn step(view: *mut c_void) {
+     }
+ }
+ 
++/// Switches a window whose Metal link left a wake unserved to `CVDisplayLink`
++/// (see the workaround on [`MetalFrames`]).
++fn check_metal_stall(window_state: &Rc<Mutex<MacWindowState>>) {
++    let mut lock = window_state.lock();
++    let FrameSource::Metal(metal_frames) = &lock.frame_source else {
++        return;
++    };
++    let metal_frames = metal_frames.clone();
++    // A window off screen gets no updates by design; its link is restarted
++    // when it becomes visible again.
++    if !lock
++        .native_window()
++        .occlusionState()
++        .contains(NSWindowOcclusionState::Visible)
++    {
++        metal_frames.forget_wait();
++        return;
++    }
++    if !metal_frames.check_stall(scheduler::Instant::now()) {
++        return;
++    }
++    log::warn!(
++        "CAMetalDisplayLink delivered no update within {:?} of a frame request; \
++         pacing this window with CVDisplayLink",
++        crate::display_link::METAL_UPDATE_STALL
++    );
++    lock.stop_display_link();
++    lock.frame_source = FrameSource::DisplayLink(None);
++    lock.start_display_link(window_state);
++}
++
+ fn metal_frame(
+     window_state: &Rc<Mutex<MacWindowState>>,
+     update: &objc2_quartz_core::CAMetalDisplayLinkUpdate,

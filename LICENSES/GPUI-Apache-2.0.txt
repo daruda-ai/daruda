@@ -1,7 +1,7 @@
 GPUI — GPU-accelerated UI framework
 Copyright 2022 - 2025 Zed Industries, Inc.
 
-Source: https://github.com/zed-industries/zed (crates/gpui)
+Source: https://github.com/zed-industries/zed (crates/gpui, crates/gpui_macos)
 Used by daruda as a compiled-in git dependency.
 
 Licensed under the Apache License, Version 2.0 (the "License");

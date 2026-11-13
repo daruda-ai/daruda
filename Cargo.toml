@@ -14,6 +14,7 @@ exclude = ["vendor/zed"]
 
 [patch."https://github.com/zed-industries/zed"]
 gpui = { path = "vendor/zed/crates/gpui" }
+gpui_macos = { path = "vendor/zed/crates/gpui_macos" }
 
 [workspace.package]
 version = "0.3.0"
@@ -170,6 +171,7 @@ resvg = { opt-level = 3 }
 # Vendored sources change only through re-vendoring, so their incremental
 # caches (several GB) rarely pay off.
 gpui = { incremental = false }
+gpui_macos = { incremental = false }
 gpui-base = { incremental = false }
 gpui-component = { incremental = false }
 gpui-component-macros = { incremental = false }

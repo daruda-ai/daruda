@@ -24,9 +24,9 @@ uninhabited-static compatibility override is unnecessary.
 
 ## GPUI patches — `gpui-*.patch`
 
-GPUI compiles from `vendor/zed/crates/gpui`, a pristine copy of the
-pinned zed revision (`vendor/zed/UPSTREAM`) with the patches below
-applied. `tools/vendor_gpui` is the only thing that writes that tree:
+GPUI compiles from `vendor/zed/crates/gpui` and its macOS platform from
+`vendor/zed/crates/gpui_macos`: pristine copies of the pinned zed
+revision (`vendor/zed/UPSTREAM`) with the patches below applied. `tools/vendor_gpui` is the only thing that writes that tree:
 it fetches the pinned rev, applies each `patches/gpui-*.patch`, and
 `--check` — run by every CI job and by
 `scripts/apply-gpui-patch.sh`, kept as a compatibility entry point —
@@ -121,6 +121,42 @@ runs with block layout rather than a flex column, which keeps that probe
 from being decisive even on an unpatched checkout. Both are wanted: the
 patch fixes the cause, the block column means a build against an
 unpatched gpui does not show a collapsed list item.
+
+## `gpui-macos-metal-link-stall.patch`
+
+Applied into `vendor/zed/crates/gpui_macos` by `tools/vendor_gpui`; the
+marker `METAL_UPDATE_STALL` is what to look for there. It is a
+`WORKAROUND`: the defect is in CoreAnimation or in how upstream drives it,
+and is reported upstream rather than fixed here.
+
+On macOS 14+ each window is paced by a `CAMetalDisplayLink` (zed #65472).
+After a display reconfiguration — observed when a second display was
+disconnected — the link stopped delivering updates: in 25 s the frame
+waker unpaused it 652 times and `metalDisplayLink:needsUpdate:` ran 0
+times, a link recreated on activation stayed silent too, and the window
+redrew only through the synchronous draw on activation. A later
+reconfiguration (display wake) brought updates back. The window was
+visible and the layer normal throughout.
+
+`MetalFrames` now records when a wake starts waiting for an update and
+schedules one check at a time. A wait still unserved after 500 ms on a
+visible window switches that window to the `CVDisplayLink` path, which
+upstream keeps for macOS 13, and logs a warning (daruda installs no `log`
+logger, so the warning is not persisted). The switch is permanent for the
+window: on Macs whose `nextDrawable` blocks (base M4/M5 on macOS 26+) that
+window's animation drops to 30 fps, which beats not drawing. An occluded
+window's wait is dropped instead, since no updates are expected there.
+
+`a_wake_without_an_update_for_the_stall_time_is_a_stall`
+(`display_link.rs`) covers the wait bookkeeping. The fallback itself was
+checked on a release build by forcing every unpause to stay paused under
+lldb: the check fired 527 ms after the first unserved wake, the window
+joined `CVDisplayLink`, and drawing continued with no further
+`needsUpdate`. `gpui_macos` is outside daruda's workspace, so its tests run
+from a scratch copy of `vendor/zed` with `[patch]` pointing `gpui` at the
+copy's `crates/gpui`.
+
+Drop the patch when upstream detects or prevents the stall.
 
 ## Upstream GPUI fixes retained by the pin
 

@@ -1,4 +1,4 @@
-//! Reproduce the GPUI source override from a pristine, pinned Git tree.
+//! Reproduce the GPUI source overrides from a pristine, pinned Git tree.
 
 use anyhow::{Context, Result, bail, ensure};
 use std::{collections::BTreeMap, fs, path::Path, process::Command};
@@ -10,7 +10,11 @@ const PATCHES: &[&str] = &[
     "gpui-text-wrap-cache.patch",
     "gpui-taffy-patch-release.patch",
     "gpui-mouse-button-sequence.patch",
+    "gpui-macos-metal-link-stall.patch",
 ];
+
+/// The Zed crates vendored under `vendor/zed/crates` and selected by `[patch]`.
+const CRATES: &[&str] = &["gpui", "gpui_macos"];
 
 fn run(command: &mut Command) -> Result<()> {
     let output = command.output().with_context(|| format!("{command:?}"))?;
@@ -41,15 +45,17 @@ fn pinned_source(root: &Value) -> Result<(&str, &str)> {
             );
         }
     }
-    ensure!(
-        root.get("patch")
-            .and_then(|p| p.get(git))
-            .and_then(|p| p.get("gpui"))
-            .and_then(|p| p.get("path"))
-            .and_then(Value::as_str)
-            == Some("vendor/zed/crates/gpui"),
-        "Cargo must select the checked-in GPUI override"
-    );
+    for name in CRATES {
+        ensure!(
+            root.get("patch")
+                .and_then(|p| p.get(git))
+                .and_then(|p| p.get(*name))
+                .and_then(|p| p.get("path"))
+                .and_then(Value::as_str)
+                == Some(format!("vendor/zed/crates/{name}").as_str()),
+            "Cargo must select the checked-in {name} override"
+        );
+    }
     Ok((git, rev))
 }
 
@@ -65,16 +71,18 @@ fn collect_dependencies(value: &Value, names: &mut Vec<String>) {
     }
 }
 
-fn workspace(upstream: &Value, gpui: &Value, git: &str, rev: &str) -> Result<Value> {
+fn workspace(upstream: &Value, members: &[Value], git: &str, rev: &str) -> Result<Value> {
     let mut names = Vec::new();
-    for section in [
-        "dependencies",
-        "dev-dependencies",
-        "build-dependencies",
-        "target",
-    ] {
-        if let Some(value) = gpui.get(section) {
-            collect_dependencies(value, &mut names);
+    for member in members {
+        for section in [
+            "dependencies",
+            "dev-dependencies",
+            "build-dependencies",
+            "target",
+        ] {
+            if let Some(value) = member.get(section) {
+                collect_dependencies(value, &mut names);
+            }
         }
     }
     let mut dependencies = Table::new();
@@ -92,7 +100,15 @@ fn workspace(upstream: &Value, gpui: &Value, git: &str, rev: &str) -> Result<Val
         dependencies.insert(name, dep);
     }
     let mut workspace = Table::new();
-    workspace.insert("members".into(), Value::Array(vec!["crates/gpui".into()]));
+    workspace.insert(
+        "members".into(),
+        Value::Array(
+            CRATES
+                .iter()
+                .map(|name| format!("crates/{name}").into())
+                .collect(),
+        ),
+    );
     workspace.insert("resolver".into(), "2".into());
     workspace.insert("package".into(), upstream["workspace"]["package"].clone());
     workspace.insert("lints".into(), upstream["workspace"]["lints"].clone());
@@ -172,32 +188,36 @@ fn main() -> Result<()> {
     let archive = temp.path().join("source.tar");
     let stage = temp.path().join("zed");
     fs::create_dir(&stage)?;
+    let mut archive_paths = vec![
+        "Cargo.toml".to_owned(),
+        "LICENSE-APACHE".to_owned(),
+        "assets/fonts/ibm-plex-sans".to_owned(),
+        "assets/fonts/lilex".to_owned(),
+    ];
+    for name in CRATES {
+        archive_paths.push(format!("crates/{name}"));
+        archive_paths.push(format!(":(exclude)crates/{name}/LICENSE-APACHE"));
+    }
     run(Command::new("git")
         .arg("-C")
         .arg(source)
         .args(["archive", "--format=tar", "--output"])
         .arg(&archive)
         .arg(rev)
-        .args([
-            "Cargo.toml",
-            "LICENSE-APACHE",
-            "crates/gpui",
-            "assets/fonts/ibm-plex-sans",
-            "assets/fonts/lilex",
-            ":(exclude)crates/gpui/LICENSE-APACHE",
-        ]))?;
+        .args(&archive_paths))?;
     run(Command::new("tar")
         .arg("-xf")
         .arg(&archive)
         .arg("-C")
         .arg(&stage))?;
-    fs::copy(
-        stage.join("LICENSE-APACHE"),
-        stage.join("crates/gpui/LICENSE-APACHE"),
-    )?;
+    let mut members = Vec::new();
+    for name in CRATES {
+        let dir = stage.join("crates").join(name);
+        fs::copy(stage.join("LICENSE-APACHE"), dir.join("LICENSE-APACHE"))?;
+        members.push(manifest(&dir.join("Cargo.toml"))?);
+    }
     let upstream = manifest(&stage.join("Cargo.toml"))?;
-    let gpui = manifest(&stage.join("crates/gpui/Cargo.toml"))?;
-    let manifest = workspace(&upstream, &gpui, git, rev)?;
+    let manifest = workspace(&upstream, &members, git, rev)?;
     fs::write(stage.join("Cargo.toml"), toml::to_string_pretty(&manifest)?)?;
     for patch in PATCHES {
         run(Command::new("git")
