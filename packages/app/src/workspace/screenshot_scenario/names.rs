@@ -34,6 +34,8 @@ const NAME_LEFT_DOCK_GIT_GH_MISSING: &str = "left-dock-git-gh-missing";
 const NAME_LEFT_DOCK_WORKTREES_PR: &str = "left-dock-worktrees-pr";
 /// The Create PR form over a lane with no pull request yet.
 const NAME_CREATE_PR_MODAL: &str = "create-pr-modal";
+/// The Pull requests page over two repositories.
+const NAME_PULL_REQUESTS_LIST: &str = "pull-requests-list";
 const NAME_SETTINGS_ERROR: &str = "settings-error";
 /// CLI token for Settings with a search query typed: the results page.
 const NAME_SETTINGS_SEARCH: &str = "settings-search";
@@ -283,6 +285,7 @@ impl ScreenshotScenario {
             NAME_LEFT_DOCK_GIT_GH_MISSING => Some(Self::LeftDockGitGhMissing),
             NAME_LEFT_DOCK_WORKTREES_PR => Some(Self::LeftDockWorktreesPr),
             NAME_CREATE_PR_MODAL => Some(Self::CreatePrModal),
+            NAME_PULL_REQUESTS_LIST => Some(Self::PullRequestsList),
             NAME_LEFT_DOCK_WORKTREES => Some(Self::LeftDockWorktrees),
             NAME_LEFT_DOCK_RAIL => Some(Self::LeftDockRail),
             NAME_LEFT_DOCK_EXPANDED => Some(Self::LeftDockExpanded),

@@ -57,7 +57,7 @@ pub(in crate::workspace) fn render(
         .flex_none()
         .items_center()
         .py(px(theme::PAD_XS));
-    for page in [Page::Tasks, Page::Flows] {
+    for page in Page::ALL {
         let ws = snap.workspace.clone();
         nav = nav.child(
             ui::button_icon_sized(page.icon(), page.icon(), snap.metrics, cx)

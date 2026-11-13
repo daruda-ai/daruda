@@ -67,6 +67,7 @@ pub const WARNING: &str = "icons/ui/warning.svg";
 // check every file.
 pub const TASKS: &str = "icons/lucide/list-checks.svg";
 pub const FLOWS: &str = "icons/lucide/workflow.svg";
+pub const PULL_REQUESTS: &str = "icons/lucide/git-pull-request.svg";
 pub const FOLDER: &str = "icons/lucide/folder.svg";
 pub const FOLDER_OPEN: &str = "icons/lucide/folder-open.svg";
 pub const EMPTY_WORKTREE: &str = "icons/empty-worktree.svg";

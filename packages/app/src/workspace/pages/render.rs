@@ -19,8 +19,12 @@ pub(in crate::workspace) fn navigation(snap: &LeftDockSnapshot, cx: &App) -> Any
         .py(px(theme::DOCK_NAV_PAD_Y))
         .border_b_1()
         .border_color(t.border)
-        .children([Page::Tasks, Page::Flows].into_iter().map(|page| {
+        .children(Page::ALL.into_iter().map(|page| {
             let workspace = snap.workspace.clone();
+            let count = match page {
+                Page::PullRequests => snap.open_lane_prs,
+                Page::Tasks | Page::Flows => 0,
+            };
             button_with_icon_sized(page.icon(), page.label(), page.icon(), snap.metrics)
                 .ghost()
                 .w_full()
@@ -29,6 +33,15 @@ pub(in crate::workspace) fn navigation(snap: &LeftDockSnapshot, cx: &App) -> Any
                 .text_size(px(snap.metrics.text(theme::LANE_LABEL_FONT_SIZE)))
                 .when(snap.workspace_page == Some(page), |button| {
                     button.bg(t.lane_card_active_bg).text_color(t.text_primary)
+                })
+                .when(count > 0, |button| {
+                    button.child(
+                        div()
+                            .ml_auto()
+                            .text_size(px(snap.metrics.text(theme::FONT_SIZE_XS)))
+                            .text_color(t.text_subtle)
+                            .child(count.to_string()),
+                    )
                 })
                 .on_click(move |_, window, cx| {
                     if let Some(ws) = workspace.upgrade() {
@@ -63,6 +76,20 @@ pub(in crate::workspace) fn flow_content(
         state,
         super::flows::header(snap, close, cx),
         super::flows::render(snap, cx),
+        cx,
+    )
+}
+
+pub(in crate::workspace) fn pr_content(
+    state: &PageState,
+    snap: &super::pull_requests::PrPageSnapshot,
+    cx: &App,
+) -> AnyElement {
+    let close = close_button(snap.workspace.clone(), cx);
+    frame(
+        state,
+        super::pull_requests::render::header(snap, close, cx),
+        super::pull_requests::render::render(snap, cx),
         cx,
     )
 }
@@ -118,6 +145,7 @@ mod tests {
 
     #[test]
     fn navigation_artwork_distinguishes_the_pages() {
-        assert_ne!(Page::Tasks.icon(), Page::Flows.icon());
+        let icons: std::collections::HashSet<_> = Page::ALL.map(Page::icon).into();
+        assert_eq!(icons.len(), Page::ALL.len());
     }
 }

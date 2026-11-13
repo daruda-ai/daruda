@@ -125,6 +125,9 @@ pub(in crate::workspace) struct LeftDockSnapshot {
         daruda_store::project::LaneRef,
         crate::workspace::github_ops::tone::PrBadge,
     >,
+    /// Open pull requests the window's lanes are on: the Pull requests
+    /// entry's count.
+    pub open_lane_prs: usize,
     /// What the Git Changes panel says about the active lane's PR.
     pub pr_strip: crate::workspace::github_ops::strip::PrStrip,
     /// What is under way for the active lane's PR.

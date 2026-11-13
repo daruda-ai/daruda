@@ -153,6 +153,7 @@ impl Workspace {
                     ))
                 })
                 .collect(),
+            open_lane_prs: self.open_lane_pr_count(),
             pr_strip: self.pr_strip(cx),
             pr_work: self
                 .lane_scoped

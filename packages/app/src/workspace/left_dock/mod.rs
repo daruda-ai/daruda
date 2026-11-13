@@ -73,7 +73,7 @@ pub(in crate::workspace) mod file_tree_context;
 pub(in crate::workspace) mod file_tree_ops;
 pub(super) mod files;
 pub(super) mod footer;
-pub(super) mod git_changes;
+pub(in crate::workspace) mod git_changes;
 pub(in crate::workspace) mod git_ops;
 pub(super) mod projects;
 pub(in crate::workspace) mod rail;

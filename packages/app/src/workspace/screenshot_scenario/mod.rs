@@ -118,6 +118,7 @@ pub(crate) enum ScreenshotScenario {
     LeftDockGitGhMissing,
     LeftDockWorktreesPr,
     CreatePrModal,
+    PullRequestsList,
     /// Open the command palette (`CommandPaletteState::open`).
     CommandPalette,
     /// Open the Lane switcher with a real candidate whose label is
@@ -842,6 +843,12 @@ pub(crate) fn drive(
                 if shot == PrShot::NoPr {
                     ws.open_create_pr_modal(window, cx);
                 }
+            });
+        }
+        ScreenshotScenario::PullRequestsList => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_left_dock_for_shot(false, true, false, window, cx);
+                ws.seed_pr_page_for_shot(cx);
             });
         }
         ScreenshotScenario::LeftDockWorktreesPr => {

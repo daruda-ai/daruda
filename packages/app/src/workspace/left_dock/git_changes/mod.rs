@@ -8,7 +8,7 @@
 use crate::ui::Sizable as _;
 mod against_base_section;
 mod file_row;
-pub(in crate::workspace::left_dock) mod pr_strip;
+pub(in crate::workspace) mod pr_strip;
 #[cfg(feature = "screenshot")]
 mod screenshot;
 pub(super) mod unified_list;

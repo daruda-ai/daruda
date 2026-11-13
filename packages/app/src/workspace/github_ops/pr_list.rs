@@ -25,10 +25,6 @@ pub(crate) enum HostList {
     Failed { last: Option<PrSearch> },
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the pull requests page calls it")
-)]
 static LOADING: HostList = HostList::Loading;
 
 /// Whether the page is on screen, and what it has for each host.
@@ -36,10 +32,6 @@ static LOADING: HostList = HostList::Loading;
 pub(crate) enum PrListState {
     #[default]
     Hidden,
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the pull requests page calls it")
-    )]
     Shown {
         filter: PrFilter,
         hosts: HashMap<String, HostList>,
@@ -55,10 +47,6 @@ impl PrListState {
     }
 
     /// What `host` has under the shown filter; `Loading` while hidden.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the pull requests page calls it")
-    )]
     pub(crate) fn host(&self, host: &str) -> &HostList {
         match self {
             Self::Hidden => &LOADING,
@@ -67,10 +55,6 @@ impl PrListState {
     }
 
     /// Show `filter`; another filter starts over. Returns whether it changed.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the pull requests page calls it")
-    )]
     fn show(&mut self, filter: PrFilter) -> bool {
         if self.filter() == Some(filter) {
             return false;
@@ -82,10 +66,6 @@ impl PrListState {
         true
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the pull requests page calls it")
-    )]
     fn hide(&mut self) -> bool {
         !matches!(std::mem::take(self), Self::Hidden)
     }
@@ -173,19 +153,11 @@ impl Workspace {
         Some((self.pr_list.filter()?, self.github_repos()))
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the pull requests page calls it")
-    )]
     pub(crate) fn pr_list(&self) -> &PrListState {
         &self.pr_list
     }
 
     /// The page is on screen with `filter`, or switched to it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the pull requests page calls it")
-    )]
     pub(crate) fn show_pr_list(&mut self, filter: PrFilter, cx: &mut Context<Self>) {
         if self.pr_list.show(filter) {
             PrList::wanted(cx);
@@ -194,10 +166,6 @@ impl Workspace {
     }
 
     /// The page left the screen: its hosts are no longer asked for it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the pull requests page calls it")
-    )]
     pub(crate) fn hide_pr_list(&mut self, cx: &mut Context<Self>) {
         if self.pr_list.hide() {
             cx.notify();
@@ -205,10 +173,6 @@ impl Workspace {
     }
 
     /// Search this window's hosts again now, for the filter shown.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the pull requests page calls it")
-    )]
     pub(crate) fn refresh_pr_list(&mut self, cx: &mut Context<Self>) {
         let Some(filter) = self.pr_list.filter() else {
             return;

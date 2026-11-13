@@ -1,4 +1,4 @@
-//! Task and flow pages, independent of the right utility dock.
+//! Task, flow and pull request pages, independent of the right utility dock.
 
 use daruda_store::project::WorkspacePage;
 use gpui::{Context, ScrollHandle, Window};
@@ -9,6 +9,7 @@ use crate::ui::icons;
 
 pub(in crate::workspace) mod detail;
 pub(in crate::workspace) mod flows;
+pub(in crate::workspace) mod pull_requests;
 pub(super) mod render;
 pub(in crate::workspace) mod tasks;
 
@@ -16,9 +17,13 @@ pub(in crate::workspace) mod tasks;
 pub(in crate::workspace) enum Page {
     Tasks,
     Flows,
+    PullRequests,
 }
 
 impl Page {
+    /// Every page, in navigation order.
+    pub const ALL: [Self; 3] = [Self::Tasks, Self::Flows, Self::PullRequests];
+
     pub fn from_stored(page: WorkspacePage) -> Self {
         match page {
             WorkspacePage::Tasks => Self::Tasks,
@@ -26,10 +31,14 @@ impl Page {
         }
     }
 
-    pub fn stored(self) -> WorkspacePage {
+    /// What the saved state records; `None` for a page a window does not
+    /// reopen on. Pull requests has no stored form: an older build reading
+    /// one it does not know would fail to restore the whole window.
+    pub fn stored(self) -> Option<WorkspacePage> {
         match self {
-            Self::Tasks => WorkspacePage::Tasks,
-            Self::Flows => WorkspacePage::Flows,
+            Self::Tasks => Some(WorkspacePage::Tasks),
+            Self::Flows => Some(WorkspacePage::Flows),
+            Self::PullRequests => None,
         }
     }
 
@@ -37,6 +46,7 @@ impl Page {
         match self {
             Self::Tasks => strings::dock::right_tab_tasks(),
             Self::Flows => strings::dock::right_tab_flows(),
+            Self::PullRequests => strings::pull_requests::title(),
         }
     }
 
@@ -44,6 +54,7 @@ impl Page {
         match self {
             Self::Tasks => icons::TASKS,
             Self::Flows => icons::FLOWS,
+            Self::PullRequests => icons::PULL_REQUESTS,
         }
     }
 }
@@ -83,6 +94,7 @@ impl Workspace {
             ws.workspace_page = Some(ws.page_state(page));
             ws.main_area.pending_resize = true;
         });
+        self.follow_pr_page(cx);
         if page == Page::Flows {
             self.respawn_flow_watcher(cx);
             if let Some(detail) = &self.pages.flows.detail
@@ -111,6 +123,7 @@ impl Workspace {
                 ws.workspace_page = None;
                 ws.main_area.pending_resize = true;
             });
+            self.follow_pr_page(cx);
             cx.notify();
         }
     }
@@ -146,8 +159,11 @@ mod tests {
 
     #[test]
     fn stored_page_round_trips() {
-        for page in [Page::Tasks, Page::Flows] {
-            assert_eq!(Page::from_stored(page.stored()), page);
+        for page in Page::ALL {
+            if let Some(stored) = page.stored() {
+                assert_eq!(Page::from_stored(stored), page);
+            }
         }
+        assert_eq!(Page::PullRequests.stored(), None, "never saved");
     }
 }

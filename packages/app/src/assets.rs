@@ -158,6 +158,7 @@ impl AssetSource for DarudaAssets {
             "icons/lucide/shield-alert.svg" => icon!("lucide/shield-alert.svg"),
             "icons/lucide/list-checks.svg" => icon!("lucide/list-checks.svg"),
             "icons/lucide/workflow.svg" => icon!("lucide/workflow.svg"),
+            "icons/lucide/git-pull-request.svg" => icon!("lucide/git-pull-request.svg"),
             "icons/lucide/folder.svg" => icon!("lucide/folder.svg"),
             "icons/lucide/folder-open.svg" => icon!("lucide/folder-open.svg"),
             "icons/status/idle.svg" => icon!("status/idle.svg"),
@@ -430,6 +431,7 @@ mod tests {
             KEEP_AWAKE,
             TASKS,
             FLOWS,
+            PULL_REQUESTS,
             FOLDER,
             FOLDER_OPEN,
             SESSION,
@@ -448,7 +450,7 @@ mod tests {
     #[test]
     fn lucide_glyphs_share_one_stroke() {
         use crate::ui::icons::{
-            FLOWS, FOLDER, FOLDER_OPEN, SERVER, SESSION, SHIELD_ALERT, SKILL, TASKS,
+            FLOWS, FOLDER, FOLDER_OPEN, PULL_REQUESTS, SERVER, SESSION, SHIELD_ALERT, SKILL, TASKS,
         };
         // Lucide ships at stroke 2; dock rows read at this lighter weight.
         const LUCIDE_STROKE: &str = r#"stroke-width="1.65""#;
@@ -456,6 +458,7 @@ mod tests {
         for path in [
             TASKS,
             FLOWS,
+            PULL_REQUESTS,
             FOLDER,
             FOLDER_OPEN,
             SESSION,

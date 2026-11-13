@@ -24,20 +24,12 @@ impl PrList {
     /// A page started showing a list or changed its filter: run a round now
     /// rather than at the next tick. Deferred: the caller is inside a
     /// workspace update the round would re-enter.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the pull requests page calls it")
-    )]
     pub(crate) fn wanted(cx: &mut App) {
         cx.defer(PrPoller::tick);
     }
 
     /// Search `hosts` for `filter` again at the next round, whatever the
     /// cadence says: the user pressed refresh.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the pull requests page calls it")
-    )]
     pub(crate) fn refresh(hosts: impl IntoIterator<Item = String>, filter: PrFilter, cx: &mut App) {
         let schedule = &mut cx.default_global::<Self>().schedule;
         for host in hosts {

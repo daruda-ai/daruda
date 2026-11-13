@@ -58,6 +58,7 @@ impl Workspace {
         self.workspace_page = workspace
             .active_page
             .map(|page| self.page_state(crate::workspace::pages::Page::from_stored(page)));
+        self.follow_pr_page(cx);
         let bottom_open = workspace.docks.bottom_open;
         let bottom_size = workspace.docks.bottom_size;
         self.docks.bottom.update(cx, |d, _| {

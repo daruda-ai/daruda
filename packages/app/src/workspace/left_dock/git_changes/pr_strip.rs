@@ -13,8 +13,9 @@ use crate::workspace::github_ops::tone::PrTone;
 use crate::workspace::layout::{Dock, LeftDockSnapshot};
 
 /// The glyph and color a check tone shows, or nothing for a quiet one.
-/// Shared with the lane row badge so both read the same.
-pub(in crate::workspace::left_dock) fn tone_glyph(
+/// Shared with the lane row badge and the Pull requests page so all read the
+/// same.
+pub(in crate::workspace) fn tone_glyph(
     tone: PrTone,
     cx: &gpui::App,
 ) -> Option<(&'static str, gpui::Hsla)> {
@@ -27,7 +28,7 @@ pub(in crate::workspace::left_dock) fn tone_glyph(
     }
 }
 
-fn checks_label(checks: CheckRollup) -> Option<String> {
+pub(in crate::workspace) fn checks_label(checks: CheckRollup) -> Option<String> {
     match checks {
         CheckRollup::Passing => Some(s::pr_checks_passing()),
         CheckRollup::Failing { failed: Some(n) } => Some(s::pr_checks_failing(n)),

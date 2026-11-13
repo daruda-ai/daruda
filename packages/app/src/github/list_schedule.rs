@@ -91,10 +91,6 @@ pub(super) struct ListSchedule {
 impl ListSchedule {
     /// The user asked to refresh `key`. A search already running answers
     /// that, so a second one is not started beside it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the pull requests page calls it")
-    )]
     pub(super) fn refresh(&mut self, key: ListKey) {
         let state = self.lists.entry(key).or_default();
         if state.ask == Ask::Idle {

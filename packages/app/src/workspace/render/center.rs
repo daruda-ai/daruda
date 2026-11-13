@@ -68,6 +68,12 @@ pub(super) fn render_center_content(
     {
         return crate::workspace::pages::render::content(page, snap, cx);
     }
+    if let Some(page) = &ws.workspace_page
+        && page.page == crate::workspace::pages::Page::PullRequests
+        && let Some(snap) = &ws.pages.pull_requests.snapshot
+    {
+        return crate::workspace::pages::render::pr_content(page, snap, cx);
+    }
     // Which divider is being held, so its cursor can reach past itself.
     let dragged_divider = ws.main_area.drag_state.map(|drag| drag.left_first_leaf);
     // Availability gate runs FIRST, before any tab lookup. An

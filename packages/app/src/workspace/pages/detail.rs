@@ -6,6 +6,7 @@ use gpui::{App, Context, Window};
 
 use super::Page;
 use super::flows::detail::{FlowDetailId, FlowsPage};
+use super::pull_requests::PullRequestsPage;
 use super::tasks::{TaskEditorId, TasksPage};
 use crate::surface::strings;
 use crate::workspace::Workspace;
@@ -16,6 +17,7 @@ use crate::workspace::dirty_items::DirtyItem;
 pub(in crate::workspace) struct PageDetails {
     pub tasks: TasksPage,
     pub flows: FlowsPage,
+    pub pull_requests: PullRequestsPage,
 }
 
 /// Names the detail a page shows. Ids are never reused, so a callback that
@@ -41,6 +43,8 @@ impl Workspace {
         match page {
             Page::Tasks => self.task_detail_id().map(PageDetailId::TaskEditor),
             Page::Flows => self.flow_detail_id().map(PageDetailId::Flow),
+            // Its rows open nothing yet.
+            Page::PullRequests => None,
         }
     }
 

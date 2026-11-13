@@ -181,7 +181,7 @@ impl Workspace {
             active_right_panel_view: self.docks.right_view,
             active_page: self
                 .active_page()
-                .map(crate::workspace::pages::Page::stored),
+                .and_then(crate::workspace::pages::Page::stored),
             task_detail: self.task_detail_target(cx),
             flow_detail: self.flow_detail_target(cx),
             window_open_policy: self.window_open_policy,

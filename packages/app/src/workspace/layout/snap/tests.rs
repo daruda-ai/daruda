@@ -30,6 +30,7 @@ fn fixture(window: &mut Window, cx: &mut gpui::App) -> LeftDockSnapshot {
         git_worktree_cache: std::collections::HashMap::new(),
         git_tracking_cache: std::collections::HashMap::new(),
         pr_cache: std::collections::HashMap::new(),
+        open_lane_prs: 0,
         pr_strip: crate::workspace::github_ops::strip::PrStrip::Hidden,
         pr_work: crate::workspace::github_ops::lane_pr::PrWork::Idle,
         git_stage_in_flight: false,

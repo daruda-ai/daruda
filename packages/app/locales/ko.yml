@@ -828,6 +828,36 @@ git:
   fetch_btn: "페치"
   pull_btn: "풀"
 
+# Pull requests page
+pull_requests:
+  title: "Pull requests"
+  filter_mine: "내 PR"
+  filter_review_requested: "리뷰 요청"
+  filter_all_open: "전체 열림"
+  group_count: "%{host} · %{count}"
+  row_meta: "%{head} → %{base} · %{author} · %{age}"
+  row_meta_undated: "%{head} → %{base} · %{author}"
+  author_deleted: "삭제된 계정"
+  updated_now: "방금"
+  updated_minutes: "%{count}분 전"
+  updated_hours: "%{count}시간 전"
+  updated_days: "%{count}일 전"
+  fork: "fork"
+  review_approved: "승인됨"
+  review_changes_requested: "변경 요청됨"
+  review_required: "리뷰 필요"
+  comments: "댓글 %{count}개"
+  go_to_lane: "이 worktree로 이동"
+  empty_repo: "이 저장소에는 조건에 맞는 열린 pull request가 없습니다."
+  truncated: "여기 표시된 것보다 pull request가 더 있습니다."
+  gh_missing: "이 저장소의 pull request를 보려면 GitHub CLI(gh)를 설치하세요."
+  gh_logged_out: "이 저장소의 pull request를 보려면 터미널에서 “gh auth login --hostname %{host}”을 실행하세요."
+  rate_limited: "GitHub 요청 한도에 도달했습니다. 잠시 후 다시 불러옵니다."
+  unreachable: "GitHub에 연결하지 못했습니다. 곧 다시 불러옵니다."
+  search_failed: "마지막 검색이 실패했습니다. 곧 다시 시도합니다."
+  empty_no_repos: "이 창에는 GitHub 저장소로 push하는 worktree가 없습니다."
+  empty_disabled: "설정에서 GitHub pull request 기능이 꺼져 있습니다."
+
 # Settings panel
 settings:
   title: "설정"
