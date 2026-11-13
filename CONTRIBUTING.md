@@ -273,6 +273,17 @@ Task state uses the profile data directory:
 | Legacy tasks | `<data_dir>/tasks.json` | One-time migration input, preserved byte-for-byte and never rewritten. |
 | Startup reconciliation marker | `<data_dir>/task-log/.reconciling` | Present only while a start settles the runs the last session left. |
 | Orchestrator run delivery | `<data_dir>/run-ledger/` | Run ledger of the orchestrator's scope and unreported results, kept across restarts; an unreadable one is left untouched and delivery stays memory-only. |
+| Browser tool binary | `<data_dir>/agent-browser/<version>/agent-browser[.exe]` plus a `.complete` marker | Profile-scoped, unlike the shared Node install. A verified download pinned by sha256 in `packages/agent/src/browser_tool/pinned.rs`. |
+| Browser daemon sockets | `<data_dir>/ab/` | `AGENT_BROWSER_SOCKET_DIR`. Kept short because upstream refuses socket paths over 103 bytes; per data root so a `DARUDA_DATA_DIR` run never reaches the release install's browsers. |
+
+Chrome for Testing, installed by `agent-browser install`, lives in
+`$HOME/.agent-browser/browsers/`. agent-browser owns it, so it is outside
+daruda's storage and shared by every profile; upstream has no setting to move
+it. Two profiles installing at the same moment can race, because upstream
+extracts in place without a lock. To recover the tool, delete
+`<data_dir>/agent-browser/`; daruda reinstalls it the next time the setting is
+on or at the next launch. Browser sessions end after agent-browser's one-hour
+idle timeout; daruda does not close them.
 
 Task edits and app-quit flushing write only the run log. Older builds still
 read the preserved, potentially stale legacy file; automatic downgrade
