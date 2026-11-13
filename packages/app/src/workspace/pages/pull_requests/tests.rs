@@ -111,7 +111,6 @@ fn a_pull_request_finds_the_lane_working_on_it() {
 /// What a group body comes to, without its rows' details.
 #[derive(Debug, PartialEq)]
 enum Shape {
-    Absent,
     Loading,
     Blocked(Blocked),
     Listed(Vec<u64>, Option<Trouble>),
@@ -121,11 +120,10 @@ fn shape(list: &PrPageList) -> Shape {
     let PageBody::Groups(groups) = &list.body else {
         panic!("expected groups, got {:?}", list.body);
     };
-    match groups.first().map(|group| &group.body) {
-        None => Shape::Absent,
-        Some(GroupBody::Loading) => Shape::Loading,
-        Some(GroupBody::Blocked(blocked)) => Shape::Blocked(*blocked),
-        Some(GroupBody::Listed { rows, trouble, .. }) => Shape::Listed(
+    match &groups.first().expect("every repository has a group").body {
+        GroupBody::Loading => Shape::Loading,
+        GroupBody::Blocked(blocked) => Shape::Blocked(*blocked),
+        GroupBody::Listed { rows, trouble, .. } => Shape::Listed(
             rows.iter()
                 .map(|row| row.key.rsplit('#').next().unwrap().parse().unwrap())
                 .collect(),
@@ -195,11 +193,18 @@ fn a_group_says_what_its_host_allows() {
             Shape::Blocked(Blocked::LoggedOut),
         ),
         (
-            "another host without gh may not be GitHub",
+            "another host logged out says so in its group",
             ghe.clone(),
             LoggedOut,
             None,
-            Shape::Absent,
+            Shape::Blocked(Blocked::LoggedOut),
+        ),
+        (
+            "another host without gh says so too",
+            ghe.clone(),
+            Missing,
+            ready(),
+            Shape::Blocked(Blocked::Missing),
         ),
         (
             "another host gh knows",

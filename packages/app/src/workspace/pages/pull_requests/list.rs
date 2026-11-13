@@ -8,9 +8,7 @@ use std::collections::BTreeSet;
 use chrono::{DateTime, Utc};
 use daruda_core::age::{self, AgeBucket};
 use daruda_github::availability::{BackoffReason, GhAvailability};
-use daruda_github::{
-    CheckRollup, GITHUB_HOST, PrFilter, PrListItem, PrSearch, PrState, RepoId, ReviewDecision,
-};
+use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, RepoId, ReviewDecision};
 use daruda_store::project::LaneRef;
 
 use crate::surface::strings::{git as git_s, pull_requests as s};
@@ -196,20 +194,19 @@ pub(in crate::workspace) fn page(
             inputs
                 .repos
                 .iter()
-                .filter_map(|repo| {
+                .map(|repo| {
                     let host = repo.host();
-                    let body =
-                        group_body(repo, availability(host), inputs.list.host(host), inputs)?;
+                    let body = group_body(repo, availability(host), inputs.list.host(host), inputs);
                     let meta = match &body {
                         GroupBody::Listed { rows, .. } => s::group_count(host, rows.len()),
                         GroupBody::Loading | GroupBody::Blocked(_) => host.to_owned(),
                     };
-                    Some(PrGroup {
+                    PrGroup {
                         repo: repo.clone(),
                         label: format!("{}/{}", repo.owner(), repo.name()),
                         meta,
                         body,
-                    })
+                    }
                 })
                 .collect(),
         )
@@ -220,21 +217,18 @@ pub(in crate::workspace) fn page(
     }
 }
 
-/// What `repo`'s group shows, or `None` to leave it out: a host other than
-/// github.com without a usable `gh` may not be GitHub at all, as the Git
-/// panel's strip also decides.
+/// What `repo`'s group shows. A `gh` problem is said on any host: unlike
+/// the Git panel's strip, which stays quiet off github.com, the page was
+/// opened to see these repositories' pull requests.
 fn group_body(
     repo: &RepoId,
     availability: GhAvailability,
     list: &HostList,
     inputs: &PageInputs<'_>,
-) -> Option<GroupBody> {
+) -> GroupBody {
     let trouble = match availability {
-        GhAvailability::Missing | GhAvailability::LoggedOut if repo.host() != GITHUB_HOST => {
-            return None;
-        }
-        GhAvailability::Missing => return Some(GroupBody::Blocked(Blocked::Missing)),
-        GhAvailability::LoggedOut => return Some(GroupBody::Blocked(Blocked::LoggedOut)),
+        GhAvailability::Missing => return GroupBody::Blocked(Blocked::Missing),
+        GhAvailability::LoggedOut => return GroupBody::Blocked(Blocked::LoggedOut),
         GhAvailability::Backoff {
             reason: BackoffReason::RateLimited,
             ..
@@ -250,13 +244,13 @@ fn group_body(
         truncated: search.is_some_and(|search| search.truncated),
         trouble,
     };
-    Some(match list {
+    match list {
         // A paused host is not searched; say why rather than wait forever.
         HostList::Loading if trouble.is_some() => listed(None, trouble),
         HostList::Loading => GroupBody::Loading,
         HostList::Ready(search) => listed(Some(search), trouble),
         HostList::Failed { last } => listed(last.as_ref(), trouble.or(Some(Trouble::SearchFailed))),
-    })
+    }
 }
 
 fn rows(repo: &RepoId, search: &PrSearch, inputs: &PageInputs<'_>) -> Vec<PrRow> {
