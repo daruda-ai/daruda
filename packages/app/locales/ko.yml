@@ -1949,3 +1949,9 @@ library:
   add_row: "행 추가"
   companion: "agents/openai.yaml 확인 (읽기 전용)"
   root_invalid: "설정 경로를 절대 경로로 해석하지 못했습니다. 계정 또는 제공자 환경 설정을 확인하세요."
+
+# Toasts about the managed agent-browser tool
+browser_tool:
+  install_failed: "브라우저 도구를 설치하지 못했습니다"
+  installed: "브라우저 도구를 설치했습니다. 이제부터 연결되는 에이전트 채팅에서 쓸 수 있습니다."
+  unsupported_platform: "이 플랫폼에서는 브라우저 도구를 지원하지 않습니다"

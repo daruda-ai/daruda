@@ -1,0 +1,268 @@
+//! The process-wide managed agent-browser install, driven by
+//! `[browser] enabled`.
+//!
+//! One install runs at a time for the whole process; restored chat panes
+//! reconnect early, so startup checks the cache synchronously.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use daruda_agent::browser_tool::install::{self, InstallError, InstallStage};
+use daruda_agent::browser_tool::{self, Asset, McpLaunch};
+use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
+use futures::StreamExt as _;
+use gpui::{App, Global};
+
+use crate::settings_store::SettingsStore;
+use crate::surface::strings::browser_tool as s;
+use crate::window_registry::WindowRegistry;
+
+/// Fetches and verifies the tool. Blocking: callers run it off the
+/// foreground thread.
+pub(crate) trait Installer: Send + Sync {
+    /// The installed binary, when the cache is complete and verified.
+    fn cached(&self) -> Option<PathBuf>;
+    fn install(&self, on_stage: &mut dyn FnMut(InstallStage)) -> Result<PathBuf, InstallError>;
+}
+
+/// The release download into the profile's tool directory.
+struct Managed {
+    tool_dir: PathBuf,
+    asset: Asset,
+    os: &'static str,
+}
+
+impl Installer for Managed {
+    fn cached(&self) -> Option<PathBuf> {
+        install::cached(&self.tool_dir, &self.asset, self.os)
+    }
+
+    fn install(&self, on_stage: &mut dyn FnMut(InstallStage)) -> Result<PathBuf, InstallError> {
+        install::install(
+            &self.tool_dir,
+            &self.asset,
+            self.os,
+            on_stage,
+            &install::HttpFetch,
+            &install::ProcessRun,
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BrowserToolState {
+    Absent,
+    Installing(InstallStage),
+    Ready(PathBuf),
+    Failed,
+}
+
+/// No release exists for this host, or one can be installed.
+pub(crate) enum BrowserTool {
+    Unsupported { notified: bool },
+    Supported(Supported),
+}
+
+pub(crate) struct Supported {
+    installer: Arc<dyn Installer>,
+    socket_dir: PathBuf,
+    state: BrowserToolState,
+}
+
+impl Global for BrowserTool {}
+
+impl BrowserTool {
+    /// Install the global for this host. Idempotent.
+    pub(crate) fn init(cx: &mut App) {
+        if cx.has_global::<Self>() {
+            return;
+        }
+        let tool = default_tool(browser_tool::target(
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            cfg!(target_env = "musl"),
+        ));
+        cx.set_global(tool);
+    }
+
+    /// A host with a release: the cache decides whether it starts `Ready`.
+    pub(crate) fn supported(installer: Arc<dyn Installer>, socket_dir: PathBuf) -> Self {
+        let state = match installer.cached() {
+            Some(binary) => BrowserToolState::Ready(binary),
+            None => BrowserToolState::Absent,
+        };
+        Self::Supported(Supported {
+            installer,
+            socket_dir,
+            state,
+        })
+    }
+
+    /// The setting may have turned on: install when nothing usable is there.
+    /// An install in flight runs to completion even if it turned off again.
+    pub(crate) fn settings_changed(cx: &mut App) {
+        if !SettingsStore::global(cx).user().browser.enabled {
+            return;
+        }
+        let Some(tool) = cx.try_global::<Self>() else {
+            return;
+        };
+        match tool {
+            Self::Unsupported { notified: false } => {
+                *cx.global_mut::<Self>() = Self::Unsupported { notified: true };
+                surface(
+                    ErrorReport::new(s::unsupported_platform())
+                        .severity(ErrorSeverity::Warning)
+                        .with_context("os", std::env::consts::OS)
+                        .with_context("arch", std::env::consts::ARCH)
+                        .dedup("browser_tool.unsupported")
+                        .build(),
+                    cx,
+                );
+            }
+            Self::Supported(supported)
+                if matches!(
+                    supported.state,
+                    BrowserToolState::Absent | BrowserToolState::Failed
+                ) =>
+            {
+                let installer = supported.installer.clone();
+                Self::start_install(installer, cx);
+            }
+            _ => {}
+        }
+    }
+
+    fn start_install(installer: Arc<dyn Installer>, cx: &mut App) {
+        Self::set_state(BrowserToolState::Installing(InstallStage::Binary), cx);
+        let (stages, mut stage_rx) = futures::channel::mpsc::unbounded();
+        let task = cx.background_executor().spawn(async move {
+            installer.install(&mut |stage| {
+                // Fails only once the foreground task is gone, i.e. the app quit.
+                let _ = stages.unbounded_send(stage);
+            })
+        });
+        cx.spawn(async move |cx| {
+            while let Some(stage) = stage_rx.next().await {
+                cx.update(|cx| Self::set_state(BrowserToolState::Installing(stage), cx));
+            }
+            let result = task.await;
+            cx.update(|cx| Self::finish_install(result, cx));
+        })
+        .detach();
+    }
+
+    fn finish_install(result: Result<PathBuf, InstallError>, cx: &mut App) {
+        let report = match result {
+            Ok(binary) => {
+                Self::set_state(BrowserToolState::Ready(binary), cx);
+                ErrorReport::new(s::installed())
+                    .severity(ErrorSeverity::Info)
+                    .dedup("browser_tool.installed")
+                    .build()
+            }
+            Err(error) => {
+                Self::set_state(BrowserToolState::Failed, cx);
+                ErrorReport::new(s::install_failed())
+                    .severity(ErrorSeverity::Error)
+                    .from_error(&error)
+                    .at(file!(), line!())
+                    .dedup("browser_tool.install_failed")
+                    .build()
+            }
+        };
+        surface(report, cx);
+    }
+
+    fn set_state(state: BrowserToolState, cx: &mut App) {
+        if let Self::Supported(supported) = cx.global_mut::<Self>() {
+            supported.state = state;
+        }
+    }
+}
+
+/// How to start `agent-browser mcp` for a lane's chat session, when the
+/// setting is on and the tool is installed.
+// Wired in by the lane-session injection; until then only tests call it.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn launch_for_lane(lane_root: &Path, cx: &App) -> Option<McpLaunch> {
+    if !SettingsStore::global(cx).user().browser.enabled {
+        return None;
+    }
+    let BrowserTool::Supported(Supported {
+        socket_dir,
+        state: BrowserToolState::Ready(binary),
+        ..
+    }) = cx.try_global::<BrowserTool>()?
+    else {
+        return None;
+    };
+    let limit = cfg!(unix).then_some(browser_tool::UNIX_SOCKET_PATH_LIMIT);
+    match browser_tool::launch(binary, socket_dir, lane_root, limit) {
+        Ok(launch) => Some(launch),
+        Err(error) => {
+            LogWriter::log(
+                ErrorReport::new("Browser tool cannot launch for this lane")
+                    .severity(ErrorSeverity::Warning)
+                    .from_error(&error)
+                    .at(file!(), line!())
+                    .dedup("browser_tool.launch")
+                    .build(),
+            );
+            None
+        }
+    }
+}
+
+/// Toast in the focused workspace (or any open one); the log alone when no
+/// workspace window is open.
+fn surface(report: ErrorReport, cx: &mut App) {
+    let Some((_, workspace)) =
+        WindowRegistry::active_workspace(cx).or_else(|| WindowRegistry::first_workspace(cx))
+    else {
+        LogWriter::log(report);
+        return;
+    };
+    let shown = report.clone();
+    if workspace
+        .update(cx, |ws, cx| ws.report_error(shown, cx))
+        .is_err()
+    {
+        LogWriter::log(report);
+    }
+}
+
+/// The tool for a host whose release is `target`, kept in `tool_dir`.
+fn host_tool(target: Option<Asset>, tool_dir: PathBuf, socket_dir: PathBuf) -> BrowserTool {
+    match target {
+        Some(asset) => BrowserTool::supported(
+            Arc::new(Managed {
+                tool_dir,
+                asset,
+                os: std::env::consts::OS,
+            }),
+            socket_dir,
+        ),
+        None => BrowserTool::Unsupported { notified: false },
+    }
+}
+
+#[cfg(not(test))]
+fn default_tool(target: Option<Asset>) -> BrowserTool {
+    host_tool(
+        target,
+        daruda_store::persistence::browser_tool_dir(),
+        daruda_store::persistence::browser_socket_dir(),
+    )
+}
+
+/// Test builds never download or read the profile's tool directory; a test
+/// that wants a tool builds one with [`host_tool`] or [`BrowserTool::supported`].
+#[cfg(test)]
+fn default_tool(_target: Option<Asset>) -> BrowserTool {
+    BrowserTool::Unsupported { notified: false }
+}
+
+#[cfg(test)]
+mod tests;
