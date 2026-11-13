@@ -372,13 +372,14 @@ mod tests {
     #[test]
     fn the_menu_offers_only_allowed_methods_default_first() {
         use MergeMethod::{Merge, Rebase, Squash};
-        // (label, allowed as GitHub lists them, GitHub's default, menu)
-        let cases: [(
-            &str,
+        /// (label, allowed as GitHub lists them, GitHub's default, menu)
+        type Case = (
+            &'static str,
             Vec<MergeMethod>,
             Option<MergeMethod>,
             Vec<MergeMethod>,
-        ); 8] = [
+        );
+        let cases: [Case; 8] = [
             (
                 "the default leads",
                 vec![Merge, Squash, Rebase],

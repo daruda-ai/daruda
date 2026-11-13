@@ -322,8 +322,13 @@ fn the_header_says_how_old_the_newest_answer_is() {
     let ghe = RepoId::new("ghe.corp", "o", "r");
     let repos = BTreeSet::from([repo(), ghe.clone()]);
     let ago = |seconds| clock - Duration::from_secs(seconds);
-    // (label, answer times per host, expected)
-    let cases: Vec<(&str, Vec<(&str, std::time::Instant)>, Option<String>)> = vec![
+    /// (label, answer times per host, expected)
+    type Case = (
+        &'static str,
+        Vec<(&'static str, std::time::Instant)>,
+        Option<String>,
+    );
+    let cases: Vec<Case> = vec![
         ("nothing arrived yet", vec![], None),
         (
             "just now",
