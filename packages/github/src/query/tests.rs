@@ -6,7 +6,8 @@
 //! PR whose workflow runs on both `push` and `pull_request`.
 //! `search_prs.json` answers `search_prs_query` (with `first: 3`) for
 //! `is:pr is:open archived:false sort:updated-desc repo:cli/cli`, 2026-11-13:
-//! fork PRs and a same-repository draft, 56 matches in all.
+//! fork PRs and a same-repository draft, 56 matches in all; recorded again
+//! the same day when the query began asking for `headRepositoryOwner`.
 
 use crate::query::{
     newest_first, parse_prs_for_branches, parse_search_prs, prs_for_branches_query,
@@ -173,6 +174,7 @@ fn a_real_search_answer_parses_fork_and_same_repository_prs() {
     assert_eq!(fork.pr.state, PrState::Open);
     assert_eq!(fork.pr.checks, CheckRollup::Passing);
     assert_eq!(fork.author.as_deref(), Some("pad895"));
+    assert_eq!(fork.head_owner.as_deref(), Some("pad895"));
     assert_eq!(fork.base_branch, "trunk");
 
     let fork_draft = &search.items[1];
@@ -185,6 +187,11 @@ fn a_real_search_answer_parses_fork_and_same_repository_prs() {
     assert_eq!(draft.pr.state, PrState::Draft);
     assert_eq!(draft.pr.checks, CheckRollup::Passing);
     assert_eq!(draft.author.as_deref(), Some("williammartin"));
+    assert_eq!(
+        draft.head_owner.as_deref(),
+        Some("cli"),
+        "a same-repository head is owned by the repository, not the author"
+    );
 }
 
 /// One search node of `count` matches; `repo`, `author` and `rollup` are
@@ -194,7 +201,7 @@ fn search_answer_of(count: u32, repo: &str, author: &str, rollup: &str) -> Strin
         r#"{{"data":{{"search":{{"issueCount":{count},"nodes":[{{"number":7,"url":"u","title":"t","state":"OPEN",
         "isDraft":false,"headRefName":"h","isCrossRepository":false,"reviewDecision":null,
         "updatedAt":"2026-01-01T00:00:00Z","statusCheckRollup":{rollup},
-        "repository":{{"nameWithOwner":{repo}}},"author":{author},"baseRefName":"main",
+        "repository":{{"nameWithOwner":{repo}}},"headRepositoryOwner":null,"author":{author},"baseRefName":"main",
         "comments":{{"totalCount":3}}}}]}}}}}}"#
     )
 }
@@ -240,6 +247,10 @@ fn search_nodes_parse_into_list_items() {
         let item = &search.items[0];
         assert_eq!(item.repo, repo, "{label}");
         assert_eq!(item.author.as_deref(), author, "{label}");
+        assert_eq!(
+            item.head_owner, None,
+            "{label}: a deleted fork has no owner"
+        );
         assert_eq!(item.pr.checks, checks, "{label}");
         assert_eq!(
             (item.comments, item.base_branch.as_str()),
@@ -302,6 +313,7 @@ fn the_search_query_names_every_field_the_parser_reads() {
         "...pr",
         "fragment pr on PullRequest",
         "nameWithOwner",
+        "headRepositoryOwner { login }",
         "author { login }",
         "baseRefName",
         "comments { totalCount }",

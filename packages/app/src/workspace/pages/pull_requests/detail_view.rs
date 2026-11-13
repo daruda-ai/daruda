@@ -284,10 +284,11 @@ fn header_actions(loaded: &PrDetail, running: PrAction) -> Option<HeaderActions>
         PrState::Draft => true,
         PrState::Merged | PrState::Closed => return None,
     };
-    let methods: Vec<(MergeMethod, String)> = actions::merge_menu(&loaded.methods)
-        .into_iter()
-        .map(|method| (method, merge_action_label(method)))
-        .collect();
+    let methods: Vec<(MergeMethod, String)> =
+        actions::merge_menu(&loaded.methods, loaded.default_method)
+            .into_iter()
+            .map(|method| (method, merge_action_label(method)))
+            .collect();
     let blocked = match loaded.mergeability {
         _ if methods.is_empty() => Some(s::merge_no_methods()),
         Mergeability::Ready => None,
@@ -589,6 +590,7 @@ mod tests {
             repo: RepoId::new("github.com", "o", "r"),
             pr: summary(cross_repo, Vec::new()),
             author: Some("alice".into()),
+            head_owner: None,
             base_branch: "main".into(),
             comments: 0,
         }
@@ -625,6 +627,7 @@ mod tests {
             author: Some("alice".into()),
             mergeability: Mergeability::Blocked(BlockReason::Behind),
             methods: vec![MergeMethod::Squash],
+            default_method: None,
             reviewers: vec![("bob".into(), ReviewerState::ChangesRequested)],
             checks: vec![
                 CheckEntry {

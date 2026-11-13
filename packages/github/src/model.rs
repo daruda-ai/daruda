@@ -217,6 +217,9 @@ pub struct PrListItem {
     pub pr: PrSummary,
     /// `None` for a deleted account.
     pub author: Option<String>,
+    /// The owner of the repository the head branch lives in: the fork's
+    /// owner for a cross-repository PR. `None` once the fork is deleted.
+    pub head_owner: Option<String>,
     pub base_branch: String,
     /// Conversation comments, not review comments on the diff.
     pub comments: u32,
@@ -304,6 +307,10 @@ pub struct PrDetail {
     pub mergeability: Mergeability,
     /// What the repository allows, in the order merge, squash, rebase.
     pub methods: Vec<MergeMethod>,
+    /// The method GitHub preselects for the caller: the one they last used
+    /// on this repository, else the repository's default. `None` when
+    /// GitHub did not say or answered a value this crate does not know.
+    pub default_method: Option<MergeMethod>,
     /// Reviewers who reviewed, then those only asked to; a team reads
     /// `org/team`. A request GitHub does not name to the caller is left out.
     pub reviewers: Vec<(String, ReviewerState)>,

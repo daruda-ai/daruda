@@ -32,14 +32,22 @@ pub(in crate::workspace) enum PrAction {
     Rerunning,
 }
 
-/// The merge methods the menu offers: only those the repository allows, in
-/// a fixed order whose head is the repository-preferred one — Squash if
-/// allowed, else Merge, else Rebase — which also labels the button.
-pub(in crate::workspace) fn merge_menu(allowed: &[MergeMethod]) -> Vec<MergeMethod> {
-    [MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase]
+/// The merge methods the menu offers: only those the repository allows,
+/// GitHub's preselected one for the viewer first, since it labels the
+/// button. Without one (or one no longer allowed) a fixed order stands in:
+/// Squash, then Merge, then Rebase.
+pub(in crate::workspace) fn merge_menu(
+    allowed: &[MergeMethod],
+    default: Option<MergeMethod>,
+) -> Vec<MergeMethod> {
+    let fallback = [MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase];
+    let mut menu: Vec<MergeMethod> = default
         .into_iter()
+        .chain(fallback.into_iter().filter(|m| Some(*m) != default))
         .filter(|method| allowed.contains(method))
-        .collect()
+        .collect();
+    menu.dedup();
+    menu
 }
 
 /// Each Actions run with a failed job, once: `gh run rerun --failed` reruns
@@ -306,26 +314,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_menu_offers_only_allowed_methods_preferred_first() {
+    fn the_menu_offers_only_allowed_methods_default_first() {
         use MergeMethod::{Merge, Rebase, Squash};
-        // (label, allowed as GitHub lists them, menu)
-        let cases: [(&str, Vec<MergeMethod>, Vec<MergeMethod>); 5] = [
+        // (label, allowed as GitHub lists them, GitHub's default, menu)
+        let cases: [(
+            &str,
+            Vec<MergeMethod>,
+            Option<MergeMethod>,
+            Vec<MergeMethod>,
+        ); 8] = [
             (
-                "all",
+                "the default leads",
                 vec![Merge, Squash, Rebase],
+                Some(Rebase),
+                vec![Rebase, Squash, Merge],
+            ),
+            (
+                "merge as default",
+                vec![Merge, Squash, Rebase],
+                Some(Merge),
+                vec![Merge, Squash, Rebase],
+            ),
+            (
+                "a default no longer allowed falls back",
+                vec![Merge, Rebase],
+                Some(Squash),
+                vec![Merge, Rebase],
+            ),
+            (
+                "no default: the fixed order",
+                vec![Merge, Squash, Rebase],
+                None,
                 vec![Squash, Merge, Rebase],
             ),
-            ("no squash", vec![Rebase, Merge], vec![Merge, Rebase]),
-            ("rebase only", vec![Rebase], vec![Rebase]),
+            ("no squash", vec![Rebase, Merge], None, vec![Merge, Rebase]),
+            ("rebase only", vec![Rebase], Some(Rebase), vec![Rebase]),
             (
                 "squash and rebase",
                 vec![Rebase, Squash],
+                None,
                 vec![Squash, Rebase],
             ),
-            ("none", vec![], vec![]),
+            ("none", vec![], Some(Merge), vec![]),
         ];
-        for (label, allowed, menu) in cases {
-            assert_eq!(merge_menu(&allowed), menu, "{label}");
+        for (label, allowed, default, menu) in cases {
+            assert_eq!(merge_menu(&allowed, default), menu, "{label}");
         }
     }
 

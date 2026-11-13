@@ -886,6 +886,7 @@ fn list_item(number: u64) -> daruda_github::PrListItem {
         repo: repo(),
         pr: pr(number, PrState::Open, "2026-01-01"),
         author: Some("me".into()),
+        head_owner: None,
         base_branch: "main".into(),
         comments: 0,
     }

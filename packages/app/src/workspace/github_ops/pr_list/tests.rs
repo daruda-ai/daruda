@@ -24,6 +24,7 @@ fn item(name: &str, number: u64) -> PrListItem {
             updated_at: String::new(),
         },
         author: None,
+        head_owner: None,
         base_branch: "main".into(),
         comments: 0,
     }

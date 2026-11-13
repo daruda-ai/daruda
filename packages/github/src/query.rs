@@ -124,7 +124,8 @@ pub(crate) fn search_prs_query() -> String {
     format!(
         "query($q: String!) {{ search(query: $q, type: ISSUE, first: {SEARCH_RESULTS}) {{ \
          issueCount nodes {{ ... on PullRequest {{ ...pr repository {{ nameWithOwner }} \
-         author {{ login }} baseRefName comments {{ totalCount }} }} }} }} }} {}",
+         headRepositoryOwner {{ login }} author {{ login }} baseRefName \
+         comments {{ totalCount }} }} }} }} }} {}",
         pr_fragment()
     )
 }
@@ -155,6 +156,7 @@ pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<PrSearch, GhErr
                     })?;
             Ok(PrListItem {
                 repo: RepoId::new(host, owner, name),
+                head_owner: node.head_repository_owner.map(|a| a.login),
                 author: node.author.map(|a| a.login),
                 base_branch: node.base_ref_name,
                 comments: node.comments.total_count,
@@ -328,6 +330,7 @@ struct SearchNode {
     #[serde(flatten)]
     pr: PrNode,
     repository: NameWithOwner,
+    head_repository_owner: Option<Author>,
     author: Option<Author>,
     base_ref_name: String,
     comments: TotalCount,

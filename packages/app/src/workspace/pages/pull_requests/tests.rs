@@ -42,6 +42,7 @@ fn item(number: u64, cross_repo: bool) -> PrListItem {
         repo: repo(),
         pr: summary(number, &format!("head-{number}"), cross_repo),
         author: Some("me".into()),
+        head_owner: None,
         base_branch: "main".into(),
         comments: 0,
     }

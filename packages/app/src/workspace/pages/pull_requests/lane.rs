@@ -77,10 +77,13 @@ fn check_out(
 /// The lane description of a worktree made for `item`; `None` for one on
 /// the pull request's own branch, which says what it is already.
 fn description(item: &PrListItem) -> Option<String> {
-    // WORKAROUND: the list search does not ask for the head repository's
-    // owner, so the author stands in; asking for it changes the search query,
-    // whose recorded `gh` fixture has to be captured again against GitHub.
-    let owner = item.author.clone().unwrap_or_else(s::author_deleted);
+    // GitHub answers no head owner once the fork is deleted; the author,
+    // who opened the PR from it, is the closest name left.
+    let owner = item
+        .head_owner
+        .clone()
+        .or_else(|| item.author.clone())
+        .unwrap_or_else(s::author_deleted);
     item.pr
         .cross_repo
         .then(|| s::review_lane_description(item.pr.number, owner, &item.pr.head_branch))
@@ -238,7 +241,7 @@ mod tests {
 
     use super::*;
 
-    fn item(cross_repo: bool, author: Option<&str>) -> PrListItem {
+    fn item(cross_repo: bool, author: Option<&str>, head_owner: Option<&str>) -> PrListItem {
         PrListItem {
             repo: RepoId::new("github.com", "o", "r"),
             pr: PrSummary {
@@ -254,6 +257,7 @@ mod tests {
                 updated_at: String::new(),
             },
             author: author.map(str::to_owned),
+            head_owner: head_owner.map(str::to_owned),
             base_branch: "main".into(),
             comments: 0,
         }
@@ -279,7 +283,7 @@ mod tests {
             ),
         ];
         for (label, cross_repo, refspec, branch, start) in cases {
-            let checkout = PrCheckout::of(&item(cross_repo, Some("me")), "up");
+            let checkout = PrCheckout::of(&item(cross_repo, Some("me"), None), "up");
             assert_eq!(
                 checkout,
                 PrCheckout {
@@ -294,10 +298,27 @@ mod tests {
     }
 
     #[test]
-    fn only_a_review_worktree_is_described() {
-        assert_eq!(description(&item(false, Some("me"))), None);
-        let described = description(&item(true, Some("alice"))).unwrap();
-        assert!(described.contains("#9"), "{described}");
-        assert!(described.contains("alice:fix/scroll"), "{described}");
+    fn only_a_review_worktree_is_described_by_its_forks_owner() {
+        assert_eq!(description(&item(false, Some("me"), Some("o"))), None);
+        // (label, author, head owner, the `owner:branch` described)
+        let cases = [
+            (
+                "the fork's owner, not the author",
+                Some("alice"),
+                Some("acme"),
+                "acme:fix/scroll",
+            ),
+            (
+                "a deleted fork falls back to the author",
+                Some("alice"),
+                None,
+                "alice:fix/scroll",
+            ),
+        ];
+        for (label, author, head_owner, expected) in cases {
+            let described = description(&item(true, author, head_owner)).unwrap();
+            assert!(described.contains("#9"), "{label}: {described}");
+            assert!(described.contains(expected), "{label}: {described}");
+        }
     }
 }

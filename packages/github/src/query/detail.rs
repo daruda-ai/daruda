@@ -16,7 +16,7 @@ pub(crate) fn pr_detail_query() -> String {
     format!(
         "query($owner: String!, $name: String!, $number: Int!) {{ \
          repository(owner: $owner, name: $name) {{ mergeCommitAllowed squashMergeAllowed \
-         rebaseMergeAllowed pullRequest(number: $number) {{ ...pr body headRefOid baseRefName \
+         rebaseMergeAllowed viewerDefaultMergeMethod pullRequest(number: $number) {{ ...pr body headRefOid baseRefName \
          author {{ login }} mergeable mergeStateStatus \
          latestReviews(first: {DETAIL_PAGE}) {{ nodes {{ author {{ login }} state }} }} \
          reviewRequests(first: {DETAIL_PAGE}) {{ nodes {{ requestedReviewer {{ __typename \
@@ -48,6 +48,10 @@ pub(crate) fn parse_pr_detail(json: &str) -> Result<PrDetail, GhError> {
     .into_iter()
     .filter_map(|(allowed, method)| allowed.then_some(method))
     .collect();
+    let default_method = repository
+        .viewer_default_merge_method
+        .as_deref()
+        .and_then(merge_method);
     let mergeability = mergeability(&pr.mergeable, &pr.merge_state_status);
     let reviewers = reviewers(pr.latest_reviews.nodes, pr.review_requests.nodes);
     let open_threads = pr
@@ -65,6 +69,7 @@ pub(crate) fn parse_pr_detail(json: &str) -> Result<PrDetail, GhError> {
         author: pr.author.map(|a| a.login),
         mergeability,
         methods,
+        default_method,
         reviewers,
         checks: entries(&runs),
         open_threads,
@@ -85,6 +90,17 @@ fn mergeability(mergeable: &str, state: &str) -> Mergeability {
         "DRAFT" => Mergeability::Blocked(BlockReason::Draft),
         "DIRTY" => Mergeability::Conflicting,
         _ => Mergeability::Unknown,
+    }
+}
+
+/// GitHub's `PullRequestMergeMethod`; `None` for a value this crate does
+/// not know.
+fn merge_method(value: &str) -> Option<MergeMethod> {
+    match value {
+        "MERGE" => Some(MergeMethod::Merge),
+        "SQUASH" => Some(MergeMethod::Squash),
+        "REBASE" => Some(MergeMethod::Rebase),
+        _ => None,
     }
 }
 
@@ -144,6 +160,7 @@ struct DetailRepository {
     merge_commit_allowed: bool,
     squash_merge_allowed: bool,
     rebase_merge_allowed: bool,
+    viewer_default_merge_method: Option<String>,
     pull_request: Option<DetailPr>,
 }
 

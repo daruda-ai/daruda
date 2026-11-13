@@ -27,6 +27,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719860083/job/129510760857",
          "startedAt": "2026-11-09T23:22:00Z",
+         "completedAt": "2026-11-09T23:22:00Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -43,6 +44,7 @@
          "conclusion": "SUCCESS",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719831288/job/129510661826",
          "startedAt": "2026-11-09T23:21:50Z",
+         "completedAt": "2026-11-09T23:21:54Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -59,6 +61,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719860083/job/129510761171",
          "startedAt": "2026-11-09T23:22:00Z",
+         "completedAt": "2026-11-09T23:22:00Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -75,6 +78,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719831288/job/129510727216",
          "startedAt": "2026-11-09T23:21:55Z",
+         "completedAt": "2026-11-09T23:21:46Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -91,6 +95,7 @@
          "conclusion": "SUCCESS",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719831288/job/129510662223",
          "startedAt": "2026-11-09T23:21:50Z",
+         "completedAt": "2026-11-09T23:21:57Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -107,6 +112,7 @@
          "conclusion": "SUCCESS",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719860083/job/129510759134",
          "startedAt": "2026-11-09T23:22:03Z",
+         "completedAt": "2026-11-09T23:22:07Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -123,6 +129,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719831288/job/129510663469",
          "startedAt": "2026-11-09T23:21:47Z",
+         "completedAt": "2026-11-09T23:21:46Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -139,6 +146,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719860083/job/129510761377",
          "startedAt": "2026-11-09T23:22:00Z",
+         "completedAt": "2026-11-09T23:22:00Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -155,6 +163,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719831288/job/129510663631",
          "startedAt": "2026-11-09T23:21:47Z",
+         "completedAt": "2026-11-09T23:21:46Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -171,6 +180,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719860083/job/129510761530",
          "startedAt": "2026-11-09T23:22:00Z",
+         "completedAt": "2026-11-09T23:22:00Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -187,6 +197,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719831288/job/129510663220",
          "startedAt": "2026-11-09T23:21:47Z",
+         "completedAt": "2026-11-09T23:21:46Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -203,6 +214,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719860083/job/129510822998",
          "startedAt": "2026-11-09T23:22:08Z",
+         "completedAt": "2026-11-09T23:22:00Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -219,6 +231,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719831288/job/129510663432",
          "startedAt": "2026-11-09T23:21:47Z",
+         "completedAt": "2026-11-09T23:21:46Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -235,6 +248,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/42719860083/job/129510828268",
          "startedAt": "2026-11-09T23:22:09Z",
+         "completedAt": "2026-11-09T23:22:00Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -249,6 +263,9 @@
      },
      "repository": {
       "nameWithOwner": "cli/cli"
+     },
+     "headRepositoryOwner": {
+      "login": "pad895"
      },
      "author": {
       "login": "pad895"
@@ -271,6 +288,9 @@
      "statusCheckRollup": null,
      "repository": {
       "nameWithOwner": "cli/cli"
+     },
+     "headRepositoryOwner": {
+      "login": "platinummonkey"
      },
      "author": {
       "login": "platinummonkey"
@@ -304,6 +324,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41722216218/job/126217685434",
          "startedAt": "2026-11-03T21:29:12Z",
+         "completedAt": "2026-11-03T21:29:12Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -320,6 +341,7 @@
          "conclusion": "SUCCESS",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41718821891/job/126205836813",
          "startedAt": "2026-11-03T21:07:07Z",
+         "completedAt": "2026-11-03T21:07:11Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -336,6 +358,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41722216218/job/126217684254",
          "startedAt": "2026-11-03T21:29:12Z",
+         "completedAt": "2026-11-03T21:29:12Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -352,6 +375,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41718821891/job/126205839486",
          "startedAt": "2026-11-03T21:07:02Z",
+         "completedAt": "2026-11-03T21:07:02Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -368,6 +392,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41718821891/job/126205839067",
          "startedAt": "2026-11-03T21:07:02Z",
+         "completedAt": "2026-11-03T21:07:02Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -384,6 +409,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41722216218/job/126217686000",
          "startedAt": "2026-11-03T21:29:12Z",
+         "completedAt": "2026-11-03T21:29:12Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -400,6 +426,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41718821891/job/126205841193",
          "startedAt": "2026-11-03T21:07:03Z",
+         "completedAt": "2026-11-03T21:07:02Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -416,6 +443,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41722216218/job/126217756176",
          "startedAt": "2026-11-03T21:29:21Z",
+         "completedAt": "2026-11-03T21:29:12Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -432,6 +460,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41718821891/job/126205839191",
          "startedAt": "2026-11-03T21:07:02Z",
+         "completedAt": "2026-11-03T21:07:02Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -448,6 +477,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41722216218/job/126217684995",
          "startedAt": "2026-11-03T21:29:12Z",
+         "completedAt": "2026-11-03T21:29:12Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -464,6 +494,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41718821891/job/126205838713",
          "startedAt": "2026-11-03T21:07:02Z",
+         "completedAt": "2026-11-03T21:07:02Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -480,6 +511,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41722216218/job/126217731082",
          "startedAt": "2026-11-03T21:29:18Z",
+         "completedAt": "2026-11-03T21:29:12Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -496,6 +528,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41718821891/job/126205908752",
          "startedAt": "2026-11-03T21:07:10Z",
+         "completedAt": "2026-11-03T21:07:02Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -512,6 +545,7 @@
          "conclusion": "SKIPPED",
          "detailsUrl": "https://github.com/cli/cli/actions/runs/41722216218/job/126217737193",
          "startedAt": "2026-11-03T21:29:18Z",
+         "completedAt": "2026-11-03T21:29:12Z",
          "checkSuite": {
           "workflowRun": {
            "event": "pull_request_target",
@@ -526,6 +560,9 @@
      },
      "repository": {
       "nameWithOwner": "cli/cli"
+     },
+     "headRepositoryOwner": {
+      "login": "cli"
      },
      "author": {
       "login": "williammartin"

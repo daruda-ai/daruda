@@ -50,6 +50,7 @@ fn item(number: u64, head: &str) -> PrListItem {
         repo: repo(),
         pr: summary(number, head),
         author: Some("alice".into()),
+        head_owner: None,
         base_branch: "main".into(),
         comments: 0,
     }
@@ -64,6 +65,7 @@ fn detail(number: u64, head: &str) -> PrDetail {
         author: Some("alice".into()),
         mergeability: Mergeability::Ready,
         methods: Vec::new(),
+        default_method: None,
         reviewers: Vec::new(),
         checks: vec![CheckEntry {
             run: CheckRun {

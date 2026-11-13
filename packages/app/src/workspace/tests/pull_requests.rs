@@ -28,6 +28,7 @@ fn item(number: u64, head: &str, cross_repo: bool) -> PrListItem {
             updated_at: "2026-01-01T00:00:00Z".into(),
         },
         author: Some("alice".into()),
+        head_owner: None,
         base_branch: "main".into(),
         comments: 0,
     }

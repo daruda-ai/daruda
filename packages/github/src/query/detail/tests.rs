@@ -2,6 +2,8 @@
 //! `pr_detail_query` for `cli/cli` #15003 (gh 2.74.2, 2026-11-13), its body
 //! trimmed: a fork PR blocked on a review, with a request the caller cannot
 //! see (`requestedReviewer: null`) and five jobs run twice.
+//! `viewerDefaultMergeMethod` was added to the query afterwards; its value
+//! is GitHub's answer for `cli/cli` to that field alone, the same day.
 
 use serde_json::{Value, json};
 
@@ -38,6 +40,7 @@ fn a_real_detail_answer_parses() {
         detail.methods,
         [MergeMethod::Merge, MergeMethod::Squash, MergeMethod::Rebase]
     );
+    assert_eq!(detail.default_method, Some(MergeMethod::Merge));
     assert_eq!(
         detail.reviewers,
         [
@@ -108,6 +111,29 @@ fn the_allowed_merge_methods_follow_the_repository() {
         let methods = parse_pr_detail(&json).unwrap().methods;
         assert_eq!(methods, expected, "{merge} {squash} {rebase}");
     }
+}
+
+#[test]
+fn the_viewers_default_merge_method_is_read() {
+    use MergeMethod::*;
+    let cases = [
+        (json!("SQUASH"), Some(Squash)),
+        (json!("REBASE"), Some(Rebase)),
+        (json!("MERGE"), Some(Merge)),
+        (json!("SOMETHING_NEW"), None),
+        (Value::Null, None),
+    ];
+    for (value, expected) in cases {
+        let json = detail_answer(|repo| repo["viewerDefaultMergeMethod"] = value.clone());
+        let method = parse_pr_detail(&json).unwrap().default_method;
+        assert_eq!(method, expected, "{value}");
+    }
+    let absent = detail_answer(|repo| {
+        repo.as_object_mut()
+            .unwrap()
+            .remove("viewerDefaultMergeMethod");
+    });
+    assert_eq!(parse_pr_detail(&absent).unwrap().default_method, None);
 }
 
 #[test]
@@ -199,6 +225,7 @@ fn the_detail_query_names_every_field_the_parser_reads() {
         "mergeCommitAllowed",
         "squashMergeAllowed",
         "rebaseMergeAllowed",
+        "viewerDefaultMergeMethod",
         "...pr",
         "fragment pr on PullRequest",
         "body",

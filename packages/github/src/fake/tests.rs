@@ -85,6 +85,7 @@ fn a_scripted_list_answers_only_the_searched_repositories() {
         repo: repo.clone(),
         pr: pr(number, "a"),
         author: Some("me".into()),
+        head_owner: None,
         base_branch: "main".into(),
         comments: 0,
     };
@@ -128,6 +129,7 @@ fn a_scripted_detail_answers_its_repository_and_number_only() {
         author: None,
         mergeability: Mergeability::Ready,
         methods: Vec::new(),
+        default_method: None,
         reviewers: Vec::new(),
         checks: Vec::new(),
         open_threads: 0,
@@ -166,6 +168,7 @@ fn detail(number: u64, state: PrState, head_sha: &str) -> PrDetail {
         author: None,
         mergeability: Mergeability::Ready,
         methods: Vec::new(),
+        default_method: None,
         reviewers: Vec::new(),
         checks: Vec::new(),
         open_threads: 0,

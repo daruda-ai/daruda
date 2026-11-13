@@ -170,12 +170,20 @@ fn updated_ago(minutes: i64) -> String {
     (chrono::Utc::now() - chrono::Duration::minutes(minutes)).to_rfc3339()
 }
 
-/// One row of the capture's list: `summary`, opened by `author` against main.
+/// One row of the capture's list: `summary`, opened by `author` against
+/// main, from the author's fork when it is cross-repository.
 fn list_item(summary: PrSummary, author: &str, comments: u32) -> PrListItem {
+    let repo = repo();
+    let head_owner = if summary.cross_repo {
+        author.to_owned()
+    } else {
+        repo.owner().to_owned()
+    };
     PrListItem {
-        repo: repo(),
+        repo,
         pr: summary,
         author: Some(author.into()),
+        head_owner: Some(head_owner),
         base_branch: "main".into(),
         comments,
     }
@@ -378,6 +386,7 @@ impl Workspace {
                 Mergeability::Blocked(BlockReason::Requirements)
             },
             methods: vec![MergeMethod::Merge, MergeMethod::Squash, MergeMethod::Rebase],
+            default_method: None,
             reviewers: vec![
                 ("hanji".into(), ReviewerState::ChangesRequested),
                 ("contributor".into(), ReviewerState::Commented),
