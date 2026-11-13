@@ -30,6 +30,8 @@ pub(in crate::workspace::left_dock) fn tone_glyph(
 fn checks_label(checks: CheckRollup) -> Option<String> {
     match checks {
         CheckRollup::Passing => Some(s::pr_checks_passing()),
+        // Past the first page of checks the failures may not be in hand.
+        CheckRollup::Failing { failed: 0 } => Some(s::pr_checks_failing_uncounted()),
         CheckRollup::Failing { failed } => Some(s::pr_checks_failing(failed)),
         CheckRollup::Pending => Some(s::pr_checks_running()),
         CheckRollup::None => None,

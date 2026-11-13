@@ -180,6 +180,7 @@ impl PrPoller {
         });
 
         Self::apply_cached(&wanted, cx);
+        Self::forget_unwanted(&wanted, cx);
         let now = cx.background_executor().now();
         let hosts: BTreeSet<String> = wanted.keys().map(|repo| repo.host.clone()).collect();
         for host in hosts {
@@ -244,13 +245,34 @@ impl PrPoller {
         .detach();
     }
 
+    /// Drop the answers of repositories no window shows any more, so one
+    /// reopened later is not shown its old state before a fresh answer.
+    /// Backoff state stays: a failing repository must not be retried early.
+    fn forget_unwanted(wanted: &BTreeMap<RepoId, RepoDemand>, cx: &mut App) {
+        for (repo, state) in cx.global_mut::<Self>().repos.iter_mut() {
+            if !wanted.contains_key(repo) {
+                state.last = None;
+                state.polled_at = None;
+            }
+        }
+    }
+
+    fn enabled(cx: &App) -> bool {
+        SettingsStore::global(cx).user().github.enabled
+    }
+
     fn finish_auth(host: &str, result: Result<GhAuth, GhError>, cx: &mut App) {
         let now = cx.background_executor().now();
+        let enabled = Self::enabled(cx);
         let poller = cx.global_mut::<Self>();
         let Some(state) = poller.hosts.get_mut(host) else {
             return;
         };
         state.checking = false;
+        // Turned off while `gh` was asked: the answer is no longer wanted.
+        if !enabled {
+            return;
+        }
         state.checked_at = Some(now);
         let availability = match result {
             Ok(auth) => GhAvailability::from(auth),
@@ -329,6 +351,15 @@ impl PrPoller {
 
     fn finish_poll(repo: RepoId, result: Result<RepoPrs, GhError>, cx: &mut App) {
         let now = cx.background_executor().now();
+        // Turned off while the request ran: links must not come back.
+        if !Self::enabled(cx) {
+            cx.global_mut::<Self>()
+                .repos
+                .entry(repo)
+                .or_default()
+                .in_flight = false;
+            return;
+        }
         match result {
             Ok(prs) => {
                 let poller = cx.global_mut::<Self>();
@@ -410,15 +441,35 @@ impl PrPoller {
     }
 
     /// The one write of a host's availability; windows repaint when it changes.
+    /// The one write of a host's availability; windows repaint when it
+    /// changes. A host where `gh` is gone or logged out can no longer keep its
+    /// lanes' PRs current, so their answers are dropped rather than shown stale.
     fn set_host_availability(host: &str, availability: GhAvailability, cx: &mut App) {
-        let Some(state) = cx.global_mut::<Self>().hosts.get_mut(host) else {
+        let poller = cx.global_mut::<Self>();
+        let Some(state) = poller.hosts.get_mut(host) else {
             return;
         };
         if state.availability == availability {
             return;
         }
         state.availability = availability;
-        WindowRegistry::for_each_workspace(cx, |_, _, cx| cx.notify());
+        let unusable = matches!(
+            availability,
+            GhAvailability::Missing | GhAvailability::LoggedOut
+        );
+        if unusable {
+            for (repo, state) in poller.repos.iter_mut() {
+                if repo.host == host {
+                    state.last = None;
+                }
+            }
+        }
+        WindowRegistry::for_each_workspace(cx, |ws, _, cx| {
+            if unusable {
+                ws.forget_pr_links_on(host, cx);
+            }
+            cx.notify();
+        });
     }
 }
 

@@ -8,6 +8,20 @@ pub(super) fn load_replay() -> Option<crate::replay::Loaded> {
         .and_then(|path| crate::replay::load(&path, crate::replay::parse_replay_agent_arg()))
 }
 
+/// Run before `globals::init_all`, which starts the PR poller: a capture
+/// answers for GitHub from a scripted `gh` (PR scenarios script their own),
+/// so it never reaches GitHub with the developer's login.
+#[cfg_attr(not(feature = "screenshot"), allow(unused_variables))]
+pub(super) fn before_globals(cx: &mut gpui::App) {
+    #[cfg(feature = "screenshot")]
+    if crate::screenshot::parse_screenshot_arg().is_some() {
+        crate::gh_host::GhHost::set_global(
+            std::sync::Arc::new(daruda_github::fake::FakeGh::new()),
+            cx,
+        );
+    }
+}
+
 pub(super) fn after_startup(cx: &mut gpui::App) {
     #[cfg(feature = "screenshot")]
     if let Some(path) = crate::screenshot::parse_screenshot_arg() {

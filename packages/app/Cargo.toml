@@ -31,7 +31,7 @@ screenshot = [
     "gpui_macos/test-support",
     "daruda_chat/screenshot",
     "daruda_settings/screenshot",
-    # Captures answer for GitHub from a scripted FakeGh, never the real CLI.
+    # Captures install a scripted FakeGh before the PR poller starts.
     "daruda_github/test-support",
 ]
 

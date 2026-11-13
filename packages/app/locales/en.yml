@@ -994,6 +994,7 @@ git:
   pr_state_closed: "Closed"
   pr_checks_passing: "Checks passed"
   pr_checks_failing: "%{n} failing"
+  pr_checks_failing_uncounted: "Checks failing"
   pr_checks_running: "Checks running"
   pr_gh_missing: "Install the GitHub CLI (gh) to see this branch’s pull request."
   pr_gh_logged_out: "Run “gh auth login” in a terminal to see this branch’s pull request."

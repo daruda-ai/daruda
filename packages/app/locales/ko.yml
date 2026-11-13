@@ -770,6 +770,7 @@ git:
   pr_state_closed: "닫힘"
   pr_checks_passing: "체크 통과"
   pr_checks_failing: "%{n}개 실패"
+  pr_checks_failing_uncounted: "체크 실패"
   pr_checks_running: "체크 실행 중"
   pr_gh_missing: "이 브랜치의 pull request를 보려면 GitHub CLI(gh)를 설치하세요."
   pr_gh_logged_out: "이 브랜치의 pull request를 보려면 터미널에서 “gh auth login”을 실행하세요."

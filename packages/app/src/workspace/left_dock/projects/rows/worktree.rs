@@ -14,7 +14,8 @@ use crate::workspace::root_menu::RootContextMenuExt as _;
 use super::agent_badges::agent_status_cell;
 use super::drag::{DragGhost, DragPayload};
 
-use super::{GitBadgeData, LaneBadges, PrBadgeData, availability_badge, availability_chip};
+use super::{GitBadgeData, LaneBadges, availability_badge, availability_chip};
+use crate::workspace::github_ops::tone::PrBadge;
 
 /// GitHub-Desktop-style badge cluster rendered on the right of a
 /// lane row's label. Layout (left to right, each group omitted when
@@ -82,11 +83,7 @@ fn git_badge_view(
 }
 
 /// `#N` with the checks glyph before it, left of the git cluster.
-fn pr_badge_view(
-    badge: PrBadgeData,
-    metrics: theme::UiMetrics,
-    cx: &gpui::App,
-) -> impl IntoElement {
+fn pr_badge_view(badge: PrBadge, metrics: theme::UiMetrics, cx: &gpui::App) -> impl IntoElement {
     let t = theme::current(cx);
     let text = if badge.active {
         t.text_muted

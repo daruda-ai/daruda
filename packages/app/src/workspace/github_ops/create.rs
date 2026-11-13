@@ -4,6 +4,7 @@
 //! Where to push is read again inside the lock, not taken from the cached
 //! push target: the branch may have moved or gained commits since.
 
+use daruda_github::availability::GhAvailability;
 use daruda_github::remote_parse::parse_remote;
 use daruda_github::{GhError, NewPr};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
@@ -70,9 +71,8 @@ impl CreatePrError {
             Self::LaneGone => s::github_pr_lane_gone(),
             Self::NoTarget => s::github_pr_no_remote(),
             Self::HeadIsBase(branch) => s::github_pr_head_is_base(branch),
-            Self::Read(_) | Self::Push(_) | Self::Gh(_) => {
-                format!("{}: {self}", s::github_pr_create_failed())
-            }
+            Self::Read(e) | Self::Push(e) => format!("{}: {e}", s::github_pr_create_failed()),
+            Self::Gh(e) => format!("{}: {e}", s::github_pr_create_failed()),
         }
     }
 }
@@ -156,10 +156,13 @@ impl Workspace {
                     .map_err(CreatePrError::Read)?
                     .ok_or(CreatePrError::NoTarget)?;
                 let repo_id = parse_remote(&push.url).ok_or(CreatePrError::NoTarget)?;
-                // A typed base may carry the remote's prefix (`origin/feat`).
-                let base = request.base.as_deref().or(default_base.as_deref());
-                let base = base.map(|b| b.strip_prefix(&format!("{}/", push.remote)).unwrap_or(b));
-                if base == Some(push.branch.as_str()) {
+                // A typed base may carry the remote's prefix (`origin/feat`);
+                // gh takes the bare branch, and the guard compares that.
+                let prefix = format!("{}/", push.remote);
+                let base = request
+                    .base
+                    .map(|b| b.strip_prefix(&prefix).map(str::to_owned).unwrap_or(b));
+                if base.as_deref().or(default_base.as_deref()) == Some(push.branch.as_str()) {
                     return Err(CreatePrError::HeadIsBase(push.branch));
                 }
                 // An explicit refspec to the branch the PR names: a no-op when
@@ -172,7 +175,7 @@ impl Workspace {
                     .map_err(CreatePrError::Push)?;
                 let new = NewPr {
                     head: push.branch,
-                    base: request.base,
+                    base,
                     title: request.title,
                     body: request.body,
                     draft: request.draft,
@@ -183,7 +186,12 @@ impl Workspace {
             },
             move |ws, result, cx| match result {
                 Ok(repo_id) => {
-                    if let Some(state) = ws.lane_scoped.get_mut(&lane) {
+                    // Wait for the link only when a poll can bring it soon; a
+                    // host in backoff would hold the button for its pause.
+                    let soon = PrPoller::availability(&repo_id.host, cx) == GhAvailability::Ready;
+                    if let Some(state) = ws.lane_scoped.get_mut(&lane)
+                        && soon
+                    {
                         state.pr_work = PrWork::AwaitingNewPr;
                     }
                     PrPoller::nudge(repo_id, cx);

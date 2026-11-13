@@ -1,14 +1,15 @@
 //! Which pull request each lane belongs to. `LaneScoped::pr` changes only
-//! through [`replace_pr`], from the three moments that can change it: a new
-//! poll answer, a moved push target, and the feature being switched off.
+//! through [`replace_pr`], from the moments that can change it: a poll
+//! answer, a moved push target, `gh` becoming unusable, and the feature
+//! being switched off.
 
 use daruda_github::query::RepoPrs;
 use daruda_github::remote_parse::parse_remote;
-use daruda_github::{RepoId, link::pick};
+use daruda_github::{PrSummary, RepoId, link::pick};
 use daruda_store::project::LaneRef;
 use gpui::Context;
 
-use crate::github::PrLink;
+use crate::github::{PrLink, PrLookup};
 use crate::lane::git::PushTarget;
 use crate::workspace::Workspace;
 use crate::workspace::lane_scoped::{LaneScoped, PrWork};
@@ -22,25 +23,40 @@ pub(crate) struct PrDemand {
     pub focused: bool,
 }
 
-/// Set `state.pr`, reporting whether it changed. A link arriving ends the
-/// wait after Create PR.
-fn replace_pr(state: &mut LaneScoped, link: Option<PrLink>) -> bool {
-    if link.is_some() {
-        end_wait(state);
+/// What an answer says about `branch`. A repository without commits has no
+/// default branch; its branches can still have, or lack, a PR.
+fn lookup_for(
+    repo: &RepoId,
+    branch: &str,
+    default_branch: Option<&str>,
+    candidates: &[PrSummary],
+) -> PrLookup {
+    if default_branch == Some(branch) {
+        return PrLookup::DefaultBranch;
     }
-    if state.pr == link {
-        return false;
+    match pick(branch, default_branch.unwrap_or_default(), candidates) {
+        Some(pr) => PrLookup::Linked(Box::new(PrLink {
+            repo: repo.clone(),
+            pr: pr.clone(),
+        })),
+        None => PrLookup::NoPr,
     }
-    state.pr = link;
-    true
 }
 
-/// Stop waiting for a PR just created: it arrived, or the branch or the
-/// feature it was created under is gone.
-fn end_wait(state: &mut LaneScoped) {
-    if state.pr_work == PrWork::AwaitingNewPr {
+/// Set `state.pr`, reporting whether it changed. A link arriving ends the
+/// wait after Create PR; so does forgetting the answer, since the branch or
+/// the means to ask about it is gone.
+fn replace_pr(state: &mut LaneScoped, lookup: PrLookup) -> bool {
+    if matches!(lookup, PrLookup::Linked(_) | PrLookup::Unknown)
+        && state.pr_work == PrWork::AwaitingNewPr
+    {
         state.pr_work = PrWork::Idle;
     }
+    if state.pr == lookup {
+        return false;
+    }
+    state.pr = lookup;
+    true
 }
 
 impl Workspace {
@@ -61,7 +77,7 @@ impl Workspace {
 
     /// Apply a poll answer for `repo` to every lane that pushes there. A lane
     /// whose branch the answer does not cover (it moved while the request
-    /// ran) keeps its link until the next answer that does.
+    /// ran) keeps what it had until the next answer that does.
     pub(crate) fn apply_repo_prs(&mut self, repo: &RepoId, prs: &RepoPrs, cx: &mut Context<Self>) {
         let mut changed = false;
         for state in self.lane_scoped.values_mut() {
@@ -74,15 +90,13 @@ impl Workspace {
             let Some(candidates) = prs.by_branch.get(&push.branch) else {
                 continue;
             };
-            let link = prs
-                .default_branch
-                .as_deref()
-                .and_then(|default| pick(&push.branch, default, candidates))
-                .map(|pr| PrLink {
-                    repo: repo.clone(),
-                    pr: pr.clone(),
-                });
-            changed |= replace_pr(state, link);
+            let lookup = lookup_for(
+                repo,
+                &push.branch,
+                prs.default_branch.as_deref(),
+                candidates,
+            );
+            changed |= replace_pr(state, lookup);
         }
         if changed {
             cx.notify();
@@ -98,15 +112,15 @@ impl Workspace {
         }
     }
 
-    /// Set a lane's link for a capture, through the same write as a poll.
+    /// Set what a capture shows for a lane, through the same write as a poll.
     #[cfg(feature = "screenshot")]
-    pub(in crate::workspace) fn seed_pr_link_for_shot(
+    pub(in crate::workspace) fn seed_pr_lookup_for_shot(
         &mut self,
         lane: LaneRef,
-        link: PrLink,
+        lookup: PrLookup,
         cx: &mut Context<Self>,
     ) {
-        if replace_pr(self.lane_scoped_mut(lane), Some(link)) {
+        if replace_pr(self.lane_scoped_mut(lane), lookup) {
             cx.notify();
         }
     }
@@ -115,8 +129,27 @@ impl Workspace {
     pub(crate) fn clear_pr_links(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
         for state in self.lane_scoped.values_mut() {
-            end_wait(state);
-            changed |= replace_pr(state, None);
+            changed |= replace_pr(state, PrLookup::Unknown);
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// Forget the PRs of lanes pushing to `host`: `gh` there is gone or
+    /// logged out, so what was last read can no longer be kept current.
+    pub(crate) fn forget_pr_links_on(&mut self, host: &str, cx: &mut Context<Self>) {
+        let mut changed = false;
+        for state in self.lane_scoped.values_mut() {
+            let on_host = state
+                .git
+                .push_target
+                .as_ref()
+                .and_then(|push| parse_remote(&push.url))
+                .is_some_and(|repo| repo.host == host);
+            if on_host {
+                changed |= replace_pr(state, PrLookup::Unknown);
+            }
         }
         if changed {
             cx.notify();
@@ -124,7 +157,7 @@ impl Workspace {
     }
 
     /// Record where `target` pushes. A different repository or branch drops
-    /// the old link and asks the poller about the new one at once.
+    /// the old answer and asks the poller about the new one at once.
     /// Returns whether anything changed.
     pub(in crate::workspace) fn set_push_target(
         &mut self,
@@ -144,12 +177,103 @@ impl Workspace {
         };
         state.git.push_target = found.clone();
         if moved {
-            end_wait(state);
-            replace_pr(state, None);
+            replace_pr(state, PrLookup::Unknown);
             if let Some(repo) = found.as_ref().and_then(|push| parse_remote(&push.url)) {
                 crate::github::PrPoller::nudge(repo, cx);
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use daruda_github::{CheckRollup, PrState};
+
+    use super::*;
+
+    fn repo() -> RepoId {
+        RepoId {
+            host: "github.com".into(),
+            owner: "o".into(),
+            name: "r".into(),
+        }
+    }
+
+    fn pr(head: &str) -> PrSummary {
+        PrSummary {
+            number: 3,
+            url: String::new(),
+            title: String::new(),
+            state: PrState::Open,
+            head_branch: head.into(),
+            cross_repo: false,
+            checks: CheckRollup::None,
+            failed: Vec::new(),
+            review: None,
+            updated_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn an_answer_reads_as_default_branch_no_pr_or_a_link() {
+        /// (label, branch, default branch, candidates, expected)
+        type Row = (
+            &'static str,
+            &'static str,
+            Option<&'static str>,
+            Vec<PrSummary>,
+            PrLookup,
+        );
+        let cases: Vec<Row> = vec![
+            (
+                "default branch",
+                "main",
+                Some("main"),
+                vec![pr("main")],
+                PrLookup::DefaultBranch,
+            ),
+            ("no PR", "feat", Some("main"), vec![], PrLookup::NoPr),
+            (
+                "linked",
+                "feat",
+                Some("main"),
+                vec![pr("feat")],
+                PrLookup::Linked(Box::new(PrLink {
+                    repo: repo(),
+                    pr: pr("feat"),
+                })),
+            ),
+            (
+                "repository without commits",
+                "feat",
+                None,
+                vec![],
+                PrLookup::NoPr,
+            ),
+        ];
+        for (label, branch, default, candidates, expected) in cases {
+            assert_eq!(
+                lookup_for(&repo(), branch, default, &candidates),
+                expected,
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_link_or_a_forgotten_answer_ends_the_wait_after_create() {
+        let mut state = LaneScoped {
+            pr_work: PrWork::AwaitingNewPr,
+            ..LaneScoped::default()
+        };
+        replace_pr(&mut state, PrLookup::NoPr);
+        assert_eq!(
+            state.pr_work,
+            PrWork::AwaitingNewPr,
+            "an answer without it yet keeps waiting"
+        );
+        replace_pr(&mut state, PrLookup::Unknown);
+        assert_eq!(state.pr_work, PrWork::Idle);
     }
 }

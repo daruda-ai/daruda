@@ -19,6 +19,19 @@ use crate::workspace::main_area::pane_tree::PaneId;
 /// Why a check has no log in the prompt; read by the agent, not the user.
 const NOT_ACTIONS: &str = "not a GitHub Actions check";
 
+/// Among writable chats as `(pane, tab)`: the focused one, then one in the
+/// active tab, then the first by tab order.
+fn best_target(
+    chats: impl IntoIterator<Item = (PaneId, usize)>,
+    focused: PaneId,
+    active_tab: usize,
+) -> Option<PaneId> {
+    chats
+        .into_iter()
+        .min_by_key(|&(pane, tab)| (pane != focused, tab != active_tab, tab))
+        .map(|(pane, _)| pane)
+}
+
 impl Workspace {
     /// The pane the prompt goes to: a writable agent chat, the focused one
     /// first, then one in the active tab, then one in another tab.
@@ -28,21 +41,15 @@ impl Workspace {
     /// run each line of a pasted log.
     pub(in crate::workspace) fn pr_send_target(&self, cx: &App) -> Option<PaneId> {
         let runtime = self.active_runtime();
-        let active_tab = runtime.active_tab_index;
-        runtime
+        let chats = runtime
             .panes
             .iter()
             .filter(|pane| {
                 pane.agent_chat_view()
                     .is_some_and(|view| !view.read(cx).is_read_only())
             })
-            .filter_map(|pane| {
-                let tab = self.tab_index_for_pane(pane.id)?;
-                let rank = (pane.id != runtime.focused_pane_id, tab != active_tab, tab);
-                Some((rank, pane.id))
-            })
-            .min_by_key(|(rank, _)| *rank)
-            .map(|(_, id)| id)
+            .filter_map(|pane| Some((pane.id, self.tab_index_for_pane(pane.id)?)));
+        best_target(chats, runtime.focused_pane_id, runtime.active_tab_index)
     }
 
     /// Read the failing checks' logs and put the fix-it prompt into the
@@ -55,7 +62,7 @@ impl Workspace {
         let has_failures = self
             .lane_scoped
             .get(&self.active)
-            .and_then(|state| state.pr.as_ref())
+            .and_then(|state| state.pr.link())
             .is_some_and(|link| !link.pr.failed.is_empty());
         if !has_failures {
             return;
@@ -113,7 +120,7 @@ impl Workspace {
         let Some(link) = self
             .lane_scoped
             .get(&lane)
-            .and_then(|state| state.pr.clone())
+            .and_then(|state| state.pr.link().cloned())
         else {
             return;
         };
@@ -205,5 +212,37 @@ impl Workspace {
             .dedup("github.send")
             .build();
         self.report_error(report, cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_focused_chat_wins_then_the_active_tab_then_tab_order() {
+        /// (label, (chat, tab) pairs, focused pane, active tab, expected)
+        type Row = (
+            &'static str,
+            Vec<(PaneId, usize)>,
+            PaneId,
+            usize,
+            Option<PaneId>,
+        );
+        let cases: Vec<Row> = vec![
+            ("no chat", vec![], 1, 0, None),
+            ("focused chat", vec![(1, 2), (2, 0)], 1, 0, Some(1)),
+            (
+                "active tab over earlier tab",
+                vec![(1, 0), (2, 3)],
+                9,
+                3,
+                Some(2),
+            ),
+            ("first tab otherwise", vec![(5, 4), (6, 2)], 9, 0, Some(6)),
+        ];
+        for (label, chats, focused, active, expected) in cases {
+            assert_eq!(best_target(chats, focused, active), expected, "{label}");
+        }
     }
 }

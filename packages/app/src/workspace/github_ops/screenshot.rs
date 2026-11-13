@@ -1,6 +1,7 @@
-//! Pull-request fixtures for captures. A scripted `FakeGh` that answers the
-//! same as the seeds replaces the real one, so the running poller neither
-//! reaches GitHub with the developer's login nor overwrites what was seeded.
+//! Pull-request fixtures for captures. Every capture starts on an empty
+//! `FakeGh` (`startup::inspection::before_globals`); these scenarios replace
+//! it with one that answers like the seeds, so the running poller does not
+//! overwrite what was seeded.
 
 use std::sync::Arc;
 
@@ -11,7 +12,7 @@ use daruda_store::project::LaneRef;
 use gpui::Context;
 
 use crate::gh_host::GhHost;
-use crate::github::{PrLink, PrPoller};
+use crate::github::{PrLink, PrLookup, PrPoller};
 use crate::lane::git::PushTarget;
 use crate::workspace::Workspace;
 
@@ -72,6 +73,8 @@ fn install_fake_gh(auth: GhAuth, prs: Vec<PrSummary>, cx: &mut gpui::App) {
 }
 
 impl Workspace {
+    /// Written directly rather than through `set_push_target`: that would
+    /// nudge the poller before the scripted answers are installed.
     fn seed_push_target_for_shot(&mut self, target: LaneRef, branch: &str) {
         self.lane_scoped_mut(target).git.push_target = Some(PushTarget {
             remote: "origin".into(),
@@ -101,16 +104,15 @@ impl Workspace {
         };
         install_fake_gh(auth, prs, cx);
         PrPoller::seed_for_shot(HOST, availability, cx);
-        if shot == PrShot::Linked {
-            self.seed_pr_link_for_shot(
-                active,
-                PrLink {
-                    repo: repo(),
-                    pr: linked,
-                },
-                cx,
-            );
-        }
+        let lookup = match shot {
+            PrShot::Linked => PrLookup::Linked(Box::new(PrLink {
+                repo: repo(),
+                pr: linked,
+            })),
+            PrShot::NoPr => PrLookup::NoPr,
+            PrShot::GhMissing => PrLookup::Unknown,
+        };
+        self.seed_pr_lookup_for_shot(active, lookup, cx);
         cx.notify();
     }
 
@@ -135,12 +137,12 @@ impl Workspace {
             self.seed_push_target_for_shot(target, &branch);
             let summary = pr(480 + i as u64, &branch, "Lane PR", state, checks);
             prs.push(summary.clone());
-            self.seed_pr_link_for_shot(
+            self.seed_pr_lookup_for_shot(
                 target,
-                PrLink {
+                PrLookup::Linked(Box::new(PrLink {
                     repo: repo(),
                     pr: summary,
-                },
+                })),
                 cx,
             );
         }

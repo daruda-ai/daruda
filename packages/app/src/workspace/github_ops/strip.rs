@@ -5,7 +5,7 @@ use daruda_github::availability::GhAvailability;
 use daruda_github::remote_parse::parse_remote;
 use gpui::App;
 
-use crate::github::{PrLink, PrPoller};
+use crate::github::{PrLink, PrLookup, PrPoller};
 use crate::workspace::Workspace;
 
 /// The one host whose `gh` trouble is worth telling the user about unasked:
@@ -30,12 +30,13 @@ pub(crate) enum PrStrip {
 }
 
 /// Decide the strip from what is known. Pure, so every combination is
-/// testable without a window.
+/// testable without a window. Create PR is offered only once GitHub has
+/// answered that this branch, not the default one, has no PR.
 pub(crate) fn strip_for(
     enabled: bool,
     repo: Option<RepoId>,
     availability: GhAvailability,
-    link: Option<PrLink>,
+    lookup: &PrLookup,
 ) -> PrStrip {
     let Some(repo) = repo.filter(|_| enabled) else {
         return PrStrip::Hidden;
@@ -46,11 +47,18 @@ pub(crate) fn strip_for(
         GhAvailability::Missing if on_github => PrStrip::Missing { host: repo.host },
         GhAvailability::LoggedOut if on_github => PrStrip::LoggedOut { host: repo.host },
         GhAvailability::Missing | GhAvailability::LoggedOut => PrStrip::Hidden,
-        GhAvailability::Ready | GhAvailability::Backoff { .. } => match link {
-            Some(link) => PrStrip::Linked(link),
-            None => PrStrip::NoPr,
+        GhAvailability::Ready | GhAvailability::Backoff { .. } => match lookup {
+            PrLookup::Linked(link) => PrStrip::Linked(PrLink::clone(link)),
+            PrLookup::NoPr => PrStrip::NoPr,
+            PrLookup::Unknown | PrLookup::DefaultBranch => PrStrip::Hidden,
         },
     }
+}
+
+/// Whether a PR URL from `gh` may be handed to the system opener: web pages
+/// only, whatever host answered.
+fn openable(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://")
 }
 
 impl Workspace {
@@ -67,8 +75,9 @@ impl Workspace {
         let availability = repo.as_ref().map_or(GhAvailability::Unknown, |repo| {
             PrPoller::availability(&repo.host, cx)
         });
-        let link = state.and_then(|state| state.pr.clone());
-        strip_for(enabled, repo, availability, link)
+        let unknown = PrLookup::Unknown;
+        let lookup = state.map_or(&unknown, |state| &state.pr);
+        strip_for(enabled, repo, availability, lookup)
     }
 
     /// Open the active lane's pull request on GitHub.
@@ -76,7 +85,8 @@ impl Workspace {
         if let Some(link) = self
             .lane_scoped
             .get(&self.active)
-            .and_then(|state| state.pr.as_ref())
+            .and_then(|state| state.pr.link())
+            .filter(|link| openable(&link.pr.url))
         {
             cx.open_url(&link.pr.url);
         }
@@ -123,13 +133,13 @@ mod tests {
         }
     }
 
-    /// `(label, enabled, repo, availability, link, expected)`.
+    /// `(label, enabled, repo, availability, lookup, expected)`.
     type Case = (
         &'static str,
         bool,
         Option<RepoId>,
         GhAvailability,
-        Option<PrLink>,
+        PrLookup,
         PrStrip,
     );
 
@@ -142,14 +152,28 @@ mod tests {
         };
         let gh = GITHUB_HOST;
         let cases: Vec<Case> = vec![
-            ("off", false, repo(gh), Ready, Some(link()), PrStrip::Hidden),
-            ("no push target", true, None, Ready, None, PrStrip::Hidden),
+            (
+                "off",
+                false,
+                repo(gh),
+                Ready,
+                PrLookup::Linked(Box::new(link())),
+                PrStrip::Hidden,
+            ),
+            (
+                "no push target",
+                true,
+                None,
+                Ready,
+                PrLookup::NoPr,
+                PrStrip::Hidden,
+            ),
             (
                 "not asked yet",
                 true,
                 repo(gh),
                 Unknown,
-                None,
+                PrLookup::Unknown,
                 PrStrip::Hidden,
             ),
             (
@@ -157,7 +181,7 @@ mod tests {
                 true,
                 repo(gh),
                 Missing,
-                None,
+                PrLookup::Unknown,
                 PrStrip::Missing { host: gh.into() },
             ),
             (
@@ -165,7 +189,7 @@ mod tests {
                 true,
                 repo(gh),
                 LoggedOut,
-                None,
+                PrLookup::Unknown,
                 PrStrip::LoggedOut { host: gh.into() },
             ),
             (
@@ -173,7 +197,7 @@ mod tests {
                 true,
                 repo("gitlab.com"),
                 LoggedOut,
-                None,
+                PrLookup::Unknown,
                 PrStrip::Hidden,
             ),
             (
@@ -181,16 +205,39 @@ mod tests {
                 true,
                 repo("ghe.corp"),
                 Ready,
-                None,
+                PrLookup::NoPr,
                 PrStrip::NoPr,
             ),
-            ("no PR yet", true, repo(gh), Ready, None, PrStrip::NoPr),
+            (
+                "no PR yet",
+                true,
+                repo(gh),
+                Ready,
+                PrLookup::NoPr,
+                PrStrip::NoPr,
+            ),
+            (
+                "not answered yet: no Create PR",
+                true,
+                repo(gh),
+                Ready,
+                PrLookup::Unknown,
+                PrStrip::Hidden,
+            ),
+            (
+                "the default branch has no PR to create",
+                true,
+                repo(gh),
+                Ready,
+                PrLookup::DefaultBranch,
+                PrStrip::Hidden,
+            ),
             (
                 "linked",
                 true,
                 repo(gh),
                 Ready,
-                Some(link()),
+                PrLookup::Linked(Box::new(link())),
                 PrStrip::Linked(link()),
             ),
             (
@@ -198,16 +245,25 @@ mod tests {
                 true,
                 repo(gh),
                 backoff,
-                Some(link()),
+                PrLookup::Linked(Box::new(link())),
                 PrStrip::Linked(link()),
             ),
         ];
-        for (label, enabled, repo, availability, link, expected) in cases {
+        for (label, enabled, repo, availability, lookup, expected) in cases {
             assert_eq!(
-                strip_for(enabled, repo, availability, link),
+                strip_for(enabled, repo, availability, &lookup),
                 expected,
                 "{label}"
             );
         }
+    }
+
+    #[test]
+    fn only_web_urls_are_opened() {
+        assert!(openable("https://github.com/o/r/pull/1"));
+        assert!(openable("http://ghe.corp/o/r/pull/1"));
+        assert!(!openable("file:///etc/passwd"));
+        assert!(!openable("javascript:alert(1)"));
+        assert!(!openable("ssh://git@github.com/o/r"));
     }
 }

@@ -66,7 +66,7 @@ fn linked(f: &GitFixture, id: LaneRef, cx: &mut TestAppContext) -> Option<(u64, 
     f.ws.read_with(cx, |ws, _| {
         ws.lane_scoped
             .get(&id)
-            .and_then(|state| state.pr.as_ref())
+            .and_then(|state| state.pr.link())
             .map(|link| (link.pr.number, link.pr.state))
     })
 }
@@ -661,6 +661,7 @@ fn a_poll_that_finds_no_login_is_not_rechecked_at_once(cx: &mut TestAppContext) 
 fn moving_the_branch_ends_the_wait_after_create(cx: &mut TestAppContext) {
     let gh = crate::test_support::fake_gh(cx);
     let (f, id) = lane_with(cx, true);
+    tick(cx);
     // The PR is made, but the poll that would link it cannot reach GitHub.
     gh.fail(
         GhOp::PrsForBranches,
@@ -800,4 +801,84 @@ fn a_failed_read_frees_the_buttons_and_says_so(cx: &mut TestAppContext) {
         Some(crate::workspace::lane_scoped::PrWork::Idle),
         "the send buttons work again"
     );
+}
+
+// ---- Final review fixes ----
+
+fn lookup(f: &GitFixture, id: LaneRef, cx: &mut TestAppContext) -> crate::github::PrLookup {
+    f.ws.read_with(cx, |ws, _| {
+        ws.lane_scoped
+            .get(&id)
+            .map(|state| state.pr.clone())
+            .unwrap_or_default()
+    })
+}
+
+#[gpui::test]
+fn a_default_branch_lane_offers_no_pr_to_create(cx: &mut TestAppContext) {
+    let _gh = crate::test_support::fake_gh(cx);
+    let (f, id) = lane_pushing(cx, push_target("git@github.com:o/r.git", "main"));
+    tick(cx);
+    assert_eq!(lookup(&f, id, cx), crate::github::PrLookup::DefaultBranch);
+    let strip = f.ws.read_with(cx, |ws, cx| ws.pr_strip(cx));
+    assert_eq!(strip, crate::workspace::github_ops::strip::PrStrip::Hidden);
+}
+
+#[gpui::test]
+fn a_base_typed_with_the_remote_prefix_reaches_gh_bare(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, id) = lane_with(cx, true);
+    let modal = create_with(&f, id, Some("origin/release"), cx);
+    assert!(modal.read_with(cx, |modal, _| modal.failure().is_none()));
+    let bases: Vec<Option<String>> = gh
+        .calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            GhCall::CreatePr { new, .. } => Some(new.base),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(bases, vec![Some("release".to_owned())]);
+}
+
+#[gpui::test]
+fn an_answer_arriving_after_the_switch_is_turned_off_is_dropped(cx: &mut TestAppContext) {
+    let gh = gh_with_open_pr(cx);
+    let (f, id) = lane_pushing_feat(cx);
+    tick(cx);
+    assert_eq!(linked(&f, id, cx), Some((7, PrState::Open)));
+
+    gh.set_prs(&repo(), vec![pr(7, PrState::Merged, "2026-01-02")]);
+    cx.executor().advance_clock(Duration::from_secs(31));
+    // The round sends its request; the feature goes off before it returns.
+    cx.update(PrPoller::tick);
+    set_enabled(cx, false);
+    cx.run_until_parked();
+    assert_ne!(
+        linked(&f, id, cx),
+        Some((7, PrState::Merged)),
+        "the late answer is not applied"
+    );
+    tick(cx);
+    assert_eq!(linked(&f, id, cx), None);
+}
+
+#[gpui::test]
+fn a_logged_out_host_drops_its_lanes_links(cx: &mut TestAppContext) {
+    let gh = gh_with_open_pr(cx);
+    let (f, id) = lane_pushing_feat(cx);
+    tick(cx);
+    assert_eq!(linked(&f, id, cx), Some((7, PrState::Open)));
+
+    gh.fail(
+        GhOp::PrsForBranches,
+        GhFailure::Exit {
+            code: Some(4),
+            stderr: "gh auth login".into(),
+        },
+    );
+    cx.executor().advance_clock(Duration::from_secs(31));
+    tick(cx);
+    assert_eq!(linked(&f, id, cx), None, "no stale badge after logout");
+    assert_eq!(lookup(&f, id, cx), crate::github::PrLookup::Unknown);
 }

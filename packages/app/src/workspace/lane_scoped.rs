@@ -21,7 +21,7 @@ pub(in crate::workspace) struct LaneScoped {
     /// The pull request this lane's branch belongs to, if any. Written only
     /// through `github_ops::link`; never persisted, since the next poll
     /// answers it again.
-    pub pr: Option<crate::github::PrLink>,
+    pub pr: crate::github::PrLookup,
     /// What is under way for the lane's PR; the strip's buttons wait on it.
     pub pr_work: PrWork,
     /// Expanded-sidebar disclosure for this app session, independent of rail grouping.

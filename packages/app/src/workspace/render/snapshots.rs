@@ -145,7 +145,13 @@ impl Workspace {
             pr_cache: self
                 .lane_scoped
                 .iter()
-                .filter_map(|(target, state)| state.pr.clone().map(|link| (*target, link)))
+                .filter_map(|(target, state)| {
+                    let link = state.pr.link()?;
+                    Some((
+                        *target,
+                        crate::workspace::github_ops::tone::PrBadge::of(&link.pr),
+                    ))
+                })
                 .collect(),
             pr_strip: self.pr_strip(cx),
             pr_work: self

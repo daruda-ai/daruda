@@ -27,6 +27,26 @@ impl PrTone {
     }
 }
 
+/// A lane's pull request on its row: what the sidebar needs and no more,
+/// so the per-render snapshot copies three small fields per lane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PrBadge {
+    pub number: u64,
+    pub tone: PrTone,
+    /// Open or draft; a merged or closed PR's number reads quieter.
+    pub active: bool,
+}
+
+impl PrBadge {
+    pub(crate) fn of(pr: &PrSummary) -> Self {
+        Self {
+            number: pr.number,
+            tone: PrTone::of(pr),
+            active: pr.state.is_active(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

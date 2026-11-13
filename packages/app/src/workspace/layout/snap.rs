@@ -121,7 +121,10 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     pub git_tracking_cache:
         std::collections::HashMap<daruda_store::project::LaneRef, crate::lane::git::GitTracking>,
     /// Per-lane pull request, for the lane badges.
-    pub pr_cache: std::collections::HashMap<daruda_store::project::LaneRef, crate::github::PrLink>,
+    pub pr_cache: std::collections::HashMap<
+        daruda_store::project::LaneRef,
+        crate::workspace::github_ops::tone::PrBadge,
+    >,
     /// What the Git Changes panel says about the active lane's PR.
     pub pr_strip: crate::workspace::github_ops::strip::PrStrip,
     /// What is under way for the active lane's PR.

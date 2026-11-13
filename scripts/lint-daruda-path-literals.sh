@@ -74,6 +74,7 @@ SCAN_DIRS=(
     "packages/control-types/src"
     "packages/content/src"
     "packages/flow-edit/src"
+    "packages/github/src"
     "packages/transcript/src"
     "packages/chat/src"
     "packages/settings/src"
