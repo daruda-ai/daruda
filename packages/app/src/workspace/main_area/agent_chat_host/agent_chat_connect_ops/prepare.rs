@@ -47,26 +47,28 @@ impl Workspace {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Option<AgentLaunchSpec> {
-        let agent_id = self
-            .agent_chat_view(pane_id)?
-            .read(cx)
-            .agent_id()
-            .to_owned();
-        // Happy path: the view's agent is still in the catalog.
-        if let Some(spec) = self.agent_launch_for(&agent_id) {
-            return Some(spec);
-        }
-        // Stale id — reconcile so the chip / persisted state stop lying, then
-        // launch the effective agent (a catalog entry, or the Claude id when the
-        // catalog is somehow empty).
-        let effective_id = self.open_agent_id(None);
-        if self.agent_chat_view(pane_id).is_some() {
-            self.repoint_agent_chat(pane_id, effective_id.clone(), cx);
+        let (spec, stale) = self.pane_launch(pane_id, cx)?;
+        // Reconcile so the chip / persisted state stop lying.
+        if let Some(effective_id) = stale {
+            self.repoint_agent_chat(pane_id, effective_id, cx);
             self.mutate_durable(cx, |_, _| {});
         }
-        Some(self.agent_launch_for(&effective_id).unwrap_or_else(|| {
+        Some(spec)
+    }
+
+    /// The launch `pane_id`'s agent gets, without reconciling: a stale id
+    /// launches the effective agent (a catalog entry, or the Claude id when
+    /// the catalog is somehow empty), returned as the id to repoint to.
+    fn pane_launch(&self, pane_id: PaneId, cx: &App) -> Option<(AgentLaunchSpec, Option<String>)> {
+        let agent_id = self.agent_chat_view(pane_id)?.read(cx).agent_id();
+        if let Some(spec) = self.agent_launch_for(agent_id) {
+            return Some((spec, None));
+        }
+        let effective_id = self.open_agent_id(None);
+        let spec = self.agent_launch_for(&effective_id).unwrap_or_else(|| {
             AgentLaunchSpec::of(&daruda_config::AgentDefinition::claude_default())
-        }))
+        });
+        Some((spec, Some(effective_id)))
     }
 
     #[cfg(test)]
@@ -341,17 +343,27 @@ impl Workspace {
             && self.orchestrator_chat_pane().map(|p| p.pane) == Some(pane_id)
     }
 
+    #[cfg(test)]
+    pub(crate) fn offers_control_tools_for_test(
+        &self,
+        pane_id: PaneId,
+        cx: &Context<Self>,
+    ) -> bool {
+        self.offers_control_tools(pane_id, cx)
+    }
+
     /// The servers a session planned for `pane_id` would be offered, through
-    /// the same decision a connect makes. The control server comes from
-    /// `orchestrator::mcp_server`, so asking schedules no run notices. An
-    /// unusable lane host, which refuses the connect, is offered nothing.
+    /// the same decision a connect makes but without reconciling a stale agent.
+    /// The control server comes from `orchestrator::mcp_server`, so asking
+    /// schedules no run notices. A missing pane or an unusable lane host,
+    /// which refuse the connect, are offered nothing.
     #[cfg(test)]
     pub(crate) fn mcp_servers_for_pane_for_test(
         &mut self,
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Vec<daruda_acp::McpServer> {
-        let Some(AgentLaunchSpec { launch, .. }) = self.resolve_pane_launch(pane_id, cx) else {
+        let Some((AgentLaunchSpec { launch, .. }, _)) = self.pane_launch(pane_id, cx) else {
             return Vec::new();
         };
         let owning_lane = self

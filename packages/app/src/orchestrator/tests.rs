@@ -65,27 +65,29 @@ fn only_the_orchestrators_pane_is_offered_the_control_server(cx: &mut TestAppCon
     // inside `Workspace::update`, and `read_with` does not lease — a test
     // that used it would pass against a double-lease panic.
     assert!(
-        offered(&user.workspace, user.pane(), cx).is_empty(),
+        cx.update(|cx| mcp_server(cx).is_none())
+            && !offers_control(&user.workspace, user.pane(), cx),
         "no control surface up yet, so nobody gets a server — a session \
          with a server it cannot reach is worse than one with none"
     );
-    cx.update(|cx| assert!(mcp_server(cx).is_none()));
+    let orchestrator_ws = orchestrator_workspace(cx);
+    assert!(
+        !offers_control(&orchestrator_ws, orchestrator.pane, cx),
+        "nothing to offer the orchestrator either, until the surface is up"
+    );
 
     cx.update(seed_control_surface_for_test);
 
-    // The user's pane still gets nothing.
+    // The user's pane still gets no control server; a lane pane may get
+    // others, such as the browser.
     assert!(
-        offered(&user.workspace, user.pane(), cx).is_empty(),
+        !offers_control(&user.workspace, user.pane(), cx),
         "a lane agent must not be handed daruda's tools"
     );
 
     // The orchestrator's pane gets exactly one, and it is the real thing:
     // the shim subcommand plus the session token. Without asserting those,
     // deleting the whole authentication mechanism would still pass.
-    let (_, weak) = cx
-        .update(|cx| WindowRegistry::orchestrator(cx))
-        .expect("registered");
-    let orchestrator_ws = weak.upgrade().expect("live");
     let servers = offered(&orchestrator_ws, orchestrator.pane, cx);
     assert_eq!(servers.len(), 1, "the orchestrator gets the control server");
     let described = serde_json::to_value(&servers[0]).expect("serialize");
@@ -130,19 +132,62 @@ fn offered(
     workspace.update(cx, |ws, cx| ws.mcp_servers_for_pane_for_test(pane, cx))
 }
 
+/// Whether `pane` is offered a server running the control shim. Asserts the
+/// pane exists first: a missing pane is offered nothing, so a check against
+/// it would pass without testing the rule.
+fn offers_control(
+    workspace: &gpui::Entity<crate::workspace::Workspace>,
+    pane: u64,
+    cx: &mut TestAppContext,
+) -> bool {
+    assert!(
+        workspace.read_with(cx, |ws, _| ws.has_agent_chat_pane_for_test(pane)),
+        "pane {pane} must be an agent-chat pane in this workspace"
+    );
+    offered(workspace, pane, cx)
+        .iter()
+        .any(runs_the_control_shim)
+}
+
+fn runs_the_control_shim(server: &daruda_acp::McpServer) -> bool {
+    let described = serde_json::to_value(server).expect("serialize");
+    described["args"].as_array().is_some_and(|args| {
+        args.iter()
+            .any(|arg| arg == crate::control::mcp::shim::SUBCOMMAND)
+    })
+}
+
+fn orchestrator_workspace(cx: &mut TestAppContext) -> gpui::Entity<crate::workspace::Workspace> {
+    let (_, weak) = cx
+        .update(|cx| WindowRegistry::orchestrator(cx))
+        .expect("registered");
+    weak.upgrade().expect("live")
+}
+
 /// A pane id that matches the orchestrator's *number* in a different
 /// window must not inherit its tools — the same window-scoping mistake
 /// the lane handles had.
 #[gpui::test]
 fn a_same_numbered_pane_in_another_window_gets_nothing(cx: &mut TestAppContext) {
     let user = crate::test_support::workspace_with_agent_chat(cx);
-    let orchestrator = crate::test_support::register_test_orchestrator(cx);
+    let orchestrator = crate::test_support::register_test_orchestrator_numbered(cx, user.pane());
+    assert_eq!(orchestrator.pane, user.pane(), "pane ids are per window");
     cx.update(seed_control_surface_for_test);
     // Ask the *user's* workspace about the orchestrator's pane number.
     assert!(
-        offered(&user.workspace, orchestrator.pane, cx).is_empty(),
+        !offers_control(&user.workspace, orchestrator.pane, cx),
         "which window this is, is half the identity"
     );
+    assert!(
+        !user.workspace.update(cx, |ws, cx| ws
+            .offers_control_tools_for_test(orchestrator.pane, cx)),
+        "the decision itself, not only the servers it yields"
+    );
+    // The same question in the orchestrator's own window is a yes, so the
+    // refusal above is the window's doing.
+    assert!(orchestrator_workspace(cx).update(cx, |ws, cx| {
+        ws.offers_control_tools_for_test(orchestrator.pane, cx)
+    }));
 }
 
 #[test]

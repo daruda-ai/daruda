@@ -132,12 +132,18 @@ mod browser {
         });
     }
 
-    /// Asked through `Workspace::update`, the way a connect asks.
+    /// Asked through `Workspace::update`, the way a connect asks. A missing
+    /// pane is offered nothing, so the pane must exist for an empty answer
+    /// to mean anything.
     fn offered(
         workspace: &gpui::Entity<crate::workspace::Workspace>,
         pane: u64,
         cx: &mut TestAppContext,
     ) -> Vec<serde_json::Value> {
+        assert!(
+            workspace.read_with(cx, |ws, _| ws.has_agent_chat_pane_for_test(pane)),
+            "pane {pane} must be an agent-chat pane in this workspace"
+        );
         workspace
             .update(cx, |ws, cx| ws.mcp_servers_for_pane_for_test(pane, cx))
             .iter()
