@@ -1,8 +1,9 @@
 //! The managed `agent-browser` tool: release selection, digest verification,
 //! and the stdio MCP launch each local lane's chat session receives.
 //!
-//! Pure policy only; installation and ACP wiring belong to their callers.
+//! [`install`] fetches the binary and its browser; ACP wiring belongs to callers.
 
+pub mod install;
 mod pinned;
 
 use std::path::{Path, PathBuf};

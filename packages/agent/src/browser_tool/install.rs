@@ -1,0 +1,177 @@
+//! Installs the pinned agent-browser binary and the browser it drives.
+//!
+//! Layout: `<tool_dir>/<VERSION>/<binary>` plus a `.complete` marker that
+//! appears only once the browser install has succeeded. Callers serialize
+//! installs: upstream's browser extractor takes no lock of its own.
+
+use std::io::{Read as _, Write as _};
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::Duration;
+
+use super::{Asset, BrowserToolError, VERSION, binary_file_name, download_url, verify};
+
+const MARKER: &str = ".complete";
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
+const DOWNLOAD_IO_TIMEOUT: Duration = Duration::from_secs(5);
+/// Release binaries are ~20 MB; the cap bounds a misbehaving proxy.
+const MAX_DOWNLOAD_BYTES: u64 = 256 * 1024 * 1024;
+const STDERR_TAIL_CHARS: usize = 2000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallStage {
+    Binary,
+    Browser,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum InstallError {
+    #[error("agent-browser download failed: {0}")]
+    Download(String),
+    #[error(transparent)]
+    Verify(#[from] BrowserToolError),
+    #[error("agent-browser install I/O failed: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("agent-browser browser install failed: {0}")]
+    Browser(String),
+}
+
+pub trait Fetch {
+    fn get(&self, url: &str) -> Result<Vec<u8>, InstallError>;
+}
+
+/// Runs `<binary> install`, which fetches the browser into the user's home.
+pub trait Run {
+    fn run_install(&self, binary: &Path) -> Result<(), InstallError>;
+}
+
+pub struct HttpFetch;
+
+impl Fetch for HttpFetch {
+    fn get(&self, url: &str) -> Result<Vec<u8>, InstallError> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(DOWNLOAD_TIMEOUT))
+            .timeout_connect(Some(DOWNLOAD_IO_TIMEOUT))
+            .timeout_recv_response(Some(DOWNLOAD_IO_TIMEOUT))
+            .timeout_per_read(Some(DOWNLOAD_IO_TIMEOUT))
+            .proxy(None)
+            .build()
+            .into();
+        let response = agent
+            .get(url)
+            .call()
+            .map_err(|e| InstallError::Download(e.to_string()))?;
+        let mut bytes = Vec::new();
+        response
+            .into_body()
+            .into_reader()
+            .take(MAX_DOWNLOAD_BYTES)
+            .read_to_end(&mut bytes)
+            .map_err(|e| InstallError::Download(e.to_string()))?;
+        Ok(bytes)
+    }
+}
+
+pub struct ProcessRun;
+
+impl Run for ProcessRun {
+    fn run_install(&self, binary: &Path) -> Result<(), InstallError> {
+        let output = daruda_core::process::command(binary)
+            .arg("install")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| InstallError::Browser(e.to_string()))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(InstallError::Browser(format!(
+            "{}: {}",
+            output.status,
+            tail(stderr.trim(), STDERR_TAIL_CHARS)
+        )))
+    }
+}
+
+fn tail(text: &str, max_chars: usize) -> &str {
+    let skip = text.chars().count().saturating_sub(max_chars);
+    text.char_indices()
+        .nth(skip)
+        .map_or("", |(index, _)| &text[index..])
+}
+
+/// The installed binary, when the marker exists and the binary matches the
+/// pinned digest.
+pub fn cached(tool_dir: &Path, asset: &Asset, os: &str) -> Option<PathBuf> {
+    let version_dir = tool_dir.join(VERSION);
+    if !version_dir.join(MARKER).is_file() {
+        return None;
+    }
+    let binary = version_dir.join(binary_file_name(os));
+    binary_verified(&binary, asset).then_some(binary)
+}
+
+fn binary_verified(binary: &Path, asset: &Asset) -> bool {
+    std::fs::read(binary).is_ok_and(|bytes| verify(&bytes, asset).is_ok())
+}
+
+/// Installs whatever is missing and returns the binary path. A failed browser
+/// install keeps the verified binary, so a retry only reruns that step.
+pub fn install(
+    tool_dir: &Path,
+    asset: &Asset,
+    os: &str,
+    on_stage: &mut dyn FnMut(InstallStage),
+    fetch: &dyn Fetch,
+    run: &dyn Run,
+) -> Result<PathBuf, InstallError> {
+    if let Some(binary) = cached(tool_dir, asset, os) {
+        return Ok(binary);
+    }
+    let version_dir = tool_dir.join(VERSION);
+    let binary = version_dir.join(binary_file_name(os));
+
+    on_stage(InstallStage::Binary);
+    if !binary_verified(&binary, asset) {
+        let bytes = fetch.get(&download_url(asset))?;
+        verify(&bytes, asset)?;
+        std::fs::create_dir_all(&version_dir)?;
+        publish(&version_dir, &binary, &bytes, true)?;
+    }
+
+    on_stage(InstallStage::Browser);
+    run.run_install(&binary)?;
+
+    publish(&version_dir, &version_dir.join(MARKER), &[], false)?;
+    Ok(binary)
+}
+
+/// Writes `bytes` beside `target` and renames over it. No flush: `cached`
+/// re-verifies the digest, so a torn write after a crash just reinstalls.
+/// `persist` replaces an existing file on Windows too (MOVEFILE_REPLACE_EXISTING).
+fn publish(dir: &Path, target: &Path, bytes: &[u8], executable: bool) -> std::io::Result<()> {
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    tmp.write_all(bytes)?;
+    tmp.flush()?;
+    if executable {
+        make_executable(tmp.as_file())?;
+    }
+    tmp.persist(target).map_err(|e| e.error)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn make_executable(file: &std::fs::File) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    file.set_permissions(std::fs::Permissions::from_mode(0o755))
+}
+
+#[cfg(not(unix))]
+fn make_executable(_: &std::fs::File) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;
