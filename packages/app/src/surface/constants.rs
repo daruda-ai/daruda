@@ -12,6 +12,12 @@ pub const APP_NAME: &str = "Daruda";
 /// launcher entry only when this equals the `.desktop` file's basename.
 pub const AGENT_FACING_NAME: &str = "daruda";
 
+/// The MCP server name a lane chat's managed browser is offered under.
+/// Distinct from any name a user is likely to configure: `codex-acp`
+/// silently drops a server whose name already exists in the user's Codex
+/// config, which would leave the chat with no browser and no error.
+pub const BROWSER_MCP_SERVER_NAME: &str = "daruda-browser";
+
 /// Help-menu targets.
 pub const URL_GITHUB_REPO: &str = "https://github.com/daruda-ai/daruda";
 pub const URL_REPORT_ISSUE: &str = "https://github.com/daruda-ai/daruda/issues/new";

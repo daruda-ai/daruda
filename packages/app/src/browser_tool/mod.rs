@@ -184,8 +184,6 @@ impl BrowserTool {
 
 /// How to start `agent-browser mcp` for a lane's chat session, when the
 /// setting is on and the tool is installed.
-// Wired in by the lane-session injection; until then only tests call it.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn launch_for_lane(lane_root: &Path, cx: &App) -> Option<McpLaunch> {
     if !SettingsStore::global(cx).user().browser.enabled {
         return None;

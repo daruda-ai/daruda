@@ -4,13 +4,17 @@ use super::AgentChatConnectionPlan;
 use crate::agent::launch_resolve::{
     AgentLaunchSpec, ConnectCommandError, account_recipe_for_connect, resolve_launch,
 };
+use crate::lane::Lane;
+use crate::lane::session_host::UnusableSessionHost;
+use crate::surface::constants::BROWSER_MCP_SERVER_NAME;
 use crate::surface::strings as s;
 use crate::workspace::{Workspace, main_area::pane_tree::PaneId};
 use daruda_acp::NodeProgress;
 use daruda_chat::view::RuntimePrepPhase;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneSessionHost, PaneCwd};
-use gpui::Context;
+use gpui::{App, Context};
+use std::path::{Path, PathBuf};
 
 /// The banner phase for a runtime-provisioning milestone, or `None` for
 /// milestones that shouldn't surface a banner (system node found, or a cache
@@ -22,6 +26,16 @@ pub(super) fn runtime_prep_phase(progress: NodeProgress) -> Option<RuntimePrepPh
         NodeProgress::Verifying => Some(RuntimePrepPhase::Verifying),
         NodeProgress::Extracting => Some(RuntimePrepPhase::Extracting),
     }
+}
+
+/// The root a lane's browser session is named from, when the lane's agent
+/// sessions run on this machine. Keyed by the lane, not the pane's cwd, so
+/// every chat in one lane shares one browser.
+fn local_lane_root(lane: Option<&Lane>, host: Option<&LaneSessionHost>) -> Option<PathBuf> {
+    if host.is_some_and(LaneSessionHost::is_remote) {
+        return None;
+    }
+    lane.map(|lane| lane.path.clone())
 }
 
 impl Workspace {
@@ -114,13 +128,7 @@ impl Workspace {
         // names.
         let owning_lane_ref = self.lane_ref_for_pane(pane_id);
         let owning_lane = owning_lane_ref.and_then(|lane_ref| self.lane_for(lane_ref));
-        let resolved_host = match owning_lane.map(|lane| {
-            lane.effective_session_host(
-                &launch,
-                &self.mirrors.session_hosts,
-                &self.mirrors.session_host_tombstones,
-            )
-        }) {
+        let resolved_host = match self.owning_lane_host(owning_lane, &launch) {
             None => None,
             Some(Ok(host)) => Some(host),
             // The same surface a launch that cannot produce a command gets
@@ -142,6 +150,7 @@ impl Workspace {
         let is_remote = resolved_host
             .as_ref()
             .is_some_and(LaneSessionHost::is_remote);
+        let local_root = local_lane_root(owning_lane, resolved_host.as_ref());
         if is_remote
             && self
                 .main_area
@@ -239,11 +248,12 @@ impl Workspace {
             &resolved.resolved_cwd,
         );
 
-        let mcp_servers = if self.offers_control_tools(pane_id, cx) {
-            crate::orchestrator::session_tools(cx).into_iter().collect()
-        } else {
-            Vec::new()
-        };
+        let mcp_servers = self.session_mcp_servers(
+            pane_id,
+            local_root.as_deref(),
+            crate::orchestrator::session_tools,
+            cx,
+        );
         Some(AgentChatConnectionPlan {
             agent_id,
             launch_spec,
@@ -253,6 +263,52 @@ impl Workspace {
             prepared,
             mcp_servers,
         })
+    }
+
+    /// The host `owning_lane`'s sessions run on for `launch`; `None` for a
+    /// pane with no owning lane.
+    fn owning_lane_host(
+        &self,
+        owning_lane: Option<&Lane>,
+        launch: &daruda_config::AgentLaunch,
+    ) -> Option<Result<LaneSessionHost, UnusableSessionHost>> {
+        owning_lane.map(|lane| {
+            lane.effective_session_host(
+                launch,
+                &self.mirrors.session_hosts,
+                &self.mirrors.session_host_tombstones,
+            )
+        })
+    }
+
+    /// The MCP servers a session planned for `pane_id` is offered.
+    ///
+    /// The orchestrator's pane gets only the control server, through
+    /// `control`. Any other pane whose lane runs on this machine gets the
+    /// browser for `local_root`; a remote adapter could not run the local
+    /// binary, so a remote lane gets none.
+    fn session_mcp_servers(
+        &self,
+        pane_id: PaneId,
+        local_root: Option<&Path>,
+        control: impl FnOnce(&mut App) -> Option<daruda_acp::McpServer>,
+        cx: &mut Context<Self>,
+    ) -> Vec<daruda_acp::McpServer> {
+        if self.offers_control_tools(pane_id, cx) {
+            return control(cx).into_iter().collect();
+        }
+        local_root
+            .and_then(|root| crate::browser_tool::launch_for_lane(root, cx))
+            .map(|launch| {
+                daruda_acp::stdio_mcp_server(
+                    BROWSER_MCP_SERVER_NAME.to_owned(),
+                    launch.command,
+                    launch.args,
+                    launch.env,
+                )
+            })
+            .into_iter()
+            .collect()
     }
 
     /// Whether this pane's session may reach the control MCP server.
@@ -273,19 +329,33 @@ impl Workspace {
             && self.orchestrator_chat_pane().map(|p| p.pane) == Some(pane_id)
     }
 
-    /// The servers a session planned for `pane_id` would be offered, for the
-    /// test that pins the threat model: exactly one pane in the process may be
-    /// offered the server.
+    /// The servers a session planned for `pane_id` would be offered, through
+    /// the same decision a connect makes. The control server comes from
+    /// `orchestrator::mcp_server`, so asking schedules no run notices. An
+    /// unusable lane host, which refuses the connect, is offered nothing.
     #[cfg(test)]
     pub(crate) fn mcp_servers_for_pane_for_test(
-        &self,
+        &mut self,
         pane_id: PaneId,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Vec<daruda_acp::McpServer> {
-        if !self.offers_control_tools(pane_id, cx) {
+        let Some(AgentLaunchSpec { launch, .. }) = self.resolve_pane_launch(pane_id, cx) else {
             return Vec::new();
-        }
-        crate::orchestrator::mcp_server(cx).into_iter().collect()
+        };
+        let owning_lane = self
+            .lane_ref_for_pane(pane_id)
+            .and_then(|lane_ref| self.lane_for(lane_ref));
+        let host = match self.owning_lane_host(owning_lane, &launch) {
+            Some(Err(_)) => return Vec::new(),
+            host => host.and_then(Result::ok),
+        };
+        let local_root = local_lane_root(owning_lane, host.as_ref());
+        self.session_mcp_servers(
+            pane_id,
+            local_root.as_deref(),
+            |cx| crate::orchestrator::mcp_server(cx),
+            cx,
+        )
     }
 }
 
