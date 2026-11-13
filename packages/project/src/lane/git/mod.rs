@@ -237,12 +237,12 @@ pub(crate) fn default_branch(repo_root: &Path) -> Option<String> {
 
 /// `git worktree add <new_path> [-b <new_branch>] [<base>]`.
 ///
-/// * `new_branch = Some(_)` → create a new branch (`-b`).
-/// * `new_branch = None` → check out the existing branch whose ref
-///   matches `new_path`'s basename (git's default).
-/// * `base = Some(_)` → branch from / check out at this ref
-///   (e.g. `"main"`, `"origin/main"`, a SHA). `None` falls through
-///   to git's default (current HEAD when creating a new branch).
+/// * `new_branch = Some(_)` → create a new branch (`-b`) starting at
+///   `base` (e.g. `"main"`, `"origin/main"`, a SHA), or at HEAD for `None`.
+/// * `new_branch = None`, `base = Some(branch)` → check out that existing
+///   local branch.
+/// * Both `None` → git's default: the branch named after `new_path`'s
+///   basename.
 ///
 /// `repo_root` must be the main repository (any existing lane
 /// path works; git resolves the shared gitdir).
@@ -258,13 +258,17 @@ pub(crate) fn add_lane(
         args.push(b.to_string());
     }
     args.push(new_path.to_string_lossy().into_owned());
-    if let Some(b) = base {
+    match (new_branch, base) {
         // Force commit resolution so `origin/<base>`-style refs do
         // not become the new branch's upstream — without `^{commit}`
         // git auto-tracks the remote ref, which then triggers
         // unintended `push` collisions when daruda later finalizes
         // the lane. Mirrors superset-desktop git.ts:457-519.
-        args.push(format!("{b}^{{commit}}"));
+        (Some(_), Some(b)) => args.push(format!("{b}^{{commit}}")),
+        // Bare, or git would detach HEAD at the commit instead of checking
+        // the branch out.
+        (None, Some(b)) => args.push(b.to_owned()),
+        (_, None) => {}
     }
     run_git(repo_root, args)?;
 

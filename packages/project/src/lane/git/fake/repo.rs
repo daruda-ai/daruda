@@ -16,6 +16,7 @@ use super::fatal;
 pub struct FakeRepo {
     root: PathBuf,
     branch: Option<String>,
+    local_branches: Vec<String>,
     default_branch: Option<String>,
     pub(super) tracking: Option<GitTracking>,
     pub(super) status: Option<GitWorktreeStatus>,
@@ -40,6 +41,7 @@ impl FakeRepo {
         Self {
             root: root.into(),
             branch: None,
+            local_branches: Vec::new(),
             default_branch: None,
             tracking: None,
             status: None,
@@ -67,6 +69,14 @@ impl FakeRepo {
     /// `worktrees` also report.
     pub fn branch(mut self, branch: impl Into<String>) -> Self {
         self.branch = Some(branch.into());
+        self
+    }
+    /// Branches that exist besides the checked-out one.
+    pub fn local_branches<S: Into<String>>(
+        mut self,
+        branches: impl IntoIterator<Item = S>,
+    ) -> Self {
+        self.local_branches = branches.into_iter().map(Into::into).collect();
         self
     }
     pub fn default_branch(mut self, branch: impl Into<String>) -> Self {
@@ -200,6 +210,9 @@ impl FakeRepo {
             git_dir: self.root.join(".git"),
             common_dir: self.root.join(".git"),
         })
+    }
+    pub(super) fn has_local_branch_answer(&self, branch: &str) -> bool {
+        self.branch.as_deref() == Some(branch) || self.local_branches.iter().any(|b| b == branch)
     }
     pub(super) fn push_target_answer(&self) -> Option<PushTarget> {
         self.push_target.clone()

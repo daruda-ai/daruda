@@ -1120,6 +1120,12 @@ pull_requests:
   comments: "%{count} comments"
   # Tooltip on a row's worktree.
   go_to_lane: "Go to this worktree"
+  # A row's button for a pull request with no worktree: one on its branch, so pushing updates it.
+  create_lane: "Open worktree"
+  # The same for a fork's pull request: a local branch to review it on.
+  create_review_lane: "Review worktree"
+  # Description of a worktree made to review a fork's pull request.
+  review_lane_description: "Review of #%{number} from %{owner}:%{branch} — pushes do not reach the pull request"
   empty_repo: "No open pull requests in this repository match this filter."
   # GitHub matched more than one search returns.
   truncated: "More pull requests than shown here."

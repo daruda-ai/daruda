@@ -67,6 +67,11 @@ pub enum GitCall {
     Fetch {
         repo: PathBuf,
     },
+    FetchRef {
+        repo: PathBuf,
+        remote: String,
+        refspec: String,
+    },
     Pull {
         repo: PathBuf,
     },
@@ -123,7 +128,9 @@ pub enum GitOp {
     Push,
     PushHead,
     Fetch,
+    FetchRef,
     Pull,
+    HasLocalBranch,
     AddLane,
     RemoveLane,
     DeleteBranch,
@@ -195,6 +202,7 @@ fn fatal(message: String) -> GitError {
 /// | `default_branch` | `None` | [`FakeRepo::branch`] |
 /// | `dirs` | exit 128 | `<root>/.git` for both |
 /// | `push_target` | exit 128 | `None` (no remote) |
+/// | `has_local_branch` | exit 128 | [`FakeRepo::branch`] or one of [`FakeRepo::local_branches`] |
 /// | `base_tips` | exit 128 as `BaseProblem::Git` | `NotFound(name)` |
 /// | `changes_since` | exit 128 as `BaseProblem::Git` | no files, no commits |
 /// | `init` | logged, `Ok` (registers nothing) | logged, `Ok` |

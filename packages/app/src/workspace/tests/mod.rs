@@ -51,6 +51,7 @@ mod lanes;
 mod persistence;
 mod project_config;
 mod projects;
+mod pull_requests;
 mod pure_ops;
 mod regression_namespace;
 mod restore_from_disk;

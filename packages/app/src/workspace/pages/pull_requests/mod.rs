@@ -10,15 +10,21 @@ use super::Page;
 use crate::github::PrPoller;
 use crate::workspace::Workspace;
 
+mod lane;
 pub(in crate::workspace) mod list;
 pub(in crate::workspace) mod render;
 
-use list::{LaneFacts, PageInputs, PrPageList};
+use std::collections::BTreeSet;
+
+use list::{LaneFacts, PageInputs, PrKey, PrPageList};
 
 /// What the page remembers while it is not on screen. Never persisted.
 pub(in crate::workspace) struct PullRequestsPage {
     /// The filter the page shows, and shows again when reopened.
     filter: PrFilter,
+    /// Pull requests a worktree is being made for, so their rows do not
+    /// offer to make a second one.
+    creating: BTreeSet<PrKey>,
     /// Staged each frame while the page is on screen; `None` otherwise.
     pub(in crate::workspace) snapshot: Option<PrPageSnapshot>,
 }
@@ -27,6 +33,7 @@ impl Default for PullRequestsPage {
     fn default() -> Self {
         Self {
             filter: PrFilter::Mine,
+            creating: BTreeSet::new(),
             snapshot: None,
         }
     }
@@ -82,6 +89,7 @@ impl Workspace {
             repos: &repos,
             list: self.pr_list(),
             lanes: &lanes,
+            creating: &self.pages.pull_requests.creating,
             now: chrono::Utc::now(),
         };
         list::page(&inputs, |host| PrPoller::availability(host, cx))

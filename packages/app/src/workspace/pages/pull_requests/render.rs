@@ -4,13 +4,15 @@ use daruda_github::ReviewDecision;
 use gpui::{AnyElement, App, Div, FontWeight, IntoElement, SharedString, div, prelude::*, px};
 
 use super::PrPageSnapshot;
-use super::list::{self, Blocked, GroupBody, PageBody, PrGroup, PrRow, Trouble};
+use super::list::{
+    self, Blocked, GroupBody, PageBody, PrGroup, PrRow, RowLane, RowLaneSlot, Trouble,
+};
 use crate::surface::strings::{common, git as git_s, pull_requests as s};
 use crate::ui::list_table::{self, Column, ListTable};
 use crate::ui::theme::list_metrics as metrics;
 use crate::ui::{
-    Badge, ButtonVariants as _, Selectable as _, Sizable as _, button, button_compact,
-    button_group, button_icon, icons, list_page, theme, tooltip,
+    Badge, ButtonVariants as _, Disableable as _, Selectable as _, Sizable as _, button,
+    button_compact, button_group, button_icon, icons, list_page, theme, tooltip,
 };
 use crate::workspace::left_dock::git_changes::pr_strip::{checks_label, tone_glyph};
 
@@ -244,27 +246,7 @@ fn render_row(
                 .child(icons::icon(icons::SESSION).with_size(px(theme::CONTROL_ICON_SIZE)))
                 .child(row.comments.to_string())
                 .into_any_element(),
-            PrColumn::Lane => cell
-                .children(row.lane.as_ref().map(|lane| {
-                    let workspace = snap.workspace.clone();
-                    let target = lane.lane;
-                    let key = row.key.clone();
-                    button_compact(
-                        SharedString::from(format!("pr-lane-{}", row.key)),
-                        lane.name.clone(),
-                    )
-                    .ghost()
-                    .max_w_full()
-                    .justify_start()
-                    .debug_selector(move || format!("pr-lane-{key}"))
-                    .tooltip(s::go_to_lane())
-                    .on_click(move |_, window, cx| {
-                        if let Some(ws) = workspace.upgrade() {
-                            ws.update(cx, |ws, cx| ws.activate_lane(target, window, cx));
-                        }
-                    })
-                }))
-                .into_any_element(),
+            PrColumn::Lane => cell.child(lane_cell(row, snap)).into_any_element(),
             PrColumn::Open => cell
                 .children(row.url.clone().map(|url| {
                     button_icon(
@@ -280,6 +262,56 @@ fn render_row(
         .id(SharedString::from(format!("pr-row-{}", row.key)))
         .hover(|style| style.bg(t.overlay_hover))
         .into_any_element()
+}
+
+/// The row's worktree to go to, or the button that makes one, inert while
+/// it is being made.
+fn lane_cell(row: &PrRow, snap: &PrPageSnapshot) -> AnyElement {
+    let item = match &row.lane {
+        RowLaneSlot::Linked(lane) => return linked_lane(row, lane, snap),
+        RowLaneSlot::Creating => None,
+        RowLaneSlot::Absent(item) => Some(item.as_ref().clone()),
+    };
+    let label = if row.fork {
+        s::create_review_lane()
+    } else {
+        s::create_lane()
+    };
+    let key = row.key.clone();
+    let workspace = snap.workspace.clone();
+    button_compact(
+        SharedString::from(format!("pr-create-lane-{}", row.key)),
+        label,
+    )
+    .debug_selector(move || format!("pr-create-lane-{key}"))
+    .disabled(item.is_none())
+    .on_click(move |_, window, cx| {
+        if let (Some(item), Some(ws)) = (item.clone(), workspace.upgrade()) {
+            ws.update(cx, |ws, cx| ws.create_lane_from_pr(item, window, cx));
+        }
+    })
+    .into_any_element()
+}
+
+fn linked_lane(row: &PrRow, lane: &RowLane, snap: &PrPageSnapshot) -> AnyElement {
+    let workspace = snap.workspace.clone();
+    let target = lane.lane;
+    let key = row.key.clone();
+    button_compact(
+        SharedString::from(format!("pr-lane-{}", row.key)),
+        lane.name.clone(),
+    )
+    .ghost()
+    .max_w_full()
+    .justify_start()
+    .debug_selector(move || format!("pr-lane-{key}"))
+    .tooltip(s::go_to_lane())
+    .on_click(move |_, window, cx| {
+        if let Some(ws) = workspace.upgrade() {
+            ws.update(cx, |ws, cx| ws.activate_lane(target, window, cx));
+        }
+    })
+    .into_any_element()
 }
 
 fn title(row: &PrRow, cell: Div, cx: &App) -> AnyElement {

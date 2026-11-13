@@ -69,7 +69,12 @@ pub trait GitRepo: Send + Sync {
     /// [`push_target`](Self::push_target) named.
     fn push_head(&self, remote: &str, branch: &str, set_upstream: bool) -> Result<(), GitError>;
     fn fetch(&self) -> Result<(), GitError>;
+    /// `git fetch <remote> <refspec>`: one ref from one remote, where
+    /// [`fetch`](Self::fetch) brings every branch of every remote.
+    fn fetch_ref(&self, remote: &str, refspec: &str) -> Result<(), GitError>;
     fn pull(&self) -> Result<(), GitError>;
+    /// Whether `refs/heads/<branch>` exists in the repository.
+    fn has_local_branch(&self, branch: &str) -> Result<bool, GitError>;
 
     /// `new_path` must be absolute: the follow-up config step runs git in it,
     /// where a relative path would resolve against the process cwd and be
@@ -196,8 +201,14 @@ impl GitRepo for SystemRepo {
     fn fetch(&self) -> Result<(), GitError> {
         status::git_fetch(&self.path)
     }
+    fn fetch_ref(&self, remote: &str, refspec: &str) -> Result<(), GitError> {
+        remote::fetch_ref(&self.path, remote, refspec)
+    }
     fn pull(&self) -> Result<(), GitError> {
         status::git_pull(&self.path)
+    }
+    fn has_local_branch(&self, branch: &str) -> Result<bool, GitError> {
+        remote::has_local_branch(&self.path, branch)
     }
 
     fn add_lane(

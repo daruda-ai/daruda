@@ -7,7 +7,9 @@ use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, PrSumm
 use daruda_store::project::LaneRef;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 
-use super::list::{self, Blocked, GroupBody, LaneFacts, PageBody, PageInputs, PrPageList, Trouble};
+use super::list::{
+    self, Blocked, GroupBody, LaneFacts, PageBody, PageInputs, PrPageList, RowLaneSlot, Trouble,
+};
 use crate::github::PrPoller;
 use crate::lane::git::{FakeRepo, PushTarget};
 use crate::workspace::github_ops::pr_list::{HostList, PrListState};
@@ -148,6 +150,7 @@ fn page_for(repo: RepoId, availability: GhAvailability, state: &PrListState) -> 
         repos: &repos,
         list: state,
         lanes: &[],
+        creating: &BTreeSet::new(),
         now: chrono::Utc::now(),
     };
     list::page(&inputs, |_| availability)
@@ -261,6 +264,7 @@ fn a_group_lists_only_its_own_repository() {
         repos: &repos,
         list: &state,
         lanes: &[],
+        creating: &BTreeSet::new(),
         now: chrono::Utc::now(),
     };
     let PageBody::Groups(groups) = list::page(&inputs, |_| GhAvailability::Ready).body else {
@@ -306,6 +310,7 @@ fn a_page_with_nothing_to_search_says_why() {
             repos,
             list: &state,
             lanes: &[],
+            creating: &BTreeSet::new(),
             now: chrono::Utc::now(),
         };
         assert_eq!(
@@ -363,6 +368,13 @@ fn searches(gh: &FakeGh) -> Vec<PrFilter> {
         .collect()
 }
 
+fn linked(slot: &RowLaneSlot) -> Option<LaneRef> {
+    match slot {
+        RowLaneSlot::Linked(lane) => Some(lane.lane),
+        RowLaneSlot::Creating | RowLaneSlot::Absent(_) => None,
+    }
+}
+
 fn rows(f: &GitFixture, cx: &mut TestAppContext) -> Vec<(String, Option<LaneRef>)> {
     let list = f.ws.read_with(cx, |ws, cx| ws.pr_page_list(cx));
     let PageBody::Groups(groups) = list.body else {
@@ -375,7 +387,7 @@ fn rows(f: &GitFixture, cx: &mut TestAppContext) -> Vec<(String, Option<LaneRef>
                 panic!("{}: {:?}", group.label, group.body);
             };
             rows.iter()
-                .map(|row| (row.key.clone(), row.lane.as_ref().map(|lane| lane.lane)))
+                .map(|row| (row.key.clone(), linked(&row.lane)))
                 .collect::<Vec<_>>()
         })
         .collect()

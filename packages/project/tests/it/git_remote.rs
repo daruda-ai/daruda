@@ -118,3 +118,49 @@ fn a_commit_in_a_linked_lane_rewrites_its_own_index() {
     assert_ne!(std::fs::read(&index).unwrap(), before, "the index moved");
     assert!(open(&linked).worktree_status().unwrap().staged.is_empty());
 }
+
+/// What opening a worktree from a pull request asks of git: one ref fetched
+/// to a name of the caller's choosing, a branch started from it, and an
+/// existing branch checked out rather than detached at its commit.
+#[test]
+fn a_fetched_ref_starts_a_lane_and_an_existing_branch_is_checked_out() {
+    if !has_git() {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let (origin, seed) = pushed_repo(temp.path());
+    // A pull request's head, as GitHub keeps it, outside `refs/heads`.
+    std::fs::write(seed.join("f.txt"), "pr\n").unwrap();
+    git(&seed, &["commit", "-qam", "pr"]);
+    git(&seed, &["push", "-q", "origin", "HEAD:refs/pull/7/head"]);
+    let head = git(&seed, &["rev-parse", "HEAD"]);
+    let clone = temp.path().join("clone");
+    git(
+        temp.path(),
+        &[
+            "clone",
+            "-q",
+            origin.to_str().unwrap(),
+            clone.to_str().unwrap(),
+        ],
+    );
+    let repo = open(&clone);
+
+    repo.fetch_ref("origin", "+refs/pull/7/head:refs/daruda/pr/7")
+        .unwrap();
+    assert!(!repo.has_local_branch("pr-7").unwrap());
+    let review = temp.path().join("review-wt");
+    repo.add_lane(&review, Some("pr-7"), Some("refs/daruda/pr/7"))
+        .unwrap();
+    assert_eq!(git(&review, &["rev-parse", "HEAD"]), head);
+    assert!(repo.has_local_branch("pr-7").unwrap());
+
+    git(&clone, &["branch", "kept", "main"]);
+    let kept = temp.path().join("kept-wt");
+    repo.add_lane(&kept, None, Some("kept")).unwrap();
+    assert_eq!(
+        git(&kept, &["symbolic-ref", "--short", "HEAD"]),
+        "kept",
+        "on the branch, not detached"
+    );
+}

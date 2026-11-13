@@ -161,6 +161,45 @@ fn writes_are_logged_in_order_and_never_applied() {
 }
 
 #[test]
+fn a_branch_exists_when_checked_out_or_scripted() {
+    let git = FakeGit::new().with(FakeRepo::at(ROOT).branch("main").local_branches(["feat"]));
+    let repo = git.open(Path::new(ROOT));
+    // (label, branch, exists)
+    for (label, branch, exists) in [
+        ("checked out", "main", true),
+        ("scripted", "feat", true),
+        ("neither", "other", false),
+    ] {
+        assert_eq!(repo.has_local_branch(branch).unwrap(), exists, "{label}");
+    }
+    assert_eq!(git.reads(GitOp::HasLocalBranch, Path::new(ROOT)), 3);
+    assert_eq!(
+        exit_code(
+            git.open(Path::new("/fake/plain"))
+                .has_local_branch("main")
+                .unwrap_err()
+        ),
+        Some(128)
+    );
+}
+
+#[test]
+fn a_ref_fetch_is_logged_with_its_remote_and_refspec() {
+    let git = FakeGit::new().with(FakeRepo::at(ROOT));
+    git.open(Path::new(ROOT))
+        .fetch_ref("origin", "+a:b")
+        .unwrap();
+    assert_eq!(
+        git.calls(),
+        vec![GitCall::FetchRef {
+            repo: ROOT.into(),
+            remote: "origin".into(),
+            refspec: "+a:b".into(),
+        }]
+    );
+}
+
+#[test]
 fn reads_are_counted_per_op_and_handle_path() {
     let git = FakeGit::new().with(FakeRepo::at(ROOT));
     let sub = Path::new(ROOT).join("src");

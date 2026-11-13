@@ -106,6 +106,20 @@ pub(in crate::workspace) struct RowLane {
     pub name: String,
 }
 
+/// A pull request, as the page keys the work it does for one.
+pub(in crate::workspace) type PrKey = (RepoId, u64);
+
+/// What a row's worktree column holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum RowLaneSlot {
+    /// The worktree working on it, to go to.
+    Linked(RowLane),
+    /// One is being made for it.
+    Creating,
+    /// None yet; the row offers to make one from `item`.
+    Absent(Box<PrListItem>),
+}
+
 /// One pull request, ready to draw.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct PrRow {
@@ -121,7 +135,7 @@ pub(in crate::workspace) struct PrRow {
     pub checks: CheckRollup,
     pub review: Option<ReviewDecision>,
     pub comments: u32,
-    pub lane: Option<RowLane>,
+    pub lane: RowLaneSlot,
     /// Only a URL a browser may be handed.
     pub url: Option<String>,
 }
@@ -149,6 +163,8 @@ pub(in crate::workspace) struct PageInputs<'a> {
     pub repos: &'a BTreeSet<RepoId>,
     pub list: &'a PrListState,
     pub lanes: &'a [LaneFacts],
+    /// Pull requests a worktree is being made for.
+    pub creating: &'a BTreeSet<PrKey>,
     pub now: DateTime<Utc>,
 }
 
@@ -260,11 +276,25 @@ fn row(item: &PrListItem, inputs: &PageInputs<'_>) -> PrRow {
         checks: pr.checks,
         review: pr.review,
         comments: item.comments,
-        lane: linked_lane(item, inputs.lanes).map(|lane| RowLane {
+        lane: lane_slot(item, inputs),
+        url: pr.web_url().map(str::to_owned),
+    }
+}
+
+fn lane_slot(item: &PrListItem, inputs: &PageInputs<'_>) -> RowLaneSlot {
+    if let Some(lane) = linked_lane(item, inputs.lanes) {
+        return RowLaneSlot::Linked(RowLane {
             lane: lane.lane,
             name: lane.name.clone(),
-        }),
-        url: pr.web_url().map(str::to_owned),
+        });
+    }
+    if inputs
+        .creating
+        .contains(&(item.repo.clone(), item.pr.number))
+    {
+        RowLaneSlot::Creating
+    } else {
+        RowLaneSlot::Absent(Box::new(item.clone()))
     }
 }
 

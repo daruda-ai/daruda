@@ -1,4 +1,5 @@
-//! Where `git push` sends a branch, read the way git itself decides it.
+//! Where `git push` sends a branch, read the way git itself decides it, and
+//! the single-ref fetches that talk to the same remotes.
 
 use std::path::Path;
 
@@ -64,6 +65,17 @@ pub(crate) fn push_head(
     }
     args.extend([remote, refspec.as_str()]);
     run_git(wt, args).map(|_| ())
+}
+
+/// `git fetch <remote> <refspec>`. The refspec names its destination, so
+/// what was fetched has a name the caller can use afterwards; `FETCH_HEAD`
+/// would be rewritten by any other fetch in between.
+pub(crate) fn fetch_ref(wt: &Path, remote: &str, refspec: &str) -> Result<(), GitError> {
+    run_git(wt, ["fetch", remote, refspec]).map(|_| ())
+}
+
+pub(crate) fn has_local_branch(wt: &Path, branch: &str) -> Result<bool, GitError> {
+    ref_exists(wt, &format!("refs/heads/{branch}"))
 }
 
 fn current_branch(wt: &Path) -> Result<Option<String>, GitError> {

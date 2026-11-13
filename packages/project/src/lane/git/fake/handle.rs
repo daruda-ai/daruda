@@ -191,9 +191,22 @@ impl GitRepo for FakeHandle {
         let call = GitCall::Fetch { repo: self.repo() };
         self.write(GitOp::Fetch, call, |_| ())
     }
+    fn fetch_ref(&self, remote: &str, refspec: &str) -> Result<(), GitError> {
+        let call = GitCall::FetchRef {
+            repo: self.repo(),
+            remote: remote.to_owned(),
+            refspec: refspec.to_owned(),
+        };
+        self.write(GitOp::FetchRef, call, |_| ())
+    }
     fn pull(&self) -> Result<(), GitError> {
         let call = GitCall::Pull { repo: self.repo() };
         self.write(GitOp::Pull, call, |_| ())
+    }
+    fn has_local_branch(&self, branch: &str) -> Result<bool, GitError> {
+        self.read(GitOp::HasLocalBranch, |repo| {
+            Ok(repo.has_local_branch_answer(branch))
+        })
     }
 
     fn add_lane(

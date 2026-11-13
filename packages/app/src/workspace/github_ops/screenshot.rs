@@ -260,6 +260,20 @@ impl Workspace {
             3 * 24 * 60,
         );
         fork.cross_repo = true;
+        // A fork's pull request nobody has opened a worktree for yet, beside
+        // the same-repository draft: the two labels the lane column offers.
+        let mut unreviewed = with(
+            pr(
+                475,
+                "font-fallback",
+                "Fall back to a CJK font for terminal glyphs",
+                PrState::Open,
+                CheckRollup::Pending,
+            ),
+            Some(ReviewDecision::ReviewRequired),
+            4 * 24 * 60,
+        );
+        unreviewed.cross_repo = true;
 
         for (lane, summary) in [(active, &sidebar), (fix, &scroll)] {
             self.seed_pr_lookup_for_shot(
@@ -281,6 +295,7 @@ impl Workspace {
                 list_item(sidebar, "comelf", 3),
                 list_item(scroll, "comelf", 0),
                 list_item(fork, "contributor", 1),
+                list_item(unreviewed, "hanji", 2),
             ],
         );
         GhHost::set_global(Arc::new(gh), cx);
