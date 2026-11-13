@@ -1,9 +1,9 @@
 //! `review_threads_*.json` are real answers to `REVIEW_THREADS_QUERY`
 //! (`cli/cli` PRs 13506 and 13982, gh 2.74.2, 2026-11-12).
 
-use daruda_github::prompt::review_threads;
-use daruda_github::query::{REVIEW_THREADS_QUERY, parse_review_threads};
-use daruda_github::{CheckRollup, PrState, PrSummary, ReviewComment, ReviewThread, ReviewThreads};
+use crate::prompt::review_threads;
+use crate::query::{REVIEW_THREADS_QUERY, parse_review_threads};
+use crate::{CheckRollup, PrState, PrSummary, ReviewComment, ReviewThread, ReviewThreads};
 
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

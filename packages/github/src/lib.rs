@@ -8,7 +8,7 @@
 
 pub mod availability;
 mod backend;
-pub mod checks;
+mod checks;
 mod error;
 #[cfg(any(test, feature = "test-support"))]
 pub mod fake;

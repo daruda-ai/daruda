@@ -33,7 +33,7 @@ pub struct RepoPrs {
 }
 
 /// The query for `count` branches, bound to `$owner`, `$name`, `$b0`...
-pub fn prs_for_branches_query(count: usize) -> String {
+pub(crate) fn prs_for_branches_query(count: usize) -> String {
     let mut declarations = String::from("$owner: String!, $name: String!");
     let mut fields = String::new();
     for i in 0..count {
@@ -57,7 +57,7 @@ pub fn prs_for_branches_query(count: usize) -> String {
 
 /// Parse the answer to [`prs_for_branches_query`] for `branches`, in the
 /// order their variables were bound.
-pub fn parse_prs_for_branches(json: &str, branches: &[String]) -> Result<RepoPrs, GhError> {
+pub(crate) fn parse_prs_for_branches(json: &str, branches: &[String]) -> Result<RepoPrs, GhError> {
     let response: Response = serde_json::from_str(json).map_err(parse_error)?;
     let Some(mut repository) = response.data.and_then(|d| d.repository) else {
         let messages: Vec<String> = response
@@ -97,7 +97,7 @@ pub fn parse_prs_for_branches(json: &str, branches: &[String]) -> Result<RepoPrs
 
 /// Unresolved review threads of one pull request, bound to `$owner`,
 /// `$name` and `$number`.
-pub const REVIEW_THREADS_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
+pub(crate) const REVIEW_THREADS_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
     repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
     reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved isOutdated path \
     line startLine originalLine originalStartLine \
@@ -106,7 +106,7 @@ pub const REVIEW_THREADS_QUERY: &str = "query($owner: String!, $name: String!, $
 /// Parse the answer to [`REVIEW_THREADS_QUERY`], keeping the unresolved
 /// threads. An outdated thread has no current line; where it was written is
 /// used instead.
-pub fn parse_review_threads(json: &str) -> Result<ReviewThreads, GhError> {
+pub(crate) fn parse_review_threads(json: &str) -> Result<ReviewThreads, GhError> {
     let response: ThreadsResponse = serde_json::from_str(json).map_err(parse_error)?;
     let Some(connection) = response
         .data
@@ -431,14 +431,4 @@ impl PrNode {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_query_binds_one_variable_per_branch() {
-        let query = prs_for_branches_query(2);
-        assert!(query.contains("$b0: String!, $b1: String!"));
-        assert!(query.contains("b1: pullRequests(headRefName: $b1"));
-        assert!(!query.contains("$b2"));
-    }
-}
+mod tests;

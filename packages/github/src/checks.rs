@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::{ActionsJob, CheckKind, CheckRollup, CheckRun, CheckStatus, FailedCheck};
 
 /// A check run's `status` and `conclusion`, as GitHub's GraphQL spells them.
-pub fn check_run_status(status: &str, conclusion: Option<&str>) -> CheckStatus {
+pub(crate) fn check_run_status(status: &str, conclusion: Option<&str>) -> CheckStatus {
     if status != "COMPLETED" {
         return CheckStatus::Pending;
     }
@@ -24,7 +24,7 @@ pub fn check_run_status(status: &str, conclusion: Option<&str>) -> CheckStatus {
 }
 
 /// A commit status context's `state` (external CI that is not a check run).
-pub fn status_context_status(state: &str) -> CheckStatus {
+pub(crate) fn status_context_status(state: &str) -> CheckStatus {
     match state {
         "SUCCESS" => CheckStatus::Success,
         "FAILURE" | "ERROR" => CheckStatus::Failure,
@@ -35,7 +35,7 @@ pub fn status_context_status(state: &str) -> CheckStatus {
 
 /// GitHub's own rollup `state`, used when the check list was truncated and
 /// the runs in hand cannot be trusted to add up.
-pub fn rollup_from_state(state: &str) -> CheckRollup {
+pub(crate) fn rollup_from_state(state: &str) -> CheckRollup {
     match state {
         "SUCCESS" => CheckRollup::Passing,
         "FAILURE" | "ERROR" => CheckRollup::Failing { failed: 0 },
@@ -45,7 +45,7 @@ pub fn rollup_from_state(state: &str) -> CheckRollup {
 }
 
 /// Add `runs` up, returning the rollup and the failing checks behind it.
-pub fn summarize(runs: &[CheckRun]) -> (CheckRollup, Vec<FailedCheck>) {
+pub(crate) fn summarize(runs: &[CheckRun]) -> (CheckRollup, Vec<FailedCheck>) {
     let mut latest: HashMap<Key<'_>, &CheckRun> = HashMap::new();
     for run in runs {
         latest
@@ -110,7 +110,7 @@ fn is_newer(run: &CheckRun, kept: &CheckRun) -> bool {
 
 /// The Actions job a check's details URL points at:
 /// `https://<host>/<owner>/<repo>/actions/runs/<run>/job/<job>`.
-pub fn actions_job(details_url: &str) -> Option<ActionsJob> {
+pub(crate) fn actions_job(details_url: &str) -> Option<ActionsJob> {
     let path = details_url.split(['?', '#']).next()?;
     let mut parts = path.rsplit('/');
     let job = parts.next()?.parse().ok()?;
@@ -125,14 +125,4 @@ pub fn actions_job(details_url: &str) -> Option<ActionsJob> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn an_incomplete_run_is_pending_whatever_its_conclusion() {
-        assert_eq!(
-            check_run_status("IN_PROGRESS", Some("FAILURE")),
-            CheckStatus::Pending
-        );
-    }
-}
+mod tests;

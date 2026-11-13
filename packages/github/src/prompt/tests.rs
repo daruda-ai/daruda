@@ -2,8 +2,9 @@
 //! (`cli/cli`, gh 2.74.2): its first line and the `go test` step through
 //! post-job cleanup, ANSI escapes and BOM included.
 
-use daruda_github::prompt::{CheckLog, clean_log, failed_checks, one_line, strip_control};
-use daruda_github::{CheckRollup, FailedCheck, PrState, PrSummary};
+use super::*;
+use crate::prompt::{CheckLog, clean_log, failed_checks, one_line, strip_control};
+use crate::{CheckRollup, FailedCheck, PrState, PrSummary};
 
 fn fixture() -> String {
     let path =
@@ -176,3 +177,17 @@ fn a_log_with_fences_gets_a_longer_one() {
         "{prompt}"
     );
 }
+
+#[test]
+fn a_short_text_is_not_elided() {
+    assert_eq!(elide_middle("abc", 1, 2), "abc");
+    assert_eq!(elide_middle("abcdef", 1, 2), format!("a\n{ELIDED}\nef"));
+}
+
+#[test]
+fn the_fence_outgrows_the_quoted_backticks() {
+    assert_eq!(fence_for("plain"), "```");
+    assert_eq!(fence_for("a ```` b"), "`````");
+}
+
+mod review;

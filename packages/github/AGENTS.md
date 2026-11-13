@@ -11,7 +11,8 @@ through `GitHost`.
 
 - App code reaches `gh` only through `crate::gh_host::GhHost`; test builds
   install an empty `FakeGh`, and tests script one with
-  `test_support::fake_gh`. `scripts/lint-real-gh-tests.sh` rejects
+  `test_support::fake_gh`. A `--screenshot` launch installs one before the
+  PR poller starts (`startup::inspection::before_globals`). `scripts/lint-real-gh-tests.sh` rejects
   `SystemGh` or a `gh` child anywhere else under `packages/app/src`.
 - `Gh` methods are whole questions (`prs_for_branches`, `failed_log`, ...),
   never a passthrough to `gh api`, so a fake answers each one directly.

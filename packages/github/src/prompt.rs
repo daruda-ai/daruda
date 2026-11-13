@@ -27,7 +27,7 @@ pub struct CheckLog {
 /// Remove escape sequences and control characters except newline and tab.
 /// A bracketed-paste end marker (`ESC [201~`) inside text pasted into a
 /// terminal would otherwise end the paste early and run the rest.
-pub fn strip_control(text: &str) -> String {
+pub(crate) fn strip_control(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
@@ -45,7 +45,7 @@ pub fn strip_control(text: &str) -> String {
 /// `text` on one line: [`strip_control`], with newlines and tabs as spaces.
 /// For fields a header or a quote line holds (names, paths, URLs), where a
 /// newline would start a line nobody quoted.
-pub fn one_line(text: &str) -> String {
+pub(crate) fn one_line(text: &str) -> String {
     strip_control(text)
         .chars()
         .map(|c| if c == '\n' || c == '\t' { ' ' } else { c })
@@ -89,7 +89,7 @@ fn skip_escape(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
 /// `job<TAB>step<TAB>timestamp` prefix and control characters removed, cut
 /// to the step that reported the first `##[error]` (everything after it is
 /// post-job cleanup), with its middle elided when long.
-pub fn clean_log(raw: &str) -> String {
+pub(crate) fn clean_log(raw: &str) -> String {
     let lines: Vec<String> = raw
         .lines()
         .map(|line| strip_control(strip_prefix(line)))
@@ -303,18 +303,4 @@ fn quote(author: Option<&str>, body: &str, indent: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_short_text_is_not_elided() {
-        assert_eq!(elide_middle("abc", 1, 2), "abc");
-        assert_eq!(elide_middle("abcdef", 1, 2), format!("a\n{ELIDED}\nef"));
-    }
-
-    #[test]
-    fn the_fence_outgrows_the_quoted_backticks() {
-        assert_eq!(fence_for("plain"), "```");
-        assert_eq!(fence_for("a ```` b"), "`````");
-    }
-}
+mod tests;

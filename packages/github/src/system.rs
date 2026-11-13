@@ -89,8 +89,21 @@ impl Gh for SystemGh {
     fn auth(&self, host: &str) -> Result<GhAuth, GhError> {
         match self.run(["auth", "status", "--hostname", host]) {
             Ok(out) if out.status.success() => Ok(GhAuth::Ready),
-            // Exit 1 covers "never logged in" and "token rejected" alike.
-            Ok(out) if out.status.code() == Some(1) => Ok(GhAuth::LoggedOut),
+            // Exit 1 covers no login, a rejected token, and — measured with
+            // gh 2.74.2 behind an unreachable proxy — no network, all saying
+            // "the token is invalid". `auth token` reads the stored token
+            // without the network: with one, the failure may be the network,
+            // so it is an error to back off from, not a logout to report.
+            Ok(out) if out.status.code() == Some(1) => {
+                match self.run(["auth", "token", "--hostname", host]) {
+                    Ok(token) if token.status.success() => Err(GhError::Exit {
+                        code: Some(1),
+                        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+                    }),
+                    Ok(_) => Ok(GhAuth::LoggedOut),
+                    Err(e) => Err(e),
+                }
+            }
             Ok(out) => Err(GhError::Exit {
                 code: out.status.code(),
                 stderr: String::from_utf8_lossy(&out.stderr).into_owned(),

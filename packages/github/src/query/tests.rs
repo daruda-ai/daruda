@@ -5,8 +5,8 @@
 //! `prs_push_and_pull_request.json` is `serde-rs/serde` #3113, a same-repo
 //! PR whose workflow runs on both `push` and `pull_request`.
 
-use daruda_github::query::{parse_prs_for_branches, prs_for_branches_query};
-use daruda_github::{CheckRollup, GhError, PrState, ReviewDecision};
+use crate::query::{parse_prs_for_branches, prs_for_branches_query};
+use crate::{CheckRollup, GhError, PrState, ReviewDecision};
 
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -120,4 +120,12 @@ fn the_query_names_every_field_the_parser_reads() {
     ] {
         assert!(query.contains(field), "{field}");
     }
+}
+
+#[test]
+fn the_query_binds_one_variable_per_branch() {
+    let query = prs_for_branches_query(2);
+    assert!(query.contains("$b0: String!, $b1: String!"));
+    assert!(query.contains("b1: pullRequests(headRefName: $b1"));
+    assert!(!query.contains("$b2"));
 }

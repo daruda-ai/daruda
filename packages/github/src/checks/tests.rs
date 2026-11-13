@@ -1,7 +1,7 @@
-use daruda_github::checks::{
+use crate::checks::{
     actions_job, check_run_status, rollup_from_state, status_context_status, summarize,
 };
-use daruda_github::{ActionsJob, CheckKind, CheckRollup, CheckRun, CheckStatus};
+use crate::{ActionsJob, CheckKind, CheckRollup, CheckRun, CheckStatus};
 
 fn run(name: &str, status: CheckStatus, started: &str) -> CheckRun {
     CheckRun {
@@ -226,4 +226,12 @@ fn githubs_own_rollup_state_maps_without_a_count() {
     );
     assert_eq!(rollup_from_state("PENDING"), CheckRollup::Pending);
     assert_eq!(rollup_from_state(""), CheckRollup::None);
+}
+
+#[test]
+fn an_incomplete_run_is_pending_whatever_its_conclusion() {
+    assert_eq!(
+        check_run_status("IN_PROGRESS", Some("FAILURE")),
+        CheckStatus::Pending
+    );
 }
