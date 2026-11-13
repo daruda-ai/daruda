@@ -202,17 +202,21 @@ fn enabling_installs_through_both_stages(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_second_change_while_installing_does_not_start_another(cx: &mut TestAppContext) {
+fn turning_on_again_while_installing_does_not_start_another(cx: &mut TestAppContext) {
     let installer = FakeInstaller::new(None, vec![Ok(binary())]);
-    install_tool(installer.clone(), true, cx);
+    install_tool(installer.clone(), false, cx);
+    // One update, so the background install has not run between the edges.
     cx.update(|cx| {
-        BrowserTool::settings_changed(cx);
-        BrowserTool::settings_changed(cx);
+        for enabled in [true, false, true] {
+            set_enabled(enabled, cx);
+            BrowserTool::settings_changed(cx);
+        }
     });
     cx.run_until_parked();
 
     assert_eq!(installer.calls(), 1);
     assert_eq!(state(cx), BrowserToolState::Ready(binary()));
+    assert!(cx.update(|cx| cx.global::<BrowserTool>().enabled));
 }
 
 #[gpui::test]
