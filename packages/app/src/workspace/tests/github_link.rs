@@ -878,3 +878,187 @@ fn a_logged_out_host_drops_its_lanes_links(cx: &mut TestAppContext) {
     assert_eq!(linked(&f, id, cx), None, "no stale badge after logout");
     assert_eq!(lookup(&f, id, cx), crate::github::PrLookup::Unknown);
 }
+
+// ---- The pull request list ----
+
+fn list_item(number: u64) -> daruda_github::PrListItem {
+    daruda_github::PrListItem {
+        repo: repo(),
+        pr: pr(number, PrState::Open, "2026-01-01"),
+        author: Some("me".into()),
+        base_branch: "main".into(),
+        comments: 0,
+    }
+}
+
+fn show_list(f: &GitFixture, filter: daruda_github::PrFilter, cx: &mut TestAppContext) {
+    f.ws.update(cx, |ws, cx| ws.show_pr_list(filter, cx));
+    cx.run_until_parked();
+}
+
+fn host_list(
+    f: &GitFixture,
+    cx: &mut TestAppContext,
+) -> crate::workspace::github_ops::pr_list::HostList {
+    f.ws.read_with(cx, |ws, _| ws.pr_list().host("github.com").clone())
+}
+
+fn listed(f: &GitFixture, cx: &mut TestAppContext) -> Vec<u64> {
+    match host_list(f, cx) {
+        crate::workspace::github_ops::pr_list::HostList::Ready(search) => {
+            search.items.iter().map(|item| item.pr.number).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+#[gpui::test]
+fn a_shown_page_gets_its_list_from_one_search(cx: &mut TestAppContext) {
+    use daruda_github::PrFilter;
+    let gh = gh_with_open_pr(cx);
+    gh.set_pr_list(PrFilter::Mine, vec![list_item(7)]);
+    let (first, _) = lane_pushing_feat(cx);
+    let (second, _) = lane_pushing_feat(cx);
+    show_list(&first, PrFilter::Mine, cx);
+    show_list(&second, PrFilter::Mine, cx);
+    tick(cx);
+    assert_eq!(listed(&first, cx), vec![7]);
+    assert_eq!(listed(&second, cx), vec![7]);
+    let searches: Vec<GhCall> = gh
+        .calls()
+        .into_iter()
+        .filter(|call| matches!(call, GhCall::SearchPrs { .. }))
+        .collect();
+    assert_eq!(
+        searches,
+        vec![GhCall::SearchPrs {
+            host: "github.com".into(),
+            repos: vec![repo()],
+            filter: PrFilter::Mine,
+        }],
+        "one search for both windows"
+    );
+
+    tick(cx);
+    assert_eq!(gh.count(GhOp::SearchPrs), 1, "not due within the minute");
+    first.ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::SearchPrs), 2, "a refresh asks at once");
+}
+
+#[gpui::test]
+fn a_hidden_page_is_not_searched(cx: &mut TestAppContext) {
+    use daruda_github::PrFilter;
+    let gh = gh_with_open_pr(cx);
+    let (f, _) = lane_pushing_feat(cx);
+    tick(cx);
+    assert_eq!(gh.count(GhOp::SearchPrs), 0, "never shown");
+
+    show_list(&f, PrFilter::AllOpen, cx);
+    assert_eq!(gh.count(GhOp::SearchPrs), 1, "showing asks at once");
+    f.ws.update(cx, |ws, cx| ws.hide_pr_list(cx));
+    cx.executor().advance_clock(Duration::from_secs(120));
+    tick(cx);
+    assert_eq!(gh.count(GhOp::SearchPrs), 1, "hidden stops asking");
+    // The lane polls go on: they do not depend on the page.
+    assert!(gh.count(GhOp::PrsForBranches) > 1);
+}
+
+#[gpui::test]
+fn another_filter_is_searched_and_only_its_page_shows_it(cx: &mut TestAppContext) {
+    use daruda_github::PrFilter;
+    let gh = gh_with_open_pr(cx);
+    gh.set_pr_list(PrFilter::Mine, vec![list_item(7)]);
+    gh.set_pr_list(PrFilter::AllOpen, vec![list_item(7), list_item(8)]);
+    let (mine, _) = lane_pushing_feat(cx);
+    let (all, _) = lane_pushing_feat(cx);
+    show_list(&mine, PrFilter::Mine, cx);
+    show_list(&all, PrFilter::AllOpen, cx);
+    tick(cx);
+    assert_eq!(listed(&mine, cx), vec![7]);
+    assert_eq!(listed(&all, cx).len(), 2);
+    assert_eq!(gh.count(GhOp::SearchPrs), 2, "one search per filter");
+}
+
+#[gpui::test]
+fn a_logged_out_search_blocks_the_host_for_the_lane_polls_too(cx: &mut TestAppContext) {
+    use daruda_github::PrFilter;
+    let gh = gh_with_open_pr(cx);
+    gh.set_pr_list(PrFilter::Mine, vec![list_item(7)]);
+    let (f, id) = lane_pushing_feat(cx);
+    show_list(&f, PrFilter::Mine, cx);
+    tick(cx);
+    assert_eq!(listed(&f, cx), vec![7]);
+    let polls = gh.count(GhOp::PrsForBranches);
+
+    gh.fail(
+        GhOp::SearchPrs,
+        GhFailure::Exit {
+            code: Some(4),
+            stderr: "gh auth login".into(),
+        },
+    );
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
+    cx.run_until_parked();
+    assert_eq!(
+        host_list(&f, cx),
+        crate::workspace::github_ops::pr_list::HostList::Loading,
+        "what was read there is dropped"
+    );
+    let availability = cx.update(|cx| PrPoller::availability("github.com", cx));
+    assert_eq!(
+        availability,
+        daruda_github::availability::GhAvailability::LoggedOut
+    );
+    assert_eq!(linked(&f, id, cx), None, "the lane's link is dropped too");
+    cx.executor().advance_clock(Duration::from_secs(61));
+    tick(cx);
+    assert_eq!(gh.count(GhOp::PrsForBranches), polls, "no lane poll");
+    assert_eq!(gh.count(GhOp::SearchPrs), 2, "no further search");
+}
+
+#[gpui::test]
+fn a_transient_search_failure_keeps_the_list_on_show(cx: &mut TestAppContext) {
+    use crate::workspace::github_ops::pr_list::HostList;
+    use daruda_github::PrFilter;
+    let gh = gh_with_open_pr(cx);
+    gh.set_pr_list(PrFilter::Mine, vec![list_item(7)]);
+    let (f, _) = lane_pushing_feat(cx);
+    show_list(&f, PrFilter::Mine, cx);
+    tick(cx);
+    gh.fail(
+        GhOp::SearchPrs,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "error connecting to api.github.com".into(),
+        },
+    );
+    cx.executor().advance_clock(Duration::from_secs(61));
+    tick(cx);
+    match host_list(&f, cx) {
+        HostList::Failed { last: Some(last) } => assert_eq!(last.items.len(), 1),
+        other => panic!("expected a failure over the last list, got {other:?}"),
+    }
+    let availability = cx.update(|cx| PrPoller::availability("github.com", cx));
+    assert_eq!(
+        availability,
+        daruda_github::availability::GhAvailability::Ready,
+        "one search failing does not pause the host"
+    );
+}
+
+#[gpui::test]
+fn turning_the_feature_off_clears_the_list(cx: &mut TestAppContext) {
+    use daruda_github::PrFilter;
+    let gh = gh_with_open_pr(cx);
+    gh.set_pr_list(PrFilter::Mine, vec![list_item(7)]);
+    let (f, _) = lane_pushing_feat(cx);
+    show_list(&f, PrFilter::Mine, cx);
+    tick(cx);
+    assert_eq!(listed(&f, cx), vec![7]);
+    set_enabled(cx, false);
+    cx.executor().advance_clock(Duration::from_secs(61));
+    tick(cx);
+    assert!(listed(&f, cx).is_empty());
+    assert_eq!(gh.count(GhOp::SearchPrs), 1, "no search while off");
+}

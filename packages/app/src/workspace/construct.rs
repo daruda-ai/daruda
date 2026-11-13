@@ -252,6 +252,7 @@ impl Workspace {
             // once per new version.
             last_update_toast_version: None,
             ports: sync::ports::PortsState::default(),
+            pr_list: Default::default(),
             _observers: lifetimes::GlobalObservers::new(
                 cx.observe_global::<accounts_global::AccountsGlobal>(|ws, cx| {
                     ws.accounts = accounts_global::snapshot(cx);

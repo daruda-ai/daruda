@@ -159,6 +159,17 @@ pub(super) enum PollOutcome {
     Paused,
 }
 
+/// What a failed request means for its host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HostVerdict {
+    /// The host's availability becomes this; see [`Schedule::set_availability`].
+    Changed(GhAvailability),
+    /// A rate-limit pause already running covers this failure.
+    AlreadyPaused,
+    /// The failure concerns only the request that made it.
+    NotHostWide,
+}
+
 /// Every host's and repository's place in the polling plan.
 #[derive(Debug, Default)]
 pub(super) struct Schedule {
@@ -290,11 +301,7 @@ impl Schedule {
     ) -> Vec<(RepoId, Vec<String>)> {
         let mut due = Vec::new();
         for (repo, demand) in wanted {
-            let host_takes = self
-                .hosts
-                .get(repo.host())
-                .is_some_and(|host| host.takes_requests(now));
-            if !host_takes {
+            if !self.takes_requests(repo.host(), now) {
                 continue;
             }
             let state = self.repos.entry(repo.clone()).or_default();
@@ -317,47 +324,79 @@ impl Schedule {
         enabled: bool,
         now: Instant,
     ) -> PollOutcome {
-        let state = self.repos.entry(repo.clone()).or_default();
-        state.in_flight = false;
+        self.repos.entry(repo.clone()).or_default().in_flight = false;
         if !enabled {
             return PollOutcome::Paused;
         }
-        let host = self.hosts.get_mut(repo.host());
+        let result = match result {
+            Ok(prs) => {
+                self.host_answered(repo.host());
+                Ok(prs)
+            }
+            Err(kind) => Err(self.host_failed(repo.host(), kind, now)),
+        };
+        let state = self.repos.entry(repo.clone()).or_default();
         match result {
             Ok(prs) => {
                 let prs = Arc::new(prs);
                 state.answer = Some((prs.clone(), now));
                 state.backoff = None;
-                if let Some(host) = host {
-                    host.rate_limit_failures = 0;
-                }
                 PollOutcome::Answer(prs)
             }
-            Err(kind) => match (kind, host) {
-                (FailureKind::Missing, host) => {
-                    if let Some(host) = host {
-                        host.answered_by_poll(now);
-                    }
-                    PollOutcome::Host(GhAvailability::Missing)
-                }
-                (FailureKind::LoggedOut, host) => {
-                    if let Some(host) = host {
-                        host.answered_by_poll(now);
-                    }
-                    PollOutcome::Host(GhAvailability::LoggedOut)
-                }
-                (FailureKind::RateLimited, Some(host)) => host
-                    .rate_limited(now)
-                    .map_or(PollOutcome::Paused, PollOutcome::Host),
-                (FailureKind::RateLimited, None) => PollOutcome::Paused,
-                // One repository failing (gone, no access, a network blip)
-                // pauses that repository alone.
-                (FailureKind::Transient, _) => {
-                    state.failed_transiently(now);
-                    PollOutcome::Paused
-                }
-            },
+            Err(HostVerdict::Changed(availability)) => PollOutcome::Host(availability),
+            Err(HostVerdict::AlreadyPaused) => PollOutcome::Paused,
+            // One repository failing (gone, no access, a network blip)
+            // pauses that repository alone.
+            Err(HostVerdict::NotHostWide) => {
+                state.failed_transiently(now);
+                PollOutcome::Paused
+            }
         }
+    }
+
+    /// A request about `host` succeeded: the rate-limit pause starts over.
+    pub(super) fn host_answered(&mut self, host: &str) {
+        if let Some(host) = self.hosts.get_mut(host) {
+            host.rate_limit_failures = 0;
+        }
+    }
+
+    /// What a failed request about `host` says about the whole host. Every
+    /// request kind reports here, so the list search and the lane polls
+    /// share one notion of a host's state.
+    pub(super) fn host_failed(
+        &mut self,
+        host: &str,
+        kind: FailureKind,
+        now: Instant,
+    ) -> HostVerdict {
+        let state = self.hosts.get_mut(host);
+        match (kind, state) {
+            (FailureKind::Missing, state) => {
+                if let Some(state) = state {
+                    state.answered_by_poll(now);
+                }
+                HostVerdict::Changed(GhAvailability::Missing)
+            }
+            (FailureKind::LoggedOut, state) => {
+                if let Some(state) = state {
+                    state.answered_by_poll(now);
+                }
+                HostVerdict::Changed(GhAvailability::LoggedOut)
+            }
+            (FailureKind::RateLimited, Some(state)) => state
+                .rate_limited(now)
+                .map_or(HostVerdict::AlreadyPaused, HostVerdict::Changed),
+            (FailureKind::RateLimited, None) => HostVerdict::AlreadyPaused,
+            (FailureKind::Transient, _) => HostVerdict::NotHostWide,
+        }
+    }
+
+    /// Whether requests may go to `host` now.
+    pub(super) fn takes_requests(&self, host: &str, now: Instant) -> bool {
+        self.hosts
+            .get(host)
+            .is_some_and(|state| state.takes_requests(now))
     }
 
     /// The one write of a host's availability. Returns whether it changed.

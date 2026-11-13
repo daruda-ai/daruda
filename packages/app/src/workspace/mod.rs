@@ -530,6 +530,9 @@ pub struct Workspace {
     last_update_toast_version: Option<semver::Version>,
     /// Latest listening-TCP-port scan — see [`sync::ports::PortsState`].
     pub(in crate::workspace) ports: sync::ports::PortsState,
+    /// The pull request list the page shows — see
+    /// [`github_ops::pr_list::PrListState`].
+    pub(in crate::workspace) pr_list: github_ops::pr_list::PrListState,
 }
 
 impl Workspace {

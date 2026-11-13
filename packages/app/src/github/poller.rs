@@ -7,13 +7,13 @@ use std::time::Duration;
 
 use daruda_github::availability::{GhAuth, GhAvailability};
 use daruda_github::query::RepoPrs;
-use daruda_github::{GhError, RepoId};
+use daruda_github::{FailureKind, GhError, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use gpui::{App, Global};
 
-use super::schedule::{PollOutcome, RepoDemand, Schedule};
-use super::{PrDemand, PrUpdate};
+use super::schedule::{HostVerdict, PollOutcome, RepoDemand, Schedule};
+use super::{PrDemand, PrList, PrUpdate};
 use crate::gh_host::GhHost;
 use crate::settings_store::SettingsStore;
 use crate::window_registry::WindowRegistry;
@@ -104,6 +104,9 @@ impl PrPoller {
             if std::mem::take(&mut poller.linked) {
                 Self::broadcast(PrUpdate::Disabled, cx);
             }
+            if was != Some(false) {
+                PrList::disable(cx);
+            }
             return;
         }
         // Push targets are not read while the feature is off.
@@ -137,6 +140,36 @@ impl PrPoller {
         }
         for (repo, branches) in polls {
             Self::poll_repo(repo, branches, cx);
+        }
+        PrList::tick(cx);
+    }
+
+    /// Whether `host` may be asked anything now.
+    pub(super) fn takes_requests(host: &str, now: std::time::Instant, cx: &App) -> bool {
+        cx.try_global::<Self>()
+            .is_some_and(|poller| poller.schedule.takes_requests(host, now))
+    }
+
+    /// Another request about `host` succeeded, with the same effect on the
+    /// host as a poll answer.
+    pub(super) fn host_answered(host: &str, cx: &mut App) {
+        let schedule = &mut cx.default_global::<Self>().schedule;
+        schedule.host_answered(host);
+        if schedule.recovered(host) {
+            Self::set_host_availability(host, GhAvailability::Ready, cx);
+        }
+    }
+
+    /// Another request about `host` failed host-wide, with the same effect
+    /// on the host as a failed poll.
+    pub(super) fn host_failed(host: &str, kind: FailureKind, cx: &mut App) {
+        let now = cx.background_executor().now();
+        let verdict = cx
+            .default_global::<Self>()
+            .schedule
+            .host_failed(host, kind, now);
+        if let HostVerdict::Changed(availability) = verdict {
+            Self::set_host_availability(host, availability, cx);
         }
     }
 
@@ -243,6 +276,9 @@ impl PrPoller {
             .set_availability(host, availability);
         if changed {
             Self::broadcast(PrUpdate::Host { host, availability }, cx);
+            if super::is_unusable(availability) {
+                PrList::host_blocked(host, cx);
+            }
         }
     }
 
@@ -253,7 +289,7 @@ impl PrPoller {
 
 /// Polling failures are expected (offline, logged out) and repeat every
 /// round, so they go to the log, never to a toast.
-fn log_failure(site: &'static str, subject: &str, error: &GhError) {
+pub(super) fn log_failure(site: &'static str, subject: &str, error: &GhError) {
     LogWriter::log(
         ErrorReport::new("GitHub pull request lookup failed")
             .severity(ErrorSeverity::Info)

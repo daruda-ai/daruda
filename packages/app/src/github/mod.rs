@@ -1,14 +1,18 @@
-//! Lanes' GitHub pull requests, kept current for every window at once.
+//! Lanes' GitHub pull requests, kept current for every window at once, and
+//! the pull request list a page shows.
 
+mod list;
+mod list_schedule;
 mod poller;
 mod schedule;
 
+pub(crate) use list::PrList;
 pub(crate) use poller::PrPoller;
 pub(crate) use schedule::is_unusable;
 
 use daruda_github::availability::GhAvailability;
 use daruda_github::query::RepoPrs;
-use daruda_github::{PrSummary, RepoId};
+use daruda_github::{PrFilter, PrSearch, PrSummary, RepoId};
 use gpui::App;
 
 /// `[github] enabled`: whether lanes look up their pull requests at all.
@@ -74,5 +78,30 @@ pub(crate) enum PrUpdate<'a> {
     /// The feature was switched on: push targets are not kept while it is off.
     Enabled,
     /// The feature was switched off: forget every lane's PR.
+    Disabled,
+}
+
+/// What the list poller tells every window; a window applies only what
+/// matches the filter its page shows.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PrListUpdate<'a> {
+    /// A fresh answer for `host`'s repositories, the union over every window
+    /// showing `filter`.
+    Answer {
+        host: &'a str,
+        filter: PrFilter,
+        search: &'a PrSearch,
+    },
+    /// The last answer, for a window that has none for `host` yet.
+    Cached {
+        host: &'a str,
+        filter: PrFilter,
+        search: &'a PrSearch,
+    },
+    /// The search failed; the last answer stays on show.
+    Failed { host: &'a str, filter: PrFilter },
+    /// `gh` on `host` is gone or logged out: drop what was read there.
+    HostBlocked { host: &'a str },
+    /// The feature was switched off: forget every list.
     Disabled,
 }
