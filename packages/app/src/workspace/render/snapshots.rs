@@ -157,7 +157,7 @@ impl Workspace {
             pr_work: self
                 .lane_scoped
                 .get(&self.active)
-                .map_or_else(Default::default, |state| state.pr_work),
+                .map_or_else(Default::default, |state| state.pr.work()),
             git_stage_in_flight: self.git_lock_held(GitLock::Index),
             git_op_in_flight: self.git_lock_held(GitLock::Repo),
             git_collapsed_dirs: self

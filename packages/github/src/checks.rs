@@ -38,7 +38,7 @@ pub(crate) fn status_context_status(state: &str) -> CheckStatus {
 pub(crate) fn rollup_from_state(state: &str) -> CheckRollup {
     match state {
         "SUCCESS" => CheckRollup::Passing,
-        "FAILURE" | "ERROR" => CheckRollup::Failing { failed: 0 },
+        "FAILURE" | "ERROR" => CheckRollup::Failing { failed: None },
         "PENDING" | "EXPECTED" => CheckRollup::Pending,
         _ => CheckRollup::None,
     }
@@ -78,7 +78,7 @@ pub(crate) fn summarize(runs: &[CheckRun]) -> (CheckRollup, Vec<FailedCheck>) {
         CheckRollup::None
     } else if !failed.is_empty() {
         CheckRollup::Failing {
-            failed: u32::try_from(failed.len()).unwrap_or(u32::MAX),
+            failed: Some(u32::try_from(failed.len()).unwrap_or(u32::MAX)),
         }
     } else if counted.iter().any(|run| run.status == CheckStatus::Pending) {
         CheckRollup::Pending

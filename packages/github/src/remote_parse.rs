@@ -1,6 +1,6 @@
 //! Which GitHub repository a git remote URL names.
 
-use crate::RepoId;
+use crate::{GITHUB_HOST, RepoId};
 
 /// The repository `url` names, or `None` for a local path or anything not
 /// shaped `host/owner/name`. Accepts `https://`, `http://`, `ssh://`,
@@ -33,11 +33,7 @@ pub fn parse_remote(url: &str) -> Option<RepoId> {
     if parts.next().is_some() || owner.is_empty() || name.is_empty() {
         return None;
     }
-    Some(RepoId {
-        host,
-        owner: owner.to_ascii_lowercase(),
-        name: name.to_ascii_lowercase(),
-    })
+    Some(RepoId::new(&host, owner, name))
 }
 
 /// `user@host:port` → `host`, lowercased. GitHub's SSH-over-443 endpoint is
@@ -50,7 +46,7 @@ fn host_of(authority: &str) -> Option<String> {
     }
     let host = host.to_ascii_lowercase();
     Some(if host == "ssh.github.com" {
-        "github.com".to_owned()
+        GITHUB_HOST.to_owned()
     } else {
         host
     })

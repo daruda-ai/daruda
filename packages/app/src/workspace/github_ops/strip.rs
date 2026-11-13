@@ -1,16 +1,11 @@
 //! What the Git Changes panel's pull-request strip says for the active lane.
 
-use daruda_github::RepoId;
 use daruda_github::availability::GhAvailability;
-use daruda_github::remote_parse::parse_remote;
+use daruda_github::{GITHUB_HOST, RepoId};
 use gpui::App;
 
 use crate::github::{PrLink, PrLookup, PrPoller};
 use crate::workspace::Workspace;
-
-/// The one host whose `gh` trouble is worth telling the user about unasked:
-/// a remote on another host may not be GitHub at all.
-const GITHUB_HOST: &str = "github.com";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PrStrip {
@@ -41,11 +36,15 @@ pub(crate) fn strip_for(
     let Some(repo) = repo.filter(|_| enabled) else {
         return PrStrip::Hidden;
     };
-    let on_github = repo.host == GITHUB_HOST;
+    let on_github = repo.host() == GITHUB_HOST;
     match availability {
         GhAvailability::Unknown => PrStrip::Hidden,
-        GhAvailability::Missing if on_github => PrStrip::Missing { host: repo.host },
-        GhAvailability::LoggedOut if on_github => PrStrip::LoggedOut { host: repo.host },
+        GhAvailability::Missing if on_github => PrStrip::Missing {
+            host: repo.host().to_owned(),
+        },
+        GhAvailability::LoggedOut if on_github => PrStrip::LoggedOut {
+            host: repo.host().to_owned(),
+        },
         GhAvailability::Missing | GhAvailability::LoggedOut => PrStrip::Hidden,
         GhAvailability::Ready | GhAvailability::Backoff { .. } => match lookup {
             PrLookup::Linked(link) => PrStrip::Linked(PrLink::clone(link)),
@@ -55,40 +54,31 @@ pub(crate) fn strip_for(
     }
 }
 
-/// Whether a PR URL from `gh` may be handed to the system opener: web pages
-/// only, whatever host answered.
-fn openable(url: &str) -> bool {
-    url.starts_with("https://") || url.starts_with("http://")
-}
-
 impl Workspace {
     /// The strip for the active lane.
     pub(in crate::workspace) fn pr_strip(&self, cx: &App) -> PrStrip {
-        let enabled = crate::settings_store::SettingsStore::global(cx)
-            .user()
-            .github
-            .enabled;
+        let enabled = crate::github::enabled(cx);
         let state = self.lane_scoped.get(&self.active);
         let repo = state
-            .and_then(|state| state.git.push_target.as_ref())
-            .and_then(|push| parse_remote(&push.url));
+            .and_then(|state| state.github_push())
+            .map(|(repo, _)| repo);
         let availability = repo.as_ref().map_or(GhAvailability::Unknown, |repo| {
-            PrPoller::availability(&repo.host, cx)
+            PrPoller::availability(repo.host(), cx)
         });
         let unknown = PrLookup::Unknown;
-        let lookup = state.map_or(&unknown, |state| &state.pr);
+        let lookup = state.map_or(&unknown, |state| state.pr.lookup());
         strip_for(enabled, repo, availability, lookup)
     }
 
     /// Open the active lane's pull request on GitHub.
     pub(in crate::workspace) fn open_pr_in_browser(&mut self, cx: &mut App) {
-        if let Some(link) = self
+        if let Some(url) = self
             .lane_scoped
             .get(&self.active)
             .and_then(|state| state.pr.link())
-            .filter(|link| openable(&link.pr.url))
+            .and_then(|link| link.pr.web_url())
         {
-            cx.open_url(&link.pr.url);
+            cx.open_url(url);
         }
     }
 
@@ -108,11 +98,7 @@ mod tests {
     use super::*;
 
     fn repo(host: &str) -> Option<RepoId> {
-        Some(RepoId {
-            host: host.into(),
-            owner: "o".into(),
-            name: "r".into(),
-        })
+        Some(RepoId::new(host, "o", "r"))
     }
 
     fn link() -> PrLink {
@@ -256,14 +242,5 @@ mod tests {
                 "{label}"
             );
         }
-    }
-
-    #[test]
-    fn only_web_urls_are_opened() {
-        assert!(openable("https://github.com/o/r/pull/1"));
-        assert!(openable("http://ghe.corp/o/r/pull/1"));
-        assert!(!openable("file:///etc/passwd"));
-        assert!(!openable("javascript:alert(1)"));
-        assert!(!openable("ssh://git@github.com/o/r"));
     }
 }

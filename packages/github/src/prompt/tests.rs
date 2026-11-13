@@ -3,7 +3,7 @@
 //! post-job cleanup, ANSI escapes and BOM included.
 
 use super::*;
-use crate::prompt::{CheckLog, clean_log, failed_checks, one_line, strip_control};
+use crate::prompt::{CheckLog, NoLog, clean_log, failed_checks, one_line, strip_control};
 use crate::{CheckRollup, FailedCheck, PrState, PrSummary};
 
 fn fixture() -> String {
@@ -20,7 +20,7 @@ fn pr() -> PrSummary {
         state: PrState::Open,
         head_branch: "feat".into(),
         cross_repo: false,
-        checks: CheckRollup::Failing { failed: 1 },
+        checks: CheckRollup::Failing { failed: Some(1) },
         failed: Vec::new(),
         review: None,
         updated_at: String::new(),
@@ -117,7 +117,7 @@ fn the_prompt_quotes_each_check_and_says_when_a_log_is_missing() {
                     details_url: Some("https://prow.k8s.io/view/1".into()),
                     job: None,
                 },
-                log: Err("not a GitHub Actions check".into()),
+                log: Err(NoLog::NotActions),
             },
         ],
     );
@@ -156,7 +156,7 @@ fn same_named_jobs_read_apart_by_workflow() {
         &pr(),
         &[CheckLog {
             check: ci,
-            log: Err("x".into()),
+            log: Err(NoLog::Unreadable("x".into())),
         }],
     );
     assert!(prompt.contains("## CI / build (push)\n"), "{prompt}");

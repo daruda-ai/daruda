@@ -2,33 +2,28 @@
 //! grouped by repository, and each repository is asked once per round, so
 //! opening more windows does not multiply GitHub requests.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::Duration;
 
-use daruda_github::availability::{BackoffReason, GhAuth, GhAvailability, backoff_delay};
+use daruda_github::availability::{GhAuth, GhAvailability};
 use daruda_github::query::RepoPrs;
-use daruda_github::{FailureKind, GhError, RepoId};
+use daruda_github::{GhError, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use gpui::{App, Global};
 
+use super::schedule::{PollOutcome, RepoDemand, Schedule};
+use super::{PrDemand, PrUpdate};
 use crate::gh_host::GhHost;
 use crate::settings_store::SettingsStore;
 use crate::window_registry::WindowRegistry;
-use crate::workspace::github_ops::link::PrDemand;
 
 /// How often the poller wakes to see what is due.
 const TICK: Duration = Duration::from_secs(5);
-/// The cadence of a repository no window is focused on.
-const UNFOCUSED_INTERVAL: Duration = Duration::from_secs(5 * 60);
-/// How long a missing or logged-out `gh` is trusted before asking again.
-const AUTH_RECHECK: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Default)]
 pub(crate) struct PrPoller {
-    hosts: HashMap<String, HostState>,
-    repos: HashMap<RepoId, RepoState>,
+    schedule: Schedule,
     /// A loop is running; set once by [`PrPoller::start`].
     started: bool,
     /// Lanes may hold links; cleared once when the feature is turned off.
@@ -38,35 +33,6 @@ pub(crate) struct PrPoller {
 }
 
 impl Global for PrPoller {}
-
-struct HostState {
-    availability: GhAvailability,
-    /// When `availability` was last decided by `gh auth status`.
-    checked_at: Option<Instant>,
-    checking: bool,
-    rate_limit_failures: u32,
-}
-
-#[derive(Default)]
-struct RepoState {
-    /// The last answer, applied every round so a lane that appears after it
-    /// links at once instead of waiting for the next request.
-    last: Option<Arc<RepoPrs>>,
-    in_flight: bool,
-    polled_at: Option<Instant>,
-    /// Ask at the next tick whatever the cadence says.
-    nudged: bool,
-    failures: u32,
-    backoff_until: Option<Instant>,
-}
-
-/// One repository's share of the round: its branches, and whether any lane
-/// on it is focused.
-#[derive(Default)]
-struct RepoDemand {
-    branches: BTreeSet<String>,
-    focused: bool,
-}
 
 impl PrPoller {
     /// Start the polling loop. Idempotent; tests drive [`PrPoller::tick`].
@@ -88,11 +54,7 @@ impl PrPoller {
     /// Deferred: the caller may be inside a workspace update the tick would
     /// re-enter.
     pub(crate) fn nudge(repo: RepoId, cx: &mut App) {
-        cx.default_global::<Self>()
-            .repos
-            .entry(repo)
-            .or_default()
-            .nudged = true;
+        cx.default_global::<Self>().schedule.nudge(repo);
         cx.defer(Self::tick);
     }
 
@@ -100,33 +62,22 @@ impl PrPoller {
     #[cfg(feature = "screenshot")]
     pub(crate) fn seed_for_shot(host: &str, availability: GhAvailability, cx: &mut App) {
         let now = cx.background_executor().now();
-        cx.default_global::<Self>().hosts.insert(
-            host.to_owned(),
-            HostState {
-                availability,
-                checked_at: Some(now),
-                checking: false,
-                rate_limit_failures: 0,
-            },
-        );
+        cx.default_global::<Self>()
+            .schedule
+            .seed(host, availability, now);
     }
 
     /// The default branch the last answer for `repo` named.
     pub(crate) fn default_branch(repo: &RepoId, cx: &App) -> Option<String> {
-        cx.try_global::<Self>()?
-            .repos
-            .get(repo)?
-            .last
-            .as_ref()?
-            .default_branch
-            .clone()
+        cx.try_global::<Self>()?.schedule.default_branch(repo)
     }
 
     /// What is known about `gh` for `host`.
     pub(crate) fn availability(host: &str, cx: &App) -> GhAvailability {
         cx.try_global::<Self>()
-            .and_then(|poller| poller.hosts.get(host))
-            .map_or(GhAvailability::Unknown, |state| state.availability)
+            .map_or(GhAvailability::Unknown, |poller| {
+                poller.schedule.availability(host)
+            })
     }
 
     /// The settings changed: run a round now rather than at the next tick,
@@ -138,9 +89,7 @@ impl PrPoller {
     /// Forget what `gh auth status` said for `host` so the next tick asks
     /// again: the user says they installed `gh` or logged in.
     pub(crate) fn recheck(host: &str, cx: &mut App) {
-        if let Some(state) = cx.default_global::<Self>().hosts.get_mut(host) {
-            state.checked_at = None;
-        }
+        cx.default_global::<Self>().schedule.recheck(host);
         cx.defer(Self::tick);
     }
 
@@ -151,18 +100,15 @@ impl PrPoller {
         let was = cx.default_global::<Self>().enabled.replace(config.enabled);
         if !config.enabled {
             let poller = cx.global_mut::<Self>();
-            // Answers from before the switch must not be re-applied after it.
-            for state in poller.repos.values_mut() {
-                state.last = None;
-            }
+            poller.schedule.forget_answers();
             if std::mem::take(&mut poller.linked) {
-                WindowRegistry::for_each_workspace(cx, |ws, _, cx| ws.clear_pr_links(cx));
+                Self::broadcast(PrUpdate::Disabled, cx);
             }
             return;
         }
         // Push targets are not read while the feature is off.
         if was == Some(false) {
-            WindowRegistry::for_each_workspace(cx, |ws, _, cx| ws.refresh_push_targets(cx));
+            Self::broadcast(PrUpdate::Enabled, cx);
         }
 
         let mut wanted: BTreeMap<RepoId, RepoDemand> = BTreeMap::new();
@@ -180,59 +126,35 @@ impl PrPoller {
         });
 
         Self::apply_cached(&wanted, cx);
-        Self::forget_unwanted(&wanted, cx);
         let now = cx.background_executor().now();
-        let hosts: BTreeSet<String> = wanted.keys().map(|repo| repo.host.clone()).collect();
-        for host in hosts {
-            Self::check_host_if_due(host, now, cx);
+        let hosts: BTreeSet<String> = wanted.keys().map(|repo| repo.host().to_owned()).collect();
+        let schedule = &mut cx.global_mut::<Self>().schedule;
+        schedule.forget_unwanted(&wanted);
+        let checks = schedule.begin_auth_checks(hosts, now);
+        let polls = schedule.begin_polls(wanted, config.interval(), now);
+        for host in checks {
+            Self::check_host(host, cx);
         }
-        for (repo, demand) in wanted {
-            if Self::repo_is_due(&repo, &demand, config.interval(), now, cx) {
-                Self::poll_repo(repo, demand.branches.into_iter().collect(), cx);
-            }
+        for (repo, branches) in polls {
+            Self::poll_repo(repo, branches, cx);
         }
     }
 
     /// Re-apply each wanted repository's last answer. In-memory and
     /// change-gated, so a round with nothing new repaints nothing.
     fn apply_cached(wanted: &BTreeMap<RepoId, RepoDemand>, cx: &mut App) {
-        let poller = cx.global::<Self>();
-        let cached: Vec<(RepoId, Arc<RepoPrs>)> = wanted
-            .keys()
-            .filter_map(|repo| {
-                let last = poller.repos.get(repo)?.last.clone()?;
-                Some((repo.clone(), last))
-            })
-            .collect();
+        let cached = cx.global::<Self>().schedule.cached(wanted);
         if cached.is_empty() {
             return;
         }
         WindowRegistry::for_each_workspace(cx, |ws, _, cx| {
             for (repo, prs) in &cached {
-                ws.apply_repo_prs(repo, prs, cx);
+                ws.apply_pr_update(PrUpdate::Answer { repo, prs }, cx);
             }
         });
     }
 
-    fn check_host_if_due(host: String, now: Instant, cx: &mut App) {
-        let poller = cx.global_mut::<Self>();
-        let state = poller.hosts.entry(host.clone()).or_insert(HostState {
-            availability: GhAvailability::Unknown,
-            checked_at: None,
-            checking: false,
-            rate_limit_failures: 0,
-        });
-        let stale = match state.availability {
-            GhAvailability::Unknown => true,
-            GhAvailability::Missing | GhAvailability::LoggedOut => state
-                .checked_at
-                .is_none_or(|at| now.saturating_duration_since(at) >= AUTH_RECHECK),
-            GhAvailability::Ready | GhAvailability::Backoff { .. } => state.checked_at.is_none(),
-        };
-        if !stale || state.checking {
-            return;
-        }
-        state.checking = true;
+    fn check_host(host: String, cx: &mut App) {
         let gh = GhHost::global(cx);
         let probe = host.clone();
         let task = cx
@@ -245,98 +167,30 @@ impl PrPoller {
         .detach();
     }
 
-    /// Drop the answers of repositories no window shows any more, so one
-    /// reopened later is not shown its old state before a fresh answer.
-    /// Backoff state stays: a failing repository must not be retried early.
-    fn forget_unwanted(wanted: &BTreeMap<RepoId, RepoDemand>, cx: &mut App) {
-        for (repo, state) in cx.global_mut::<Self>().repos.iter_mut() {
-            if !wanted.contains_key(repo) {
-                state.last = None;
-                state.polled_at = None;
-            }
-        }
-    }
-
-    fn enabled(cx: &App) -> bool {
-        SettingsStore::global(cx).user().github.enabled
-    }
-
     fn finish_auth(host: &str, result: Result<GhAuth, GhError>, cx: &mut App) {
         let now = cx.background_executor().now();
-        let enabled = Self::enabled(cx);
-        let poller = cx.global_mut::<Self>();
-        let Some(state) = poller.hosts.get_mut(host) else {
-            return;
-        };
-        state.checking = false;
-        // Turned off while `gh` was asked: the answer is no longer wanted.
-        if !enabled {
-            return;
-        }
-        state.checked_at = Some(now);
-        let availability = match result {
-            Ok(auth) => GhAvailability::from(auth),
+        let enabled = super::enabled(cx);
+        let auth = match result {
+            Ok(auth) => Some(auth),
             Err(e) => {
-                log_failure("github.auth", host, &e);
-                GhAvailability::Backoff {
-                    until: now + backoff_delay(1, BackoffReason::Transient),
-                    reason: BackoffReason::Transient,
+                // An answer for a switched-off feature is dropped unlogged.
+                if enabled {
+                    log_failure("github.auth", host, &e);
                 }
+                None
             }
         };
-        Self::set_host_availability(host, availability, cx);
-        cx.defer(Self::tick);
-    }
-
-    fn repo_is_due(
-        repo: &RepoId,
-        demand: &RepoDemand,
-        focused_interval: Duration,
-        now: Instant,
-        cx: &mut App,
-    ) -> bool {
-        let poller = cx.global_mut::<Self>();
-        let host_ready = match poller.hosts.get(&repo.host).map(|h| h.availability) {
-            Some(GhAvailability::Ready) => true,
-            Some(GhAvailability::Backoff { until, .. }) => now >= until,
-            _ => false,
-        };
-        if !host_ready {
-            return false;
+        let answered = cx
+            .global_mut::<Self>()
+            .schedule
+            .finish_auth(host, auth, enabled, now);
+        if let Some(availability) = answered {
+            Self::set_host_availability(host, availability, cx);
+            cx.defer(Self::tick);
         }
-        let state = poller.repos.entry(repo.clone()).or_default();
-        if state.in_flight || state.backoff_until.is_some_and(|until| now < until) {
-            return false;
-        }
-        let interval = if demand.focused {
-            focused_interval
-        } else {
-            UNFOCUSED_INTERVAL
-        };
-        // A branch the last answer did not cover is asked about at once.
-        let uncovered = state.last.as_ref().is_none_or(|last| {
-            demand
-                .branches
-                .iter()
-                .any(|branch| !last.by_branch.contains_key(branch))
-        });
-        state.nudged
-            || uncovered
-            || state
-                .polled_at
-                .is_none_or(|at| now.saturating_duration_since(at) >= interval)
     }
 
     fn poll_repo(repo: RepoId, branches: Vec<String>, cx: &mut App) {
-        {
-            let state = cx
-                .global_mut::<Self>()
-                .repos
-                .entry(repo.clone())
-                .or_default();
-            state.in_flight = true;
-            state.nudged = false;
-        }
         let gh = GhHost::global(cx);
         let request = repo.clone();
         let task = cx
@@ -351,125 +205,49 @@ impl PrPoller {
 
     fn finish_poll(repo: RepoId, result: Result<RepoPrs, GhError>, cx: &mut App) {
         let now = cx.background_executor().now();
-        // Turned off while the request ran: links must not come back.
-        if !Self::enabled(cx) {
-            cx.global_mut::<Self>()
-                .repos
-                .entry(repo)
-                .or_default()
-                .in_flight = false;
-            return;
-        }
-        match result {
-            Ok(prs) => {
-                let poller = cx.global_mut::<Self>();
-                let state = poller.repos.entry(repo.clone()).or_default();
-                state.in_flight = false;
-                state.polled_at = Some(now);
-                state.failures = 0;
-                state.backoff_until = None;
-                let prs = Arc::new(prs);
-                state.last = Some(prs.clone());
-                poller.linked = true;
-                // A rate-limit pause that has run out ends with this answer.
-                let paused = poller.hosts.get_mut(&repo.host).is_some_and(|host| {
-                    host.rate_limit_failures = 0;
-                    matches!(host.availability, GhAvailability::Backoff { .. })
-                });
-                if paused {
-                    Self::set_host_availability(&repo.host, GhAvailability::Ready, cx);
-                }
-                WindowRegistry::for_each_workspace(cx, |ws, _, cx| {
-                    ws.apply_repo_prs(&repo, &prs, cx);
-                });
-            }
-            Err(e) => {
+        let enabled = super::enabled(cx);
+        let result = result.map_err(|e| {
+            if enabled {
                 log_failure("github.poll", &repo.qualified(), &e);
-                let poller = cx.global_mut::<Self>();
-                let state = poller.repos.entry(repo.clone()).or_default();
-                state.in_flight = false;
-                let host = poller.hosts.get_mut(&repo.host);
-                let host_now = match e.kind() {
-                    // A poll that finds gh gone or logged out counts as an
-                    // auth check, so the host is not re-asked at once.
-                    FailureKind::Missing | FailureKind::LoggedOut => {
-                        if let Some(host) = host {
-                            host.checked_at = Some(now);
-                        }
-                        Some(if e.kind() == FailureKind::Missing {
-                            GhAvailability::Missing
-                        } else {
-                            GhAvailability::LoggedOut
-                        })
-                    }
-                    FailureKind::RateLimited => match host {
-                        // Every repository on the host hears the same limit in
-                        // one round; it grows the pause once, not per answer.
-                        Some(HostState {
-                            availability:
-                                GhAvailability::Backoff {
-                                    until,
-                                    reason: BackoffReason::RateLimited,
-                                },
-                            ..
-                        }) if *until > now => None,
-                        host => {
-                            let failures = host.map_or(1, |host| {
-                                host.rate_limit_failures += 1;
-                                host.rate_limit_failures
-                            });
-                            Some(GhAvailability::Backoff {
-                                until: now + backoff_delay(failures, BackoffReason::RateLimited),
-                                reason: BackoffReason::RateLimited,
-                            })
-                        }
-                    },
-                    // One repository failing (gone, no access, a network
-                    // blip) pauses that repository alone.
-                    FailureKind::Transient => {
-                        state.failures += 1;
-                        state.backoff_until =
-                            Some(now + backoff_delay(state.failures, BackoffReason::Transient));
-                        None
-                    }
-                };
-                if let Some(availability) = host_now {
-                    Self::set_host_availability(&repo.host, availability, cx);
-                }
             }
+            e.kind()
+        });
+        let poller = cx.global_mut::<Self>();
+        match poller.schedule.finish_poll(&repo, result, enabled, now) {
+            PollOutcome::Answer(prs) => {
+                poller.linked = true;
+                // A pause that has run out ends with this answer.
+                if poller.schedule.recovered(repo.host()) {
+                    Self::set_host_availability(repo.host(), GhAvailability::Ready, cx);
+                }
+                Self::broadcast(
+                    PrUpdate::Answer {
+                        repo: &repo,
+                        prs: &prs,
+                    },
+                    cx,
+                );
+            }
+            PollOutcome::Host(availability) => {
+                Self::set_host_availability(repo.host(), availability, cx);
+            }
+            PollOutcome::Paused => {}
         }
     }
 
-    /// The one write of a host's availability; windows repaint when it changes.
-    /// The one write of a host's availability; windows repaint when it
-    /// changes. A host where `gh` is gone or logged out can no longer keep its
-    /// lanes' PRs current, so their answers are dropped rather than shown stale.
+    /// Record a host's availability and tell every window when it changed.
     fn set_host_availability(host: &str, availability: GhAvailability, cx: &mut App) {
-        let poller = cx.global_mut::<Self>();
-        let Some(state) = poller.hosts.get_mut(host) else {
-            return;
-        };
-        if state.availability == availability {
-            return;
+        let changed = cx
+            .global_mut::<Self>()
+            .schedule
+            .set_availability(host, availability);
+        if changed {
+            Self::broadcast(PrUpdate::Host { host, availability }, cx);
         }
-        state.availability = availability;
-        let unusable = matches!(
-            availability,
-            GhAvailability::Missing | GhAvailability::LoggedOut
-        );
-        if unusable {
-            for (repo, state) in poller.repos.iter_mut() {
-                if repo.host == host {
-                    state.last = None;
-                }
-            }
-        }
-        WindowRegistry::for_each_workspace(cx, |ws, _, cx| {
-            if unusable {
-                ws.forget_pr_links_on(host, cx);
-            }
-            cx.notify();
-        });
+    }
+
+    fn broadcast(update: PrUpdate<'_>, cx: &mut App) {
+        WindowRegistry::for_each_workspace(cx, |ws, _, cx| ws.apply_pr_update(update, cx));
     }
 }
 

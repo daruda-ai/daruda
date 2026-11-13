@@ -4,9 +4,11 @@
 //! Where to push is read again inside the lock, not taken from the cached
 //! push target: the branch may have moved or gained commits since.
 
+use std::path::PathBuf;
+
 use daruda_github::availability::GhAvailability;
 use daruda_github::remote_parse::parse_remote;
-use daruda_github::{GhError, NewPr};
+use daruda_github::{GhError, NewPr, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::LaneRef;
@@ -16,11 +18,11 @@ use super::create_modal::CreatePrModal;
 use crate::gh_host::GhHost;
 use crate::git_host::GitHost;
 use crate::github::PrPoller;
-use crate::lane::git::GitError;
+use crate::lane::git::{GitError, PushTarget};
 use crate::surface::strings::error as s;
 use crate::ui::WindowExt as _;
 use crate::workspace::Workspace;
-use crate::workspace::lane_scoped::PrWork;
+use crate::workspace::lane_scoped::LaneScoped;
 use crate::workspace::left_dock::git_ops::lock::GitLock;
 
 /// What the modal hands over; the lane supplies the rest.
@@ -77,23 +79,71 @@ impl CreatePrError {
     }
 }
 
-/// A lane base as `gh --base` takes it: without the push remote's prefix,
-/// and not a commit, which no PR can target.
+/// A base as `gh --base` takes it: the bare branch, without the push
+/// remote's prefix (`origin/main` names `main` on that remote).
+fn strip_remote<'a>(base: &'a str, remote: &str) -> &'a str {
+    base.strip_prefix(remote)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .unwrap_or(base)
+}
+
+/// A lane's recorded base as a default for the form: a branch, never a
+/// commit, which no PR can target.
 fn base_branch(base: &str, remote: &str) -> Option<String> {
-    let base = base.strip_prefix(&format!("{remote}/")).unwrap_or(base);
+    let base = strip_remote(base, remote);
     let commit_like = (7..=40).contains(&base.len()) && base.chars().all(|c| c.is_ascii_hexdigit());
     (!base.is_empty() && !commit_like).then(|| base.to_owned())
+}
+
+/// What Create PR does, decided before anything is pushed.
+#[derive(Debug, PartialEq, Eq)]
+struct PrPlan {
+    repo: RepoId,
+    /// `-u` only for a branch with no upstream yet: an existing one (in a
+    /// fork workflow, the repository it came from) stays.
+    set_upstream: bool,
+    new: NewPr,
+}
+
+/// Plan the PR for a branch pushing to `push`. `default_base` is the
+/// repository's default branch when an answer has named it: with no base
+/// typed, GitHub targets that one, so the head must not be it either.
+fn plan_pr(
+    push: PushTarget,
+    request: CreatePrRequest,
+    default_base: Option<&str>,
+    worktree: PathBuf,
+) -> Result<PrPlan, CreatePrError> {
+    let repo = parse_remote(&push.url).ok_or(CreatePrError::NoTarget)?;
+    let base = request
+        .base
+        .map(|base| strip_remote(&base, &push.remote).to_owned());
+    if base.as_deref().or(default_base) == Some(push.branch.as_str()) {
+        return Err(CreatePrError::HeadIsBase(push.branch));
+    }
+    Ok(PrPlan {
+        repo,
+        set_upstream: !push.published && !push.has_upstream,
+        new: NewPr {
+            head: push.branch,
+            base,
+            title: request.title,
+            body: request.body,
+            draft: request.draft,
+            worktree,
+        },
+    })
 }
 
 impl Workspace {
     /// The base a new PR targets by default: the lane's own base, else the
     /// repository's default branch, else nothing (GitHub's choice).
     fn default_pr_base(&self, lane: LaneRef, cx: &gpui::App) -> Option<String> {
-        let push = self.lane_scoped.get(&lane)?.git.push_target.as_ref()?;
+        let (repo, push) = self.lane_scoped.get(&lane)?.github_push()?;
         self.lane_for(lane)
             .and_then(|lane| lane.base_ref.as_deref())
             .and_then(|base| base_branch(base, &push.remote))
-            .or_else(|| PrPoller::default_branch(&parse_remote(&push.url)?, cx))
+            .or_else(|| PrPoller::default_branch(&repo, cx))
     }
 
     pub(in crate::workspace) fn open_create_pr_modal(
@@ -140,9 +190,8 @@ impl Workspace {
         let default_base = self
             .lane_scoped
             .get(&lane)
-            .and_then(|state| state.git.push_target.as_ref())
-            .and_then(|push| parse_remote(&push.url))
-            .and_then(|repo| PrPoller::default_branch(&repo, cx));
+            .and_then(LaneScoped::github_push)
+            .and_then(|(repo, _)| PrPoller::default_branch(&repo, cx));
         let repo = GitHost::global(cx).open(&path);
         let gh = GhHost::global(cx);
         let report_path = path.clone();
@@ -155,44 +204,26 @@ impl Workspace {
                     .push_target()
                     .map_err(CreatePrError::Read)?
                     .ok_or(CreatePrError::NoTarget)?;
-                let repo_id = parse_remote(&push.url).ok_or(CreatePrError::NoTarget)?;
-                // A typed base may carry the remote's prefix (`origin/feat`);
-                // gh takes the bare branch, and the guard compares that.
-                let prefix = format!("{}/", push.remote);
-                let base = request
-                    .base
-                    .map(|b| b.strip_prefix(&prefix).map(str::to_owned).unwrap_or(b));
-                if base.as_deref().or(default_base.as_deref()) == Some(push.branch.as_str()) {
-                    return Err(CreatePrError::HeadIsBase(push.branch));
-                }
+                let remote = push.remote.clone();
+                let plan = plan_pr(push, request, default_base.as_deref(), path)?;
                 // An explicit refspec to the branch the PR names: a no-op when
                 // the remote is already at HEAD, so it never skips commits a
                 // cached ahead count missed.
-                // `-u` only for a branch with no upstream yet: an existing one
-                // (in a fork workflow, the repository it came from) stays.
-                let set_upstream = !push.published && !push.has_upstream;
-                repo.push_head(&push.remote, &push.branch, set_upstream)
+                repo.push_head(&remote, &plan.new.head, plan.set_upstream)
                     .map_err(CreatePrError::Push)?;
-                let new = NewPr {
-                    head: push.branch,
-                    base,
-                    title: request.title,
-                    body: request.body,
-                    draft: request.draft,
-                    worktree: path,
-                };
-                gh.create_pr(&repo_id, &new).map_err(CreatePrError::Gh)?;
-                Ok(repo_id)
+                gh.create_pr(&plan.repo, &plan.new)
+                    .map_err(CreatePrError::Gh)?;
+                Ok::<_, CreatePrError>(plan.repo)
             },
             move |ws, result, cx| match result {
                 Ok(repo_id) => {
                     // Wait for the link only when a poll can bring it soon; a
                     // host in backoff would hold the button for its pause.
-                    let soon = PrPoller::availability(&repo_id.host, cx) == GhAvailability::Ready;
+                    let soon = PrPoller::availability(repo_id.host(), cx) == GhAvailability::Ready;
                     if let Some(state) = ws.lane_scoped.get_mut(&lane)
                         && soon
                     {
-                        state.pr_work = PrWork::AwaitingNewPr;
+                        state.pr.await_new_pr();
                     }
                     PrPoller::nudge(repo_id, cx);
                     // Deferred: this runs inside the workspace's update, and
@@ -253,5 +284,116 @@ mod tests {
         for (base, expected) in cases {
             assert_eq!(base_branch(base, "origin").as_deref(), expected, "{base}");
         }
+    }
+
+    fn push(branch: &str, published: bool, has_upstream: bool) -> PushTarget {
+        PushTarget {
+            remote: "origin".into(),
+            url: "git@github.com:o/r.git".into(),
+            branch: branch.into(),
+            published,
+            has_upstream,
+        }
+    }
+
+    fn request(base: Option<&str>) -> CreatePrRequest {
+        CreatePrRequest {
+            title: "t".into(),
+            body: "b".into(),
+            base: base.map(str::to_owned),
+            draft: false,
+        }
+    }
+
+    #[test]
+    fn a_plan_targets_the_bare_base_and_refuses_the_head_as_base() {
+        // (label, head, typed base, default branch, planned base or None if refused)
+        type Row = (
+            &'static str,
+            &'static str,
+            Option<&'static str>,
+            Option<&'static str>,
+            Option<Option<&'static str>>,
+        );
+        let cases: [Row; 6] = [
+            ("typed base", "feat", Some("main"), None, Some(Some("main"))),
+            (
+                "prefix stripped",
+                "feat",
+                Some("origin/main"),
+                None,
+                Some(Some("main")),
+            ),
+            (
+                "other remote kept",
+                "feat",
+                Some("upstream/main"),
+                None,
+                Some(Some("upstream/main")),
+            ),
+            ("GitHub's choice", "feat", None, Some("main"), Some(None)),
+            (
+                "typed base is the head",
+                "feat",
+                Some("origin/feat"),
+                None,
+                None,
+            ),
+            (
+                "default branch is the head",
+                "main",
+                None,
+                Some("main"),
+                None,
+            ),
+        ];
+        for (label, head, base, default, expected) in cases {
+            let planned = plan_pr(
+                push(head, true, true),
+                request(base),
+                default,
+                PathBuf::new(),
+            );
+            match expected {
+                Some(base) => {
+                    let plan = planned.unwrap_or_else(|e| panic!("{label}: {e}"));
+                    assert_eq!(plan.new.base.as_deref(), base, "{label}");
+                    assert_eq!(plan.new.head, head, "{label}");
+                }
+                None => assert!(
+                    matches!(planned, Err(CreatePrError::HeadIsBase(ref b)) if b == head),
+                    "{label}: {planned:?}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn upstream_is_set_only_for_a_branch_without_one() {
+        let cases = [
+            ("first push", false, false, true),
+            ("already pushed", true, false, false),
+            ("tracks another repository", false, true, false),
+        ];
+        for (label, published, has_upstream, expected) in cases {
+            let plan = plan_pr(
+                push("feat", published, has_upstream),
+                request(None),
+                None,
+                PathBuf::new(),
+            )
+            .unwrap();
+            assert_eq!(plan.set_upstream, expected, "{label}");
+        }
+    }
+
+    #[test]
+    fn a_remote_that_is_not_github_has_no_plan() {
+        let mut target = push("feat", true, true);
+        target.url = "/srv/git/r.git".into();
+        assert!(matches!(
+            plan_pr(target, request(None), None, PathBuf::new()),
+            Err(CreatePrError::NoTarget)
+        ));
     }
 }

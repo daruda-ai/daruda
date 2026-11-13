@@ -36,7 +36,7 @@ fn a_real_answer_parses_per_branch() {
     assert_eq!(pr.state, PrState::Draft);
     assert!(!pr.cross_repo);
     assert_eq!(pr.review, Some(ReviewDecision::ReviewRequired));
-    assert_eq!(pr.checks, CheckRollup::Failing { failed: 1 });
+    assert_eq!(pr.checks, CheckRollup::Failing { failed: Some(1) });
     assert_eq!(pr.failed[0].name, "build (windows-latest)");
     assert_eq!(
         pr.failed[0].workflow.as_deref(),
@@ -73,7 +73,7 @@ fn status_contexts_count_like_check_runs() {
     let names = branches(&["fix-admin-access-capacity-request"]);
     let answer = parse_prs_for_branches(&fixture("prs_status_contexts.json"), &names).unwrap();
     let pr = &answer.by_branch[&names[0]][0];
-    assert_eq!(pr.checks, CheckRollup::Failing { failed: 1 });
+    assert_eq!(pr.checks, CheckRollup::Failing { failed: Some(1) });
     assert_eq!(pr.failed[0].name, "pull-kubernetes-linter-hints");
     assert_eq!(pr.failed[0].job, None, "Prow has no Actions job");
 }
@@ -98,6 +98,20 @@ fn a_truncated_check_list_defers_to_githubs_state() {
         "detailsUrl":null,"startedAt":null}]}}}]}}}}"#;
     let answer = parse_prs_for_branches(json, &branches(&["a"])).unwrap();
     assert_eq!(answer.by_branch["a"][0].checks, CheckRollup::Pending);
+}
+
+#[test]
+fn a_truncated_failing_list_has_no_count_but_keeps_the_failures_in_hand() {
+    let json = r#"{"data":{"repository":{"defaultBranchRef":{"name":"main"},"b0":{"nodes":[{
+        "number":1,"url":"u","title":"t","state":"OPEN","isDraft":false,"headRefName":"a",
+        "isCrossRepository":false,"reviewDecision":null,"updatedAt":"2026-01-01T00:00:00Z",
+        "statusCheckRollup":{"state":"FAILURE","contexts":{"pageInfo":{"hasNextPage":true},
+        "nodes":[{"__typename":"CheckRun","name":"x","status":"COMPLETED","conclusion":"FAILURE",
+        "detailsUrl":null,"startedAt":null}]}}}]}}}}"#;
+    let answer = parse_prs_for_branches(json, &branches(&["a"])).unwrap();
+    let pr = &answer.by_branch["a"][0];
+    assert_eq!(pr.checks, CheckRollup::Failing { failed: None });
+    assert_eq!(pr.failed.len(), 1);
 }
 
 #[test]

@@ -1,15 +1,39 @@
 //! The pull-request values the rest of daruda reads.
 
-/// A GitHub repository. `owner` and `name` are lowercased: GitHub compares
-/// them case-insensitively, and so must every lookup keyed by this.
+/// The public GitHub host. `gh` trouble on it is worth telling the user
+/// about unasked; another host may not be GitHub at all.
+pub const GITHUB_HOST: &str = "github.com";
+
+/// A GitHub repository. Every part is lowercased by [`RepoId::new`]: GitHub
+/// compares them case-insensitively, and so must every lookup keyed by this.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RepoId {
-    pub host: String,
-    pub owner: String,
-    pub name: String,
+    host: String,
+    owner: String,
+    name: String,
 }
 
 impl RepoId {
+    pub fn new(host: &str, owner: &str, name: &str) -> Self {
+        Self {
+            host: host.to_ascii_lowercase(),
+            owner: owner.to_ascii_lowercase(),
+            name: name.to_ascii_lowercase(),
+        }
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     /// `host/owner/name`, the form `gh --repo` accepts for any host.
     pub fn qualified(&self) -> String {
         format!("{}/{}/{}", self.host, self.owner, self.name)
@@ -48,8 +72,8 @@ pub enum CheckKind {
     Status,
 }
 
-/// One check as GitHub reports it, before [`crate::checks::summarize`]
-/// decides what it counts as.
+/// One check as GitHub reports it, before the crate's rollup rules decide
+/// what it counts as.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckRun {
     pub kind: CheckKind,
@@ -68,8 +92,8 @@ pub struct CheckRun {
     pub started_at: Option<String>,
 }
 
-/// What a single check counts as. The mapping from GitHub's values lives in
-/// [`crate::checks`], with the rest of the rules.
+/// What a single check counts as. The mapping from GitHub's values is
+/// private to this crate, with the rest of the rollup rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckStatus {
     Pending,
@@ -87,7 +111,9 @@ pub enum CheckRollup {
     Pending,
     Passing,
     Failing {
-        failed: u32,
+        /// How many checks fail; `None` when GitHub truncated the list, so
+        /// only its own verdict is known, not the count.
+        failed: Option<u32>,
     },
 }
 
@@ -163,12 +189,21 @@ pub struct PrSummary {
     /// The head lives in another repository (a fork).
     pub cross_repo: bool,
     pub checks: CheckRollup,
-    /// The failing checks behind [`CheckRollup::Failing`]; may hold fewer
-    /// than its count when GitHub truncated the list.
+    /// The failing checks in hand behind [`CheckRollup::Failing`]; with a
+    /// truncated list, those on its first page.
     pub failed: Vec<FailedCheck>,
     pub review: Option<ReviewDecision>,
     /// RFC 3339.
     pub updated_at: String,
+}
+
+impl PrSummary {
+    /// The PR's page, if `url` is one a browser may be handed: whatever host
+    /// answered, a `file:` or script URL must not reach the system opener.
+    pub fn web_url(&self) -> Option<&str> {
+        let url = self.url.as_str();
+        (url.starts_with("https://") || url.starts_with("http://")).then_some(url)
+    }
 }
 
 #[cfg(test)]

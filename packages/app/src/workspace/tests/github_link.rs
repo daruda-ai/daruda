@@ -15,11 +15,7 @@ use crate::github::PrPoller;
 use crate::lane::git::{FakeRepo, PushTarget};
 
 fn repo() -> RepoId {
-    RepoId {
-        host: "github.com".into(),
-        owner: "o".into(),
-        name: "r".into(),
-    }
+    RepoId::new("github.com", "o", "r")
 }
 
 fn pr(number: u64, state: PrState, updated: &str) -> PrSummary {
@@ -412,7 +408,7 @@ fn create_pr_uses_the_lane_it_is_given_not_the_one_shown(cx: &mut TestAppContext
 
 fn failing_pr() -> PrSummary {
     let mut failing = pr(7, PrState::Open, "2026-01-01");
-    failing.checks = CheckRollup::Failing { failed: 2 };
+    failing.checks = CheckRollup::Failing { failed: Some(2) };
     failing.failed = vec![
         daruda_github::FailedCheck {
             workflow: None,
@@ -672,11 +668,11 @@ fn moving_the_branch_ends_the_wait_after_create(cx: &mut TestAppContext) {
     );
     assert_eq!(create(&f, id, cx), None);
     let work = |cx: &mut TestAppContext| {
-        f.ws.read_with(cx, |ws, _| ws.lane_scoped.get(&id).map(|s| s.pr_work))
+        f.ws.read_with(cx, |ws, _| ws.lane_scoped.get(&id).map(|s| s.pr.work()))
     };
     assert_eq!(
         work(cx),
-        Some(crate::workspace::lane_scoped::PrWork::AwaitingNewPr)
+        Some(crate::workspace::github_ops::lane_pr::PrWork::AwaitingNewPr)
     );
 
     f.fake.add_repo(
@@ -688,7 +684,7 @@ fn moving_the_branch_ends_the_wait_after_create(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(
         work(cx),
-        Some(crate::workspace::lane_scoped::PrWork::Idle),
+        Some(crate::workspace::github_ops::lane_pr::PrWork::Idle),
         "Create works on the new branch"
     );
 }
@@ -794,11 +790,11 @@ fn a_failed_read_frees_the_buttons_and_says_so(cx: &mut TestAppContext) {
     assert!(toasts(&f, cx).len() > before);
     let work = f.ws.read_with(cx, |ws, _| {
         let lane = ws.active_ref();
-        ws.lane_scoped.get(&lane).map(|state| state.pr_work)
+        ws.lane_scoped.get(&lane).map(|state| state.pr.work())
     });
     assert_eq!(
         work,
-        Some(crate::workspace::lane_scoped::PrWork::Idle),
+        Some(crate::workspace::github_ops::lane_pr::PrWork::Idle),
         "the send buttons work again"
     );
 }
@@ -809,7 +805,7 @@ fn lookup(f: &GitFixture, id: LaneRef, cx: &mut TestAppContext) -> crate::github
     f.ws.read_with(cx, |ws, _| {
         ws.lane_scoped
             .get(&id)
-            .map(|state| state.pr.clone())
+            .map(|state| state.pr.lookup().clone())
             .unwrap_or_default()
     })
 }

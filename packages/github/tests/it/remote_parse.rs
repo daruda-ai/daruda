@@ -2,11 +2,7 @@ use daruda_github::RepoId;
 use daruda_github::remote_parse::parse_remote;
 
 fn repo(host: &str, owner: &str, name: &str) -> Option<RepoId> {
-    Some(RepoId {
-        host: host.into(),
-        owner: owner.into(),
-        name: name.into(),
-    })
+    Some(RepoId::new(host, owner, name))
 }
 
 #[test]
@@ -75,4 +71,11 @@ fn remote_urls_name_their_repository() {
 fn qualified_names_include_the_host() {
     let id = parse_remote("git@ghe.corp:Team/App.git").unwrap();
     assert_eq!(id.qualified(), "ghe.corp/team/app");
+}
+
+#[test]
+fn a_repository_id_ignores_case_however_it_is_made() {
+    let id = RepoId::new("GitHub.com", "Owner", "Name");
+    assert_eq!(id, RepoId::new("github.com", "owner", "name"));
+    assert_eq!(id.qualified(), "github.com/owner/name");
 }

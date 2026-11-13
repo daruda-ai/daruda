@@ -1,7 +1,7 @@
 //! Which pull request each lane belongs to. `LaneScoped::pr` changes only
-//! through [`replace_pr`], from the moments that can change it: a poll
-//! answer, a moved push target, `gh` becoming unusable, and the feature
-//! being switched off.
+//! through [`LanePr::replace`](super::lane_pr::LanePr::replace), from the
+//! moments that can change it: a poll answer, a moved push target, `gh`
+//! becoming unusable, and the feature being switched off.
 
 use daruda_github::query::RepoPrs;
 use daruda_github::remote_parse::parse_remote;
@@ -9,19 +9,10 @@ use daruda_github::{PrSummary, RepoId, link::pick};
 use daruda_store::project::LaneRef;
 use gpui::Context;
 
-use crate::github::{PrLink, PrLookup};
+use crate::github::{PrDemand, PrLink, PrLookup, PrUpdate, is_unusable};
 use crate::lane::git::PushTarget;
 use crate::workspace::Workspace;
-use crate::workspace::lane_scoped::{LaneScoped, PrWork};
-
-/// One lane's question for the poller: which PR is `branch` in `repo`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PrDemand {
-    pub repo: RepoId,
-    pub branch: String,
-    /// The lane is the one this window shows, so it is polled more often.
-    pub focused: bool,
-}
+use crate::workspace::lane_scoped::LaneScoped;
 
 /// What an answer says about `branch`. A repository without commits has no
 /// default branch; its branches can still have, or lack, a PR.
@@ -43,31 +34,40 @@ fn lookup_for(
     }
 }
 
-/// Set `state.pr`, reporting whether it changed. A link arriving ends the
-/// wait after Create PR; so does forgetting the answer, since the branch or
-/// the means to ask about it is gone.
-fn replace_pr(state: &mut LaneScoped, lookup: PrLookup) -> bool {
-    if matches!(lookup, PrLookup::Linked(_) | PrLookup::Unknown)
-        && state.pr_work == PrWork::AwaitingNewPr
-    {
-        state.pr_work = PrWork::Idle;
+impl LaneScoped {
+    /// Where the lane's branch pushes, with the GitHub repository its remote
+    /// names; `None` without a push target or for a remote that is not one.
+    pub(in crate::workspace) fn github_push(&self) -> Option<(RepoId, &PushTarget)> {
+        let push = self.git.push_target.as_ref()?;
+        Some((parse_remote(&push.url)?, push))
     }
-    if state.pr == lookup {
-        return false;
-    }
-    state.pr = lookup;
-    true
 }
 
 impl Workspace {
+    /// Carry out what the poller says about the lanes' pull requests.
+    pub(crate) fn apply_pr_update(&mut self, update: PrUpdate<'_>, cx: &mut Context<Self>) {
+        match update {
+            PrUpdate::Answer { repo, prs } => self.apply_repo_prs(repo, prs, cx),
+            PrUpdate::Host { host, availability } => {
+                if is_unusable(availability) {
+                    self.forget_pr_links_on(host, cx);
+                }
+                // The strip shows the host's state even when no link changed.
+                cx.notify();
+            }
+            PrUpdate::Enabled => self.refresh_push_targets(cx),
+            PrUpdate::Disabled => self.clear_pr_links(cx),
+        }
+    }
+
     /// Every lane whose push target names a GitHub-shaped repository.
     pub(crate) fn pr_demand(&self) -> Vec<PrDemand> {
         self.lane_scoped
             .iter()
             .filter_map(|(target, state)| {
-                let push = state.git.push_target.as_ref()?;
+                let (repo, push) = state.github_push()?;
                 Some(PrDemand {
-                    repo: parse_remote(&push.url)?,
+                    repo,
                     branch: push.branch.clone(),
                     focused: *target == self.active,
                 })
@@ -78,13 +78,13 @@ impl Workspace {
     /// Apply a poll answer for `repo` to every lane that pushes there. A lane
     /// whose branch the answer does not cover (it moved while the request
     /// ran) keeps what it had until the next answer that does.
-    pub(crate) fn apply_repo_prs(&mut self, repo: &RepoId, prs: &RepoPrs, cx: &mut Context<Self>) {
+    fn apply_repo_prs(&mut self, repo: &RepoId, prs: &RepoPrs, cx: &mut Context<Self>) {
         let mut changed = false;
         for state in self.lane_scoped.values_mut() {
-            let Some(push) = state.git.push_target.as_ref() else {
+            let Some((lane_repo, push)) = state.github_push() else {
                 continue;
             };
-            if parse_remote(&push.url).as_ref() != Some(repo) {
+            if lane_repo != *repo {
                 continue;
             }
             let Some(candidates) = prs.by_branch.get(&push.branch) else {
@@ -96,7 +96,7 @@ impl Workspace {
                 prs.default_branch.as_deref(),
                 candidates,
             );
-            changed |= replace_pr(state, lookup);
+            changed |= state.pr.replace(lookup);
         }
         if changed {
             cx.notify();
@@ -105,7 +105,7 @@ impl Workspace {
 
     /// Re-read every git lane's push target: the feature was switched on,
     /// and push targets are not kept current while it is off.
-    pub(crate) fn refresh_push_targets(&mut self, cx: &mut Context<Self>) {
+    fn refresh_push_targets(&mut self, cx: &mut Context<Self>) {
         let lanes: Vec<LaneRef> = self.lane_scoped.keys().copied().collect();
         for lane in lanes {
             self.refresh_push_target(lane, cx);
@@ -120,16 +120,16 @@ impl Workspace {
         lookup: PrLookup,
         cx: &mut Context<Self>,
     ) {
-        if replace_pr(self.lane_scoped_mut(lane), lookup) {
+        if self.lane_scoped_mut(lane).pr.replace(lookup) {
             cx.notify();
         }
     }
 
     /// Forget every lane's PR: the feature was switched off.
-    pub(crate) fn clear_pr_links(&mut self, cx: &mut Context<Self>) {
+    fn clear_pr_links(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
         for state in self.lane_scoped.values_mut() {
-            changed |= replace_pr(state, PrLookup::Unknown);
+            changed |= state.pr.replace(PrLookup::Unknown);
         }
         if changed {
             cx.notify();
@@ -138,17 +138,14 @@ impl Workspace {
 
     /// Forget the PRs of lanes pushing to `host`: `gh` there is gone or
     /// logged out, so what was last read can no longer be kept current.
-    pub(crate) fn forget_pr_links_on(&mut self, host: &str, cx: &mut Context<Self>) {
+    fn forget_pr_links_on(&mut self, host: &str, cx: &mut Context<Self>) {
         let mut changed = false;
         for state in self.lane_scoped.values_mut() {
             let on_host = state
-                .git
-                .push_target
-                .as_ref()
-                .and_then(|push| parse_remote(&push.url))
-                .is_some_and(|repo| repo.host == host);
+                .github_push()
+                .is_some_and(|(repo, _)| repo.host() == host);
             if on_host {
-                changed |= replace_pr(state, PrLookup::Unknown);
+                changed |= state.pr.replace(PrLookup::Unknown);
             }
         }
         if changed {
@@ -175,10 +172,10 @@ impl Workspace {
             (Some(old), Some(new)) => old.url != new.url || old.branch != new.branch,
             _ => true,
         };
-        state.git.push_target = found.clone();
+        state.git.push_target = found;
         if moved {
-            replace_pr(state, PrLookup::Unknown);
-            if let Some(repo) = found.as_ref().and_then(|push| parse_remote(&push.url)) {
+            state.pr.replace(PrLookup::Unknown);
+            if let Some((repo, _)) = state.github_push() {
                 crate::github::PrPoller::nudge(repo, cx);
             }
         }
@@ -193,11 +190,7 @@ mod tests {
     use super::*;
 
     fn repo() -> RepoId {
-        RepoId {
-            host: "github.com".into(),
-            owner: "o".into(),
-            name: "r".into(),
-        }
+        RepoId::new("github.com", "o", "r")
     }
 
     fn pr(head: &str) -> PrSummary {
@@ -259,21 +252,5 @@ mod tests {
                 "{label}"
             );
         }
-    }
-
-    #[test]
-    fn a_link_or_a_forgotten_answer_ends_the_wait_after_create() {
-        let mut state = LaneScoped {
-            pr_work: PrWork::AwaitingNewPr,
-            ..LaneScoped::default()
-        };
-        replace_pr(&mut state, PrLookup::NoPr);
-        assert_eq!(
-            state.pr_work,
-            PrWork::AwaitingNewPr,
-            "an answer without it yet keeps waiting"
-        );
-        replace_pr(&mut state, PrLookup::Unknown);
-        assert_eq!(state.pr_work, PrWork::Idle);
     }
 }

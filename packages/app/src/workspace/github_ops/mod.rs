@@ -3,6 +3,7 @@
 
 pub(crate) mod create;
 pub(crate) mod create_modal;
+pub(in crate::workspace) mod lane_pr;
 pub(crate) mod link;
 mod review_send;
 #[cfg(feature = "screenshot")]

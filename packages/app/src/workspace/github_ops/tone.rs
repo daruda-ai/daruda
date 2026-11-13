@@ -73,20 +73,20 @@ mod tests {
             (PrState::Open, CheckRollup::Passing, PrTone::Passing),
             (
                 PrState::Open,
-                CheckRollup::Failing { failed: 2 },
+                CheckRollup::Failing { failed: Some(2) },
                 PrTone::Failing,
             ),
             (PrState::Open, CheckRollup::Pending, PrTone::Running),
             (PrState::Open, CheckRollup::None, PrTone::Quiet),
             (
                 PrState::Draft,
-                CheckRollup::Failing { failed: 1 },
+                CheckRollup::Failing { failed: Some(1) },
                 PrTone::Failing,
             ),
             (PrState::Merged, CheckRollup::Passing, PrTone::Quiet),
             (
                 PrState::Closed,
-                CheckRollup::Failing { failed: 1 },
+                CheckRollup::Failing { failed: Some(1) },
                 PrTone::Quiet,
             ),
         ];

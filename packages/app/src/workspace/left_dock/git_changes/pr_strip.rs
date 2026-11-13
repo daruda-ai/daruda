@@ -7,9 +7,9 @@ use gpui::{AnyElement, ClickEvent, Context, IntoElement, div, prelude::*, px};
 use crate::surface::strings::git as s;
 use crate::ui::theme;
 use crate::ui::{Disableable as _, Sizable as _};
+use crate::workspace::github_ops::lane_pr::PrWork;
 use crate::workspace::github_ops::strip::PrStrip;
 use crate::workspace::github_ops::tone::PrTone;
-use crate::workspace::lane_scoped::PrWork;
 use crate::workspace::layout::{Dock, LeftDockSnapshot};
 
 /// The glyph and color a check tone shows, or nothing for a quiet one.
@@ -30,9 +30,8 @@ pub(in crate::workspace::left_dock) fn tone_glyph(
 fn checks_label(checks: CheckRollup) -> Option<String> {
     match checks {
         CheckRollup::Passing => Some(s::pr_checks_passing()),
-        // Past the first page of checks the failures may not be in hand.
-        CheckRollup::Failing { failed: 0 } => Some(s::pr_checks_failing_uncounted()),
-        CheckRollup::Failing { failed } => Some(s::pr_checks_failing(failed)),
+        CheckRollup::Failing { failed: Some(n) } => Some(s::pr_checks_failing(n)),
+        CheckRollup::Failing { failed: None } => Some(s::pr_checks_failing_uncounted()),
         CheckRollup::Pending => Some(s::pr_checks_running()),
         CheckRollup::None => None,
     }
@@ -125,10 +124,9 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                 .text_ellipsis()
                 .text_color(muted)
                 .child(format!("{} {}", s::pr_number(pr.number), pr.title));
-            let failed = match pr.checks {
-                CheckRollup::Failing { failed } if pr.state.is_active() => failed,
-                _ => 0,
-            };
+            // The button counts what it sends: the failing checks in hand.
+            let failing = matches!(pr.checks, CheckRollup::Failing { .. }) && pr.state.is_active();
+            let failed = if failing { pr.failed.len() } else { 0 };
             let review = pr.state.is_active().then(|| {
                 let workspace = snap.workspace.clone();
                 crate::ui::button_compact_sized(
@@ -144,7 +142,7 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                     }
                 }))
             });
-            let fix = (failed > 0 && !pr.failed.is_empty()).then(|| {
+            let fix = (failed > 0).then(|| {
                 let workspace = snap.workspace.clone();
                 crate::ui::button_compact_sized(
                     "pr-fix-checks",

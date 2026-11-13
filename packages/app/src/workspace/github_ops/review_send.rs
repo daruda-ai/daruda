@@ -2,8 +2,8 @@
 //! to the lane's agent: the prompt goes into the agent's input, never
 //! submitted, so the user reads it first.
 
-use daruda_github::Gh;
-use daruda_github::prompt::{CheckLog, failed_checks, review_threads};
+use daruda_github::prompt::{CheckLog, NoLog, failed_checks, review_threads};
+use daruda_github::{Gh, GhError};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::project::LaneRef;
@@ -13,11 +13,7 @@ use crate::gh_host::GhHost;
 use crate::github::PrLink;
 use crate::surface::strings::error as s;
 use crate::workspace::Workspace;
-use crate::workspace::lane_scoped::PrWork;
 use crate::workspace::main_area::pane_tree::PaneId;
-
-/// Why a check has no log in the prompt; read by the agent, not the user.
-const NOT_ACTIONS: &str = "not a GitHub Actions check";
 
 /// Among writable chats as `(pane, tab)`: the focused one, then one in the
 /// active tab, then the first by tab order.
@@ -76,8 +72,10 @@ impl Workspace {
                     .map(|check| CheckLog {
                         check: check.clone(),
                         log: match check.job {
-                            Some(job) => gh.failed_log(&link.repo, job).map_err(|e| e.to_string()),
-                            None => Err(NOT_ACTIONS.to_owned()),
+                            Some(job) => gh
+                                .failed_log(&link.repo, job)
+                                .map_err(|e| NoLog::Unreadable(e.to_string())),
+                            None => Err(NoLog::NotActions),
                         },
                     })
                     .collect();
@@ -97,9 +95,7 @@ impl Workspace {
     ) {
         self.send_pr_prompt(
             |gh, link| {
-                let threads = gh
-                    .review_threads(&link.repo, link.pr.number)
-                    .map_err(|e| e.to_string())?;
+                let threads = gh.review_threads(&link.repo, link.pr.number)?;
                 Ok(review_threads(&link.pr, &threads))
             },
             window,
@@ -112,7 +108,7 @@ impl Workspace {
     /// then deliver it if the lane is still the one shown.
     fn send_pr_prompt(
         &mut self,
-        build: impl FnOnce(&dyn Gh, &PrLink) -> Result<Option<String>, String> + Send + 'static,
+        build: impl FnOnce(&dyn Gh, &PrLink) -> Result<Option<String>, GhError> + Send + 'static,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -124,10 +120,11 @@ impl Workspace {
         else {
             return;
         };
+        // A send already under way answers the click; no target warning.
         if self
             .lane_scoped
             .get(&lane)
-            .is_some_and(|state| state.pr_work == PrWork::Sending)
+            .is_some_and(|state| state.pr.is_sending())
         {
             return;
         }
@@ -135,7 +132,7 @@ impl Workspace {
             self.report_pr_send(s::github_no_agent_pane(), ErrorSeverity::Warning, cx);
             return;
         }
-        self.lane_scoped_mut(lane).pr_work = PrWork::Sending;
+        self.lane_scoped_mut(lane).pr.begin_send();
         cx.notify();
         let gh = GhHost::global(cx);
         cx.spawn_in(window, async move |this, cx| {
@@ -165,14 +162,12 @@ impl Workspace {
     fn deliver_pr_prompt(
         &mut self,
         lane: LaneRef,
-        built: Result<Option<String>, String>,
+        built: Result<Option<String>, GhError>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(state) = self.lane_scoped.get_mut(&lane)
-            && state.pr_work == PrWork::Sending
-        {
-            state.pr_work = PrWork::Idle;
+        if let Some(state) = self.lane_scoped.get_mut(&lane) {
+            state.pr.end_send();
         }
         cx.notify();
         let prompt = match built {
@@ -181,10 +176,10 @@ impl Workspace {
                 self.report_pr_send(s::github_no_open_comments(), ErrorSeverity::Info, cx);
                 return;
             }
-            Err(reason) => {
+            Err(e) => {
                 let report = ErrorReport::new(s::github_read_failed())
                     .severity(ErrorSeverity::Warning)
-                    .message(reason)
+                    .from_error(&e)
                     .at(file!(), line!())
                     .dedup("github.send.read")
                     .build();

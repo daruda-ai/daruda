@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use daruda_github::availability::{GhAuth, GhAvailability};
 use daruda_github::fake::FakeGh;
-use daruda_github::{CheckRollup, FailedCheck, PrState, PrSummary, RepoId};
+use daruda_github::{CheckRollup, FailedCheck, GITHUB_HOST, PrState, PrSummary, RepoId};
 use daruda_store::project::LaneRef;
 use gpui::Context;
 
@@ -16,19 +16,13 @@ use crate::github::{PrLink, PrLookup, PrPoller};
 use crate::lane::git::PushTarget;
 use crate::workspace::Workspace;
 
-const HOST: &str = "github.com";
-
 fn repo() -> RepoId {
-    RepoId {
-        host: HOST.into(),
-        owner: "daruda".into(),
-        name: "daruda".into(),
-    }
+    RepoId::new(GITHUB_HOST, "daruda", "daruda")
 }
 
 fn pr(number: u64, head: &str, title: &str, state: PrState, checks: CheckRollup) -> PrSummary {
     let failed = match checks {
-        CheckRollup::Failing { failed } => (0..failed)
+        CheckRollup::Failing { failed } => (0..failed.unwrap_or(0))
             .map(|i| FailedCheck {
                 workflow: None,
                 event: None,
@@ -67,7 +61,7 @@ pub(in crate::workspace) enum PrShot {
 /// Answer for GitHub the way the seeds say it is.
 fn install_fake_gh(auth: GhAuth, prs: Vec<PrSummary>, cx: &mut gpui::App) {
     let gh = FakeGh::new();
-    gh.set_auth(HOST, auth);
+    gh.set_auth(GITHUB_HOST, auth);
     gh.set_prs(&repo(), prs);
     GhHost::set_global(Arc::new(gh), cx);
 }
@@ -95,7 +89,7 @@ impl Workspace {
             BRANCH,
             "Adjust sidebar presentation for narrow docks",
             PrState::Open,
-            CheckRollup::Failing { failed: 2 },
+            CheckRollup::Failing { failed: Some(2) },
         );
         let (auth, availability, prs) = match shot {
             PrShot::Linked => (GhAuth::Ready, GhAvailability::Ready, vec![linked.clone()]),
@@ -103,7 +97,7 @@ impl Workspace {
             PrShot::GhMissing => (GhAuth::Missing, GhAvailability::Missing, Vec::new()),
         };
         install_fake_gh(auth, prs, cx);
-        PrPoller::seed_for_shot(HOST, availability, cx);
+        PrPoller::seed_for_shot(GITHUB_HOST, availability, cx);
         let lookup = match shot {
             PrShot::Linked => PrLookup::Linked(Box::new(PrLink {
                 repo: repo(),
@@ -124,7 +118,7 @@ impl Workspace {
             .map(|p| p.lanes.iter().map(|lane| lane.id).collect())
             .unwrap_or_default();
         let states = [
-            (PrState::Open, CheckRollup::Failing { failed: 1 }),
+            (PrState::Open, CheckRollup::Failing { failed: Some(1) }),
             (PrState::Draft, CheckRollup::Pending),
             (PrState::Open, CheckRollup::Passing),
             (PrState::Merged, CheckRollup::Passing),
@@ -147,7 +141,7 @@ impl Workspace {
             );
         }
         install_fake_gh(GhAuth::Ready, prs, cx);
-        PrPoller::seed_for_shot(HOST, GhAvailability::Ready, cx);
+        PrPoller::seed_for_shot(GITHUB_HOST, GhAvailability::Ready, cx);
         cx.notify();
     }
 }

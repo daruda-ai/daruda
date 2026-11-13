@@ -128,7 +128,7 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     /// What the Git Changes panel says about the active lane's PR.
     pub pr_strip: crate::workspace::github_ops::strip::PrStrip,
     /// What is under way for the active lane's PR.
-    pub pr_work: crate::workspace::lane_scoped::PrWork,
+    pub pr_work: crate::workspace::github_ops::lane_pr::PrWork,
     pub git_stage_in_flight: bool,
     /// Mirrors `Workspace::git_op_in_flight` — true while a Fetch / Push /
     /// Commit / Amend is running. Drives `loading + disabled` on the Fetch

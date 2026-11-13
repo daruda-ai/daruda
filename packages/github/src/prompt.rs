@@ -21,7 +21,25 @@ const ELIDED: &str = "[… lines omitted …]";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckLog {
     pub check: FailedCheck,
-    pub log: Result<String, String>,
+    pub log: Result<String, NoLog>,
+}
+
+/// Why a check's log is missing from the prompt; the agent reads this.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoLog {
+    /// Only GitHub Actions jobs have a log `gh` can print.
+    NotActions,
+    /// Reading it failed; what `gh` said.
+    Unreadable(String),
+}
+
+impl std::fmt::Display for NoLog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotActions => write!(f, "not a GitHub Actions check"),
+            Self::Unreadable(reason) => write!(f, "{reason}"),
+        }
+    }
 }
 
 /// Remove escape sequences and control characters except newline and tab.
@@ -222,7 +240,7 @@ pub fn failed_checks(pr: &PrSummary, logs: &[CheckLog]) -> String {
                 None => block.push_str("(log omitted: the prompt is full)\n"),
             },
             Err(reason) => {
-                block.push_str(&format!("(no log: {})\n", one_line(reason)));
+                block.push_str(&format!("(no log: {})\n", one_line(&reason.to_string())));
             }
         }
         out.push_str(&block);

@@ -2,11 +2,7 @@ use super::*;
 use crate::{CheckRollup, PrState};
 
 fn repo() -> RepoId {
-    RepoId {
-        host: "github.com".into(),
-        owner: "o".into(),
-        name: "r".into(),
-    }
+    RepoId::new("github.com", "o", "r")
 }
 
 fn pr(number: u64, head: &str) -> PrSummary {

@@ -1,6 +1,6 @@
 //! GitHub pull requests as a lane sees them: which repository a remote names
 //! ([`remote_parse`]), which pull request a branch belongs to ([`link`]),
-//! and what its checks add up to ([`checks`]).
+//! and what its checks add up to ([`CheckRollup`]).
 //!
 //! GPUI-free. Every GitHub request goes through the `gh` CLI behind the
 //! [`Gh`] trait, so this crate stores no token and speaks no HTTP itself.
@@ -22,7 +22,7 @@ mod system;
 pub use backend::Gh;
 pub use error::{FailureKind, GhError};
 pub use model::{
-    ActionsJob, CheckKind, CheckRollup, CheckRun, CheckStatus, FailedCheck, NewPr, PrState,
-    PrSummary, RepoId, ReviewComment, ReviewDecision, ReviewThread, ReviewThreads,
+    ActionsJob, CheckKind, CheckRollup, CheckRun, CheckStatus, FailedCheck, GITHUB_HOST, NewPr,
+    PrState, PrSummary, RepoId, ReviewComment, ReviewDecision, ReviewThread, ReviewThreads,
 };
 pub use system::SystemGh;

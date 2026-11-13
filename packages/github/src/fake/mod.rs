@@ -238,7 +238,9 @@ impl Gh for FakeGh {
         let number = prs.iter().map(|pr| pr.number).max().unwrap_or(0) + 1;
         let url = format!(
             "https://{}/{}/{}/pull/{number}",
-            repo.host, repo.owner, repo.name
+            repo.host(),
+            repo.owner(),
+            repo.name()
         );
         prs.push(PrSummary {
             number,

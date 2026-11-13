@@ -396,14 +396,9 @@ impl PrNode {
                     .collect();
                 let (counted, failed) = summarize(&runs);
                 // A truncated list cannot be added up; GitHub's verdict stands,
-                // with the failures in hand as a lower bound on the count.
+                // without a count, and the failures in hand are still sent.
                 let checks = if rollup.contexts.page_info.has_next_page {
-                    match rollup_from_state(&rollup.state) {
-                        CheckRollup::Failing { .. } => CheckRollup::Failing {
-                            failed: u32::try_from(failed.len()).unwrap_or(u32::MAX),
-                        },
-                        other => other,
-                    }
+                    rollup_from_state(&rollup.state)
                 } else {
                     counted
                 };

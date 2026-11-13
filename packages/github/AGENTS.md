@@ -34,4 +34,5 @@ through `GitHost`.
   quote or end a bracketed paste. The app sends it only to writable agent
   chats, inserted and never submitted.
 - Polling (`app/src/github/poller.rs`) is process-wide and asks once per
-  repository per round, however many windows show its lanes.
+  repository per round, however many windows show its lanes. Its timing,
+  backoff and auth-recheck rules are GPUI-free in `app/src/github/schedule.rs`.

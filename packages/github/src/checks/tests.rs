@@ -104,12 +104,12 @@ fn checks_add_up_by_the_one_rule() {
         (
             "one failure",
             vec![run("a", Success, "1"), run("b", Failure, "1")],
-            CheckRollup::Failing { failed: 1 },
+            CheckRollup::Failing { failed: Some(1) },
         ),
         (
             "a failure outranks pending",
             vec![run("a", Pending, "1"), run("b", Failure, "1")],
-            CheckRollup::Failing { failed: 1 },
+            CheckRollup::Failing { failed: Some(1) },
         ),
         (
             "pending without failure",
@@ -124,7 +124,7 @@ fn checks_add_up_by_the_one_rule() {
         (
             "a re-run that failed replaces the pass, whatever the order",
             vec![run("a", Failure, "2"), run("a", Success, "1")],
-            CheckRollup::Failing { failed: 1 },
+            CheckRollup::Failing { failed: Some(1) },
         ),
         (
             "a queued re-run replaces the failure it re-runs",
@@ -137,7 +137,7 @@ fn checks_add_up_by_the_one_rule() {
                 run("build", Failure, "1"),
                 in_workflow(run("build", Success, "2"), "Release"),
             ],
-            CheckRollup::Failing { failed: 1 },
+            CheckRollup::Failing { failed: Some(1) },
         ),
         (
             "a push run's failure is not hidden by the pull_request run after it",
@@ -145,7 +145,7 @@ fn checks_add_up_by_the_one_rule() {
                 on_event(run("test", Failure, "1"), "push"),
                 on_event(run("test", Success, "2"), "pull_request"),
             ],
-            CheckRollup::Failing { failed: 1 },
+            CheckRollup::Failing { failed: Some(1) },
         ),
         (
             "a re-run of one event still replaces that event's earlier run",
@@ -158,7 +158,7 @@ fn checks_add_up_by_the_one_rule() {
         (
             "a status context does not replace a check run of the same name",
             vec![run("lint", Failure, "1"), status(run("lint", Success, "2"))],
-            CheckRollup::Failing { failed: 1 },
+            CheckRollup::Failing { failed: Some(1) },
         ),
     ];
     for (label, runs, expected) in cases {
@@ -222,7 +222,7 @@ fn githubs_own_rollup_state_maps_without_a_count() {
     assert_eq!(rollup_from_state("SUCCESS"), CheckRollup::Passing);
     assert_eq!(
         rollup_from_state("FAILURE"),
-        CheckRollup::Failing { failed: 0 }
+        CheckRollup::Failing { failed: None }
     );
     assert_eq!(rollup_from_state("PENDING"), CheckRollup::Pending);
     assert_eq!(rollup_from_state(""), CheckRollup::None);

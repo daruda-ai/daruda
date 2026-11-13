@@ -122,13 +122,13 @@ impl Gh for SystemGh {
                 "api".to_owned(),
                 "graphql".to_owned(),
                 "--hostname".to_owned(),
-                repo.host.clone(),
+                repo.host().to_owned(),
                 "-f".to_owned(),
                 format!("query={}", prs_for_branches_query(chunk.len())),
                 "-f".to_owned(),
-                format!("owner={}", repo.owner),
+                format!("owner={}", repo.owner()),
                 "-f".to_owned(),
-                format!("name={}", repo.name),
+                format!("name={}", repo.name()),
             ];
             for (i, branch) in chunk.iter().enumerate() {
                 args.push("-f".to_owned());
@@ -160,13 +160,13 @@ impl Gh for SystemGh {
             "api".to_owned(),
             "graphql".to_owned(),
             "--hostname".to_owned(),
-            repo.host.clone(),
+            repo.host().to_owned(),
             "-f".to_owned(),
             format!("query={REVIEW_THREADS_QUERY}"),
             "-f".to_owned(),
-            format!("owner={}", repo.owner),
+            format!("owner={}", repo.owner()),
             "-f".to_owned(),
-            format!("name={}", repo.name),
+            format!("name={}", repo.name()),
             // `-F`: the number must reach GraphQL as an Int.
             "-F".to_owned(),
             format!("number={number}"),
@@ -211,11 +211,7 @@ mod tests {
 
     #[test]
     fn no_branches_sends_no_request() {
-        let repo = RepoId {
-            host: "github.com".into(),
-            owner: "o".into(),
-            name: "r".into(),
-        };
+        let repo = RepoId::new("github.com", "o", "r");
         assert_eq!(
             SystemGh.prs_for_branches(&repo, &[]).unwrap(),
             RepoPrs::default()
