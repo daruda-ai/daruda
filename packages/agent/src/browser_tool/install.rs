@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
+use daruda_core::process::{CaptureError, CaptureLimits, Captured, run_captured};
+
 use super::{Asset, BrowserToolError, VERSION, binary_file_name, download_url, verify};
 
 const MARKER: &str = ".complete";
@@ -17,6 +19,13 @@ const DOWNLOAD_IO_TIMEOUT: Duration = Duration::from_secs(5);
 /// Release binaries are ~20 MB; the cap bounds a misbehaving proxy.
 const MAX_DOWNLOAD_BYTES: u64 = 256 * 1024 * 1024;
 const STDERR_TAIL_CHARS: usize = 2000;
+/// The browser step downloads ~188 MB of Chrome: room for a slow link, while
+/// a stalled download still ends. The output caps only bound a runaway child.
+const BROWSER_INSTALL_LIMITS: CaptureLimits = CaptureLimits {
+    timeout: Duration::from_secs(15 * 60),
+    stdout: 4 * 1024 * 1024,
+    stderr: 4 * 1024 * 1024,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallStage {
@@ -76,23 +85,24 @@ pub struct ProcessRun;
 
 impl Run for ProcessRun {
     fn run_install(&self, binary: &Path) -> Result<(), InstallError> {
-        let output = daruda_core::process::command(binary)
-            .arg("install")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|e| InstallError::Browser(e.to_string()))?;
-        if output.status.success() {
-            return Ok(());
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(InstallError::Browser(format!(
-            "{}: {}",
-            output.status,
-            tail(stderr.trim(), STDERR_TAIL_CHARS)
-        )))
+        let mut command = daruda_core::process::command(binary);
+        command.arg("install").stdin(Stdio::null());
+        browser_install_outcome(run_captured(command, BROWSER_INSTALL_LIMITS))
     }
+}
+
+/// A timeout or an output overflow has already killed the child's tree.
+fn browser_install_outcome(result: Result<Captured, CaptureError>) -> Result<(), InstallError> {
+    let output = result.map_err(|e| InstallError::Browser(e.to_string()))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(InstallError::Browser(format!(
+        "{}: {}",
+        output.status,
+        tail(stderr.trim(), STDERR_TAIL_CHARS)
+    )))
 }
 
 fn tail(text: &str, max_chars: usize) -> &str {

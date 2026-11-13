@@ -168,6 +168,36 @@ fn tail_keeps_the_last_characters() {
     }
 }
 
+#[test]
+fn a_browser_install_past_its_deadline_fails() {
+    let result =
+        browser_install_outcome(Err(CaptureError::Timeout(BROWSER_INSTALL_LIMITS.timeout)));
+
+    let Err(InstallError::Browser(message)) = result else {
+        panic!("{result:?}");
+    };
+    assert!(message.contains("timed out"), "{message}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_browser_install_reports_its_exit_and_stderr_tail() {
+    use std::os::unix::process::ExitStatusExt as _;
+
+    let captured = |code: i32, stderr: &str| Captured {
+        status: std::process::ExitStatus::from_raw(code << 8),
+        stdout: Vec::new(),
+        stderr: stderr.as_bytes().to_vec(),
+    };
+    assert!(browser_install_outcome(Ok(captured(0, "noise"))).is_ok());
+
+    let result = browser_install_outcome(Ok(captured(1, "chrome: no space left\n")));
+    let Err(InstallError::Browser(message)) = result else {
+        panic!("{result:?}");
+    };
+    assert!(message.ends_with("chrome: no space left"), "{message}");
+}
+
 #[cfg(unix)]
 #[test]
 fn published_binary_is_executable() {
