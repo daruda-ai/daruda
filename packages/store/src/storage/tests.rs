@@ -197,3 +197,19 @@ fn status_icon_packages_follow_the_config_profile_and_override() {
         );
     }
 }
+
+#[test]
+fn browser_tool_paths_follow_the_profile_and_override() {
+    let release = layout("release", None);
+    let debug = layout("debug", None);
+    assert_eq!(release.browser_tool(), release.data().join("agent-browser"));
+    assert_eq!(release.browser_sockets(), release.data().join("ab"));
+    assert_ne!(release.browser_tool(), debug.browser_tool());
+    assert_ne!(release.browser_sockets(), debug.browser_sockets());
+    let portable = layout("preview", Some("portable".into()));
+    assert_eq!(
+        portable.browser_tool(),
+        PathBuf::from("portable/agent-browser")
+    );
+    assert_eq!(portable.browser_sockets(), PathBuf::from("portable/ab"));
+}

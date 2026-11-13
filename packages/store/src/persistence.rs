@@ -136,6 +136,24 @@ pub fn status_icon_themes_dir() -> PathBuf {
     StorageLayout::current().status_icon_themes()
 }
 
+/// Directory holding the app-managed agent-browser binary.
+///
+/// Profile-scoped on purpose, unlike [`node_install_dir`]: it is not one of
+/// the shared exceptions, so a debug or `DARUDA_DATA_DIR` run installs and
+/// verifies its own copy without touching the release install's.
+pub fn browser_tool_dir() -> PathBuf {
+    StorageLayout::current().browser_tool()
+}
+
+/// Directory for agent-browser daemon sockets (`AGENT_BROWSER_SOCKET_DIR`).
+///
+/// Profile-scoped on purpose: sockets per data root keep a debug or
+/// `DARUDA_DATA_DIR` run from reaching the release install's browser
+/// daemons. The name is kept short because upstream limits socket paths.
+pub fn browser_socket_dir() -> PathBuf {
+    StorageLayout::current().browser_sockets()
+}
+
 /// The active profile's suffix for non-path resources that need the same
 /// release/debug/named-profile isolation [`default_data_dir`] gives
 /// on-disk paths — e.g. a macOS Keychain service name, so a debug build

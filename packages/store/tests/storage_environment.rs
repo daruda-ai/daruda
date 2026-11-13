@@ -50,6 +50,11 @@ fn storage_snapshot_child() {
     assert_eq!(persistence::node_install_dir(), expected.join("node"));
     assert_eq!(persistence::flow_lock_root(), expected.join("flow-locks"));
     assert_eq!(
+        persistence::browser_tool_dir(),
+        expected.join("agent-browser")
+    );
+    assert_eq!(persistence::browser_socket_dir(), expected.join("ab"));
+    assert_eq!(
         persistence::remote_lock_root(),
         expected.join("remote-locks")
     );
