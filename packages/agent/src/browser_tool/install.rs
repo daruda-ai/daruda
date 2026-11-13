@@ -2,7 +2,8 @@
 //!
 //! Layout: `<tool_dir>/<VERSION>/<binary>` plus a `.complete` marker that
 //! appears only once the browser install has succeeded. Callers serialize
-//! installs: upstream's browser extractor takes no lock of its own.
+//! installs within one process; upstream's browser extractor takes no lock,
+//! so installs from two processes (profiles) can race over the browser.
 
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};

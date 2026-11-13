@@ -196,6 +196,10 @@ impl BrowserTool {
                     BrowserToolState::Absent | BrowserToolState::Failed
                 ) {
                     let installer = supported.installer.clone();
+                    // WORKAROUND: upstream agent-browser extracts Chrome into the
+                    // shared `$HOME/.agent-browser` in place without a lock - a
+                    // cross-profile lock would need a new shared storage exception;
+                    // two profiles enabling at once is rare, and toggling retries.
                     Self::start_install(installer, cx);
                 }
             }
