@@ -58,8 +58,15 @@ pub(crate) enum BrowserToolState {
     Failed,
 }
 
+pub(crate) struct BrowserTool {
+    /// The last `[browser] enabled` seen. The settings observer runs on every
+    /// settings change, so installs and notices follow only its off-to-on edge.
+    enabled: bool,
+    host: Host,
+}
+
 /// No release exists for this host, or one can be installed.
-pub(crate) enum BrowserTool {
+enum Host {
     Unsupported { notified: bool },
     Supported(Supported),
 }
@@ -92,25 +99,39 @@ impl BrowserTool {
             Some(binary) => BrowserToolState::Ready(binary),
             None => BrowserToolState::Absent,
         };
-        Self::Supported(Supported {
+        Self::with_host(Host::Supported(Supported {
             installer,
             socket_dir,
             state,
-        })
+        }))
     }
 
-    /// The setting may have turned on: install when nothing usable is there.
-    /// An install in flight runs to completion even if it turned off again.
-    pub(crate) fn settings_changed(cx: &mut App) {
-        if !SettingsStore::global(cx).user().browser.enabled {
-            return;
+    /// Starts as off, so a setting already on at startup counts as turning on.
+    fn with_host(host: Host) -> Self {
+        Self {
+            enabled: false,
+            host,
         }
+    }
+
+    /// When the setting turns on, install if nothing usable is there; a
+    /// failed install is retried only by turning the setting off and on
+    /// again. An install in flight runs to completion even if it turned off.
+    pub(crate) fn settings_changed(cx: &mut App) {
+        let enabled = SettingsStore::global(cx).user().browser.enabled;
         let Some(tool) = cx.try_global::<Self>() else {
             return;
         };
-        match tool {
-            Self::Unsupported { notified: false } => {
-                *cx.global_mut::<Self>() = Self::Unsupported { notified: true };
+        if tool.enabled == enabled {
+            return;
+        }
+        cx.global_mut::<Self>().enabled = enabled;
+        if !enabled {
+            return;
+        }
+        match &cx.global::<Self>().host {
+            Host::Unsupported { notified: false } => {
+                cx.global_mut::<Self>().host = Host::Unsupported { notified: true };
                 surface(
                     ErrorReport::new(s::unsupported_platform())
                         .severity(ErrorSeverity::Warning)
@@ -121,7 +142,7 @@ impl BrowserTool {
                     cx,
                 );
             }
-            Self::Supported(supported)
+            Host::Supported(supported)
                 if matches!(
                     supported.state,
                     BrowserToolState::Absent | BrowserToolState::Failed
@@ -176,7 +197,7 @@ impl BrowserTool {
     }
 
     fn set_state(state: BrowserToolState, cx: &mut App) {
-        if let Self::Supported(supported) = cx.global_mut::<Self>() {
+        if let Host::Supported(supported) = &mut cx.global_mut::<Self>().host {
             supported.state = state;
         }
     }
@@ -188,11 +209,11 @@ pub(crate) fn launch_for_lane(lane_root: &Path, cx: &App) -> Option<McpLaunch> {
     if !SettingsStore::global(cx).user().browser.enabled {
         return None;
     }
-    let BrowserTool::Supported(Supported {
+    let Host::Supported(Supported {
         socket_dir,
         state: BrowserToolState::Ready(binary),
         ..
-    }) = cx.try_global::<BrowserTool>()?
+    }) = &cx.try_global::<BrowserTool>()?.host
     else {
         return None;
     };
@@ -242,7 +263,7 @@ fn host_tool(target: Option<Asset>, tool_dir: PathBuf, socket_dir: PathBuf) -> B
             }),
             socket_dir,
         ),
-        None => BrowserTool::Unsupported { notified: false },
+        None => BrowserTool::with_host(Host::Unsupported { notified: false }),
     }
 }
 
@@ -259,7 +280,7 @@ fn default_tool(target: Option<Asset>) -> BrowserTool {
 /// that wants a tool builds one with [`host_tool`] or [`BrowserTool::supported`].
 #[cfg(test)]
 fn default_tool(_target: Option<Asset>) -> BrowserTool {
-    BrowserTool::Unsupported { notified: false }
+    BrowserTool::with_host(Host::Unsupported { notified: false })
 }
 
 #[cfg(test)]

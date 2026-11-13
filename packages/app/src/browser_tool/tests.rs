@@ -79,9 +79,9 @@ fn toggle(enabled: bool, cx: &mut TestAppContext) {
 }
 
 fn state(cx: &mut TestAppContext) -> BrowserToolState {
-    cx.update(|cx| match cx.global::<BrowserTool>() {
-        BrowserTool::Supported(supported) => supported.state.clone(),
-        BrowserTool::Unsupported { .. } => panic!("expected a supported host"),
+    cx.update(|cx| match &cx.global::<BrowserTool>().host {
+        Host::Supported(supported) => supported.state.clone(),
+        Host::Unsupported { .. } => panic!("expected a supported host"),
     })
 }
 
@@ -103,13 +103,13 @@ fn the_host_target_decides_support(cx: &mut TestAppContext) {
     let asset = browser_tool::target("macos", "aarch64", false).expect("a release");
     let supported = host_tool(Some(asset), dir.path().to_path_buf(), socket_dir());
     assert!(
-        matches!(&supported, BrowserTool::Supported(s) if s.state == BrowserToolState::Absent),
+        matches!(&supported.host, Host::Supported(s) if s.state == BrowserToolState::Absent),
         "an empty tool directory has nothing cached"
     );
     let unsupported = host_tool(None, dir.path().to_path_buf(), socket_dir());
     assert!(matches!(
-        unsupported,
-        BrowserTool::Unsupported { notified: false }
+        unsupported.host,
+        Host::Unsupported { notified: false }
     ));
 
     cx.update(|cx| {
@@ -118,8 +118,8 @@ fn the_host_target_decides_support(cx: &mut TestAppContext) {
         cx.set_global(unsupported);
         BrowserTool::settings_changed(cx);
         assert!(matches!(
-            cx.global::<BrowserTool>(),
-            BrowserTool::Unsupported { notified: true }
+            cx.global::<BrowserTool>().host,
+            Host::Unsupported { notified: true }
         ));
     });
 }
@@ -132,7 +132,7 @@ fn enabling_installs_through_both_stages(cx: &mut TestAppContext) {
     let _observer = cx.update(|cx| {
         let seen = seen.clone();
         cx.observe_global::<BrowserTool>(move |cx| {
-            if let BrowserTool::Supported(supported) = cx.global::<BrowserTool>() {
+            if let Host::Supported(supported) = &cx.global::<BrowserTool>().host {
                 seen.borrow_mut().push(supported.state.clone());
             }
         })
@@ -183,6 +183,36 @@ fn a_failed_install_is_retried_when_turned_on_again(cx: &mut TestAppContext) {
     toggle(true, cx);
     assert_eq!(installer.calls(), 2);
     assert_eq!(state(cx), BrowserToolState::Ready(binary()));
+}
+
+#[gpui::test]
+fn startup_with_the_setting_on_installs_once(cx: &mut TestAppContext) {
+    let installer = FakeInstaller::new(None, vec![Ok(binary())]);
+    install_tool(installer.clone(), true, cx);
+    cx.update(BrowserTool::settings_changed);
+    cx.run_until_parked();
+
+    assert_eq!(installer.calls(), 1);
+    assert_eq!(state(cx), BrowserToolState::Ready(binary()));
+}
+
+#[gpui::test]
+fn an_unrelated_settings_change_does_not_retry_a_failed_install(cx: &mut TestAppContext) {
+    let installer = FakeInstaller::new(None, vec![Err("offline".to_owned()), Ok(binary())]);
+    install_tool(installer.clone(), false, cx);
+    toggle(true, cx);
+    assert_eq!(state(cx), BrowserToolState::Failed);
+
+    cx.update(|cx| {
+        let mut config = (*SettingsStore::global(cx).user_arc()).clone();
+        config.general.language = "ko".to_owned();
+        cx.update_global::<SettingsStore, _>(|store, _| store.set_user_for_testing(config));
+        BrowserTool::settings_changed(cx);
+    });
+    cx.run_until_parked();
+
+    assert_eq!(installer.calls(), 1);
+    assert_eq!(state(cx), BrowserToolState::Failed);
 }
 
 #[gpui::test]
