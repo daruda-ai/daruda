@@ -66,6 +66,7 @@ macro_rules! with_settings_fields {
             GitConfirmPush: git.confirm_push, "git.confirm_push", copy, |value: bool| value;
             GitDefaultCommitMessage: git.default_commit_message, "git.default_commit_message", copy, |value: bool| value;
             GithubEnabled: github.enabled, "github.enabled", copy, |value: bool| value;
+            BrowserEnabled: browser.enabled, "browser.enabled", copy, |value: bool| value;
             NotifyHook: notifications.hook_notification_enabled, "notifications.hook_notification_enabled", copy, |value: bool| value;
             NotifyAgentCompletion: notifications.agent_completion_enabled, "notifications.agent_completion_enabled", copy, |value: bool| value;
             NotifyAgentWaiting: notifications.agent_waiting_enabled, "notifications.agent_waiting_enabled", copy, |value: bool| value;

@@ -101,6 +101,8 @@ settings:
   hint_git_default_commit_message: "끄면 빈 메시지는 거부됩니다."
   label_github_enabled: "GitHub pull request 표시"
   hint_github_enabled: "worktree마다 pull request와 체크 상태를 gh CLI로 읽어 보여 줍니다."
+  label_browser_enabled: "에이전트 브라우저 도구"
+  hint_browser_enabled: "agent-browser를 내려받아 로컬 worktree의 에이전트 채팅마다 전용 브라우저를 제공합니다. 켠 뒤 연결되는 채팅부터 적용됩니다."
   card_status_bar: "상태바"
   search_heading: "“%{query}” 검색 결과"
   search_none: "“%{query}”에 맞는 설정이 없습니다."

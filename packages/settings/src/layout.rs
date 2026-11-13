@@ -183,6 +183,7 @@ const WORKSPACE: &[Card] = &[
             b(B::GitConfirmPush),
             b(B::GitDefaultCommitMessage),
             b(B::GithubEnabled),
+            b(B::BrowserEnabled),
         ],
     },
     Card::Rows {

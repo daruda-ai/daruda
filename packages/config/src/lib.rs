@@ -19,6 +19,7 @@ pub mod flow;
 pub mod font;
 pub mod general;
 pub mod git;
+pub mod browser;
 pub mod github;
 pub mod keybindings;
 pub mod left_dock;
@@ -72,6 +73,7 @@ pub use config_file::{
 };
 use config_file::{deserialize_config, patch_section};
 pub use git::GitConfig;
+pub use browser::BrowserConfig;
 pub use github::GithubConfig;
 
 /// `value` clamped to `[min, max]`, or `fallback` when it is NaN. TOML reads
@@ -172,6 +174,7 @@ pub struct Config {
     pub clipboard: ClipboardConfig,
     pub git: GitConfig,
     pub github: GithubConfig,
+    pub browser: BrowserConfig,
     pub usage: UsageConfig,
     pub panels: PanelsConfig,
     pub status_bar: StatusBarConfig,
@@ -238,6 +241,7 @@ impl Default for Config {
             clipboard: Default::default(),
             git: Default::default(),
             github: Default::default(),
+            browser: Default::default(),
             usage: Default::default(),
             panels: Default::default(),
             status_bar: Default::default(),

@@ -343,6 +343,7 @@ pub struct SettingsView {
     git_confirm_push: bool,
     git_default_commit_message: bool,
     github_enabled: bool,
+    browser_enabled: bool,
     notify_hook: bool,
     notify_agent_completion: bool,
     notify_agent_waiting: bool,

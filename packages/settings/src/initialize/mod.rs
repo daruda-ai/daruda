@@ -407,6 +407,7 @@ impl SettingsView {
             git_confirm_push: config.git.confirm_push,
             git_default_commit_message: config.git.default_commit_message,
             github_enabled: config.github.enabled,
+            browser_enabled: config.browser.enabled,
             notify_hook: config.notifications.hook_notification_enabled,
             notify_agent_completion: config.notifications.agent_completion_enabled,
             notify_agent_waiting: config.notifications.agent_waiting_enabled,
