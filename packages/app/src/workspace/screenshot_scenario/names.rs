@@ -38,6 +38,8 @@ const NAME_CREATE_PR_MODAL: &str = "create-pr-modal";
 const NAME_PULL_REQUESTS_LIST: &str = "pull-requests-list";
 /// A pull request's detail, a failing check's log open.
 const NAME_PULL_REQUESTS_DETAIL: &str = "pull-requests-detail";
+/// A mergeable pull request's detail, its merge confirmation up.
+const NAME_PULL_REQUESTS_MERGE: &str = "pull-requests-merge";
 const NAME_SETTINGS_ERROR: &str = "settings-error";
 /// CLI token for Settings with a search query typed: the results page.
 const NAME_SETTINGS_SEARCH: &str = "settings-search";
@@ -289,6 +291,7 @@ impl ScreenshotScenario {
             NAME_CREATE_PR_MODAL => Some(Self::CreatePrModal),
             NAME_PULL_REQUESTS_LIST => Some(Self::PullRequestsList),
             NAME_PULL_REQUESTS_DETAIL => Some(Self::PullRequestsDetail),
+            NAME_PULL_REQUESTS_MERGE => Some(Self::PullRequestsMerge),
             NAME_LEFT_DOCK_WORKTREES => Some(Self::LeftDockWorktrees),
             NAME_LEFT_DOCK_RAIL => Some(Self::LeftDockRail),
             NAME_LEFT_DOCK_EXPANDED => Some(Self::LeftDockExpanded),

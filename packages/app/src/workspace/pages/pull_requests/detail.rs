@@ -9,6 +9,7 @@ use daruda_github::{ActionsJob, GhError, PrDetail, PrListItem, ReviewThreads};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
 
+use super::actions::PrAction;
 use super::list::{self, LaneFacts};
 use crate::gh_host::GhHost;
 use crate::github::PrLink;
@@ -63,6 +64,8 @@ pub(in crate::workspace) struct PrDetailState {
     pub threads: Option<Load<ReviewThreads>>,
     /// The failed Actions jobs whose log is open.
     pub(super) logs: BTreeMap<JobKey, Load<String>>,
+    /// What it is doing to the pull request on GitHub.
+    pub(super) action: PrAction,
     /// Which read of the detail may land; a refresh outdates the one before.
     read: u64,
 }
@@ -77,6 +80,7 @@ impl PrDetailState {
             tab: PrTab::default(),
             threads: None,
             logs: BTreeMap::new(),
+            action: PrAction::Idle,
             read: 0,
         }
     }
@@ -91,7 +95,7 @@ impl Workspace {
         self.pages.pull_requests.detail.as_ref().map(|d| d.id)
     }
 
-    fn pr_detail_mut(&mut self, id: PrDetailId) -> Option<&mut PrDetailState> {
+    pub(super) fn pr_detail_mut(&mut self, id: PrDetailId) -> Option<&mut PrDetailState> {
         self.pages
             .pull_requests
             .detail

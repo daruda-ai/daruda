@@ -10,6 +10,7 @@ use super::Page;
 use crate::github::PrPoller;
 use crate::workspace::Workspace;
 
+pub(in crate::workspace) mod actions;
 pub(in crate::workspace) mod detail;
 pub(in crate::workspace) mod detail_render;
 pub(in crate::workspace) mod detail_view;

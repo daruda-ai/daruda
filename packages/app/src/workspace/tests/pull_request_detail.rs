@@ -1,10 +1,11 @@
 //! A pull request's detail on the Pull requests page: what it reads from
-//! GitHub, what it drops, and where Send to agent goes.
+//! GitHub, what it drops, where Send to agent goes, and what its merge,
+//! close, ready and rerun actions ask GitHub.
 
-use daruda_github::fake::{FakeGh, GhOp};
+use daruda_github::fake::{FakeGh, GhCall, GhFailure, GhOp};
 use daruda_github::{
     ActionsJob, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus, FailedCheck,
-    Mergeability, PrDetail, PrListItem, PrState, PrSummary, RepoId,
+    MergeMethod, Mergeability, PrDetail, PrListItem, PrState, PrSummary, RepoId,
 };
 use daruda_store::project::LaneRef;
 use gpui::{AppContext as _, TestAppContext, VisualTestContext};
@@ -12,7 +13,9 @@ use gpui::{AppContext as _, TestAppContext, VisualTestContext};
 use crate::lane::git::{FakeRepo, PushTarget};
 use crate::workspace::pages::Page;
 use crate::workspace::pages::pull_requests::detail::{Load, PrDetailId};
-use crate::workspace::pages::pull_requests::detail_view::{DetailBody, LogSlot, SendSlot};
+use crate::workspace::pages::pull_requests::detail_view::{
+    ActionSlot, DetailBody, LogSlot, SendSlot,
+};
 use crate::workspace::tests::GitFixture;
 
 const JOB: ActionsJob = ActionsJob { run: 11, job: 22 };
@@ -309,4 +312,270 @@ fn without_a_linked_worktree_send_to_agent_is_off(cx: &mut TestAppContext) {
         f.ws.read_with(cx, |ws, _| ws.active_page()),
         Some(Page::PullRequests)
     );
+}
+
+/// A detail GitHub lets merge with a merge commit or a squash, whose failed
+/// checks are two jobs of run 11 and one of run 12.
+fn mergeable(number: u64, head: &str) -> PrDetail {
+    let mut detail = detail(number, head);
+    detail.methods = vec![MergeMethod::Merge, MergeMethod::Squash];
+    let failed = |job: ActionsJob| {
+        let mut entry = detail.checks[0].clone();
+        entry.job = Some(job);
+        entry
+    };
+    detail.checks = vec![
+        failed(JOB),
+        failed(ActionsJob { run: 11, job: 23 }),
+        failed(ActionsJob { run: 12, job: 30 }),
+    ];
+    detail
+}
+
+/// The detail of #7, read, with `detail` as GitHub's answer.
+fn opened(cx: &mut TestAppContext, detail: PrDetail) -> (GitFixture, FakeGh, PrDetailId) {
+    let (f, gh, _) = window(cx);
+    gh.set_pr_detail(&repo(), 7, detail);
+    open(&f, item(7, "feat"), cx);
+    cx.run_until_parked();
+    let id = id(&f, cx);
+    (f, gh, id)
+}
+
+/// Run `ask` in the window and say whether it raised a dialog.
+fn asks(
+    f: &GitFixture,
+    cx: &mut TestAppContext,
+    ask: impl FnOnce(&mut super::Workspace, &mut gpui::Window, &mut gpui::Context<super::Workspace>),
+) -> bool {
+    use crate::ui::WindowExt as _;
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| ask(ws, window, cx));
+        window.has_active_dialog(cx)
+    })
+    .unwrap()
+}
+
+/// The dialog's OK.
+fn confirm(f: &GitFixture, cx: &mut TestAppContext) {
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.run_until_parked();
+    vcx.simulate_keystrokes("enter");
+    vcx.run_until_parked();
+}
+
+fn merges(gh: &FakeGh) -> Vec<GhCall> {
+    gh.calls()
+        .into_iter()
+        .filter(|call| matches!(call, GhCall::MergePr { .. }))
+        .collect()
+}
+
+fn loaded_state(f: &GitFixture, cx: &mut TestAppContext) -> Option<PrState> {
+    match shown(f, cx)?.2 {
+        Load::Ready(loaded) => Some(loaded.summary.state),
+        Load::Loading | Load::Failed(_) => None,
+    }
+}
+
+/// What the actions reported; the fixture's own git watching can fail too.
+fn error_titles(f: &GitFixture, cx: &mut TestAppContext) -> Vec<String> {
+    f.ws.read_with(cx, |ws, _| {
+        ws.error_history()
+            .iter()
+            .filter(|r| {
+                r.dedup_key
+                    .as_deref()
+                    .is_some_and(|key| key.starts_with("github.pr_action"))
+            })
+            .map(|r| r.title.clone())
+            .collect()
+    })
+}
+
+#[gpui::test]
+fn merge_asks_first_then_merges_once_with_the_chosen_method_at_the_shown_head(
+    cx: &mut TestAppContext,
+) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    let reads = gh.count(GhOp::PrDetail);
+    assert!(asks(&f, cx, |ws, window, cx| {
+        ws.ask_pr_merge(id, MergeMethod::Merge, window, cx)
+    }));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::MergePr), 0, "nothing merges before OK");
+
+    confirm(&f, cx);
+    assert_eq!(
+        merges(&gh),
+        [GhCall::MergePr {
+            repo: repo(),
+            number: 7,
+            method: MergeMethod::Merge,
+            head_sha: "abc".into(),
+        }]
+    );
+    assert_eq!(
+        gh.count(GhOp::PrDetail),
+        reads + 1,
+        "the detail is read again"
+    );
+    assert_eq!(loaded_state(&f, cx), Some(PrState::Merged));
+    assert!(error_titles(&f, cx).is_empty());
+}
+
+#[gpui::test]
+fn a_moved_head_says_so_and_reloads_the_detail(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    // Pushed to after the detail was read.
+    let mut moved = mergeable(7, "feat");
+    moved.head_sha = "def".into();
+    gh.set_pr_detail(&repo(), 7, moved);
+    let reads = gh.count(GhOp::PrDetail);
+
+    assert!(asks(&f, cx, |ws, window, cx| {
+        ws.ask_pr_merge(id, MergeMethod::Squash, window, cx)
+    }));
+    confirm(&f, cx);
+    assert_eq!(gh.count(GhOp::MergePr), 1);
+    assert_eq!(
+        error_titles(&f, cx),
+        [crate::surface::strings::error::github_pr_head_moved(7)]
+    );
+    assert_eq!(
+        gh.count(GhOp::PrDetail),
+        reads + 1,
+        "the detail is reloaded"
+    );
+    let Some((_, _, Load::Ready(loaded))) = shown(&f, cx) else {
+        panic!("not read");
+    };
+    assert_eq!(loaded.head_sha, "def", "it shows the head that moved");
+    assert_eq!(loaded.summary.state, PrState::Open);
+}
+
+#[gpui::test]
+fn every_action_is_off_while_one_runs(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    f.ws.update(cx, |ws, cx| ws.rerun_pr_detail_checks(id, cx));
+    let shown = view(&f, cx);
+    let actions = shown
+        .actions
+        .clone()
+        .expect("an open pull request has actions");
+    assert_eq!(actions.merge.slot, ActionSlot::Waiting);
+    assert_eq!(actions.close, ActionSlot::Waiting);
+    let DetailBody::Ready(ready) = shown.body else {
+        panic!("not read");
+    };
+    assert_eq!(ready.rerun, Some(ActionSlot::Running));
+
+    // Asked again, or for another action, while it runs: nothing starts.
+    f.ws.update(cx, |ws, cx| ws.rerun_pr_detail_checks(id, cx));
+    assert!(!asks(&f, cx, |ws, window, cx| ws.ask_pr_close(id, window, cx)));
+    assert!(!asks(&f, cx, |ws, window, cx| {
+        ws.ask_pr_merge(id, MergeMethod::Merge, window, cx)
+    }));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::ClosePr) + gh.count(GhOp::MergePr), 0);
+    let actions = view(&f, cx).actions.expect("still open");
+    assert_eq!(actions.merge.slot, ActionSlot::Ready);
+    assert_eq!(actions.close, ActionSlot::Ready);
+}
+
+#[gpui::test]
+fn ready_close_and_rerun_each_ask_github_once(cx: &mut TestAppContext) {
+    let mut draft = mergeable(7, "feat");
+    draft.summary.state = PrState::Draft;
+    let (f, gh, id) = opened(cx, draft);
+
+    f.ws.update(cx, |ws, cx| ws.rerun_pr_detail_checks(id, cx));
+    cx.run_until_parked();
+    let reruns: Vec<u64> = gh
+        .calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            GhCall::RerunFailed { run, .. } => Some(run),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reruns, [11, 12], "two failed jobs of run 11 are one rerun");
+
+    assert!(view(&f, cx).actions.expect("a draft").ready.is_some());
+    f.ws.update(cx, |ws, cx| ws.mark_pr_detail_ready(id, cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::SetReady), 1);
+    assert_eq!(loaded_state(&f, cx), Some(PrState::Open));
+    assert_eq!(view(&f, cx).actions.expect("open").ready, None);
+
+    assert!(asks(&f, cx, |ws, window, cx| ws.ask_pr_close(id, window, cx)));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::ClosePr), 0, "nothing closes before OK");
+    confirm(&f, cx);
+    assert_eq!(gh.count(GhOp::ClosePr), 1);
+    assert_eq!(loaded_state(&f, cx), Some(PrState::Closed));
+    assert_eq!(view(&f, cx).actions, None, "a closed pull request has none");
+    assert!(error_titles(&f, cx).is_empty());
+}
+
+#[gpui::test]
+fn a_failed_action_reports_what_gh_said(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    gh.fail(
+        GhOp::RerunFailed,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "run 11 cannot be rerun".into(),
+        },
+    );
+    let reads = gh.count(GhOp::PrDetail);
+    f.ws.update(cx, |ws, cx| ws.rerun_pr_detail_checks(id, cx));
+    cx.run_until_parked();
+    let report = f.ws.read_with(cx, |ws, _| {
+        ws.error_history()
+            .iter()
+            .find(|r| r.dedup_key.as_deref() == Some("github.pr_action"))
+            .cloned()
+            .expect("the failure is reported")
+    });
+    assert_eq!(
+        report.title,
+        crate::surface::strings::error::github_pr_rerun_failed(7)
+    );
+    assert!(
+        report.message.contains("run 11 cannot be rerun"),
+        "{}",
+        report.message
+    );
+    assert_eq!(gh.count(GhOp::PrDetail), reads, "the detail stays as shown");
+    let DetailBody::Ready(ready) = view(&f, cx).body else {
+        panic!("not read");
+    };
+    assert_eq!(
+        ready.rerun,
+        Some(ActionSlot::Ready),
+        "and can be tried again"
+    );
+}
+
+#[gpui::test]
+fn an_answer_landing_after_its_detail_was_replaced_is_dropped(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    gh.set_pr_detail(&repo(), 8, mergeable(8, "other"));
+    f.ws.update(cx, |ws, cx| ws.rerun_pr_detail_checks(id, cx));
+    let reads = gh.count(GhOp::PrDetail);
+    open(&f, item(8, "other"), cx);
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::RerunFailed), 2, "the rerun still ran");
+    assert_eq!(
+        gh.count(GhOp::PrDetail),
+        reads + 1,
+        "only #8's own read: #7's answer reloads nothing"
+    );
+    let Some((shown_id, 8, Load::Ready(_))) = shown(&f, cx) else {
+        panic!("{:?}", shown(&f, cx));
+    };
+    assert_ne!(shown_id, id);
+    let actions = view(&f, cx).actions.expect("#8 is open");
+    assert_eq!(actions.merge.slot, ActionSlot::Ready, "#8 runs nothing");
 }

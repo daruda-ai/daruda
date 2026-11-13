@@ -8,6 +8,7 @@ use daruda_github::{
     PrListItem, PrState, ReviewThread, ReviewThreads, ReviewerState,
 };
 
+use super::actions::{self, PrAction};
 use super::detail::{Load, PrDetailId, PrDetailState, PrTab};
 use super::list::{self, LaneFacts, RowLane};
 use crate::surface::strings::{git as git_s, notification, pull_requests as s};
@@ -36,6 +37,59 @@ impl SendSlot {
     pub(in crate::workspace) fn enabled(self) -> bool {
         self == Self::Ready
     }
+}
+
+/// Whether an action on the pull request can be pressed, and why not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum ActionSlot {
+    Ready,
+    /// This action is running.
+    Running,
+    /// Another action on the same pull request is running.
+    Waiting,
+    /// Said in its tooltip.
+    Blocked(String),
+}
+
+impl ActionSlot {
+    /// `mine` running, another running, or idle and `blocked` or not.
+    fn of(running: PrAction, mine: PrAction, blocked: Option<String>) -> Self {
+        match running {
+            PrAction::Idle => blocked.map_or(Self::Ready, Self::Blocked),
+            running if running == mine => Self::Running,
+            _ => Self::Waiting,
+        }
+    }
+
+    pub(in crate::workspace) fn enabled(&self) -> bool {
+        *self == Self::Ready
+    }
+
+    pub(in crate::workspace) fn reason(&self) -> Option<String> {
+        match self {
+            Self::Blocked(reason) => Some(reason.clone()),
+            Self::Ready | Self::Running | Self::Waiting => None,
+        }
+    }
+}
+
+/// The merge button and its menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct MergeView {
+    /// The preferred method's label, or a plain one when none is allowed.
+    pub label: String,
+    /// The allowed methods, preferred first, and their labels.
+    pub methods: Vec<(MergeMethod, String)>,
+    pub slot: ActionSlot,
+}
+
+/// The header's actions on an open or draft pull request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct HeaderActions {
+    pub merge: MergeView,
+    pub close: ActionSlot,
+    /// Only on a draft.
+    pub ready: Option<ActionSlot>,
 }
 
 /// A failed Actions check's log, which it can open under it.
@@ -101,6 +155,8 @@ pub(in crate::workspace) struct ReadyView {
     pub checks_summary: String,
     pub checks: Vec<CheckRowView>,
     pub checks_send: SendSlot,
+    /// Only when a failed check is an Actions job, which can be rerun.
+    pub rerun: Option<ActionSlot>,
     pub threads: ThreadsView,
     pub threads_send: SendSlot,
     /// `None` when the author wrote none.
@@ -128,6 +184,8 @@ pub(in crate::workspace) struct PrDetailView {
     pub meta: String,
     pub url: Option<String>,
     pub lane: Option<RowLane>,
+    /// Once read, while the pull request is open or a draft.
+    pub actions: Option<HeaderActions>,
     pub tab: PrTab,
     pub tabs: Vec<(PrTab, String)>,
     pub body: DetailBody,
@@ -166,6 +224,7 @@ pub(in crate::workspace) fn view(
         meta: meta(item, loaded, now),
         url: pr.web_url().map(str::to_owned),
         lane: row_lane.clone(),
+        actions: loaded.and_then(|loaded| header_actions(loaded, state.action)),
         tab: state.tab,
         tabs: PrTab::ALL
             .into_iter()
@@ -202,6 +261,8 @@ fn ready(
             .map(|entry| check_row(entry, state))
             .collect(),
         checks_send: send(loaded.summary.failed.is_empty()),
+        rerun: (!actions::failed_runs(&loaded.checks).is_empty())
+            .then(|| ActionSlot::of(state.action, PrAction::Rerunning, None)),
         threads: match &state.threads {
             None | Some(Load::Loading) => ThreadsView::Loading,
             Some(Load::Failed(reason)) => ThreadsView::Failed(reason.clone()),
@@ -212,6 +273,48 @@ fn ready(
             .filter(|body| !body.is_empty())
             .map(str::to_owned),
         side: side(item, loaded, lane),
+    }
+}
+
+/// Merge is offered only when GitHub says it can go now; otherwise its
+/// tooltip says why, in the words the summary column uses.
+fn header_actions(loaded: &PrDetail, running: PrAction) -> Option<HeaderActions> {
+    let draft = match loaded.summary.state {
+        PrState::Open => false,
+        PrState::Draft => true,
+        PrState::Merged | PrState::Closed => return None,
+    };
+    let methods: Vec<(MergeMethod, String)> = actions::merge_menu(&loaded.methods)
+        .into_iter()
+        .map(|method| (method, merge_action_label(method)))
+        .collect();
+    let blocked = match loaded.mergeability {
+        _ if methods.is_empty() => Some(s::merge_no_methods()),
+        Mergeability::Ready => None,
+        Mergeability::Blocked(reason) => Some(s::merge_blocked(block_label(reason))),
+        Mergeability::Conflicting => Some(s::merge_blocked(s::merge_conflicting())),
+        Mergeability::Unknown => Some(s::merge_blocked(s::merge_unknown())),
+    };
+    Some(HeaderActions {
+        merge: MergeView {
+            label: methods
+                .first()
+                .map_or_else(s::merge_button, |(_, label)| label.clone()),
+            methods,
+            slot: ActionSlot::of(running, PrAction::Merging, blocked),
+        },
+        close: ActionSlot::of(running, PrAction::Closing, None),
+        ready: draft.then(|| ActionSlot::of(running, PrAction::MarkingReady, None)),
+    })
+}
+
+/// What merging with `method` is called on its button, menu item and
+/// confirmation.
+pub(in crate::workspace) fn merge_action_label(method: MergeMethod) -> String {
+    match method {
+        MergeMethod::Squash => s::merge_squash(),
+        MergeMethod::Merge => s::merge_commit(),
+        MergeMethod::Rebase => s::merge_rebase(),
     }
 }
 
@@ -685,6 +788,106 @@ mod tests {
         let ready = ready(read);
         assert_eq!(ready.description, None, "a blank body reads as none");
         assert_eq!(ready.side.lane, None);
+    }
+
+    #[test]
+    fn the_header_offers_what_github_allows_on_an_open_pull_request() {
+        // (label, state, mergeability, allowed, running, button, menu, merge, ready)
+        let behind = Mergeability::Blocked(BlockReason::Behind);
+        let blocked = ActionSlot::Blocked("Can’t merge: Behind the base branch".into());
+        let cases = [
+            (
+                "squash preferred",
+                PrState::Open,
+                Mergeability::Ready,
+                vec![MergeMethod::Rebase, MergeMethod::Merge, MergeMethod::Squash],
+                PrAction::Idle,
+                "Squash and merge",
+                vec![
+                    "Squash and merge",
+                    "Create a merge commit",
+                    "Rebase and merge",
+                ],
+                ActionSlot::Ready,
+                None,
+            ),
+            (
+                "no squash",
+                PrState::Open,
+                Mergeability::Ready,
+                vec![MergeMethod::Rebase, MergeMethod::Merge],
+                PrAction::Idle,
+                "Create a merge commit",
+                vec!["Create a merge commit", "Rebase and merge"],
+                ActionSlot::Ready,
+                None,
+            ),
+            (
+                "behind",
+                PrState::Open,
+                behind,
+                vec![MergeMethod::Squash],
+                PrAction::Idle,
+                "Squash and merge",
+                vec!["Squash and merge"],
+                blocked.clone(),
+                None,
+            ),
+            (
+                "no method",
+                PrState::Open,
+                Mergeability::Ready,
+                vec![],
+                PrAction::Idle,
+                "Merge",
+                vec![],
+                ActionSlot::Blocked(s::merge_no_methods()),
+                None,
+            ),
+            (
+                "draft, merging",
+                PrState::Draft,
+                Mergeability::Ready,
+                vec![MergeMethod::Squash],
+                PrAction::Merging,
+                "Squash and merge",
+                vec!["Squash and merge"],
+                ActionSlot::Running,
+                Some(ActionSlot::Waiting),
+            ),
+        ];
+        for (label, pr_state, mergeability, allowed, running, button, menu, merge, ready) in cases {
+            let mut loaded = detail(false, 0, false);
+            loaded.summary.state = pr_state;
+            loaded.mergeability = mergeability;
+            loaded.methods = allowed;
+            let mut state = state(Load::Ready(loaded), false);
+            state.action = running;
+            let actions = view(&state, None, false, Utc::now()).actions.expect(label);
+            assert_eq!(actions.merge.label, button, "{label}: button");
+            let labels: Vec<_> = actions
+                .merge
+                .methods
+                .iter()
+                .map(|(_, l)| l.as_str())
+                .collect();
+            assert_eq!(labels, menu, "{label}: menu");
+            assert_eq!(actions.merge.slot, merge, "{label}: merge");
+            assert_eq!(actions.ready, ready, "{label}: ready");
+        }
+
+        for done in [PrState::Merged, PrState::Closed] {
+            let mut loaded = detail(false, 0, false);
+            loaded.summary.state = done;
+            let state = state(Load::Ready(loaded), false);
+            assert_eq!(
+                view(&state, None, false, Utc::now()).actions,
+                None,
+                "{done:?}"
+            );
+        }
+        let unread = view(&state(Load::Loading, false), None, false, Utc::now());
+        assert_eq!(unread.actions, None, "nothing to act on before it is read");
     }
 
     #[test]

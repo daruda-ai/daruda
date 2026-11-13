@@ -20,6 +20,7 @@ use crate::github::{PrLink, PrLookup, PrPoller};
 use crate::lane::git::{GitTracking, PushTarget};
 use crate::workspace::Workspace;
 use crate::workspace::pages::Page;
+use crate::workspace::pages::pull_requests::detail::Load;
 
 fn repo() -> RepoId {
     RepoId::new(GITHUB_HOST, "daruda", "daruda")
@@ -50,6 +51,15 @@ fn pr(number: u64, head: &str, title: &str, state: PrState, checks: CheckRollup)
         review: None,
         updated_at: String::new(),
     }
+}
+
+/// What a capture of the pull request detail shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum PrDetailShot {
+    /// The first failing check's log open.
+    FailedLog,
+    /// A mergeable pull request, its squash-merge confirmation up.
+    MergeConfirm,
 }
 
 /// What the active lane's PR looks like in a capture.
@@ -312,9 +322,10 @@ impl Workspace {
     }
 
     /// The detail of the active worktree's pull request on its Checks tab,
-    /// with the first failing check's log open.
+    /// as `shot` says.
     pub(in crate::workspace) fn seed_pr_detail_for_shot(
         &mut self,
+        shot: PrDetailShot,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -354,14 +365,19 @@ impl Workspace {
             failed("test (ubuntu-latest)", test),
             failed("clippy", clippy),
         ];
+        let merge_ready = shot == PrDetailShot::MergeConfirm;
         let detail = PrDetail {
             summary,
             body: "Narrow docks clipped the worktree names.\n\n- Measure the label once per frame\n- Keep the badge column fixed".into(),
             head_sha: "4f9c2e1".into(),
             base_branch: "main".into(),
             author: Some("comelf".into()),
-            mergeability: Mergeability::Blocked(BlockReason::Requirements),
-            methods: vec![MergeMethod::Merge, MergeMethod::Squash],
+            mergeability: if merge_ready {
+                Mergeability::Ready
+            } else {
+                Mergeability::Blocked(BlockReason::Requirements)
+            },
+            methods: vec![MergeMethod::Merge, MergeMethod::Squash, MergeMethod::Rebase],
             reviewers: vec![
                 ("hanji".into(), ReviewerState::ChangesRequested),
                 ("contributor".into(), ReviewerState::Commented),
@@ -377,7 +393,7 @@ impl Workspace {
             ],
             open_threads: 3,
         };
-        gh.set_pr_detail(&row.repo, row.pr.number, detail);
+        gh.set_pr_detail(&row.repo, row.pr.number, detail.clone());
         gh.set_failed_log(
             test,
             "test (ubuntu-latest)\tRun tests\t2026-11-13T02:11:04.1Z ##[group]Run cargo test --locked -p daruda\n\
@@ -396,7 +412,18 @@ impl Workspace {
             .filter(|d| d.item == item)
             .map(|d| d.id)
         {
-            self.toggle_pr_check_log(id, test, cx);
+            match shot {
+                PrDetailShot::FailedLog => self.toggle_pr_check_log(id, test, cx),
+                PrDetailShot::MergeConfirm => {
+                    // The dropdown's open state lives inside the widget, out
+                    // of reach of a capture, so the shot is the dialog a
+                    // menu item raises; it needs the detail already read.
+                    if let Some(shown) = self.pages.pull_requests.detail.as_mut() {
+                        shown.load = Load::Ready(detail);
+                    }
+                    self.ask_pr_merge(id, MergeMethod::Squash, window, cx);
+                }
+            }
         }
     }
 }

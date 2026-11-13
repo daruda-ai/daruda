@@ -1204,6 +1204,27 @@ pull_requests:
   # The summary column's worktree when none works on the pull request.
   lane_none: "None"
   fork_lane_note: "A review worktree: its pushes do not reach this pull request."
+  # The detail's header buttons.
+  action_ready: "Ready for review"
+  action_close: "Close"
+  # The Checks tab's button: reruns the failed jobs of each failed Actions run.
+  action_rerun: "Rerun failed checks"
+  # Merge methods as the merge button, its menu and the confirmation name them.
+  merge_squash: "Squash and merge"
+  merge_commit: "Create a merge commit"
+  merge_rebase: "Rebase and merge"
+  # The merge button when the repository allows no method.
+  merge_button: "Merge"
+  # Under the merge menu's methods.
+  merge_menu_note: "You confirm once more before it merges"
+  # Tooltip on the merge button when GitHub says it cannot merge now.
+  merge_blocked: "Can’t merge: %{reason}"
+  merge_no_methods: "This repository allows no merge method"
+  merge_confirm_title: "%{method} #%{number}?"
+  merge_confirm_body: "“%{title}” goes into %{base}. Only the head commit shown here is merged: if the branch moved since, nothing is."
+  close_confirm_title: "Close #%{number}?"
+  close_confirm_body: "“%{title}” is closed without merging. Its branch stays, and it can be reopened on GitHub."
+  close_confirm_ok: "Close pull request"
 
 # Settings panel
 settings:
@@ -1679,6 +1700,12 @@ error:
   github_lane_changed: "The worktree changed while reading from GitHub; nothing was sent"
   github_send_failed: "The agent pane did not take the text"
   github_no_open_comments: "This pull request has no unresolved review comments"
+  github_pr_merge_failed: "Merging #%{number} failed"
+  github_pr_close_failed: "Closing #%{number} failed"
+  github_pr_ready_failed: "Marking #%{number} ready for review failed"
+  github_pr_rerun_failed: "Rerunning the failed checks of #%{number} failed"
+  # A merge pinned to the shown head commit found the branch moved on.
+  github_pr_head_moved: "#%{number} changed since it was shown; nothing was merged"
   github_read_failed: "Reading from GitHub failed"
   git_restore_failed: "git restore failed"
   git_restore_staged_all_failed: "git restore --staged . failed"

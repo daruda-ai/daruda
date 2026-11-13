@@ -6,13 +6,14 @@ use gpui::{AnyElement, Context, Div, FontWeight, Hsla, SharedString, div, prelud
 
 use super::detail::{Load, PrDetailId, PrTab};
 use super::detail_view::{
-    CheckRowView, DetailBody, Fact, LogSlot, Mood, PrDetailView, ReadyView, SendSlot, SideView,
-    ThreadRowView, ThreadsView,
+    ActionSlot, CheckRowView, DetailBody, Fact, HeaderActions, LogSlot, MergeView, Mood,
+    PrDetailView, ReadyView, SendSlot, SideView, ThreadRowView, ThreadsView,
 };
 use crate::surface::strings::{common, pull_requests as s};
 use crate::ui::{
-    Badge, Disableable as _, Selectable as _, Sizable as _, button, button_compact, button_group,
-    button_icon, button_with_icon, icons, theme,
+    Badge, Button, Disableable as _, DropdownMenu as _, PopupMenuItem, Selectable as _,
+    Sizable as _, button, button_compact, button_group, button_icon, button_primary,
+    button_with_icon, icons, menu_builder, theme,
 };
 use crate::workspace::Workspace;
 
@@ -160,7 +161,77 @@ fn title_block(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
                 .flex_none()
                 .gap(px(theme::GAP_SM))
                 .children(lane)
-                .children(github),
+                .children(github)
+                .children(
+                    view.actions
+                        .as_ref()
+                        .map(|actions| header_actions(id, actions, cx)),
+                ),
+        )
+        .into_any_element()
+}
+
+/// An action button as its slot says: spinning while it runs, off while
+/// another runs, and saying why when it cannot run.
+fn with_slot(button: Button, slot: &ActionSlot) -> Button {
+    button
+        .loading(*slot == ActionSlot::Running)
+        .disabled(!slot.enabled())
+        .when_some(slot.reason(), |button, reason| button.tooltip(reason))
+}
+
+/// Ready for review on a draft, Close, and the merge button.
+fn header_actions(id: PrDetailId, actions: &HeaderActions, cx: &Context<Workspace>) -> AnyElement {
+    let ready = actions.ready.as_ref().map(|slot| {
+        with_slot(button("pr-detail-ready", s::action_ready()), slot)
+            .debug_selector(|| "pr-detail-ready".into())
+            .on_click(cx.listener(move |ws, _, _, cx| ws.mark_pr_detail_ready(id, cx)))
+    });
+    div()
+        .flex()
+        .gap(px(theme::GAP_SM))
+        .children(ready)
+        .child(
+            with_slot(button("pr-detail-close", s::action_close()), &actions.close)
+                .debug_selector(|| "pr-detail-close".into())
+                .on_click(cx.listener(move |ws, _, window, cx| ws.ask_pr_close(id, window, cx))),
+        )
+        .child(merge_button(id, &actions.merge, cx))
+        .into_any_element()
+}
+
+/// The preferred method's label, opening a menu of the allowed methods;
+/// each asks before it merges. Without a menu while it cannot merge.
+fn merge_button(id: PrDetailId, merge: &MergeView, cx: &Context<Workspace>) -> AnyElement {
+    let button = with_slot(
+        button_primary("pr-detail-merge", merge.label.clone()),
+        &merge.slot,
+    )
+    .debug_selector(|| "pr-detail-merge".into())
+    .child(icons::icon(icons::EXPAND_MORE));
+    if !merge.slot.enabled() {
+        return button.into_any_element();
+    }
+    let methods = merge.methods.clone();
+    let workspace = cx.weak_entity();
+    button
+        .dropdown_menu_with_anchor(
+            gpui::Anchor::TopRight,
+            menu_builder(move |menu, _, _| {
+                methods
+                    .iter()
+                    .cloned()
+                    .fold(menu, |menu, (method, label)| {
+                        let workspace = workspace.clone();
+                        menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                            if let Some(ws) = workspace.upgrade() {
+                                ws.update(cx, |ws, cx| ws.ask_pr_merge(id, method, window, cx));
+                            }
+                        }))
+                    })
+                    .separator()
+                    .label(s::merge_menu_note())
+            }),
         )
         .into_any_element()
 }
@@ -210,6 +281,7 @@ fn send_line(
     nothing: String,
     on_send: impl Fn(&mut Workspace, &mut gpui::Window, &mut Context<Workspace>) + 'static,
     selector: &'static str,
+    extra: Option<AnyElement>,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -231,6 +303,7 @@ fn send_line(
                 .text_color(t.text_muted)
                 .children(summary),
         )
+        .children(extra)
         .child(
             button_compact(selector, s::send_to_agent())
                 .debug_selector(move || selector.into())
@@ -258,6 +331,12 @@ fn checks(id: PrDetailId, ready: &ReadyView, cx: &Context<Workspace>) -> AnyElem
             s::send_nothing_checks(),
             move |ws, window, cx| ws.send_pr_detail_checks(id, window, cx),
             "pr-detail-send-checks",
+            ready.rerun.as_ref().map(|slot| {
+                with_slot(button_compact("pr-detail-rerun", s::action_rerun()), slot)
+                    .debug_selector(|| "pr-detail-rerun".into())
+                    .on_click(cx.listener(move |ws, _, _, cx| ws.rerun_pr_detail_checks(id, cx)))
+                    .into_any_element()
+            }),
             cx,
         ))
         .children(rows)
@@ -381,6 +460,7 @@ fn threads(id: PrDetailId, ready: &ReadyView, cx: &Context<Workspace>) -> AnyEle
         s::send_nothing_threads(),
         move |ws, window, cx| ws.send_pr_detail_threads(id, window, cx),
         "pr-detail-send-threads",
+        None,
         cx,
     );
     let body: Vec<AnyElement> = match &ready.threads {
