@@ -40,6 +40,9 @@ profiles use one bot token; a path lint cannot detect that collision.
   `Reconciling` has no clearing `Drop` for that reason. A pass that ends,
   whether it got through or stopped on a handled failure, clears the marker
   through `finish` or `abandon`; never leave it behind on a reported error.
+- The browser tool dirs (`browser_tool_dir()`, `browser_socket_dir()`) are
+  profile-scoped, not shared exceptions; Chrome for Testing sits outside
+  daruda's storage in `$HOME/.agent-browser/`.
 
 See [storage locations](../../CONTRIBUTING.md#storage-locations) for the
 contributor-facing directory map and manual recovery.

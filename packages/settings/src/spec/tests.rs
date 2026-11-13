@@ -161,6 +161,7 @@ fn coverage_of(patch: &SettingsPatch) -> Coverage {
         | SettingsPatch::GitConfirmPush(_)
         | SettingsPatch::GitDefaultCommitMessage(_)
         | SettingsPatch::GithubEnabled(_)
+        | SettingsPatch::BrowserEnabled(_)
         | SettingsPatch::NotifyHook(_)
         | SettingsPatch::NotifyAgentCompletion(_)
         | SettingsPatch::NotifyAgentWaiting(_)

@@ -331,6 +331,10 @@ pub(super) fn bool(setting: BoolSetting) -> RowCopy {
             label: s::settings::label_github_enabled,
             hint: s::settings::hint_github_enabled,
         },
+        BoolSetting::BrowserEnabled => RowCopy {
+            label: s::settings::label_browser_enabled,
+            hint: s::settings::hint_browser_enabled,
+        },
         BoolSetting::NotifyHook => RowCopy {
             label: s::settings::label_notify_hook,
             hint: s::settings::hint_notify_hook,

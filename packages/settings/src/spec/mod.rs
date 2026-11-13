@@ -389,6 +389,13 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.github.enabled,
     },
     BoolSpec {
+        setting: BoolSetting::BrowserEnabled,
+        get: |w| w.browser_enabled,
+        set: |w, v| w.browser_enabled = v,
+        patch: SettingsPatch::BrowserEnabled,
+        show: |c| c.browser.enabled,
+    },
+    BoolSpec {
         setting: BoolSetting::NotifyHook,
         get: |w| w.notify_hook,
         set: |w, v| w.notify_hook = v,

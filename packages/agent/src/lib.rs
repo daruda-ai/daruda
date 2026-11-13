@@ -15,6 +15,7 @@
 pub mod accounts;
 pub mod activity;
 mod activity_scan;
+pub mod browser_tool;
 pub mod codex_activity;
 pub mod hooks;
 mod http;

@@ -4,13 +4,17 @@ use super::AgentChatConnectionPlan;
 use crate::agent::launch_resolve::{
     AgentLaunchSpec, ConnectCommandError, account_recipe_for_connect, resolve_launch,
 };
+use crate::lane::Lane;
+use crate::lane::session_host::UnusableSessionHost;
+use crate::surface::constants::BROWSER_MCP_SERVER_NAME;
 use crate::surface::strings as s;
 use crate::workspace::{Workspace, main_area::pane_tree::PaneId};
 use daruda_acp::NodeProgress;
 use daruda_chat::view::RuntimePrepPhase;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::{LaneSessionHost, PaneCwd};
-use gpui::Context;
+use gpui::{App, Context};
+use std::path::{Path, PathBuf};
 
 /// The banner phase for a runtime-provisioning milestone, or `None` for
 /// milestones that shouldn't surface a banner (system node found, or a cache
@@ -24,6 +28,23 @@ pub(super) fn runtime_prep_phase(progress: NodeProgress) -> Option<RuntimePrepPh
     }
 }
 
+/// The root a lane's browser session is named from, when the lane's agent
+/// sessions run on this machine. Keyed by the lane, not the pane's cwd, so
+/// every chat in one lane shares one browser.
+fn local_lane_root(lane: Option<&Lane>, host: Option<&LaneSessionHost>) -> Option<PathBuf> {
+    if host.is_some_and(LaneSessionHost::is_remote) {
+        return None;
+    }
+    lane.map(|lane| lane.path.clone())
+}
+
+/// The launch a pane's agent gets. `repoint_to` names the agent to rewrite
+/// a stale `agent_id` to, when the pane's own agent left the catalog.
+struct PaneLaunch {
+    spec: AgentLaunchSpec,
+    repoint_to: Option<String>,
+}
+
 impl Workspace {
     /// Resolve the launch spec for `pane_id`'s agent, reconciling the view when
     /// its `agent_id` is stale (a live config reload removed/renamed it) by
@@ -33,26 +54,34 @@ impl Workspace {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Option<AgentLaunchSpec> {
-        let agent_id = self
-            .agent_chat_view(pane_id)?
-            .read(cx)
-            .agent_id()
-            .to_owned();
-        // Happy path: the view's agent is still in the catalog.
-        if let Some(spec) = self.agent_launch_for(&agent_id) {
-            return Some(spec);
-        }
-        // Stale id — reconcile so the chip / persisted state stop lying, then
-        // launch the effective agent (a catalog entry, or the Claude id when the
-        // catalog is somehow empty).
-        let effective_id = self.open_agent_id(None);
-        if self.agent_chat_view(pane_id).is_some() {
-            self.repoint_agent_chat(pane_id, effective_id.clone(), cx);
+        let PaneLaunch { spec, repoint_to } = self.pane_launch(pane_id, cx)?;
+        // Reconcile so the chip / persisted state stop lying.
+        if let Some(effective_id) = repoint_to {
+            self.repoint_agent_chat(pane_id, effective_id, cx);
             self.mutate_durable(cx, |_, _| {});
         }
-        Some(self.agent_launch_for(&effective_id).unwrap_or_else(|| {
+        Some(spec)
+    }
+
+    /// The launch `pane_id`'s agent gets, without reconciling: a stale id
+    /// launches the effective agent (a catalog entry, or the Claude id when
+    /// the catalog is somehow empty).
+    fn pane_launch(&self, pane_id: PaneId, cx: &App) -> Option<PaneLaunch> {
+        let agent_id = self.agent_chat_view(pane_id)?.read(cx).agent_id();
+        if let Some(spec) = self.agent_launch_for(agent_id) {
+            return Some(PaneLaunch {
+                spec,
+                repoint_to: None,
+            });
+        }
+        let effective_id = self.open_agent_id(None);
+        let spec = self.agent_launch_for(&effective_id).unwrap_or_else(|| {
             AgentLaunchSpec::of(&daruda_config::AgentDefinition::claude_default())
-        }))
+        });
+        Some(PaneLaunch {
+            spec,
+            repoint_to: Some(effective_id),
+        })
     }
 
     #[cfg(test)]
@@ -113,14 +142,8 @@ impl Workspace {
         // lane's session host, not by whatever host (if any) `launch` itself
         // names.
         let owning_lane_ref = self.lane_ref_for_pane(pane_id);
-        let owning_lane = owning_lane_ref.and_then(|lane_ref| self.lane_for(lane_ref));
-        let resolved_host = match owning_lane.map(|lane| {
-            lane.effective_session_host(
-                &launch,
-                &self.mirrors.session_hosts,
-                &self.mirrors.session_host_tombstones,
-            )
-        }) {
+        let (owning_lane, owning_host) = self.owning_lane_and_host(pane_id, &launch).unzip();
+        let resolved_host = match owning_host {
             None => None,
             Some(Ok(host)) => Some(host),
             // The same surface a launch that cannot produce a command gets
@@ -142,6 +165,7 @@ impl Workspace {
         let is_remote = resolved_host
             .as_ref()
             .is_some_and(LaneSessionHost::is_remote);
+        let local_root = local_lane_root(owning_lane, resolved_host.as_ref());
         if is_remote
             && self
                 .main_area
@@ -239,11 +263,12 @@ impl Workspace {
             &resolved.resolved_cwd,
         );
 
-        let mcp_servers = if self.offers_control_tools(pane_id, cx) {
-            crate::orchestrator::session_tools(cx).into_iter().collect()
-        } else {
-            Vec::new()
-        };
+        let mcp_servers = self.session_mcp_servers(
+            pane_id,
+            local_root.as_deref(),
+            crate::orchestrator::session_tools,
+            cx,
+        );
         Some(AgentChatConnectionPlan {
             agent_id,
             launch_spec,
@@ -253,6 +278,59 @@ impl Workspace {
             prepared,
             mcp_servers,
         })
+    }
+
+    /// `pane_id`'s owning lane and the host its sessions run on for
+    /// `launch`; `None` for a pane with no owning lane.
+    fn owning_lane_and_host(
+        &self,
+        pane_id: PaneId,
+        launch: &daruda_config::AgentLaunch,
+    ) -> Option<(&Lane, Result<LaneSessionHost, UnusableSessionHost>)> {
+        let lane = self.lane_for(self.lane_ref_for_pane(pane_id)?)?;
+        let host = lane.effective_session_host(
+            launch,
+            &self.mirrors.session_hosts,
+            &self.mirrors.session_host_tombstones,
+        );
+        Some((lane, host))
+    }
+
+    /// The MCP servers for `pane_id`: the orchestrator's pane gets only
+    /// `control`; a local lane's pane gets the browser, which a remote adapter
+    /// could not run; a read-only CLI snapshot gets nothing.
+    fn session_mcp_servers(
+        &self,
+        pane_id: PaneId,
+        local_root: Option<&Path>,
+        control: impl FnOnce(&mut App) -> Option<daruda_acp::McpServer>,
+        cx: &mut Context<Self>,
+    ) -> Vec<daruda_acp::McpServer> {
+        if self.loads_snapshot(pane_id, cx) {
+            return Vec::new();
+        }
+        if self.offers_control_tools(pane_id, cx) {
+            control(cx).into_iter().collect()
+        } else {
+            local_root
+                .and_then(|root| crate::browser_tool::launch_for_lane(root, cx))
+                .map(|launch| {
+                    daruda_acp::stdio_mcp_server(
+                        BROWSER_MCP_SERVER_NAME.to_owned(),
+                        launch.command,
+                        launch.args,
+                        launch.env,
+                    )
+                })
+                .into_iter()
+                .collect()
+        }
+    }
+
+    fn loads_snapshot(&self, pane_id: PaneId, cx: &App) -> bool {
+        self.agent_chat_view(pane_id)
+            .and_then(|view| view.read(cx).load_intent())
+            == Some(daruda_chat::view::LoadIntent::Snapshot)
     }
 
     /// Whether this pane's session may reach the control MCP server.
@@ -273,19 +351,45 @@ impl Workspace {
             && self.orchestrator_chat_pane().map(|p| p.pane) == Some(pane_id)
     }
 
-    /// The servers a session planned for `pane_id` would be offered, for the
-    /// test that pins the threat model: exactly one pane in the process may be
-    /// offered the server.
     #[cfg(test)]
-    pub(crate) fn mcp_servers_for_pane_for_test(
+    pub(crate) fn offers_control_tools_for_test(
         &self,
         pane_id: PaneId,
         cx: &Context<Self>,
+    ) -> bool {
+        self.offers_control_tools(pane_id, cx)
+    }
+
+    /// The servers a session planned for `pane_id` would be offered, through
+    /// the same decision a connect makes but without reconciling a stale agent.
+    /// The control server comes from `orchestrator::mcp_server`, so asking
+    /// schedules no run notices. A missing pane or an unusable lane host,
+    /// which refuse the connect, are offered nothing.
+    #[cfg(test)]
+    pub(crate) fn mcp_servers_for_pane_for_test(
+        &mut self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
     ) -> Vec<daruda_acp::McpServer> {
-        if !self.offers_control_tools(pane_id, cx) {
+        let Some(PaneLaunch {
+            spec: AgentLaunchSpec { launch, .. },
+            ..
+        }) = self.pane_launch(pane_id, cx)
+        else {
             return Vec::new();
-        }
-        crate::orchestrator::mcp_server(cx).into_iter().collect()
+        };
+        let (owning_lane, host) = self.owning_lane_and_host(pane_id, &launch).unzip();
+        let host = match host {
+            Some(Err(_)) => return Vec::new(),
+            host => host.and_then(Result::ok),
+        };
+        let local_root = local_lane_root(owning_lane, host.as_ref());
+        self.session_mcp_servers(
+            pane_id,
+            local_root.as_deref(),
+            |cx| crate::orchestrator::mcp_server(cx),
+            cx,
+        )
     }
 }
 

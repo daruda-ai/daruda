@@ -68,6 +68,16 @@ impl Workspace {
             .collect()
     }
 
+    /// Make the next allocated id at least `next`.
+    pub(crate) fn skip_ids_below_for_test(&mut self, next: u64) {
+        self.next_id = self.next_id.max(next);
+    }
+
+    /// Whether `pane` is an agent-chat pane in any of this workspace's lanes.
+    pub(crate) fn has_agent_chat_pane_for_test(&self, pane: PaneId) -> bool {
+        self.agent_chat_view(pane).is_some()
+    }
+
     /// Give `pane` the live session `session`, as a connect would.
     pub(crate) fn set_pane_session_for_test(
         &mut self,

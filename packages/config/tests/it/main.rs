@@ -8,6 +8,7 @@ mod agent_icon;
 mod agent_preset;
 mod agent_transcript_default;
 mod agent_vocabulary;
+mod browser;
 mod claude_status;
 mod config_agent_catalog;
 mod config_defaults;

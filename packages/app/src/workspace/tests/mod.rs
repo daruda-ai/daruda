@@ -6,6 +6,7 @@ mod agent_chat_disconnect;
 mod agent_chat_events;
 mod agent_switch_cost;
 mod annotation_ops_tests;
+mod browser_tool_notices;
 mod close_running;
 mod config_mirror;
 mod context_menu_ops;

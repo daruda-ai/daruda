@@ -12,6 +12,7 @@ mod app_presence;
 mod assets;
 mod bind_keys;
 mod bootstrap;
+mod browser_tool;
 mod config_watcher;
 mod control;
 mod diagnostics;

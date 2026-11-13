@@ -6,6 +6,7 @@
 
 pub mod account_env;
 pub mod agent;
+pub mod browser;
 pub mod claude_status;
 pub mod clipboard;
 pub mod colors;
@@ -62,6 +63,7 @@ pub use agent::{
     delegated_default, delegated_default_for_command, effective_delegated_mode, is_valid_env_name,
     mode_display_name, with_transcript_default,
 };
+pub use browser::BrowserConfig;
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
 pub use colors::{AnsiPalette, ColorConfig, HexColor};
@@ -172,6 +174,7 @@ pub struct Config {
     pub clipboard: ClipboardConfig,
     pub git: GitConfig,
     pub github: GithubConfig,
+    pub browser: BrowserConfig,
     pub usage: UsageConfig,
     pub panels: PanelsConfig,
     pub status_bar: StatusBarConfig,
@@ -238,6 +241,7 @@ impl Default for Config {
             clipboard: Default::default(),
             git: Default::default(),
             github: Default::default(),
+            browser: Default::default(),
             usage: Default::default(),
             panels: Default::default(),
             status_bar: Default::default(),

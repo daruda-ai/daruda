@@ -90,6 +90,8 @@ pub(crate) fn init_all(cx: &mut App) {
     }
 
     crate::overage_policy::OveragePolicy::sync(cx);
+    crate::browser_tool::BrowserTool::init(cx);
+    crate::browser_tool::BrowserTool::settings_changed(cx);
     register_settings_observer(cx);
     crate::settings_store::spawn_file_watch(cx);
     crate::github::PrPoller::start(cx);
@@ -115,6 +117,7 @@ fn register_settings_observer(cx: &mut App) {
         crate::overage_policy::OveragePolicy::sync(cx);
         crate::hooks::agent_hooks::AgentHooks::sync(cx);
         crate::github::PrPoller::settings_changed(cx);
+        crate::browser_tool::BrowserTool::settings_changed(cx);
         let appearance = window_background_for(&user);
         WindowRegistry::for_each_workspace(cx, |_ws, window, _cx| {
             window.set_background_appearance(appearance);

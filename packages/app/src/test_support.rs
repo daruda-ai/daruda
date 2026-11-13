@@ -184,6 +184,15 @@ pub(crate) fn workspace_for_control(cx: &mut TestAppContext) -> ControlFixture {
 pub(crate) fn register_test_orchestrator(
     cx: &mut TestAppContext,
 ) -> crate::remote_channel::bridge::PaneRef {
+    register_test_orchestrator_numbered(cx, 0)
+}
+
+/// [`register_test_orchestrator`] with the session's pane numbered at least
+/// `min_pane`, so another window's pane can share its number.
+pub(crate) fn register_test_orchestrator_numbered(
+    cx: &mut TestAppContext,
+    min_pane: u64,
+) -> crate::remote_channel::bridge::PaneRef {
     crate::test_support::init_gpui_component(cx);
     let config = daruda_config::Config::default();
     let holder = std::cell::RefCell::new(None);
@@ -217,6 +226,7 @@ pub(crate) fn register_test_orchestrator(
     let agent = config.resolved_agents()[0].id.clone();
     cx.update_window(window.into(), |_, win, cx| {
         ws.update(cx, |ws, cx| {
+            ws.skip_ids_below_for_test(min_pane);
             ws.seed_orchestrator_chat_pane_unrevealed_for_test(
                 agent,
                 cwd,

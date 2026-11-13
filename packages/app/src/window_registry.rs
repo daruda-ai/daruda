@@ -36,6 +36,7 @@ impl WindowRegistry {
         // A registered workspace is the first moment a restart's owed phone
         // results have a host for the orchestrator.
         crate::orchestrator::recovered::on_window_registered(cx);
+        crate::browser_tool::on_window_registered(cx);
     }
 
     /// Remove a workspace from the `cx.on_release` hook.

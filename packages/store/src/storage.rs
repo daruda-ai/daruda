@@ -116,6 +116,17 @@ impl StorageLayout {
         self.data.join("run-ledger")
     }
 
+    /// Profile-scoped: the managed agent-browser binary.
+    pub(crate) fn browser_tool(&self) -> PathBuf {
+        self.data.join("agent-browser")
+    }
+
+    /// Short on purpose: upstream refuses a socket path over 103 bytes, and
+    /// the socket name is appended to this directory.
+    pub(crate) fn browser_sockets(&self) -> PathBuf {
+        self.data.join("ab")
+    }
+
     pub(crate) fn node_install(&self) -> PathBuf {
         self.shared.join("node")
     }

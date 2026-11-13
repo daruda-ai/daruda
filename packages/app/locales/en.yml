@@ -2907,3 +2907,10 @@ library:
   add_row: "Add row"
   companion: "Inspect agents/openai.yaml (read only)"
   root_invalid: "Configuration root could not be resolved to an absolute path. Check the account or provider environment."
+
+# Toasts about the managed agent-browser tool
+browser_tool:
+  install_failed: "Could not install the browser tool"
+  installed: "Browser tool installed. Agent chats connected from now on can use it."
+  unsupported_platform: "The browser tool is not supported on this platform"
+  socket_dir_invalid: "The browser tool cannot run here: its socket path is too long or not valid UTF-8."
