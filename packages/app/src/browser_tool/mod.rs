@@ -7,8 +7,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use daruda_agent::browser_tool::install::{self, InstallError, InstallStage};
-use daruda_agent::browser_tool::{self, Asset, McpLaunch, SocketDirError};
+use daruda_agent::browser_tool::install::{self, InstallError, InstallStage, ToolInstall};
+use daruda_agent::browser_tool::{self, Asset, McpLaunch, SocketDir, SocketDirError};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use futures::StreamExt as _;
@@ -16,7 +16,11 @@ use gpui::{App, Global};
 
 use crate::settings_store::SettingsStore;
 use crate::surface::strings::browser_tool as s;
-use crate::window_registry::WindowRegistry;
+
+mod notices;
+
+pub(crate) use notices::on_window_registered;
+use notices::surface;
 
 /// Fetches and verifies the tool. Blocking: callers run it off the
 /// foreground thread.
@@ -28,26 +32,13 @@ pub(crate) trait Installer: Send + Sync {
 }
 
 /// The release download into the profile's tool directory.
-struct Managed {
-    tool_dir: PathBuf,
-    asset: Asset,
-    os: &'static str,
-}
-
-impl Installer for Managed {
+impl Installer for ToolInstall {
     fn cached(&self) -> Option<PathBuf> {
-        install::cached_by_size(&self.tool_dir, &self.asset, self.os)
+        ToolInstall::cached(self)
     }
 
     fn install(&self, on_stage: &mut dyn FnMut(InstallStage)) -> Result<PathBuf, InstallError> {
-        install::install(
-            &self.tool_dir,
-            &self.asset,
-            self.os,
-            on_stage,
-            &install::HttpFetch,
-            &install::ProcessRun,
-        )
+        ToolInstall::install(self, on_stage, &install::HttpFetch, &install::ProcessRun)
     }
 }
 
@@ -107,7 +98,7 @@ impl Unusable {
 
 pub(crate) struct Supported {
     installer: Arc<dyn Installer>,
-    socket_dir: PathBuf,
+    socket_dir: SocketDir,
     state: BrowserToolState,
 }
 
@@ -129,10 +120,11 @@ impl BrowserTool {
 
     /// A host with a release: the cache decides whether it starts `Ready`,
     /// unless `socket_dir` makes every launch fail.
-    pub(crate) fn supported(installer: Arc<dyn Installer>, socket_dir: PathBuf) -> Self {
-        if let Err(error) = browser_tool::check_socket_dir(&socket_dir, socket_path_limit()) {
-            return Self::unusable(Unusable::SocketDir(error));
-        }
+    pub(crate) fn supported(installer: Arc<dyn Installer>, socket_dir: &Path) -> Self {
+        let socket_dir = match SocketDir::new(socket_dir, socket_path_limit()) {
+            Ok(socket_dir) => socket_dir,
+            Err(error) => return Self::unusable(Unusable::SocketDir(error)),
+        };
         let state = match installer.cached() {
             Some(binary) => BrowserToolState::Ready(binary),
             None => BrowserToolState::Absent,
@@ -162,7 +154,8 @@ impl BrowserTool {
 
     /// When the setting turns on, install if nothing usable is there, a
     /// ready tool included; a failed install is retried only by turning the
-    /// setting off and on again. An install in flight runs to completion.
+    /// setting off and on again. An install in flight runs to completion,
+    /// toasting its outcome only if the setting is still on.
     pub(crate) fn settings_changed(cx: &mut App) {
         let enabled = SettingsStore::global(cx).user().browser.enabled;
         let Some(tool) = cx.try_global::<Self>() else {
@@ -244,7 +237,13 @@ impl BrowserTool {
                     .build()
             }
         };
-        surface(report, cx);
+        // Turned off while installing: the toast would promise a tool no
+        // chat gets, so the outcome goes to the log only.
+        if cx.global::<Self>().enabled {
+            surface(report, cx);
+        } else {
+            LogWriter::log(report);
+        }
     }
 
     fn set_state(state: BrowserToolState, cx: &mut App) {
@@ -268,11 +267,7 @@ pub(crate) fn launch_for_lane(lane_root: &Path, cx: &App) -> Option<McpLaunch> {
     else {
         return None;
     };
-    let launch = browser_tool::launch(binary, socket_dir, lane_root, socket_path_limit());
-    // `supported` checked this socket directory, the only input `launch` can
-    // reject, so a `Supported` host never gets here.
-    debug_assert!(launch.is_ok(), "{launch:?}");
-    launch.ok()
+    Some(browser_tool::launch(binary, socket_dir, lane_root))
 }
 
 /// Upstream binds a Unix socket only on Unix hosts.
@@ -280,51 +275,12 @@ fn socket_path_limit() -> Option<usize> {
     cfg!(unix).then_some(browser_tool::UNIX_SOCKET_PATH_LIMIT)
 }
 
-/// Deliver the notices held for want of a window. Deferred: registration
-/// runs inside the new workspace's construction.
-pub(crate) fn on_window_registered(cx: &mut App) {
-    if cx
-        .try_global::<BrowserTool>()
-        .is_none_or(|tool| tool.undelivered.is_empty())
-    {
-        return;
-    }
-    cx.defer(|cx| {
-        let reports = std::mem::take(&mut cx.global_mut::<BrowserTool>().undelivered);
-        for report in reports {
-            surface(report, cx);
-        }
-    });
-}
-
-/// Toast in the focused workspace (or any open one); held until a workspace
-/// window registers when none is open.
-fn surface(report: ErrorReport, cx: &mut App) {
-    let Some((_, workspace)) =
-        WindowRegistry::active_workspace(cx).or_else(|| WindowRegistry::first_workspace(cx))
-    else {
-        cx.global_mut::<BrowserTool>().undelivered.push(report);
-        return;
-    };
-    let shown = report.clone();
-    if workspace
-        .update(cx, |ws, cx| ws.report_error(shown, cx))
-        .is_err()
-    {
-        LogWriter::log(report);
-    }
-}
-
 /// The tool for a host whose release is `target`, kept in `tool_dir`.
 fn host_tool(target: Option<Asset>, tool_dir: PathBuf, socket_dir: PathBuf) -> BrowserTool {
     match target {
         Some(asset) => BrowserTool::supported(
-            Arc::new(Managed {
-                tool_dir,
-                asset,
-                os: std::env::consts::OS,
-            }),
-            socket_dir,
+            Arc::new(ToolInstall::new(&tool_dir, asset, std::env::consts::OS)),
+            &socket_dir,
         ),
         None => BrowserTool::unusable(Unusable::Platform),
     }

@@ -170,8 +170,8 @@ fn session_name_follows_a_symlinked_lane_root() {
 fn launch_runs_mcp_with_the_lane_session_and_socket_dir() {
     let temp = tempfile::tempdir().unwrap();
     let binary = Path::new("/opt/agent-browser");
-    let sockets = Path::new("/tmp/ab");
-    let launch = launch(binary, sockets, temp.path(), None).unwrap();
+    let sockets = SocketDir::new(Path::new("/tmp/ab"), None).unwrap();
+    let launch = launch(binary, &sockets, temp.path());
     assert_eq!(launch.command, PathBuf::from("/opt/agent-browser"));
     assert_eq!(launch.args, vec!["mcp".to_owned()]);
     assert_eq!(
@@ -187,42 +187,7 @@ fn launch_runs_mcp_with_the_lane_session_and_socket_dir() {
 }
 
 #[test]
-fn launch_enforces_only_a_given_socket_path_limit() {
-    let lane = Path::new("/nonexistent/lane");
-    // `<dir>/daruda-<12 hex>.sock` adds 25 bytes to the directory.
-    let fits = PathBuf::from(format!("/{}", "s".repeat(UNIX_SOCKET_PATH_LIMIT - 26)));
-    let long = PathBuf::from(format!("/{}", "s".repeat(UNIX_SOCKET_PATH_LIMIT)));
-    let binary = Path::new("agent-browser");
-    let rows: &[(&str, &Path, Option<usize>, Option<usize>)] = &[
-        (
-            "exactly at the limit",
-            &fits,
-            Some(UNIX_SOCKET_PATH_LIMIT),
-            None,
-        ),
-        (
-            "over the limit",
-            &long,
-            Some(UNIX_SOCKET_PATH_LIMIT),
-            Some(UNIX_SOCKET_PATH_LIMIT + 1 + 25),
-        ),
-        ("no limit", &long, None, None),
-    ];
-    for (label, dir, limit, too_long) in rows {
-        let result = launch(binary, dir, lane, *limit);
-        match (result, too_long) {
-            (Ok(_), None) => {}
-            (Err(SocketDirError::TooLong { len, limit }), Some(expected)) => {
-                assert_eq!(len, *expected, "{label}");
-                assert_eq!(limit, UNIX_SOCKET_PATH_LIMIT, "{label}");
-            }
-            (other, _) => panic!("{label}: {other:?}"),
-        }
-    }
-}
-
-#[test]
-fn check_socket_dir_bounds_the_session_socket_path() {
+fn socket_dir_bounds_the_session_socket_path() {
     // `<dir>/daruda-<12 hex>.sock` adds 25 bytes to the directory.
     let fits = PathBuf::from(format!("/{}", "s".repeat(UNIX_SOCKET_PATH_LIMIT - 26)));
     let long = PathBuf::from(format!("/{}", "s".repeat(UNIX_SOCKET_PATH_LIMIT - 25)));
@@ -242,8 +207,8 @@ fn check_socket_dir_bounds_the_session_socket_path() {
         ("no limit", &long, None, None),
     ];
     for (label, dir, limit, too_long) in rows {
-        match (check_socket_dir(dir, *limit), too_long) {
-            (Ok(value), None) => assert_eq!(Path::new(value), *dir, "{label}"),
+        match (SocketDir::new(dir, *limit), too_long) {
+            (Ok(sockets), None) => assert_eq!(sockets.path(), *dir, "{label}"),
             (Err(SocketDirError::TooLong { len, limit }), Some(expected)) => {
                 assert_eq!(len, *expected, "{label}");
                 assert_eq!(limit, UNIX_SOCKET_PATH_LIMIT, "{label}");
@@ -255,11 +220,11 @@ fn check_socket_dir_bounds_the_session_socket_path() {
 
 #[cfg(unix)]
 #[test]
-fn check_socket_dir_rejects_a_non_utf8_directory() {
+fn socket_dir_rejects_a_non_utf8_directory() {
     use std::os::unix::ffi::OsStrExt as _;
     let dir = Path::new(std::ffi::OsStr::from_bytes(b"/tmp/\xff"));
     assert!(matches!(
-        check_socket_dir(dir, None),
+        SocketDir::new(dir, None),
         Err(SocketDirError::NonUtf8(path)) if path == dir
     ));
 }

@@ -90,7 +90,7 @@ fn an_exact_resume_never_becomes_a_fresh_session() {
 }
 
 mod browser {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     use daruda_agent::browser_tool::install::{InstallError, InstallStage};
@@ -114,7 +114,9 @@ mod browser {
             &self,
             _on_stage: &mut dyn FnMut(InstallStage),
         ) -> Result<PathBuf, InstallError> {
-            Err(InstallError::Browser("tests never install".to_owned()))
+            Err(InstallError::Io(std::io::Error::other(
+                "tests never install",
+            )))
         }
     }
 
@@ -127,7 +129,7 @@ mod browser {
             let cached = ready.then(|| PathBuf::from("/opt/agent-browser/agent-browser"));
             cx.set_global(BrowserTool::supported(
                 Arc::new(Cached(cached)),
-                PathBuf::from("/tmp/ab"),
+                Path::new("/tmp/ab"),
             ));
         });
     }

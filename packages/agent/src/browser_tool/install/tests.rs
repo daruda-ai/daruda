@@ -52,7 +52,9 @@ impl Run for FakeRun {
         if self.succeed.get() {
             Ok(())
         } else {
-            Err(InstallError::Browser("no browser".to_owned()))
+            Err(InstallError::BrowserRun(CaptureError::Spawn(
+                std::io::Error::other("no browser"),
+            )))
         }
     }
 }
@@ -63,15 +65,16 @@ fn run_install(
     run: &FakeRun,
 ) -> (Result<PathBuf, InstallError>, Vec<InstallStage>) {
     let stages = RefCell::new(Vec::new());
-    let result = install(
-        tool_dir,
-        &ASSET,
-        OS,
+    let result = ToolInstall::new(tool_dir, ASSET, OS).install(
         &mut |stage| stages.borrow_mut().push(stage),
         fetch,
         run,
     );
     (result, stages.into_inner())
+}
+
+fn cached(tool_dir: &Path) -> Option<PathBuf> {
+    ToolInstall::new(tool_dir, ASSET, OS).cached()
 }
 
 fn binary_path(tool_dir: &Path) -> PathBuf {
@@ -108,7 +111,7 @@ fn success_publishes_binary_and_marker_then_short_circuits() {
     assert_eq!(binary, binary_path(dir.path()));
     assert_eq!(std::fs::read(&binary).unwrap(), BYTES);
     assert!(marker_path(dir.path()).is_file());
-    assert_eq!(cached_by_size(dir.path(), &ASSET, OS), Some(binary.clone()));
+    assert_eq!(cached(dir.path()), Some(binary.clone()));
     assert_eq!(stages, [InstallStage::Binary, InstallStage::Browser]);
 
     let (again, stages) = run_install(dir.path(), &fetch, &run);
@@ -127,12 +130,12 @@ fn browser_failure_keeps_the_binary_for_a_retry() {
     let (result, _) = run_install(dir.path(), &fetch, &run);
 
     assert!(
-        matches!(result, Err(InstallError::Browser(_))),
+        matches!(result, Err(InstallError::BrowserRun(_))),
         "{result:?}"
     );
     assert_eq!(std::fs::read(binary_path(dir.path())).unwrap(), BYTES);
     assert!(!marker_path(dir.path()).exists());
-    assert_eq!(cached_by_size(dir.path(), &ASSET, OS), None);
+    assert_eq!(cached(dir.path()), None);
 
     run.succeed.set(true);
     let (retry, stages) = run_install(dir.path(), &fetch, &run);
@@ -145,7 +148,7 @@ fn browser_failure_keeps_the_binary_for_a_retry() {
 }
 
 #[test]
-fn cached_by_size_needs_the_marker_and_the_pinned_size() {
+fn cached_needs_the_marker_and_the_pinned_size() {
     let rows: &[(&str, Option<&[u8]>, bool, bool)] = &[
         ("installed", Some(BYTES), true, true),
         ("same-size content is not hashed", Some(b"abd"), true, true),
@@ -167,7 +170,7 @@ fn cached_by_size_needs_the_marker_and_the_pinned_size() {
         }
 
         let expected = found.then(|| binary_path(dir.path()));
-        assert_eq!(cached_by_size(dir.path(), &ASSET, OS), expected, "{label}");
+        assert_eq!(cached(dir.path()), expected, "{label}");
     }
 }
 
@@ -202,7 +205,7 @@ fn read_capped_refuses_an_oversized_body() {
             assert_eq!(result.unwrap(), *body, "{label}");
         } else {
             assert!(
-                matches!(&result, Err(InstallError::Download(m)) if m.contains("exceeds")),
+                matches!(&result, Err(InstallError::TooLarge { max: m }) if m == max),
                 "{label}: {result:?}"
             );
         }
@@ -227,10 +230,13 @@ fn a_browser_install_past_its_deadline_fails() {
     let result =
         browser_install_outcome(Err(CaptureError::Timeout(BROWSER_INSTALL_LIMITS.timeout)));
 
-    let Err(InstallError::Browser(message)) = result else {
-        panic!("{result:?}");
-    };
-    assert!(message.contains("timed out"), "{message}");
+    assert!(
+        matches!(
+            result,
+            Err(InstallError::BrowserRun(CaptureError::Timeout(_)))
+        ),
+        "{result:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -246,10 +252,15 @@ fn a_browser_install_reports_its_exit_and_stderr_tail() {
     assert!(browser_install_outcome(Ok(captured(0, "noise"))).is_ok());
 
     let result = browser_install_outcome(Ok(captured(1, "chrome: no space left\n")));
-    let Err(InstallError::Browser(message)) = result else {
+    let Err(InstallError::BrowserExit {
+        status,
+        stderr_tail,
+    }) = result
+    else {
         panic!("{result:?}");
     };
-    assert!(message.ends_with("chrome: no space left"), "{message}");
+    assert_eq!(status.code(), Some(1));
+    assert_eq!(stderr_tail, "chrome: no space left");
 }
 
 #[cfg(unix)]

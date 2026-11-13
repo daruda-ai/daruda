@@ -38,6 +38,13 @@ fn local_lane_root(lane: Option<&Lane>, host: Option<&LaneSessionHost>) -> Optio
     lane.map(|lane| lane.path.clone())
 }
 
+/// The launch a pane's agent gets. `repoint_to` names the agent to rewrite
+/// a stale `agent_id` to, when the pane's own agent left the catalog.
+struct PaneLaunch {
+    spec: AgentLaunchSpec,
+    repoint_to: Option<String>,
+}
+
 impl Workspace {
     /// Resolve the launch spec for `pane_id`'s agent, reconciling the view when
     /// its `agent_id` is stale (a live config reload removed/renamed it) by
@@ -47,9 +54,9 @@ impl Workspace {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Option<AgentLaunchSpec> {
-        let (spec, stale) = self.pane_launch(pane_id, cx)?;
+        let PaneLaunch { spec, repoint_to } = self.pane_launch(pane_id, cx)?;
         // Reconcile so the chip / persisted state stop lying.
-        if let Some(effective_id) = stale {
+        if let Some(effective_id) = repoint_to {
             self.repoint_agent_chat(pane_id, effective_id, cx);
             self.mutate_durable(cx, |_, _| {});
         }
@@ -58,17 +65,23 @@ impl Workspace {
 
     /// The launch `pane_id`'s agent gets, without reconciling: a stale id
     /// launches the effective agent (a catalog entry, or the Claude id when
-    /// the catalog is somehow empty), returned as the id to repoint to.
-    fn pane_launch(&self, pane_id: PaneId, cx: &App) -> Option<(AgentLaunchSpec, Option<String>)> {
+    /// the catalog is somehow empty).
+    fn pane_launch(&self, pane_id: PaneId, cx: &App) -> Option<PaneLaunch> {
         let agent_id = self.agent_chat_view(pane_id)?.read(cx).agent_id();
         if let Some(spec) = self.agent_launch_for(agent_id) {
-            return Some((spec, None));
+            return Some(PaneLaunch {
+                spec,
+                repoint_to: None,
+            });
         }
         let effective_id = self.open_agent_id(None);
         let spec = self.agent_launch_for(&effective_id).unwrap_or_else(|| {
             AgentLaunchSpec::of(&daruda_config::AgentDefinition::claude_default())
         });
-        Some((spec, Some(effective_id)))
+        Some(PaneLaunch {
+            spec,
+            repoint_to: Some(effective_id),
+        })
     }
 
     #[cfg(test)]
@@ -129,8 +142,8 @@ impl Workspace {
         // lane's session host, not by whatever host (if any) `launch` itself
         // names.
         let owning_lane_ref = self.lane_ref_for_pane(pane_id);
-        let owning_lane = owning_lane_ref.and_then(|lane_ref| self.lane_for(lane_ref));
-        let resolved_host = match self.owning_lane_host(owning_lane, &launch) {
+        let (owning_lane, owning_host) = self.owning_lane_and_host(pane_id, &launch).unzip();
+        let resolved_host = match owning_host {
             None => None,
             Some(Ok(host)) => Some(host),
             // The same surface a launch that cannot produce a command gets
@@ -267,20 +280,20 @@ impl Workspace {
         })
     }
 
-    /// The host `owning_lane`'s sessions run on for `launch`; `None` for a
-    /// pane with no owning lane.
-    fn owning_lane_host(
+    /// `pane_id`'s owning lane and the host its sessions run on for
+    /// `launch`; `None` for a pane with no owning lane.
+    fn owning_lane_and_host(
         &self,
-        owning_lane: Option<&Lane>,
+        pane_id: PaneId,
         launch: &daruda_config::AgentLaunch,
-    ) -> Option<Result<LaneSessionHost, UnusableSessionHost>> {
-        owning_lane.map(|lane| {
-            lane.effective_session_host(
-                launch,
-                &self.mirrors.session_hosts,
-                &self.mirrors.session_host_tombstones,
-            )
-        })
+    ) -> Option<(&Lane, Result<LaneSessionHost, UnusableSessionHost>)> {
+        let lane = self.lane_for(self.lane_ref_for_pane(pane_id)?)?;
+        let host = lane.effective_session_host(
+            launch,
+            &self.mirrors.session_hosts,
+            &self.mirrors.session_host_tombstones,
+        );
+        Some((lane, host))
     }
 
     /// The MCP servers for `pane_id`: the orchestrator's pane gets only
@@ -293,7 +306,10 @@ impl Workspace {
         control: impl FnOnce(&mut App) -> Option<daruda_acp::McpServer>,
         cx: &mut Context<Self>,
     ) -> Vec<daruda_acp::McpServer> {
-        let servers = if self.offers_control_tools(pane_id, cx) {
+        if self.loads_snapshot(pane_id, cx) {
+            return Vec::new();
+        }
+        if self.offers_control_tools(pane_id, cx) {
             control(cx).into_iter().collect()
         } else {
             local_root
@@ -308,11 +324,7 @@ impl Workspace {
                 })
                 .into_iter()
                 .collect()
-        };
-        if self.loads_snapshot(pane_id, cx) {
-            return Vec::new();
         }
-        servers
     }
 
     fn loads_snapshot(&self, pane_id: PaneId, cx: &App) -> bool {
@@ -359,13 +371,15 @@ impl Workspace {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Vec<daruda_acp::McpServer> {
-        let Some((AgentLaunchSpec { launch, .. }, _)) = self.pane_launch(pane_id, cx) else {
+        let Some(PaneLaunch {
+            spec: AgentLaunchSpec { launch, .. },
+            ..
+        }) = self.pane_launch(pane_id, cx)
+        else {
             return Vec::new();
         };
-        let owning_lane = self
-            .lane_ref_for_pane(pane_id)
-            .and_then(|lane_ref| self.lane_for(lane_ref));
-        let host = match self.owning_lane_host(owning_lane, &launch) {
+        let (owning_lane, host) = self.owning_lane_and_host(pane_id, &launch).unzip();
+        let host = match host {
             Some(Err(_)) => return Vec::new(),
             host => host.and_then(Result::ok),
         };

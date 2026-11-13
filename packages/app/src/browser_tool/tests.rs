@@ -48,7 +48,7 @@ impl Installer for FakeInstaller {
         } else {
             answers[0].clone()
         };
-        answer.map_err(InstallError::Browser)
+        answer.map_err(|reason| InstallError::Io(std::io::Error::other(reason)))
     }
 }
 
@@ -64,7 +64,7 @@ fn install_tool(installer: Arc<FakeInstaller>, enabled: bool, cx: &mut TestAppCo
     cx.update(|cx| {
         SettingsStore::init(cx);
         set_enabled(enabled, cx);
-        cx.set_global(BrowserTool::supported(installer, socket_dir()));
+        cx.set_global(BrowserTool::supported(installer, &socket_dir()));
     });
 }
 
@@ -146,7 +146,7 @@ fn an_overlong_socket_dir_makes_the_tool_unusable(cx: &mut TestAppContext) {
     cx.update(|cx| {
         SettingsStore::init(cx);
         set_enabled(false, cx);
-        cx.set_global(BrowserTool::supported(installer.clone(), long));
+        cx.set_global(BrowserTool::supported(installer.clone(), &long));
     });
     let notified = |cx: &mut TestAppContext| {
         cx.update(|cx| match &cx.global::<BrowserTool>().host {
@@ -221,6 +221,32 @@ fn turning_on_again_while_installing_does_not_start_another(cx: &mut TestAppCont
     assert_eq!(installer.calls(), 1);
     assert_eq!(state(cx), BrowserToolState::Ready(binary()));
     assert!(cx.update(|cx| cx.global::<BrowserTool>().enabled));
+}
+
+#[gpui::test]
+fn an_install_finishing_after_turning_off_raises_no_notice(cx: &mut TestAppContext) {
+    // No window is open, so a raised notice would be held in `undelivered`.
+    let cases = [
+        ("still on", vec![true], 1),
+        ("turned off while installing", vec![true, false], 0),
+    ];
+    for (label, edges, notices) in cases {
+        let installer = FakeInstaller::new(None, vec![Ok(binary())]);
+        install_tool(installer.clone(), false, cx);
+        // One update, so the background install finishes after every edge.
+        cx.update(|cx| {
+            for enabled in &edges {
+                set_enabled(*enabled, cx);
+                BrowserTool::settings_changed(cx);
+            }
+        });
+        cx.run_until_parked();
+
+        assert_eq!(installer.calls(), 1, "{label}");
+        assert_eq!(state(cx), BrowserToolState::Ready(binary()), "{label}");
+        let held = cx.update(|cx| cx.global::<BrowserTool>().undelivered.len());
+        assert_eq!(held, notices, "{label}");
+    }
 }
 
 #[gpui::test]

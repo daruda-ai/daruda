@@ -110,45 +110,42 @@ pub struct McpLaunch {
     pub env: Vec<(String, String)>,
 }
 
-/// Whether `socket_dir` can hold every lane's session socket, returning it as
-/// the environment value. Session names have a fixed length, so the
-/// directory alone decides; [`launch`] applies the same rule.
-///
-/// `socket_path_limit` is [`UNIX_SOCKET_PATH_LIMIT`] where upstream binds a
-/// Unix socket and `None` elsewhere; the caller decides from its platform.
-pub fn check_socket_dir(
-    socket_dir: &Path,
-    socket_path_limit: Option<usize>,
-) -> Result<&str, SocketDirError> {
-    if let Some(limit) = socket_path_limit {
-        let socket = format!("{SESSION_PREFIX}{}.sock", "0".repeat(SESSION_HASH_LEN));
-        let len = socket_dir.join(socket).as_os_str().len();
-        if len > limit {
-            return Err(SocketDirError::TooLong { len, limit });
+/// A directory checked to hold every lane's session socket. Session names
+/// have a fixed length, so the directory alone decides, once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SocketDir(String);
+
+impl SocketDir {
+    /// `socket_path_limit` is [`UNIX_SOCKET_PATH_LIMIT`] where upstream binds
+    /// a Unix socket and `None` elsewhere; the caller decides from its platform.
+    pub fn new(dir: &Path, socket_path_limit: Option<usize>) -> Result<Self, SocketDirError> {
+        if let Some(limit) = socket_path_limit {
+            let socket = format!("{SESSION_PREFIX}{}.sock", "0".repeat(SESSION_HASH_LEN));
+            let len = dir.join(socket).as_os_str().len();
+            if len > limit {
+                return Err(SocketDirError::TooLong { len, limit });
+            }
         }
+        dir.to_str()
+            .map(|value| Self(value.to_owned()))
+            .ok_or_else(|| SocketDirError::NonUtf8(dir.to_path_buf()))
     }
-    socket_dir
-        .to_str()
-        .ok_or_else(|| SocketDirError::NonUtf8(socket_dir.to_path_buf()))
+
+    pub fn path(&self) -> &Path {
+        Path::new(&self.0)
+    }
 }
 
-/// Fails only as [`check_socket_dir`] does for the same arguments.
-pub fn launch(
-    binary: &Path,
-    socket_dir: &Path,
-    lane_root: &Path,
-    socket_path_limit: Option<usize>,
-) -> Result<McpLaunch, SocketDirError> {
-    let socket_dir_value = check_socket_dir(socket_dir, socket_path_limit)?;
-    let session = session_name(lane_root);
-    Ok(McpLaunch {
+/// How to start `agent-browser mcp` for the lane rooted at `lane_root`.
+pub fn launch(binary: &Path, socket_dir: &SocketDir, lane_root: &Path) -> McpLaunch {
+    McpLaunch {
         command: binary.to_path_buf(),
         args: vec!["mcp".to_owned()],
         env: vec![
-            (SESSION_ENV.to_owned(), session),
-            (SOCKET_DIR_ENV.to_owned(), socket_dir_value.to_owned()),
+            (SESSION_ENV.to_owned(), session_name(lane_root)),
+            (SOCKET_DIR_ENV.to_owned(), socket_dir.0.clone()),
         ],
-    })
+    }
 }
 
 #[cfg(test)]

@@ -37,13 +37,22 @@ pub enum InstallStage {
 #[derive(Debug, thiserror::Error)]
 pub enum InstallError {
     #[error("agent-browser download failed: {0}")]
-    Download(String),
+    Request(#[source] Box<ureq::Error>),
+    #[error("agent-browser download failed: {0}")]
+    Read(#[source] std::io::Error),
+    #[error("agent-browser download exceeds {max} bytes")]
+    TooLarge { max: u64 },
     #[error(transparent)]
     Verify(#[from] BrowserToolError),
     #[error("agent-browser install I/O failed: {0}")]
     Io(#[from] std::io::Error),
-    #[error("agent-browser browser install failed: {0}")]
-    Browser(String),
+    #[error("agent-browser browser install did not finish: {0}")]
+    BrowserRun(#[source] CaptureError),
+    #[error("agent-browser browser install failed: {status}: {stderr_tail}")]
+    BrowserExit {
+        status: std::process::ExitStatus,
+        stderr_tail: String,
+    },
 }
 
 pub trait Fetch {
@@ -70,7 +79,7 @@ impl Fetch for HttpFetch {
         let response = agent
             .get(url)
             .call()
-            .map_err(|e| InstallError::Download(e.to_string()))?;
+            .map_err(|e| InstallError::Request(Box::new(e)))?;
         read_capped(response.into_body().into_reader(), MAX_DOWNLOAD_BYTES)
     }
 }
@@ -82,11 +91,9 @@ fn read_capped(reader: impl std::io::Read, max: u64) -> Result<Vec<u8>, InstallE
     reader
         .take(max.saturating_add(1))
         .read_to_end(&mut bytes)
-        .map_err(|e| InstallError::Download(e.to_string()))?;
+        .map_err(InstallError::Read)?;
     if bytes.len() as u64 > max {
-        return Err(InstallError::Download(format!(
-            "response exceeds {max} bytes"
-        )));
+        return Err(InstallError::TooLarge { max });
     }
     Ok(bytes)
 }
@@ -103,16 +110,15 @@ impl Run for ProcessRun {
 
 /// A timeout or an output overflow has already killed the child's tree.
 fn browser_install_outcome(result: Result<Captured, CaptureError>) -> Result<(), InstallError> {
-    let output = result.map_err(|e| InstallError::Browser(e.to_string()))?;
+    let output = result.map_err(InstallError::BrowserRun)?;
     if output.status.success() {
         return Ok(());
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(InstallError::Browser(format!(
-        "{}: {}",
-        output.status,
-        tail(stderr.trim(), STDERR_TAIL_CHARS)
-    )))
+    Err(InstallError::BrowserExit {
+        status: output.status,
+        stderr_tail: tail(stderr.trim(), STDERR_TAIL_CHARS).to_owned(),
+    })
 }
 
 fn tail(text: &str, max_chars: usize) -> &str {
@@ -122,76 +128,102 @@ fn tail(text: &str, max_chars: usize) -> &str {
         .map_or("", |(index, _)| &text[index..])
 }
 
-/// The installed binary, when the marker exists and the binary has the
-/// pinned size. Cheap enough for the UI thread: the digest was verified when
-/// [`install`] published the binary, which it flushed before the marker.
-pub fn cached_by_size(tool_dir: &Path, asset: &Asset, os: &str) -> Option<PathBuf> {
-    let version_dir = tool_dir.join(VERSION);
-    if !version_dir.join(MARKER).is_file() {
-        return None;
-    }
-    let binary = version_dir.join(binary_file_name(os));
-    std::fs::metadata(&binary)
-        .is_ok_and(|meta| meta.is_file() && meta.len() == asset.size)
-        .then_some(binary)
+/// One pinned release installed under a profile's tool directory:
+/// `<tool_dir>/<VERSION>/<binary>` plus the `.complete` marker.
+#[derive(Debug, Clone)]
+pub struct ToolInstall {
+    version_dir: PathBuf,
+    asset: Asset,
+    /// A `std::env::consts::OS` value; it names the binary.
+    os: &'static str,
 }
 
-fn binary_verified(binary: &Path, asset: &Asset) -> bool {
-    std::fs::read(binary).is_ok_and(|bytes| verify(&bytes, asset).is_ok())
-}
-
-/// Installs whatever is missing and returns the binary path. An existing
-/// binary is reused only after its digest is verified. A failed browser
-/// install keeps the verified binary, so a retry only reruns that step.
-pub fn install(
-    tool_dir: &Path,
-    asset: &Asset,
-    os: &str,
-    on_stage: &mut dyn FnMut(InstallStage),
-    fetch: &dyn Fetch,
-    run: &dyn Run,
-) -> Result<PathBuf, InstallError> {
-    let version_dir = tool_dir.join(VERSION);
-    let binary = version_dir.join(binary_file_name(os));
-    let marker = version_dir.join(MARKER);
-    let reusable = binary_verified(&binary, asset);
-    if reusable && marker.is_file() {
-        return Ok(binary);
+impl ToolInstall {
+    pub fn new(tool_dir: &Path, asset: Asset, os: &'static str) -> Self {
+        Self {
+            version_dir: tool_dir.join(VERSION),
+            asset,
+            os,
+        }
     }
 
-    on_stage(InstallStage::Binary);
-    if !reusable {
-        let bytes = fetch.get(&download_url(asset))?;
-        verify(&bytes, asset)?;
-        std::fs::create_dir_all(&version_dir)?;
-        publish(&version_dir, &binary, &bytes, Publish::Binary)?;
+    pub fn binary(&self) -> PathBuf {
+        self.version_dir.join(binary_file_name(self.os))
     }
 
-    on_stage(InstallStage::Browser);
-    run.run_install(&binary)?;
+    fn marker(&self) -> PathBuf {
+        self.version_dir.join(MARKER)
+    }
 
-    publish(&version_dir, &marker, &[], Publish::Marker)?;
-    Ok(binary)
+    /// The installed binary, when the marker exists and the binary has the
+    /// pinned size. Cheap enough for the UI thread: the digest was verified
+    /// when [`Self::install`] published the binary, flushed before the marker.
+    /// Trust boundary: a same-size file swapped in by someone with the
+    /// user's write access passes; [`Self::install`] re-hashes before reuse.
+    pub fn cached(&self) -> Option<PathBuf> {
+        if !self.marker().is_file() {
+            return None;
+        }
+        let binary = self.binary();
+        std::fs::metadata(&binary)
+            .is_ok_and(|meta| meta.is_file() && meta.len() == self.asset.size)
+            .then_some(binary)
+    }
+
+    /// Installs whatever is missing and returns the binary path. An existing
+    /// binary is reused only after its digest is verified. A failed browser
+    /// install keeps the verified binary, so a retry only reruns that step.
+    pub fn install(
+        &self,
+        on_stage: &mut dyn FnMut(InstallStage),
+        fetch: &dyn Fetch,
+        run: &dyn Run,
+    ) -> Result<PathBuf, InstallError> {
+        let binary = self.binary();
+        let marker = self.marker();
+        let reusable = self.binary_verified(&binary);
+        if reusable && marker.is_file() {
+            return Ok(binary);
+        }
+
+        on_stage(InstallStage::Binary);
+        if !reusable {
+            let bytes = fetch.get(&download_url(&self.asset))?;
+            verify(&bytes, &self.asset)?;
+            std::fs::create_dir_all(&self.version_dir)?;
+            publish_binary(&self.version_dir, &binary, &bytes)?;
+        }
+
+        on_stage(InstallStage::Browser);
+        run.run_install(&binary)?;
+
+        write_marker(&self.version_dir, &marker)?;
+        Ok(binary)
+    }
+
+    fn binary_verified(&self, binary: &Path) -> bool {
+        std::fs::read(binary).is_ok_and(|bytes| verify(&bytes, &self.asset).is_ok())
+    }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Publish {
-    Binary,
-    Marker,
-}
-
-/// Writes `bytes` beside `target` and renames over it. The binary is flushed
-/// first: [`cached_by_size`] trusts any marked binary of the right size.
+/// Writes `bytes` beside `target`, flushes it and renames over it:
+/// [`ToolInstall::cached`] trusts any marked binary of the right size.
 /// `persist` replaces an existing file on Windows too (MOVEFILE_REPLACE_EXISTING).
-fn publish(dir: &Path, target: &Path, bytes: &[u8], kind: Publish) -> std::io::Result<()> {
+fn publish_binary(dir: &Path, target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     tmp.write_all(bytes)?;
     tmp.flush()?;
-    if kind == Publish::Binary {
-        make_executable(tmp.as_file())?;
-        daruda_core::path::sync_file_data(tmp.as_file())?;
-    }
+    make_executable(tmp.as_file())?;
+    daruda_core::path::sync_file_data(tmp.as_file())?;
     tmp.persist(target).map_err(|e| e.error)?;
+    Ok(())
+}
+
+/// Creates the empty marker through a rename, so it appears whole.
+fn write_marker(dir: &Path, marker: &Path) -> std::io::Result<()> {
+    tempfile::NamedTempFile::new_in(dir)?
+        .persist(marker)
+        .map_err(|e| e.error)?;
     Ok(())
 }
 
