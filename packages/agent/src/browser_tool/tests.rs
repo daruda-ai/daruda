@@ -6,6 +6,7 @@ use super::*;
 const ABC: Asset = Asset {
     name: "fake-abc",
     sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    size: 3,
 };
 
 #[test]
@@ -72,6 +73,7 @@ fn target_selects_the_release_asset_per_host() {
                 asset.sha256.bytes().all(|b| b.is_ascii_hexdigit()),
                 "{label}: digest is hex"
             );
+            assert!(asset.size > 0, "{label}: size");
         }
     }
 }

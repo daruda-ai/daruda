@@ -8,6 +8,7 @@ const BYTES: &[u8] = b"abc";
 const ASSET: Asset = Asset {
     name: "fake-abc",
     sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    size: 3,
 };
 
 struct FakeFetch {
@@ -107,7 +108,7 @@ fn success_publishes_binary_and_marker_then_short_circuits() {
     assert_eq!(binary, binary_path(dir.path()));
     assert_eq!(std::fs::read(&binary).unwrap(), BYTES);
     assert!(marker_path(dir.path()).is_file());
-    assert_eq!(cached(dir.path(), &ASSET, OS), Some(binary.clone()));
+    assert_eq!(cached_by_size(dir.path(), &ASSET, OS), Some(binary.clone()));
     assert_eq!(stages, [InstallStage::Binary, InstallStage::Browser]);
 
     let (again, stages) = run_install(dir.path(), &fetch, &run);
@@ -131,7 +132,7 @@ fn browser_failure_keeps_the_binary_for_a_retry() {
     );
     assert_eq!(std::fs::read(binary_path(dir.path())).unwrap(), BYTES);
     assert!(!marker_path(dir.path()).exists());
-    assert_eq!(cached(dir.path(), &ASSET, OS), None);
+    assert_eq!(cached_by_size(dir.path(), &ASSET, OS), None);
 
     run.succeed.set(true);
     let (retry, stages) = run_install(dir.path(), &fetch, &run);
@@ -144,15 +145,46 @@ fn browser_failure_keeps_the_binary_for_a_retry() {
 }
 
 #[test]
-fn cached_rejects_a_tampered_binary() {
-    let dir = tempfile::tempdir().unwrap();
-    let (result, _) = run_install(dir.path(), &FakeFetch::new(BYTES), &FakeRun::new(true));
-    result.unwrap();
+fn cached_by_size_needs_the_marker_and_the_pinned_size() {
+    let rows: &[(&str, Option<&[u8]>, bool, bool)] = &[
+        ("installed", Some(BYTES), true, true),
+        ("same-size content is not hashed", Some(b"abd"), true, true),
+        ("shorter binary", Some(b"ab"), true, false),
+        ("longer binary", Some(b"abcd"), true, false),
+        ("no marker", Some(BYTES), false, false),
+        ("no binary", None, true, false),
+    ];
+    for (label, binary, marker, found) in rows {
+        let dir = tempfile::tempdir().unwrap();
+        let (result, _) = run_install(dir.path(), &FakeFetch::new(BYTES), &FakeRun::new(true));
+        result.unwrap();
+        match binary {
+            Some(bytes) => std::fs::write(binary_path(dir.path()), bytes).unwrap(),
+            None => std::fs::remove_file(binary_path(dir.path())).unwrap(),
+        }
+        if !marker {
+            std::fs::remove_file(marker_path(dir.path())).unwrap();
+        }
 
+        let expected = found.then(|| binary_path(dir.path()));
+        assert_eq!(cached_by_size(dir.path(), &ASSET, OS), expected, "{label}");
+    }
+}
+
+#[test]
+fn install_replaces_a_same_size_tampered_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    let fetch = FakeFetch::new(BYTES);
+    let run = FakeRun::new(true);
+    run_install(dir.path(), &fetch, &run).0.unwrap();
     std::fs::write(binary_path(dir.path()), b"abd").unwrap();
 
-    assert!(marker_path(dir.path()).is_file());
-    assert_eq!(cached(dir.path(), &ASSET, OS), None);
+    let (result, stages) = run_install(dir.path(), &fetch, &run);
+
+    assert_eq!(result.unwrap(), binary_path(dir.path()));
+    assert_eq!(std::fs::read(binary_path(dir.path())).unwrap(), BYTES);
+    assert_eq!(stages, [InstallStage::Binary, InstallStage::Browser]);
+    assert_eq!(fetch.calls.get(), 2);
 }
 
 #[test]

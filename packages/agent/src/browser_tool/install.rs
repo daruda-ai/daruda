@@ -112,22 +112,26 @@ fn tail(text: &str, max_chars: usize) -> &str {
         .map_or("", |(index, _)| &text[index..])
 }
 
-/// The installed binary, when the marker exists and the binary matches the
-/// pinned digest.
-pub fn cached(tool_dir: &Path, asset: &Asset, os: &str) -> Option<PathBuf> {
+/// The installed binary, when the marker exists and the binary has the
+/// pinned size. Cheap enough for the UI thread: the digest was verified when
+/// [`install`] published the binary, which it flushed before the marker.
+pub fn cached_by_size(tool_dir: &Path, asset: &Asset, os: &str) -> Option<PathBuf> {
     let version_dir = tool_dir.join(VERSION);
     if !version_dir.join(MARKER).is_file() {
         return None;
     }
     let binary = version_dir.join(binary_file_name(os));
-    binary_verified(&binary, asset).then_some(binary)
+    std::fs::metadata(&binary)
+        .is_ok_and(|meta| meta.is_file() && meta.len() == asset.size)
+        .then_some(binary)
 }
 
 fn binary_verified(binary: &Path, asset: &Asset) -> bool {
     std::fs::read(binary).is_ok_and(|bytes| verify(&bytes, asset).is_ok())
 }
 
-/// Installs whatever is missing and returns the binary path. A failed browser
+/// Installs whatever is missing and returns the binary path. An existing
+/// binary is reused only after its digest is verified. A failed browser
 /// install keeps the verified binary, so a retry only reruns that step.
 pub fn install(
     tool_dir: &Path,
@@ -137,36 +141,45 @@ pub fn install(
     fetch: &dyn Fetch,
     run: &dyn Run,
 ) -> Result<PathBuf, InstallError> {
-    if let Some(binary) = cached(tool_dir, asset, os) {
-        return Ok(binary);
-    }
     let version_dir = tool_dir.join(VERSION);
     let binary = version_dir.join(binary_file_name(os));
+    let marker = version_dir.join(MARKER);
+    let reusable = binary_verified(&binary, asset);
+    if reusable && marker.is_file() {
+        return Ok(binary);
+    }
 
     on_stage(InstallStage::Binary);
-    if !binary_verified(&binary, asset) {
+    if !reusable {
         let bytes = fetch.get(&download_url(asset))?;
         verify(&bytes, asset)?;
         std::fs::create_dir_all(&version_dir)?;
-        publish(&version_dir, &binary, &bytes, true)?;
+        publish(&version_dir, &binary, &bytes, Publish::Binary)?;
     }
 
     on_stage(InstallStage::Browser);
     run.run_install(&binary)?;
 
-    publish(&version_dir, &version_dir.join(MARKER), &[], false)?;
+    publish(&version_dir, &marker, &[], Publish::Marker)?;
     Ok(binary)
 }
 
-/// Writes `bytes` beside `target` and renames over it. No flush: `cached`
-/// re-verifies the digest, so a torn write after a crash just reinstalls.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Publish {
+    Binary,
+    Marker,
+}
+
+/// Writes `bytes` beside `target` and renames over it. The binary is flushed
+/// first: [`cached_by_size`] trusts any marked binary of the right size.
 /// `persist` replaces an existing file on Windows too (MOVEFILE_REPLACE_EXISTING).
-fn publish(dir: &Path, target: &Path, bytes: &[u8], executable: bool) -> std::io::Result<()> {
+fn publish(dir: &Path, target: &Path, bytes: &[u8], kind: Publish) -> std::io::Result<()> {
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     tmp.write_all(bytes)?;
     tmp.flush()?;
-    if executable {
+    if kind == Publish::Binary {
         make_executable(tmp.as_file())?;
+        daruda_core::path::sync_file_data(tmp.as_file())?;
     }
     tmp.persist(target).map_err(|e| e.error)?;
     Ok(())

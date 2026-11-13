@@ -23,11 +23,13 @@ const RELEASE_BASE_URL: &str = "https://github.com/vercel-labs/agent-browser/rel
 const SESSION_PREFIX: &str = "daruda-";
 const SESSION_HASH_LEN: usize = 12;
 
-/// One single-file release binary and its pinned SHA-256 digest (hex).
+/// One single-file release binary, its pinned SHA-256 digest (hex) and its
+/// byte size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Asset {
     pub name: &'static str,
     pub sha256: &'static str,
+    pub size: u64,
 }
 
 #[derive(Debug, thiserror::Error)]

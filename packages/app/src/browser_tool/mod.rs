@@ -21,7 +21,8 @@ use crate::window_registry::WindowRegistry;
 /// Fetches and verifies the tool. Blocking: callers run it off the
 /// foreground thread.
 pub(crate) trait Installer: Send + Sync {
-    /// The installed binary, when the cache is complete and verified.
+    /// The installed binary, when the cache is complete. A cheap check that
+    /// runs on the foreground thread; `install` verifies the digest.
     fn cached(&self) -> Option<PathBuf>;
     fn install(&self, on_stage: &mut dyn FnMut(InstallStage)) -> Result<PathBuf, InstallError>;
 }
@@ -35,7 +36,7 @@ struct Managed {
 
 impl Installer for Managed {
     fn cached(&self) -> Option<PathBuf> {
-        install::cached(&self.tool_dir, &self.asset, self.os)
+        install::cached_by_size(&self.tool_dir, &self.asset, self.os)
     }
 
     fn install(&self, on_stage: &mut dyn FnMut(InstallStage)) -> Result<PathBuf, InstallError> {
