@@ -56,7 +56,12 @@ fn clearing_host_state_releases_pixels_even_when_a_source_binding_survives(
         weak.upgrade().is_none(),
         "render sources must not retain the host cache"
     );
-    assert!(binding.source(&SharedUri::from("/gone.png")).is_some());
+    let missing = std::env::current_dir().unwrap().join("gone.png");
+    assert!(
+        binding
+            .source(&SharedUri::from(missing.to_string_lossy().into_owned()))
+            .is_some()
+    );
 }
 
 #[gpui::test]
@@ -109,7 +114,8 @@ async fn host_reset_replaces_the_visible_body_lease(cx: &mut gpui::TestAppContex
     image::RgbaImage::new(1, 1).save(&path).unwrap();
     let states = crate::MarkdownStates::default();
     let probe_states = states.clone();
-    let text = format!("![preview]({})", path.display()).into();
+    let uri = daruda_core::file_url::from_local_path(&path).unwrap();
+    let text = format!("![preview](<{uri}>)").into();
     let window = cx.add_window(move |_, _| ResetProbe {
         states: probe_states,
         text,
@@ -157,7 +163,8 @@ async fn replacing_body_content_releases_old_image_registrations(cx: &mut gpui::
     image::RgbaImage::new(1, 1).save(&path).unwrap();
     let states = crate::MarkdownStates::default();
     let probe_states = states.clone();
-    let text = format!("![preview]({})", path.display()).into();
+    let uri = daruda_core::file_url::from_local_path(&path).unwrap();
+    let text = format!("![preview](<{uri}>)").into();
     let window = cx.add_window(move |_, _| ResetProbe {
         states: probe_states,
         text,
@@ -235,7 +242,8 @@ async fn streaming_text_keeps_a_retired_image_deferred(cx: &mut gpui::TestAppCon
     image::RgbaImage::new(1, 1).save(&path).unwrap();
     let states = crate::MarkdownStates::default();
     let probe_states = states.clone();
-    let text = format!("![preview]({})", path.display());
+    let uri = daruda_core::file_url::from_local_path(&path).unwrap();
+    let text = format!("![preview](<{uri}>)");
     let first = text.clone().into();
     let window = cx.add_window(move |_, _| ResetProbe {
         states: probe_states,

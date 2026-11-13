@@ -763,7 +763,9 @@ fn local_image_references_match_embedded_images_in_both_hosts(cx: &mut TestAppCo
             engine.label()
         );
         for uri in &uris {
-            let md = format!("![preview](<{uri}>)");
+            // Markdown treats backslashes before punctuation as escapes, even in angle brackets.
+            let destination = uri.replace('\\', "\\\\");
+            let md = format!("![preview](<{destination}>)");
             let actual = bounds_for_engine(cx, engine, &md, px(400.), "md-probe").unwrap();
             assert_eq!(actual, expected, "{}: {uri}", engine.label());
         }
