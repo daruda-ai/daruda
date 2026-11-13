@@ -659,8 +659,8 @@ mod overage_notice;
 #[cfg(feature = "devtools")]
 mod seed_ops;
 pub use overage_notice::OverageNotice;
-pub(crate) mod resource_image_ops;
 pub(crate) mod resource_image_cache;
+pub(crate) mod resource_image_ops;
 mod session_ops;
 #[cfg(feature = "screenshot")]
 mod shot_ops;
