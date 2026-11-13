@@ -13,7 +13,9 @@ use crate::query::{
     parse_review_threads, parse_search_prs, pr_detail_query, prs_for_branches_query,
     search_prs_query, search_string,
 };
-use crate::{ActionsJob, GhError, NewPr, PrDetail, PrFilter, PrSearch, RepoId, ReviewThreads};
+use crate::{
+    ActionsJob, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrSearch, RepoId, ReviewThreads,
+};
 
 const LIMITS: CaptureLimits = CaptureLimits {
     timeout: Duration::from_secs(30),
@@ -28,6 +30,72 @@ const REPOS_PER_SEARCH: usize = 20;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemGh;
+
+/// Refuse a merge pin that is not a commit SHA: an empty one would make
+/// `gh` merge whatever the head is now.
+pub(crate) fn check_head_sha(head_sha: &str) -> Result<(), GhError> {
+    if !head_sha.is_empty() && head_sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(GhError::BadArgument(format!(
+            "merge pinned to {head_sha:?}, not a commit SHA"
+        )))
+    }
+}
+
+/// With a method named and no terminal, `gh pr merge` asks nothing. Never
+/// `--delete-branch` (a lane may stand on it) or `--auto` (a merge the user
+/// did not watch happen).
+fn merge_args(
+    repo: &RepoId,
+    number: u64,
+    method: MergeMethod,
+    head_sha: &str,
+) -> Result<Vec<String>, GhError> {
+    check_head_sha(head_sha)?;
+    let method = match method {
+        MergeMethod::Merge => "--merge",
+        MergeMethod::Squash => "--squash",
+        MergeMethod::Rebase => "--rebase",
+    };
+    Ok(vec![
+        "pr".to_owned(),
+        "merge".to_owned(),
+        number.to_string(),
+        "--repo".to_owned(),
+        repo.qualified(),
+        method.to_owned(),
+        format!("--match-head-commit={head_sha}"),
+    ])
+}
+
+fn ready_args(repo: &RepoId, number: u64) -> Vec<String> {
+    let repo = repo.qualified();
+    ["pr", "ready", &number.to_string(), "--repo", &repo]
+        .map(str::to_owned)
+        .to_vec()
+}
+
+fn close_args(repo: &RepoId, number: u64) -> Vec<String> {
+    let repo = repo.qualified();
+    ["pr", "close", &number.to_string(), "--repo", &repo]
+        .map(str::to_owned)
+        .to_vec()
+}
+
+fn rerun_failed_args(repo: &RepoId, run: u64) -> Vec<String> {
+    let repo = repo.qualified();
+    [
+        "run",
+        "rerun",
+        &run.to_string(),
+        "--failed",
+        "--repo",
+        &repo,
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
 
 impl SystemGh {
     fn run<I, S>(&self, args: I) -> Result<Captured, GhError>
@@ -229,6 +297,31 @@ impl Gh for SystemGh {
         parse_pr_detail(&json)
     }
 
+    fn merge_pr(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        method: MergeMethod,
+        head_sha: &str,
+    ) -> Result<(), GhError> {
+        let args = merge_args(repo, number, method, head_sha)?;
+        self.stdout(&args)
+            .map(drop)
+            .map_err(GhError::classify_merge)
+    }
+
+    fn set_ready(&self, repo: &RepoId, number: u64) -> Result<(), GhError> {
+        self.stdout(ready_args(repo, number)).map(drop)
+    }
+
+    fn close_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError> {
+        self.stdout(close_args(repo, number)).map(drop)
+    }
+
+    fn rerun_failed(&self, repo: &RepoId, run: u64) -> Result<(), GhError> {
+        self.stdout(rerun_failed_args(repo, run)).map(drop)
+    }
+
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {
         let mut args = vec![
             "pr".to_owned(),
@@ -279,6 +372,89 @@ mod tests {
         for (label, repos) in [("none", &[][..]), ("other host only", &other_host[..])] {
             let found = SystemGh.search_prs("github.com", repos, PrFilter::AllOpen);
             assert_eq!(found.unwrap(), PrSearch::default(), "{label}");
+        }
+    }
+
+    /// The argv of each mutation; none is ever run from a test.
+    #[test]
+    fn mutations_build_their_gh_argv() {
+        let repo = RepoId::new("GHE.corp", "O", "r");
+        let sha = "0123abcdef";
+        let merge = |method| merge_args(&repo, 7, method, sha).unwrap();
+        let cases: [(&str, Vec<String>, &[&str]); 6] = [
+            (
+                "squash",
+                merge(MergeMethod::Squash),
+                &[
+                    "pr",
+                    "merge",
+                    "7",
+                    "--repo",
+                    "ghe.corp/o/r",
+                    "--squash",
+                    "--match-head-commit=0123abcdef",
+                ],
+            ),
+            (
+                "merge commit",
+                merge(MergeMethod::Merge),
+                &[
+                    "pr",
+                    "merge",
+                    "7",
+                    "--repo",
+                    "ghe.corp/o/r",
+                    "--merge",
+                    "--match-head-commit=0123abcdef",
+                ],
+            ),
+            (
+                "rebase",
+                merge(MergeMethod::Rebase),
+                &[
+                    "pr",
+                    "merge",
+                    "7",
+                    "--repo",
+                    "ghe.corp/o/r",
+                    "--rebase",
+                    "--match-head-commit=0123abcdef",
+                ],
+            ),
+            (
+                "ready",
+                ready_args(&repo, 7),
+                &["pr", "ready", "7", "--repo", "ghe.corp/o/r"],
+            ),
+            (
+                "close",
+                close_args(&repo, 7),
+                &["pr", "close", "7", "--repo", "ghe.corp/o/r"],
+            ),
+            (
+                "rerun failed",
+                rerun_failed_args(&repo, 991),
+                &["run", "rerun", "991", "--failed", "--repo", "ghe.corp/o/r"],
+            ),
+        ];
+        for (label, args, expected) in cases {
+            assert_eq!(args, expected, "{label}");
+            for never in ["--delete-branch", "-d", "--auto", "--admin"] {
+                assert!(!args.iter().any(|a| a == never), "{label}: {never}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_merge_pinned_to_no_commit_is_refused_before_gh_runs() {
+        let repo = RepoId::new("github.com", "o", "r");
+        for (label, sha) in [("empty", ""), ("a flag", "--admin"), ("not hex", "main")] {
+            // Through `SystemGh` itself: a refused pin must not spawn `gh`.
+            let refused = SystemGh.merge_pr(&repo, 1, MergeMethod::Squash, sha);
+            assert!(
+                matches!(refused, Err(GhError::BadArgument(_))),
+                "{label}: {refused:?}"
+            );
         }
     }
 }

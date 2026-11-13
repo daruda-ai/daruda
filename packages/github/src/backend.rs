@@ -5,7 +5,9 @@
 
 use crate::availability::GhAuth;
 use crate::query::RepoPrs;
-use crate::{ActionsJob, GhError, NewPr, PrDetail, PrFilter, PrSearch, RepoId, ReviewThreads};
+use crate::{
+    ActionsJob, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrSearch, RepoId, ReviewThreads,
+};
 
 pub trait Gh: Send + Sync {
     /// Whether `gh` is installed and logged in to `host`.
@@ -31,4 +33,19 @@ pub trait Gh: Send + Sync {
     fn review_threads(&self, repo: &RepoId, number: u64) -> Result<ReviewThreads, GhError>;
     /// What pull request `number`'s page shows, in one request.
     fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError>;
+    /// Merge pull request `number` with `method`, only if its head is still
+    /// `head_sha`; otherwise [`GhError::HeadMoved`]. Leaves the branch.
+    fn merge_pr(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        method: MergeMethod,
+        head_sha: &str,
+    ) -> Result<(), GhError>;
+    /// Mark draft pull request `number` ready for review.
+    fn set_ready(&self, repo: &RepoId, number: u64) -> Result<(), GhError>;
+    /// Close pull request `number` unmerged. Leaves the branch.
+    fn close_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError>;
+    /// Rerun the failed jobs of Actions run `run`.
+    fn rerun_failed(&self, repo: &RepoId, run: u64) -> Result<(), GhError>;
 }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::{CheckRollup, Mergeability, PrSearch, PrState};
+use crate::{CheckRollup, MergeMethod, Mergeability, PrSearch, PrState};
 
 fn repo() -> RepoId {
     RepoId::new("github.com", "o", "r")
@@ -152,4 +152,119 @@ fn a_scripted_detail_answers_its_repository_and_number_only() {
             number: 7
         }
     );
+}
+
+fn detail(number: u64, state: PrState, head_sha: &str) -> PrDetail {
+    PrDetail {
+        summary: PrSummary {
+            state,
+            ..pr(number, "a")
+        },
+        body: String::new(),
+        head_sha: head_sha.into(),
+        base_branch: "main".into(),
+        author: None,
+        mergeability: Mergeability::Ready,
+        methods: Vec::new(),
+        reviewers: Vec::new(),
+        checks: Vec::new(),
+        open_threads: 0,
+    }
+}
+
+#[test]
+fn a_mutation_moves_the_scripted_pr_to_its_new_state() {
+    type Mutate = fn(&FakeGh, &RepoId, u64) -> Result<(), GhError>;
+    let cases: [(&str, PrState, Mutate, PrState); 3] = [
+        (
+            "merge",
+            PrState::Open,
+            |gh, repo, n| gh.merge_pr(repo, n, MergeMethod::Squash, "abc"),
+            PrState::Merged,
+        ),
+        ("ready", PrState::Draft, FakeGh::set_ready, PrState::Open),
+        ("close", PrState::Open, FakeGh::close_pr, PrState::Closed),
+    ];
+    for (label, before, mutate, after) in cases {
+        let gh = FakeGh::new();
+        gh.set_prs(
+            &repo(),
+            vec![PrSummary {
+                state: before,
+                ..pr(7, "a")
+            }],
+        );
+        gh.set_pr_detail(&repo(), 7, detail(7, before, "abc"));
+        mutate(&gh, &repo(), 7).unwrap();
+        let listed = gh.prs_for_branches(&repo(), &["a".to_owned()]).unwrap();
+        assert_eq!(listed.by_branch["a"][0].state, after, "{label}: listed");
+        let shown = gh.pr_detail(&repo(), 7).unwrap();
+        assert_eq!(shown.summary.state, after, "{label}: detail");
+    }
+}
+
+#[test]
+fn a_merge_is_refused_unless_pinned_to_the_scripted_head() {
+    let gh = FakeGh::new();
+    gh.set_pr_detail(&repo(), 7, detail(7, PrState::Open, "abc"));
+    let cases = [
+        ("moved head", "def", "head moved"),
+        ("not a commit", "", "bad argument"),
+    ];
+    for (label, sha, expected) in cases {
+        let answer = gh.merge_pr(&repo(), 7, MergeMethod::Rebase, sha);
+        let got = match answer {
+            Err(GhError::HeadMoved) => "head moved",
+            Err(GhError::BadArgument(_)) => "bad argument",
+            _ => "other",
+        };
+        assert_eq!(got, expected, "{label}: {answer:?}");
+    }
+    assert_eq!(
+        gh.pr_detail(&repo(), 7).unwrap().summary.state,
+        PrState::Open
+    );
+    assert_eq!(
+        gh.calls()[0],
+        GhCall::MergePr {
+            repo: repo(),
+            number: 7,
+            method: MergeMethod::Rebase,
+            head_sha: "def".into(),
+        }
+    );
+}
+
+#[test]
+fn rerun_is_logged_and_a_scripted_failure_answers_each_mutation() {
+    let gh = FakeGh::new();
+    gh.rerun_failed(&repo(), 991).unwrap();
+    assert_eq!(
+        gh.calls(),
+        vec![GhCall::RerunFailed {
+            repo: repo(),
+            run: 991
+        }]
+    );
+    let ops = [
+        GhOp::MergePr,
+        GhOp::SetReady,
+        GhOp::ClosePr,
+        GhOp::RerunFailed,
+    ];
+    for op in ops {
+        gh.fail(op, GhFailure::HeadMoved);
+    }
+    let answers = [
+        ("merge", gh.merge_pr(&repo(), 1, MergeMethod::Merge, "abc")),
+        ("ready", gh.set_ready(&repo(), 1)),
+        ("close", gh.close_pr(&repo(), 1)),
+        ("rerun", gh.rerun_failed(&repo(), 1)),
+    ];
+    for (label, answer) in answers {
+        assert!(matches!(answer, Err(GhError::HeadMoved)), "{label}");
+    }
+    for op in ops {
+        assert_eq!(gh.count(op), 1 + usize::from(op == GhOp::RerunFailed));
+    }
 }

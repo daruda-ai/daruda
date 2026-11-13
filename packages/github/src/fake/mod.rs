@@ -10,6 +10,13 @@
 //! | `failed_log` | exit 1, as for a run that has no failed log |
 //! | `review_threads` | none |
 //! | `pr_detail` | exit 1, as for a pull request that does not exist |
+//! | `merge_pr` | `HeadMoved` if a scripted detail's head differs, else merged |
+//! | `set_ready` | the PR, if scripted, becomes open |
+//! | `close_pr` | the PR, if scripted, becomes closed |
+//! | `rerun_failed` | done |
+//!
+//! A mutation changes the state of the scripted PR in both `set_prs` and
+//! `set_pr_detail`, so the next lookup sees it.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -17,9 +24,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use crate::availability::GhAuth;
 use crate::backend::Gh;
 use crate::query::{RepoPrs, newest_first};
+use crate::system::check_head_sha;
 use crate::{
-    ActionsJob, CheckRollup, GhError, NewPr, PrDetail, PrFilter, PrListItem, PrSearch, PrState,
-    PrSummary, RepoId, ReviewThreads,
+    ActionsJob, CheckRollup, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrListItem, PrSearch,
+    PrState, PrSummary, RepoId, ReviewThreads,
 };
 
 /// A request the code under test made.
@@ -53,6 +61,24 @@ pub enum GhCall {
         repo: RepoId,
         number: u64,
     },
+    MergePr {
+        repo: RepoId,
+        number: u64,
+        method: MergeMethod,
+        head_sha: String,
+    },
+    SetReady {
+        repo: RepoId,
+        number: u64,
+    },
+    ClosePr {
+        repo: RepoId,
+        number: u64,
+    },
+    RerunFailed {
+        repo: RepoId,
+        run: u64,
+    },
 }
 
 /// One [`Gh`] method, for aiming failures.
@@ -65,6 +91,10 @@ pub enum GhOp {
     FailedLog,
     ReviewThreads,
     PrDetail,
+    MergePr,
+    SetReady,
+    ClosePr,
+    RerunFailed,
 }
 
 /// A cloneable description of a [`GhError`], turned into a fresh error on
@@ -74,6 +104,7 @@ pub enum GhFailure {
     NotFound,
     Exit { code: Option<i32>, stderr: String },
     Parse(String),
+    HeadMoved,
 }
 
 impl GhFailure {
@@ -85,6 +116,7 @@ impl GhFailure {
                 stderr: stderr.clone(),
             },
             Self::Parse(message) => GhError::Parse(message.clone()),
+            Self::HeadMoved => GhError::HeadMoved,
         }
     }
 }
@@ -195,6 +227,34 @@ impl GhCall {
             Self::FailedLog { .. } => GhOp::FailedLog,
             Self::ReviewThreads { .. } => GhOp::ReviewThreads,
             Self::PrDetail { .. } => GhOp::PrDetail,
+            Self::MergePr { .. } => GhOp::MergePr,
+            Self::SetReady { .. } => GhOp::SetReady,
+            Self::ClosePr { .. } => GhOp::ClosePr,
+            Self::RerunFailed { .. } => GhOp::RerunFailed,
+        }
+    }
+}
+
+impl FakeState {
+    /// Log `call`, then answer the failure scripted for it, if any.
+    fn record(&mut self, call: GhCall) -> Result<(), GhError> {
+        let op = call.op();
+        self.calls.push(call);
+        match self.failures.get(&op) {
+            Some(failure) => Err(failure.to_error()),
+            None => Ok(()),
+        }
+    }
+
+    /// Move PR `number` of `repo` to `state` wherever it is scripted.
+    fn set_state(&mut self, repo: &RepoId, number: u64, state: PrState) {
+        let listed = self.prs.get_mut(repo).into_iter().flatten();
+        let detailed = self.details.get_mut(&(repo.clone(), number));
+        for pr in listed
+            .filter(|pr| pr.number == number)
+            .chain(detailed.map(|detail| &mut detail.summary))
+        {
+            pr.state = state;
         }
     }
 }
@@ -325,6 +385,59 @@ impl Gh for FakeGh {
                 code: Some(1),
                 stderr: format!("Could not resolve to a PullRequest with the number of {number}."),
             })
+    }
+
+    fn merge_pr(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        method: MergeMethod,
+        head_sha: &str,
+    ) -> Result<(), GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::MergePr {
+            repo: repo.clone(),
+            number,
+            method,
+            head_sha: head_sha.to_owned(),
+        })?;
+        check_head_sha(head_sha)?;
+        let scripted_head = state
+            .details
+            .get(&(repo.clone(), number))
+            .map(|detail| detail.head_sha.as_str());
+        if scripted_head.is_some_and(|head| head != head_sha) {
+            return Err(GhError::HeadMoved);
+        }
+        state.set_state(repo, number, PrState::Merged);
+        Ok(())
+    }
+
+    fn set_ready(&self, repo: &RepoId, number: u64) -> Result<(), GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::SetReady {
+            repo: repo.clone(),
+            number,
+        })?;
+        state.set_state(repo, number, PrState::Open);
+        Ok(())
+    }
+
+    fn close_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::ClosePr {
+            repo: repo.clone(),
+            number,
+        })?;
+        state.set_state(repo, number, PrState::Closed);
+        Ok(())
+    }
+
+    fn rerun_failed(&self, repo: &RepoId, run: u64) -> Result<(), GhError> {
+        self.lock().record(GhCall::RerunFailed {
+            repo: repo.clone(),
+            run,
+        })
     }
 
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {

@@ -19,6 +19,12 @@ pub enum GhError {
     },
     /// The output was not what this crate expects from `gh`.
     Parse(String),
+    /// A merge pinned to a head commit found the pull request's head
+    /// elsewhere: it was pushed to since the caller read it.
+    HeadMoved,
+    /// A value the caller passed that must not reach `gh`, such as a merge
+    /// pinned to something that is not a commit SHA.
+    BadArgument(String),
 }
 
 impl std::fmt::Display for GhError {
@@ -36,11 +42,35 @@ impl std::fmt::Display for GhError {
             Self::Timeout(d) => write!(f, "gh timed out after {}s", d.as_secs()),
             Self::Overflow { limit } => write!(f, "gh output exceeded {limit} bytes"),
             Self::Parse(message) => write!(f, "unexpected gh output: {message}"),
+            Self::HeadMoved => write!(f, "the pull request changed since it was read"),
+            Self::BadArgument(message) => write!(f, "refused to run gh: {message}"),
         }
     }
 }
 
 impl std::error::Error for GhError {}
+
+impl GhError {
+    /// A failed `gh pr merge --match-head-commit` as the caller should see
+    /// it: a head that moved becomes [`GhError::HeadMoved`], the rest stays.
+    pub(crate) fn classify_merge(self) -> Self {
+        match self {
+            // ASSUMPTION: not measured — a mismatch cannot be triggered
+            // safely. gh passes the SHA to GraphQL `mergePullRequest` as
+            // `expectedHeadOid` and relays GitHub's refusal, which the REST
+            // merge endpoint words "Head branch was modified. Review and try
+            // the merge again."; matched case-insensitively on that phrase.
+            Self::Exit { ref stderr, .. }
+                if stderr
+                    .to_ascii_lowercase()
+                    .contains("head branch was modified") =>
+            {
+                Self::HeadMoved
+            }
+            other => other,
+        }
+    }
+}
 
 /// How a failed request should change what the poller does next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +82,8 @@ pub enum FailureKind {
     /// GitHub refused for rate limiting; back off longer.
     RateLimited,
     /// Anything else, network trouble included; back off and retry.
+    /// A failed mutation ([`GhError::HeadMoved`] included) lands here too;
+    /// the poller never sees one, and the caller decides what it means.
     Transient,
 }
 
@@ -85,5 +117,42 @@ mod tests {
             stderr: "To get started with GitHub CLI, please run:  gh auth login".into(),
         };
         assert_eq!(error.kind(), FailureKind::LoggedOut);
+    }
+
+    #[test]
+    fn a_merge_refused_for_a_moved_head_is_recognized() {
+        let exit = |stderr: &str| GhError::Exit {
+            code: Some(1),
+            stderr: stderr.into(),
+        };
+        let cases = [
+            (
+                "GraphQL relay",
+                exit(
+                    "GraphQL: Head branch was modified. Review and try the merge again. \
+                     (mergePullRequest)",
+                ),
+                true,
+            ),
+            ("lowercase", exit("head branch was modified"), true),
+            (
+                "other refusal",
+                exit("Pull request is not mergeable"),
+                false,
+            ),
+            ("exit 4 stays a logout", exit_4(), false),
+            ("not an exit", GhError::NotFound, false),
+        ];
+        for (label, error, moved) in cases {
+            let merged = error.classify_merge();
+            assert_eq!(matches!(merged, GhError::HeadMoved), moved, "{label}");
+        }
+    }
+
+    fn exit_4() -> GhError {
+        GhError::Exit {
+            code: Some(4),
+            stderr: "gh auth login".into(),
+        }
     }
 }
