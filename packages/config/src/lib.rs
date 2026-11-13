@@ -6,6 +6,7 @@
 
 pub mod account_env;
 pub mod agent;
+pub mod browser;
 pub mod claude_status;
 pub mod clipboard;
 pub mod colors;
@@ -19,7 +20,6 @@ pub mod flow;
 pub mod font;
 pub mod general;
 pub mod git;
-pub mod browser;
 pub mod github;
 pub mod keybindings;
 pub mod left_dock;
@@ -63,6 +63,7 @@ pub use agent::{
     delegated_default, delegated_default_for_command, effective_delegated_mode, is_valid_env_name,
     mode_display_name, with_transcript_default,
 };
+pub use browser::BrowserConfig;
 pub use claude_status::ClaudeStatusConfig;
 pub use clipboard::ClipboardConfig;
 pub use colors::{AnsiPalette, ColorConfig, HexColor};
@@ -73,7 +74,6 @@ pub use config_file::{
 };
 use config_file::{deserialize_config, patch_section};
 pub use git::GitConfig;
-pub use browser::BrowserConfig;
 pub use github::GithubConfig;
 
 /// `value` clamped to `[min, max]`, or `fallback` when it is NaN. TOML reads
