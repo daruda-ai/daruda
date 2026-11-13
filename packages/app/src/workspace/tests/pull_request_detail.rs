@@ -550,7 +550,10 @@ fn a_failed_action_reports_what_gh_said(cx: &mut TestAppContext) {
         report.message
     );
     assert_eq!(gh.count(GhOp::PrDetail), reads, "the detail stays as shown");
-    let DetailBody::Ready(ready) = view(&f, cx).body else {
+    let shown = view(&f, cx);
+    let error = shown.error.clone().expect("the detail keeps what gh said");
+    assert!(error.contains("run 11 cannot be rerun"), "{error}");
+    let DetailBody::Ready(ready) = shown.body else {
         panic!("not read");
     };
     assert_eq!(
@@ -558,6 +561,61 @@ fn a_failed_action_reports_what_gh_said(cx: &mut TestAppContext) {
         Some(ActionSlot::Ready),
         "and can be tried again"
     );
+
+    // The next action clears it while it runs; a reload clears it too.
+    gh.clear_failure(GhOp::RerunFailed);
+    f.ws.update(cx, |ws, cx| ws.rerun_pr_detail_checks(id, cx));
+    assert_eq!(view(&f, cx).error, None);
+    cx.run_until_parked();
+    assert_eq!(view(&f, cx).error, None, "it succeeded");
+    gh.fail(
+        GhOp::RerunFailed,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "again".into(),
+        },
+    );
+    f.ws.update(cx, |ws, cx| ws.rerun_pr_detail_checks(id, cx));
+    cx.run_until_parked();
+    assert!(view(&f, cx).error.is_some());
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    assert_eq!(view(&f, cx).error, None, "a reload clears it");
+}
+
+#[gpui::test]
+fn merge_goes_to_github_even_when_it_may_refuse(cx: &mut TestAppContext) {
+    let mut blocked = mergeable(7, "feat");
+    blocked.mergeability = Mergeability::Blocked(daruda_github::BlockReason::Requirements);
+    let (f, gh, id) = opened(cx, blocked);
+    let actions = view(&f, cx).actions.expect("open");
+    assert_eq!(actions.merge.slot, ActionSlot::Ready);
+    gh.fail(
+        GhOp::MergePr,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "Pull request is not mergeable: the base branch policy prohibits the merge"
+                .into(),
+        },
+    );
+    assert!(asks(&f, cx, |ws, window, cx| {
+        ws.ask_pr_merge(id, MergeMethod::Merge, window, cx)
+    }));
+    confirm(&f, cx);
+    assert_eq!(gh.count(GhOp::MergePr), 1);
+    let error = view(&f, cx)
+        .error
+        .expect("GitHub's refusal stays in the detail");
+    assert!(error.contains("base branch policy"), "{error}");
+
+    // A conflict is not asked at all.
+    let mut conflicting = mergeable(7, "feat");
+    conflicting.mergeability = Mergeability::Conflicting;
+    gh.set_pr_detail(&repo(), 7, conflicting);
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    cx.run_until_parked();
+    assert!(!asks(&f, cx, |ws, window, cx| {
+        ws.ask_pr_merge(id, MergeMethod::Merge, window, cx)
+    }));
 }
 
 #[gpui::test]

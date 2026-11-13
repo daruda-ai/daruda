@@ -8,7 +8,7 @@ use daruda_github::{
     PrListItem, PrState, ReviewThread, ReviewThreads, ReviewerState,
 };
 
-use super::actions::{self, PrAction};
+use super::actions::{self, ActionState, MergeBlock, PrAction};
 use super::detail::{Load, PrDetailId, PrDetailState, PrTab};
 use super::list::{self, LaneFacts, RowLane};
 use crate::surface::strings::{git as git_s, notification, pull_requests as s};
@@ -52,12 +52,12 @@ pub(in crate::workspace) enum ActionSlot {
 }
 
 impl ActionSlot {
-    /// `mine` running, another running, or idle and `blocked` or not.
-    fn of(running: PrAction, mine: PrAction, blocked: Option<String>) -> Self {
-        match running {
-            PrAction::Idle => blocked.map_or(Self::Ready, Self::Blocked),
-            running if running == mine => Self::Running,
-            _ => Self::Waiting,
+    /// `mine` running, another running, or neither and `blocked` or not.
+    fn of(state: &ActionState, mine: PrAction, blocked: Option<String>) -> Self {
+        match state.running() {
+            None => blocked.map_or(Self::Ready, Self::Blocked),
+            Some(running) if running == mine => Self::Running,
+            Some(_) => Self::Waiting,
         }
     }
 
@@ -90,6 +90,26 @@ pub(in crate::workspace) struct HeaderActions {
     pub close: ActionSlot,
     /// Only on a draft.
     pub ready: Option<ActionSlot>,
+}
+
+/// The header's worktree button.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum LaneSlot {
+    /// Go to the worktree working on it.
+    Linked(RowLane),
+    /// One is being made for it, from here or from its list row.
+    Creating,
+    /// None yet: offer to make one; `review` for a fork's review worktree.
+    Absent { review: bool },
+}
+
+/// What the summary column says under the linked worktree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum LaneNote {
+    /// On the pull request's own branch: a push updates it.
+    UpdatesPr,
+    /// A fork's review worktree: its pushes go nowhere near it.
+    ReviewOnly,
 }
 
 /// A failed Actions check's log, which it can open under it.
@@ -146,8 +166,8 @@ pub(in crate::workspace) struct SideView {
     /// Each reviewer and where they stand, then the open threads.
     pub reviews: Vec<Fact>,
     pub lane: Option<RowLane>,
-    /// Said under the worktree: a fork's review worktree cannot push to it.
-    pub lane_note: Option<String>,
+    /// Said under the linked worktree: whether its pushes reach the PR.
+    pub lane_note: Option<LaneNote>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,20 +203,24 @@ pub(in crate::workspace) struct PrDetailView {
     /// `head → base · author · 2h ago · Changes requested · Behind the base`.
     pub meta: String,
     pub url: Option<String>,
-    pub lane: Option<RowLane>,
+    pub lane: LaneSlot,
     /// Once read, while the pull request is open or a draft.
     pub actions: Option<HeaderActions>,
+    /// What the last action's failure said, until the next action or reload.
+    pub error: Option<String>,
     pub tab: PrTab,
     pub tabs: Vec<(PrTab, String)>,
     pub body: DetailBody,
 }
 
 /// The detail for `state`, worked on in `lane` (if any), whose sends are
-/// under way when `sending`.
+/// under way when `sending`, and whose worktree is being made when
+/// `creating`.
 pub(in crate::workspace) fn view(
     state: &PrDetailState,
     lane: Option<&LaneFacts>,
     sending: bool,
+    creating: bool,
     now: DateTime<Utc>,
 ) -> PrDetailView {
     let item = &state.item;
@@ -223,8 +247,18 @@ pub(in crate::workspace) fn view(
         title: format!("{} {}", git_s::pr_number(pr.number), pr.title),
         meta: meta(item, loaded, now),
         url: pr.web_url().map(str::to_owned),
-        lane: row_lane.clone(),
-        actions: loaded.and_then(|loaded| header_actions(loaded, state.action)),
+        lane: match (&row_lane, creating) {
+            (Some(lane), _) => LaneSlot::Linked(lane.clone()),
+            (None, true) => LaneSlot::Creating,
+            (None, false) => LaneSlot::Absent {
+                review: item.pr.cross_repo,
+            },
+        },
+        actions: loaded.and_then(|loaded| header_actions(loaded, &state.action)),
+        error: match &state.action {
+            ActionState::Failed(line) => Some(line.clone()),
+            ActionState::Idle | ActionState::Running(_) => None,
+        },
         tab: state.tab,
         tabs: PrTab::ALL
             .into_iter()
@@ -262,7 +296,7 @@ fn ready(
             .collect(),
         checks_send: send(loaded.summary.failed.is_empty()),
         rerun: (!actions::failed_runs(&loaded.checks).is_empty())
-            .then(|| ActionSlot::of(state.action, PrAction::Rerunning, None)),
+            .then(|| ActionSlot::of(&state.action, PrAction::Rerunning, None)),
         threads: match &state.threads {
             None | Some(Load::Loading) => ThreadsView::Loading,
             Some(Load::Failed(reason)) => ThreadsView::Failed(reason.clone()),
@@ -276,9 +310,9 @@ fn ready(
     }
 }
 
-/// Merge is offered only when GitHub says it can go now; otherwise its
-/// tooltip says why, in the words the summary column uses.
-fn header_actions(loaded: &PrDetail, running: PrAction) -> Option<HeaderActions> {
+/// Merge is offered unless it cannot go at all (see [`MergeBlock`]); then
+/// its tooltip says why, in the words the summary column uses.
+fn header_actions(loaded: &PrDetail, running: &ActionState) -> Option<HeaderActions> {
     let draft = match loaded.summary.state {
         PrState::Open => false,
         PrState::Draft => true,
@@ -289,13 +323,11 @@ fn header_actions(loaded: &PrDetail, running: PrAction) -> Option<HeaderActions>
             .into_iter()
             .map(|method| (method, merge_action_label(method)))
             .collect();
-    let blocked = match loaded.mergeability {
-        _ if methods.is_empty() => Some(s::merge_no_methods()),
-        Mergeability::Ready => None,
-        Mergeability::Blocked(reason) => Some(s::merge_blocked(block_label(reason))),
-        Mergeability::Conflicting => Some(s::merge_blocked(s::merge_conflicting())),
-        Mergeability::Unknown => Some(s::merge_blocked(s::merge_unknown())),
-    };
+    let blocked = actions::merge_block(loaded).map(|block| match block {
+        MergeBlock::NoMethods => s::merge_no_methods(),
+        MergeBlock::Draft => s::merge_blocked(s::blocked_draft()),
+        MergeBlock::Conflicting => s::merge_blocked(s::merge_conflicting()),
+    });
     Some(HeaderActions {
         merge: MergeView {
             label: methods
@@ -502,10 +534,13 @@ fn side(item: &PrListItem, loaded: &PrDetail, lane: Option<RowLane>) -> SideView
             Mood::Warn
         },
     });
-    let lane_note = lane
-        .as_ref()
-        .filter(|_| item.pr.cross_repo)
-        .map(|_| s::fork_lane_note());
+    let lane_note = lane.as_ref().map(|_| {
+        if item.pr.cross_repo {
+            LaneNote::ReviewOnly
+        } else {
+            LaneNote::UpdatesPr
+        }
+    });
     SideView {
         merge: vec![
             Fact {
@@ -725,7 +760,13 @@ mod tests {
         for (label, linked, sending, failed, threads, checks_send, threads_send) in cases {
             let lane = lane();
             let state = state(Load::Ready(detail(failed, threads, false)), false);
-            let view = ready(view(&state, linked.then_some(&lane), sending, Utc::now()));
+            let view = ready(view(
+                &state,
+                linked.then_some(&lane),
+                sending,
+                false,
+                Utc::now(),
+            ));
             assert_eq!(view.checks_send, checks_send, "{label}: checks");
             assert_eq!(view.threads_send, threads_send, "{label}: threads");
             assert_eq!(view.checks_send.enabled(), checks_send == SendSlot::Ready);
@@ -735,7 +776,7 @@ mod tests {
     #[test]
     fn only_a_failed_actions_check_opens_its_log() {
         let mut state = state(Load::Ready(detail(true, 0, false)), false);
-        let closed = ready(view(&state, None, false, Utc::now()));
+        let closed = ready(view(&state, None, false, false, Utc::now()));
         let logs: Vec<_> = closed.checks.iter().map(|row| row.log.clone()).collect();
         assert_eq!(
             logs,
@@ -755,7 +796,7 @@ mod tests {
         assert_eq!(closed.checks_summary, "2 failing · 1 passed · 1 skipped");
 
         state.logs.insert((11, 22), Load::Ready("boom".into()));
-        let open = ready(view(&state, None, false, Utc::now()));
+        let open = ready(view(&state, None, false, false, Utc::now()));
         assert_eq!(
             open.checks[0].log,
             LogSlot::Open(JOB, Load::Ready("boom".into()))
@@ -764,7 +805,7 @@ mod tests {
 
     #[test]
     fn the_header_says_what_the_detail_knows_once_read() {
-        let loading = view(&state(Load::Loading, false), None, false, Utc::now());
+        let loading = view(&state(Load::Loading, false), None, false, false, Utc::now());
         assert_eq!(loading.body, DetailBody::Loading);
         assert_eq!(loading.crumb, "Pull requests / o/r");
         assert_eq!(loading.title, "#7 Fix it");
@@ -779,6 +820,7 @@ mod tests {
         let read = view(
             &state(Load::Ready(detail(true, 3, false)), false),
             None,
+            false,
             false,
             Utc::now(),
         );
@@ -795,16 +837,16 @@ mod tests {
 
     #[test]
     fn the_header_offers_what_github_allows_on_an_open_pull_request() {
+        use ActionState::{Idle, Running};
         // (label, state, mergeability, allowed, running, button, menu, merge, ready)
         let behind = Mergeability::Blocked(BlockReason::Behind);
-        let blocked = ActionSlot::Blocked("Can’t merge: Behind the base branch".into());
         let cases = [
             (
                 "squash preferred",
                 PrState::Open,
                 Mergeability::Ready,
                 vec![MergeMethod::Rebase, MergeMethod::Merge, MergeMethod::Squash],
-                PrAction::Idle,
+                Idle,
                 "Squash and merge",
                 vec![
                     "Squash and merge",
@@ -819,29 +861,62 @@ mod tests {
                 PrState::Open,
                 Mergeability::Ready,
                 vec![MergeMethod::Rebase, MergeMethod::Merge],
-                PrAction::Idle,
+                Idle,
                 "Create a merge commit",
                 vec!["Create a merge commit", "Rebase and merge"],
                 ActionSlot::Ready,
                 None,
             ),
             (
-                "behind",
+                "behind: GitHub says no, the button does not",
                 PrState::Open,
                 behind,
                 vec![MergeMethod::Squash],
-                PrAction::Idle,
+                Idle,
                 "Squash and merge",
                 vec!["Squash and merge"],
-                blocked.clone(),
+                ActionSlot::Ready,
                 None,
+            ),
+            (
+                "not worked out yet",
+                PrState::Open,
+                Mergeability::Unknown,
+                vec![MergeMethod::Squash],
+                Idle,
+                "Squash and merge",
+                vec!["Squash and merge"],
+                ActionSlot::Ready,
+                None,
+            ),
+            (
+                "conflicting",
+                PrState::Open,
+                Mergeability::Conflicting,
+                vec![MergeMethod::Squash],
+                Idle,
+                "Squash and merge",
+                vec!["Squash and merge"],
+                ActionSlot::Blocked("Can’t merge: Conflicts with the base branch".into()),
+                None,
+            ),
+            (
+                "draft: ready for review first",
+                PrState::Draft,
+                Mergeability::Blocked(BlockReason::Draft),
+                vec![MergeMethod::Squash],
+                Idle,
+                "Squash and merge",
+                vec!["Squash and merge"],
+                ActionSlot::Blocked("Can’t merge: Draft".into()),
+                Some(ActionSlot::Ready),
             ),
             (
                 "no method",
                 PrState::Open,
                 Mergeability::Ready,
                 vec![],
-                PrAction::Idle,
+                Idle,
                 "Merge",
                 vec![],
                 ActionSlot::Blocked(s::merge_no_methods()),
@@ -852,7 +927,7 @@ mod tests {
                 PrState::Draft,
                 Mergeability::Ready,
                 vec![MergeMethod::Squash],
-                PrAction::Merging,
+                Running(PrAction::Merging),
                 "Squash and merge",
                 vec!["Squash and merge"],
                 ActionSlot::Running,
@@ -865,8 +940,10 @@ mod tests {
             loaded.mergeability = mergeability;
             loaded.methods = allowed;
             let mut state = state(Load::Ready(loaded), false);
-            state.action = running;
-            let actions = view(&state, None, false, Utc::now()).actions.expect(label);
+            state.action = running.clone();
+            let actions = view(&state, None, false, false, Utc::now())
+                .actions
+                .expect(label);
             assert_eq!(actions.merge.label, button, "{label}: button");
             let labels: Vec<_> = actions
                 .merge
@@ -884,24 +961,72 @@ mod tests {
             loaded.summary.state = done;
             let state = state(Load::Ready(loaded), false);
             assert_eq!(
-                view(&state, None, false, Utc::now()).actions,
+                view(&state, None, false, false, Utc::now()).actions,
                 None,
                 "{done:?}"
             );
         }
-        let unread = view(&state(Load::Loading, false), None, false, Utc::now());
+        let unread = view(&state(Load::Loading, false), None, false, false, Utc::now());
         assert_eq!(unread.actions, None, "nothing to act on before it is read");
     }
 
     #[test]
-    fn a_forks_review_worktree_says_its_pushes_go_nowhere() {
+    fn the_linked_worktree_says_whether_its_pushes_reach_the_pull_request() {
         let lane = lane();
-        for (cross_repo, note) in [(true, Some(s::fork_lane_note())), (false, None)] {
+        for (cross_repo, note) in [(true, LaneNote::ReviewOnly), (false, LaneNote::UpdatesPr)] {
             let state = state(Load::Ready(detail(false, 0, cross_repo)), cross_repo);
-            let side = ready(view(&state, Some(&lane), false, Utc::now())).side;
-            assert_eq!(side.lane_note, note, "cross_repo {cross_repo}");
+            let side = ready(view(&state, Some(&lane), false, false, Utc::now())).side;
+            assert_eq!(side.lane_note, Some(note), "cross_repo {cross_repo}");
             assert_eq!(side.lane.map(|lane| lane.name), Some("fix".to_owned()));
         }
+        let state = state(Load::Ready(detail(false, 0, false)), false);
+        let side = ready(view(&state, None, false, false, Utc::now())).side;
+        assert_eq!(side.lane_note, None, "nothing to say without a worktree");
+    }
+
+    #[test]
+    fn without_a_worktree_the_header_offers_to_make_one() {
+        let lane = lane();
+        let linked = RowLane {
+            lane: lane.lane,
+            name: "fix".into(),
+        };
+        // (label, cross_repo, linked, creating, slot)
+        let cases = [
+            ("linked", false, true, false, LaneSlot::Linked(linked)),
+            ("being made", false, false, true, LaneSlot::Creating),
+            (
+                "same repository",
+                false,
+                false,
+                false,
+                LaneSlot::Absent { review: false },
+            ),
+            (
+                "a fork: a review worktree",
+                true,
+                false,
+                false,
+                LaneSlot::Absent { review: true },
+            ),
+        ];
+        for (label, cross_repo, linked, creating, slot) in cases {
+            let state = state(Load::Loading, cross_repo);
+            let view = view(&state, linked.then_some(&lane), false, creating, Utc::now());
+            assert_eq!(view.lane, slot, "{label}");
+        }
+    }
+
+    #[test]
+    fn a_failed_action_is_said_under_the_header_and_frees_the_buttons() {
+        let mut state = state(Load::Ready(detail(true, 0, false)), false);
+        assert_eq!(view(&state, None, false, false, Utc::now()).error, None);
+        state.action = ActionState::Failed("Merging #7 failed: nope".into());
+        let failed = view(&state, None, false, false, Utc::now());
+        assert_eq!(failed.error.as_deref(), Some("Merging #7 failed: nope"));
+        let actions = failed.actions.clone().expect("open");
+        assert_eq!(actions.close, ActionSlot::Ready);
+        assert_eq!(ready(failed).rerun, Some(ActionSlot::Ready));
     }
 
     #[test]

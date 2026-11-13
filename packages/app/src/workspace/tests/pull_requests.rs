@@ -317,3 +317,70 @@ fn slot(f: &GitFixture, cx: &mut TestAppContext) -> Slot {
         RowLaneSlot::Absent(_) => Slot::Absent,
     }
 }
+
+/// The detail's worktree slot, staged as the page draws it.
+fn detail_slot(
+    f: &GitFixture,
+    cx: &mut TestAppContext,
+) -> crate::workspace::pages::pull_requests::detail_view::LaneSlot {
+    f.ws.update(cx, |ws, cx| {
+        ws.stage_pr_page(cx);
+        ws.pages.pull_requests.detail_snapshot.clone()
+    })
+    .expect("the page shows its detail")
+    .lane
+}
+
+#[gpui::test]
+fn the_details_button_makes_the_worktree_its_row_would(cx: &mut TestAppContext) {
+    use crate::workspace::pages::pull_requests::detail_view::LaneSlot;
+    let (f, gh) = window(cx, |repo| repo);
+    // Failing, so the in-flight state can be read before it settles.
+    f.fake.fail(
+        f.root.clone(),
+        GitOp::FetchRef,
+        FakeFailure::Exit {
+            code: Some(128),
+            stderr: "fatal: couldn't find remote ref".into(),
+        },
+    );
+    let pr = item(8, "fix/scroll", false);
+    gh.set_pr_list(PrFilter::Mine, vec![pr.clone()]);
+    let (window, ws) = (f.window, f.ws.downgrade());
+    cx.update(|cx| crate::window_registry::WindowRegistry::register(window.into(), ws, cx));
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    cx.update(crate::github::PrPoller::tick);
+    cx.run_until_parked();
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| ws.open_pr_detail(pr.clone(), window, cx));
+    });
+    cx.run_until_parked();
+    assert_eq!(detail_slot(&f, cx), LaneSlot::Absent { review: false });
+
+    let id =
+        f.ws.read_with(cx, |ws, _| ws.pr_detail_id())
+            .expect("shown");
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| ws.create_pr_detail_lane(id, window, cx));
+    });
+    assert_eq!(
+        detail_slot(&f, cx),
+        LaneSlot::Creating,
+        "inert while git runs"
+    );
+    assert_eq!(slot(&f, cx), Slot::Creating, "and so is its row");
+    cx.run_until_parked();
+
+    assert_eq!(
+        calls(&f),
+        vec![GitCall::FetchRef {
+            repo: f.root.clone(),
+            remote: "upstream".into(),
+            refspec: "+refs/heads/fix/scroll:refs/remotes/upstream/fix/scroll".into(),
+        }]
+    );
+    assert_eq!(detail_slot(&f, cx), LaneSlot::Absent { review: false });
+    assert_eq!(error_titles(&f, cx), vec![error::lane_create_failed()]);
+}

@@ -20,16 +20,63 @@ use crate::ui::dialog::{ButtonVariant, confirm_destructive, open_confirm_dialog}
 use crate::workspace::Workspace;
 use crate::workspace::spawn_helpers::spawn_bg_work_and_mutate;
 
-/// What the detail is doing to its pull request; every action button is off
-/// while one runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// An action the detail runs on its pull request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::workspace) enum PrAction {
-    #[default]
-    Idle,
     Merging,
     Closing,
     MarkingReady,
     Rerunning,
+}
+
+/// Where the detail's actions stand; every action button is off while one
+/// runs.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(in crate::workspace) enum ActionState {
+    #[default]
+    Idle,
+    Running(PrAction),
+    /// The last action failed: what it was and what `gh` said, shown under
+    /// the header until the next action or a reload. Actions can run again.
+    Failed(String),
+}
+
+impl ActionState {
+    pub(in crate::workspace) fn running(&self) -> Option<PrAction> {
+        match self {
+            Self::Running(action) => Some(*action),
+            Self::Idle | Self::Failed(_) => None,
+        }
+    }
+}
+
+/// Why the merge button is off. Anything else GitHub would refuse (a
+/// missing review, a branch behind its base, a state not worked out yet) is
+/// left to GitHub to say: the reason shows in the sub-line, and a refusal
+/// comes back as the action's error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum MergeBlock {
+    NoMethods,
+    /// A draft is made ready for review first, with its own button.
+    Draft,
+    Conflicting,
+}
+
+pub(in crate::workspace) fn merge_block(loaded: &PrDetail) -> Option<MergeBlock> {
+    if loaded.methods.is_empty() {
+        Some(MergeBlock::NoMethods)
+    } else if loaded.summary.state == PrState::Draft {
+        Some(MergeBlock::Draft)
+    } else if loaded.mergeability == Mergeability::Conflicting {
+        Some(MergeBlock::Conflicting)
+    } else {
+        None
+    }
+}
+
+/// Whether `method` may be asked of GitHub for `loaded`.
+fn can_merge(loaded: &PrDetail, method: MergeMethod) -> bool {
+    merge_block(loaded).is_none() && loaded.methods.contains(&method)
 }
 
 /// The merge methods the menu offers: only those the repository allows,
@@ -100,7 +147,7 @@ impl Workspace {
             .pull_requests
             .detail
             .as_ref()
-            .filter(|d| d.id == id && d.action == PrAction::Idle)?;
+            .filter(|d| d.id == id && d.action.running().is_none())?;
         let Load::Ready(loaded) = &detail.load else {
             return None;
         };
@@ -125,9 +172,7 @@ impl Workspace {
         let Some(target) = self.pr_action_target(id) else {
             return;
         };
-        let allowed = target.loaded.mergeability == Mergeability::Ready
-            && target.loaded.methods.contains(&method);
-        if !allowed {
+        if !can_merge(&target.loaded, method) {
             return;
         }
         let head_sha = target.loaded.head_sha.clone();
@@ -211,10 +256,7 @@ impl Workspace {
             return;
         };
         let applies = match &request {
-            Request::Merge { method, .. } => {
-                target.loaded.mergeability == Mergeability::Ready
-                    && target.loaded.methods.contains(method)
-            }
+            Request::Merge { method, .. } => can_merge(&target.loaded, *method),
             Request::Close => true,
             Request::Ready => target.loaded.summary.state == PrState::Draft,
             Request::Rerun(runs) => !runs.is_empty(),
@@ -224,7 +266,7 @@ impl Workspace {
         }
         let action = request.action();
         if let Some(detail) = self.pr_detail_mut(id) {
-            detail.action = action;
+            detail.action = ActionState::Running(action);
         }
         let (repo, number) = (target.repo, target.number);
         let gh = GhHost::global(cx);
@@ -254,6 +296,7 @@ impl Workspace {
     /// list and the lane badges are asked again either way; only the detail
     /// that asked is reloaded or freed. A failure is reported even if that
     /// detail is gone: the person asked for the action and it did not happen.
+    /// The detail that asked keeps what failed, under its header.
     fn land_pr_action(
         &mut self,
         id: PrDetailId,
@@ -264,29 +307,35 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let shown = match self.pr_detail_mut(id) {
-            Some(detail) if detail.action == action => {
-                detail.action = PrAction::Idle;
+            Some(detail) if detail.action == ActionState::Running(action) => {
+                detail.action = ActionState::Idle;
                 true
             }
             _ => false,
         };
-        match &result {
-            Ok(()) => PrPoller::nudge(repo, cx),
+        let failure = match &result {
+            Ok(()) => {
+                PrPoller::nudge(repo, cx);
+                None
+            }
             Err(GhError::HeadMoved) => {
-                let report = ErrorReport::new(error::github_pr_head_moved(number))
+                let title = error::github_pr_head_moved(number);
+                let report = ErrorReport::new(title.clone())
                     .severity(ErrorSeverity::Warning)
                     .at(file!(), line!())
                     .dedup("github.pr_action.head_moved")
                     .build();
                 self.report_error(report, cx);
+                Some(title)
             }
             Err(e) => {
                 let title = match action {
                     PrAction::Merging => error::github_pr_merge_failed(number),
                     PrAction::Closing => error::github_pr_close_failed(number),
                     PrAction::MarkingReady => error::github_pr_ready_failed(number),
-                    PrAction::Rerunning | PrAction::Idle => error::github_pr_rerun_failed(number),
+                    PrAction::Rerunning => error::github_pr_rerun_failed(number),
                 };
+                let line = s::action_failed(&title, e);
                 let report = ErrorReport::new(title)
                     .severity(ErrorSeverity::Error)
                     .from_error(e)
@@ -294,14 +343,21 @@ impl Workspace {
                     .dedup("github.pr_action")
                     .build();
                 self.report_error(report, cx);
+                Some(line)
             }
-        }
+        };
         // A failure other than a moved head leaves the pull request as shown.
         let reload = result.is_ok() || matches!(result, Err(GhError::HeadMoved));
         if shown && reload {
             self.refresh_pr_detail(id, cx);
         } else if result.is_ok() {
             self.refresh_pr_list(cx);
+        }
+        // After the reload, which clears an earlier failure.
+        if let (true, Some(line)) = (shown, failure)
+            && let Some(detail) = self.pr_detail_mut(id)
+        {
+            detail.action = ActionState::Failed(line);
         }
         cx.notify();
     }
@@ -360,6 +416,90 @@ mod tests {
         for (label, allowed, default, menu) in cases {
             assert_eq!(merge_menu(&allowed, default), menu, "{label}");
         }
+    }
+
+    #[test]
+    fn merge_is_off_only_for_a_draft_a_conflict_or_no_method() {
+        use daruda_github::{BlockReason, CheckRollup, PrSummary};
+        let detail = |state, mergeability, methods: Vec<MergeMethod>| PrDetail {
+            summary: PrSummary {
+                number: 1,
+                url: String::new(),
+                title: String::new(),
+                state,
+                head_branch: "h".into(),
+                cross_repo: false,
+                checks: CheckRollup::None,
+                failed: Vec::new(),
+                review: None,
+                updated_at: String::new(),
+            },
+            body: String::new(),
+            head_sha: "abc".into(),
+            base_branch: "main".into(),
+            author: None,
+            mergeability,
+            methods,
+            default_method: None,
+            reviewers: Vec::new(),
+            checks: Vec::new(),
+            open_threads: 0,
+        };
+        let squash = || vec![MergeMethod::Squash];
+        let blocked = Mergeability::Blocked(BlockReason::Requirements);
+        // (label, state, mergeability, methods, block)
+        let cases = [
+            ("ready", PrState::Open, Mergeability::Ready, squash(), None),
+            (
+                "GitHub may refuse: it says so",
+                PrState::Open,
+                blocked,
+                squash(),
+                None,
+            ),
+            (
+                "not worked out yet",
+                PrState::Open,
+                Mergeability::Unknown,
+                squash(),
+                None,
+            ),
+            (
+                "a conflict",
+                PrState::Open,
+                Mergeability::Conflicting,
+                squash(),
+                Some(MergeBlock::Conflicting),
+            ),
+            (
+                "a draft",
+                PrState::Draft,
+                blocked,
+                squash(),
+                Some(MergeBlock::Draft),
+            ),
+            (
+                "no method",
+                PrState::Open,
+                Mergeability::Ready,
+                vec![],
+                Some(MergeBlock::NoMethods),
+            ),
+        ];
+        for (label, state, mergeability, methods, block) in cases {
+            let loaded = detail(state, mergeability, methods);
+            assert_eq!(merge_block(&loaded), block, "{label}");
+            assert_eq!(
+                can_merge(&loaded, MergeMethod::Squash),
+                block.is_none(),
+                "{label}"
+            );
+        }
+        let ready = detail(PrState::Open, Mergeability::Ready, squash());
+        assert!(
+            !can_merge(&ready, MergeMethod::Rebase),
+            "a method not allowed"
+        );
     }
 
     fn entry(status: CheckStatus, job: Option<ActionsJob>) -> CheckEntry {

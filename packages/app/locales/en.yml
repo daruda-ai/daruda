@@ -1207,6 +1207,10 @@ pull_requests:
   # The summary column's worktree when none works on the pull request.
   lane_none: "None"
   fork_lane_note: "A review worktree: its pushes do not reach this pull request."
+  # Under a worktree on the pull request's own branch.
+  same_repo_lane_note: "Pushing from this worktree updates this pull request."
+  # Under the detail's header after an action failed: its title, then what gh said.
+  action_failed: "%{title}: %{reason}"
   # The detail's header buttons.
   action_ready: "Ready for review"
   action_close: "Close"

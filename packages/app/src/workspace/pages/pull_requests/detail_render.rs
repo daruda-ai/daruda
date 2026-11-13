@@ -6,8 +6,8 @@ use gpui::{AnyElement, Context, Div, FontWeight, Hsla, SharedString, div, prelud
 
 use super::detail::{Load, PrDetailId, PrTab};
 use super::detail_view::{
-    ActionSlot, CheckRowView, DetailBody, Fact, HeaderActions, LogSlot, MergeView, Mood,
-    PrDetailView, ReadyView, SendSlot, SideView, ThreadRowView, ThreadsView,
+    ActionSlot, CheckRowView, DetailBody, Fact, HeaderActions, LaneNote, LaneSlot, LogSlot,
+    MergeView, Mood, PrDetailView, ReadyView, SendSlot, SideView, ThreadRowView, ThreadsView,
 };
 use crate::surface::strings::{common, pull_requests as s};
 use crate::ui::{
@@ -28,6 +28,7 @@ pub(in crate::workspace) fn render(view: &PrDetailView, cx: &Context<Workspace>)
         .flex_col()
         .gap(px(theme::GAP_LG))
         .child(title_block(view, cx))
+        .children(view.error.clone().map(|error| action_error(error, cx)))
         .child(tabs(view, cx))
         .child(match &view.body {
             DetailBody::Loading => note(common::loading(), cx).into_any_element(),
@@ -102,15 +103,7 @@ fn crumb_bar(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
 fn title_block(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
     let t = theme::current(cx);
     let id = view.id;
-    let lane = view.lane.as_ref().map(|lane| {
-        button_with_icon(
-            "pr-detail-lane",
-            s::open_in_lane(&lane.name),
-            icons::FOLDER_OPEN,
-        )
-        .debug_selector(|| "pr-detail-lane".into())
-        .on_click(cx.listener(move |ws, _, window, cx| ws.open_pr_detail_lane(id, window, cx)))
-    });
+    let lane = lane_button(view, cx);
     let github = view.url.clone().map(|url| {
         button_with_icon("pr-detail-github", s::github(), icons::OPEN_IN_NEW)
             .tooltip(crate::surface::strings::git::pr_open_on_github())
@@ -160,7 +153,7 @@ fn title_block(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
                 .flex()
                 .flex_none()
                 .gap(px(theme::GAP_SM))
-                .children(lane)
+                .child(lane)
                 .children(github)
                 .children(
                     view.actions
@@ -168,6 +161,47 @@ fn title_block(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
                         .map(|actions| header_actions(id, actions, cx)),
                 ),
         )
+        .into_any_element()
+}
+
+/// The worktree working on the pull request, or the list row's button that
+/// makes one, inert while it is being made.
+fn lane_button(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
+    let id = view.id;
+    let review = match &view.lane {
+        LaneSlot::Linked(lane) => {
+            return button_with_icon(
+                "pr-detail-lane",
+                s::open_in_lane(&lane.name),
+                icons::FOLDER_OPEN,
+            )
+            .debug_selector(|| "pr-detail-lane".into())
+            .on_click(cx.listener(move |ws, _, window, cx| ws.open_pr_detail_lane(id, window, cx)))
+            .into_any_element();
+        }
+        LaneSlot::Creating => None,
+        LaneSlot::Absent { review } => Some(*review),
+    };
+    let label = if review.unwrap_or(false) {
+        s::create_review_lane()
+    } else {
+        s::create_lane()
+    };
+    button("pr-detail-create-lane", label)
+        .debug_selector(|| "pr-detail-create-lane".into())
+        .loading(review.is_none())
+        .disabled(review.is_none())
+        .on_click(cx.listener(move |ws, _, window, cx| ws.create_pr_detail_lane(id, window, cx)))
+        .into_any_element()
+}
+
+/// What the last action's failure said, as `gh` put it.
+fn action_error(error: String, cx: &Context<Workspace>) -> AnyElement {
+    div()
+        .debug_selector(|| "pr-detail-error".into())
+        .text_size(px(theme::FONT_SIZE_SM))
+        .text_color(theme::current(cx).banner_error_text)
+        .child(error)
         .into_any_element()
 }
 
@@ -569,11 +603,15 @@ fn side(view: &SideView, cx: &Context<Workspace>) -> AnyElement {
                 .flex_col()
                 .gap(px(theme::GAP_SM))
                 .child(lane)
-                .children(view.lane_note.clone().map(|note| {
+                .children(view.lane_note.map(|note| {
+                    let (text, color) = match note {
+                        LaneNote::UpdatesPr => (s::same_repo_lane_note(), t.text_subtle),
+                        LaneNote::ReviewOnly => (s::fork_lane_note(), t.banner_warning_text),
+                    };
                     div()
                         .text_size(px(theme::FONT_SIZE_SM))
-                        .text_color(t.banner_warning_text)
-                        .child(note)
+                        .text_color(color)
+                        .child(text)
                 }))
                 .into_any_element(),
             cx,

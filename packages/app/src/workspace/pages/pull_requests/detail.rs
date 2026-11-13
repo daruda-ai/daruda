@@ -9,7 +9,7 @@ use daruda_github::{ActionsJob, GhError, PrDetail, PrListItem, ReviewThreads};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
 
-use super::actions::PrAction;
+use super::actions::ActionState;
 use super::list::{self, LaneFacts};
 use crate::gh_host::GhHost;
 use crate::github::PrLink;
@@ -64,8 +64,8 @@ pub(in crate::workspace) struct PrDetailState {
     pub threads: Option<Load<ReviewThreads>>,
     /// The failed Actions jobs whose log is open.
     pub(super) logs: BTreeMap<JobKey, Load<String>>,
-    /// What it is doing to the pull request on GitHub.
-    pub(super) action: PrAction,
+    /// What it is doing to the pull request on GitHub, or what failed.
+    pub(super) action: ActionState,
     /// Which read of the detail may land; a refresh outdates the one before.
     read: u64,
 }
@@ -80,7 +80,7 @@ impl PrDetailState {
             tab: PrTab::default(),
             threads: None,
             logs: BTreeMap::new(),
-            action: PrAction::Idle,
+            action: ActionState::Idle,
             read: 0,
         }
     }
@@ -152,6 +152,9 @@ impl Workspace {
             return;
         };
         detail.logs.clear();
+        if matches!(detail.action, ActionState::Failed(_)) {
+            detail.action = ActionState::Idle;
+        }
         let reread_threads = detail.threads.take().is_some() && detail.tab == PrTab::Threads;
         self.read_pr_detail(id, cx);
         if reread_threads {
@@ -357,6 +360,25 @@ impl Workspace {
     ) {
         if let Some(target) = self.pr_detail_send_target(id) {
             self.send_review_comments_to(target, window, cx);
+        }
+    }
+
+    /// Make a worktree for the shown pull request, as its list row would.
+    pub(in crate::workspace) fn create_pr_detail_lane(
+        &mut self,
+        id: PrDetailId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let item = self
+            .pages
+            .pull_requests
+            .detail
+            .as_ref()
+            .filter(|d| d.id == id)
+            .map(|d| d.item.clone());
+        if let Some(item) = item {
+            self.create_lane_from_pr(item, window, cx);
         }
     }
 

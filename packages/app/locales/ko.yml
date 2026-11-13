@@ -919,6 +919,8 @@ pull_requests:
   reviewer_other: "알 수 없음"
   lane_none: "없음"
   fork_lane_note: "리뷰용 worktree입니다. 여기서 push해도 이 pull request에 반영되지 않습니다."
+  same_repo_lane_note: "push하면 이 PR에 반영됩니다."
+  action_failed: "%{title}: %{reason}"
   action_ready: "리뷰 준비 완료"
   action_close: "닫기"
   action_rerun: "실패한 체크 재실행"

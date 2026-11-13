@@ -98,7 +98,12 @@ impl Workspace {
                 let sending = lane
                     .as_ref()
                     .is_some_and(|lane| self.is_sending_pr(lane.lane));
-                detail_view::view(state, lane.as_ref(), sending, chrono::Utc::now())
+                let creating = self
+                    .pages
+                    .pull_requests
+                    .creating
+                    .contains(&(state.item.repo.clone(), state.item.pr.number));
+                detail_view::view(state, lane.as_ref(), sending, creating, chrono::Utc::now())
             });
         let list = shown && detail.is_none();
         self.pages.pull_requests.detail_snapshot = detail;
