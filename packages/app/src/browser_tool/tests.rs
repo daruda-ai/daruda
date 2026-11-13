@@ -9,7 +9,7 @@ use super::*;
 
 /// Answers from memory; never downloads or runs anything.
 struct FakeInstaller {
-    cached: Option<PathBuf>,
+    cached: Mutex<Option<PathBuf>>,
     /// Each call takes the next answer; the last one repeats.
     answers: Mutex<Vec<Result<PathBuf, String>>>,
     calls: AtomicUsize,
@@ -18,10 +18,14 @@ struct FakeInstaller {
 impl FakeInstaller {
     fn new(cached: Option<PathBuf>, answers: Vec<Result<PathBuf, String>>) -> Arc<Self> {
         Arc::new(Self {
-            cached,
+            cached: Mutex::new(cached),
             answers: Mutex::new(answers),
             calls: AtomicUsize::new(0),
         })
+    }
+
+    fn set_cached(&self, cached: Option<PathBuf>) {
+        *self.cached.lock().expect("cached lock") = cached;
     }
 
     fn calls(&self) -> usize {
@@ -31,7 +35,7 @@ impl FakeInstaller {
 
 impl Installer for FakeInstaller {
     fn cached(&self) -> Option<PathBuf> {
-        self.cached.clone()
+        self.cached.lock().expect("cached lock").clone()
     }
 
     fn install(&self, on_stage: &mut dyn FnMut(InstallStage)) -> Result<PathBuf, InstallError> {
@@ -230,6 +234,22 @@ fn a_failed_install_is_retried_when_turned_on_again(cx: &mut TestAppContext) {
     toggle(false, cx);
     toggle(true, cx);
     assert_eq!(installer.calls(), 2);
+    assert_eq!(state(cx), BrowserToolState::Ready(binary()));
+}
+
+#[gpui::test]
+fn turning_on_again_rechecks_a_ready_tool(cx: &mut TestAppContext) {
+    let installer = FakeInstaller::new(Some(binary()), vec![Ok(binary())]);
+    install_tool(installer.clone(), false, cx);
+
+    toggle(true, cx);
+    assert_eq!(installer.calls(), 0, "a cached tool needs no install");
+    assert_eq!(state(cx), BrowserToolState::Ready(binary()));
+
+    toggle(false, cx);
+    installer.set_cached(None);
+    toggle(true, cx);
+    assert_eq!(installer.calls(), 1, "removed files are installed again");
     assert_eq!(state(cx), BrowserToolState::Ready(binary()));
 }
 

@@ -160,9 +160,9 @@ impl BrowserTool {
         }
     }
 
-    /// When the setting turns on, install if nothing usable is there; a
-    /// failed install is retried only by turning the setting off and on
-    /// again. An install in flight runs to completion even if it turned off.
+    /// When the setting turns on, install if nothing usable is there, a
+    /// ready tool included; a failed install is retried only by turning the
+    /// setting off and on again. An install in flight runs to completion.
     pub(crate) fn settings_changed(cx: &mut App) {
         let enabled = SettingsStore::global(cx).user().browser.enabled;
         let Some(tool) = cx.try_global::<Self>() else {
@@ -183,16 +183,22 @@ impl BrowserTool {
                     surface(report, cx);
                 }
             }
-            Host::Supported(supported)
+            Host::Supported(supported) => {
+                // The files may have been removed since the tool became ready.
+                if matches!(supported.state, BrowserToolState::Ready(_)) {
+                    supported.state = match supported.installer.cached() {
+                        Some(binary) => BrowserToolState::Ready(binary),
+                        None => BrowserToolState::Absent,
+                    };
+                }
                 if matches!(
                     supported.state,
                     BrowserToolState::Absent | BrowserToolState::Failed
-                ) =>
-            {
-                let installer = supported.installer.clone();
-                Self::start_install(installer, cx);
+                ) {
+                    let installer = supported.installer.clone();
+                    Self::start_install(installer, cx);
+                }
             }
-            _ => {}
         }
     }
 
