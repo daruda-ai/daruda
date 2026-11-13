@@ -124,6 +124,7 @@ impl Workspace {
             lanes: &lanes,
             creating: &self.pages.pull_requests.creating,
             now: chrono::Utc::now(),
+            clock: cx.background_executor().now(),
         };
         list::page(&inputs, |host| PrPoller::availability(host, cx))
     }

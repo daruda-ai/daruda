@@ -91,12 +91,16 @@ pub(crate) enum PrListUpdate<'a> {
         host: &'a str,
         filter: PrFilter,
         search: &'a PrSearch,
+        /// When it arrived, on the executor's clock.
+        at: std::time::Instant,
     },
     /// The last answer, for a window that has none for `host` yet.
     Cached {
         host: &'a str,
         filter: PrFilter,
         search: &'a PrSearch,
+        /// When that answer arrived.
+        at: std::time::Instant,
     },
     /// The search failed; the last answer stays on show.
     Failed { host: &'a str, filter: PrFilter },

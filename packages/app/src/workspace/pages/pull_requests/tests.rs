@@ -138,6 +138,7 @@ fn shown(host_list: Option<HostList>) -> PrListState {
         hosts: host_list
             .map(|list| HashMap::from([(HOST.to_owned(), list)]))
             .unwrap_or_default(),
+        answered: HashMap::new(),
     }
 }
 
@@ -151,6 +152,7 @@ fn page_for(repo: RepoId, availability: GhAvailability, state: &PrListState) -> 
         lanes: &[],
         creating: &BTreeSet::new(),
         now: chrono::Utc::now(),
+        clock: std::time::Instant::now(),
     };
     list::page(&inputs, |_| availability)
 }
@@ -284,6 +286,7 @@ fn a_group_lists_only_its_own_repository() {
         lanes: &[],
         creating: &BTreeSet::new(),
         now: chrono::Utc::now(),
+        clock: std::time::Instant::now(),
     };
     let PageBody::Groups(groups) = list::page(&inputs, |_| GhAvailability::Ready).body else {
         panic!("expected groups");
@@ -314,6 +317,55 @@ fn a_group_lists_only_its_own_repository() {
 }
 
 #[test]
+fn the_header_says_how_old_the_newest_answer_is() {
+    let clock = std::time::Instant::now();
+    let ghe = RepoId::new("ghe.corp", "o", "r");
+    let repos = BTreeSet::from([repo(), ghe.clone()]);
+    let ago = |seconds| clock - Duration::from_secs(seconds);
+    // (label, answer times per host, expected)
+    let cases: Vec<(&str, Vec<(&str, std::time::Instant)>, Option<String>)> = vec![
+        ("nothing arrived yet", vec![], None),
+        (
+            "just now",
+            vec![(HOST, ago(12))],
+            Some("Updated just now".into()),
+        ),
+        (
+            "the newest host counts",
+            vec![(HOST, ago(600)), ("ghe.corp", ago(120))],
+            Some("Updated 2m ago".into()),
+        ),
+        (
+            "a host no repository is on does not",
+            vec![(HOST, ago(7200)), ("other.host", ago(1))],
+            Some("Updated 2h ago".into()),
+        ),
+    ];
+    for (label, times, expected) in cases {
+        let state = PrListState::Shown {
+            filter: PrFilter::Mine,
+            hosts: HashMap::new(),
+            answered: times
+                .into_iter()
+                .map(|(host, at)| (host.to_owned(), at))
+                .collect(),
+        };
+        let inputs = PageInputs {
+            enabled: true,
+            filter: PrFilter::Mine,
+            repos: &repos,
+            list: &state,
+            lanes: &[],
+            creating: &BTreeSet::new(),
+            now: chrono::Utc::now(),
+            clock,
+        };
+        let page = list::page(&inputs, |_| GhAvailability::Ready);
+        assert_eq!(page.refreshed, expected, "{label}");
+    }
+}
+
+#[test]
 fn a_page_with_nothing_to_search_says_why() {
     let state = shown(None);
     let none = BTreeSet::new();
@@ -330,6 +382,7 @@ fn a_page_with_nothing_to_search_says_why() {
             lanes: &[],
             creating: &BTreeSet::new(),
             now: chrono::Utc::now(),
+            clock: std::time::Instant::now(),
         };
         assert_eq!(
             list::page(&inputs, |_| GhAvailability::Ready).body,

@@ -91,11 +91,12 @@ impl PrList {
             return;
         }
         WindowRegistry::for_each_workspace(cx, |ws, _, cx| {
-            for (key, search) in &cached {
+            for (key, search, at) in &cached {
                 let update = PrListUpdate::Cached {
                     host: &key.host,
                     filter: key.filter,
                     search,
+                    at: *at,
                 };
                 ws.apply_pr_list(update, cx);
             }
@@ -136,6 +137,7 @@ impl PrList {
                     host,
                     filter,
                     search: &search,
+                    at: now,
                 };
                 Self::broadcast(update, cx);
             }

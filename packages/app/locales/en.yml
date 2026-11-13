@@ -1133,6 +1133,11 @@ pull_requests:
   gh_logged_out: "Run “gh auth login --hostname %{host}” in a terminal to list this repository’s pull requests."
   rate_limited: "GitHub’s rate limit was reached; the list is asked again later."
   unreachable: "GitHub could not be reached; the list is asked again shortly."
+  # Beside the list's refresh button: how old the newest answer is.
+  refreshed_now: "Updated just now"
+  refreshed_minutes: "Updated %{count}m ago"
+  refreshed_hours: "Updated %{count}h ago"
+  refreshed_days: "Updated %{count}d ago"
   # A group whose last search failed; its last rows stay, dimmed.
   search_failed: "Couldn’t load this repository’s pull requests."
   # Searches the window's hosts again now.

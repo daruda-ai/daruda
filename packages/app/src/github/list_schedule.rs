@@ -135,13 +135,14 @@ impl ListSchedule {
         }
     }
 
-    /// The last answers of the wanted searches that have one.
-    pub(super) fn cached(&self, wanted: &ListWanted) -> Vec<(ListKey, Arc<PrSearch>)> {
+    /// The last answers of the wanted searches that have one, and when
+    /// each arrived.
+    pub(super) fn cached(&self, wanted: &ListWanted) -> Vec<(ListKey, Arc<PrSearch>, Instant)> {
         wanted
             .keys()
             .filter_map(|key| {
                 let answer = self.lists.get(key)?.answer.as_ref()?;
-                Some((key.clone(), answer.search.clone()))
+                Some((key.clone(), answer.search.clone(), answer.at))
             })
             .collect()
     }

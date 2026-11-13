@@ -57,15 +57,18 @@ fn updates_change_only_the_shown_filter() {
     let ready = || Some(HostList::Ready(answer.clone()));
     /// (label, state before, update, expected host list, expected changed)
     type Row<'a> = (&'static str, PrListState, PrListUpdate<'a>, HostList, bool);
+    let at = Instant::now();
     let fresh = PrListUpdate::Answer {
         host: HOST,
         filter: PrFilter::Mine,
         search: &both,
+        at,
     };
     let cached = PrListUpdate::Cached {
         host: HOST,
         filter: PrFilter::Mine,
         search: &both,
+        at,
     };
     let failed = PrListUpdate::Failed {
         host: HOST,
@@ -80,11 +83,11 @@ fn updates_change_only_the_shown_filter() {
             true,
         ),
         (
-            "the same answer again changes nothing",
+            "the same answer at a new time moves only the time",
             shown(PrFilter::Mine, ready()),
             fresh,
             HostList::Ready(answer.clone()),
-            false,
+            true,
         ),
         (
             "another filter's answer is ignored",
@@ -159,6 +162,38 @@ fn updates_change_only_the_shown_filter() {
 }
 
 #[test]
+fn each_hosts_answer_time_follows_its_answers() {
+    let first = Instant::now();
+    let later = first + std::time::Duration::from_secs(60);
+    let answer = search(vec![item("r", 1)]);
+    let at = |at| PrListUpdate::Answer {
+        host: HOST,
+        filter: PrFilter::Mine,
+        search: &answer,
+        at,
+    };
+    let mut state = shown(PrFilter::Mine, None);
+    assert_eq!(state.answered_at(HOST), None, "nothing arrived yet");
+    assert!(state.apply(at(first), &mine()));
+    assert_eq!(state.answered_at(HOST), Some(first));
+    assert!(!state.apply(at(first), &mine()), "nothing new");
+    assert!(state.apply(at(later), &mine()), "only the time moved");
+    assert_eq!(state.answered_at(HOST), Some(later));
+
+    let failed = PrListUpdate::Failed {
+        host: HOST,
+        filter: PrFilter::Mine,
+    };
+    state.apply(failed, &mine());
+    assert_eq!(state.answered_at(HOST), Some(later), "a failure keeps it");
+    state.apply(PrListUpdate::HostBlocked { host: HOST }, &mine());
+    assert_eq!(state.answered_at(HOST), None, "a blocked host drops it");
+    state.apply(at(later), &mine());
+    assert!(state.show(PrFilter::AllOpen));
+    assert_eq!(state.answered_at(HOST), None, "another filter starts over");
+}
+
+#[test]
 fn show_and_hide_report_changes() {
     let mut state = PrListState::default();
     assert!(state.show(PrFilter::Mine));
@@ -168,6 +203,7 @@ fn show_and_hide_report_changes() {
             host: HOST,
             filter: PrFilter::Mine,
             search: &search(vec![item("r", 1)]),
+            at: Instant::now(),
         },
         &mine(),
     );

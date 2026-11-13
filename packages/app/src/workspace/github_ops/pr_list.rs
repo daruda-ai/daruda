@@ -4,6 +4,7 @@
 //! refresh. Not persisted: a window starts with the page hidden.
 
 use std::collections::{BTreeSet, HashMap};
+use std::time::Instant;
 
 use daruda_github::{PrFilter, PrSearch, RepoId};
 use gpui::Context;
@@ -35,6 +36,9 @@ pub(crate) enum PrListState {
     Shown {
         filter: PrFilter,
         hosts: HashMap<String, HostList>,
+        /// When each host's last answer under `filter` arrived; it stays
+        /// through a failed search, as the answer's rows do.
+        answered: HashMap<String, Instant>,
     },
 }
 
@@ -54,6 +58,14 @@ impl PrListState {
         }
     }
 
+    /// When `host`'s last answer under the shown filter arrived.
+    pub(crate) fn answered_at(&self, host: &str) -> Option<Instant> {
+        match self {
+            Self::Hidden => None,
+            Self::Shown { answered, .. } => answered.get(host).copied(),
+        }
+    }
+
     /// Show `filter`; another filter starts over. Returns whether it changed.
     fn show(&mut self, filter: PrFilter) -> bool {
         if self.filter() == Some(filter) {
@@ -62,6 +74,7 @@ impl PrListState {
         *self = Self::Shown {
             filter,
             hosts: HashMap::new(),
+            answered: HashMap::new(),
         };
         true
     }
@@ -77,26 +90,29 @@ impl PrListState {
         let Self::Shown {
             filter: shown,
             hosts,
+            answered,
         } = self
         else {
             return false;
         };
-        let next = match update {
+        let (host, list, at) = match update {
             PrListUpdate::Answer {
                 host,
                 filter,
                 search,
-            } if filter == *shown => (host, HostList::Ready(narrow(search, repos))),
+                at,
+            } if filter == *shown => (host, HostList::Ready(narrow(search, repos)), Some(at)),
             PrListUpdate::Cached {
                 host,
                 filter,
                 search,
+                at,
             } if filter == *shown
                 && hosts
                     .get(host)
                     .is_none_or(|list| *list == HostList::Loading) =>
             {
-                (host, HostList::Ready(narrow(search, repos)))
+                (host, HostList::Ready(narrow(search, repos)), Some(at))
             }
             PrListUpdate::Failed { host, filter } if filter == *shown => {
                 let last = match hosts.get(host) {
@@ -104,21 +120,26 @@ impl PrListState {
                     Some(HostList::Failed { last }) => last.clone(),
                     Some(HostList::Loading) | None => None,
                 };
-                (host, HostList::Failed { last })
+                (host, HostList::Failed { last }, None)
             }
-            PrListUpdate::HostBlocked { host } => return hosts.remove(host).is_some(),
+            PrListUpdate::HostBlocked { host } => {
+                answered.remove(host);
+                return hosts.remove(host).is_some();
+            }
             PrListUpdate::Disabled => {
                 let had = !hosts.is_empty();
                 hosts.clear();
+                answered.clear();
                 return had;
             }
             PrListUpdate::Answer { .. }
             | PrListUpdate::Cached { .. }
             | PrListUpdate::Failed { .. } => return false,
         };
-        let (host, list) = next;
+        // A new time alone repaints: the header says how old the list is.
+        let moved = at.is_some_and(|at| answered.insert(host.to_owned(), at) != Some(at));
         if hosts.get(host) == Some(&list) {
-            return false;
+            return moved;
         }
         hosts.insert(host.to_owned(), list);
         true

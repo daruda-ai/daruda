@@ -77,7 +77,19 @@ pub(in crate::workspace) fn header(
                 }
             })
     };
-    list_page::header(s::title(), filters, refresh, close, cx).into_any_element()
+    let t = theme::current(cx);
+    let action = div()
+        .flex()
+        .items_center()
+        .gap(px(theme::GAP_LG))
+        .children(snap.list.refreshed.clone().map(|refreshed| {
+            div()
+                .text_size(px(theme::FONT_SIZE_SM))
+                .text_color(t.text_subtle)
+                .child(refreshed)
+        }))
+        .child(refresh);
+    list_page::header(s::title(), filters, action, close, cx).into_any_element()
 }
 
 pub(in crate::workspace) fn render(snap: &PrPageSnapshot, cx: &App) -> AnyElement {

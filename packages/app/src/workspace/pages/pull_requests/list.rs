@@ -4,6 +4,7 @@
 //! each, and why a host has nothing to show.
 
 use std::collections::BTreeSet;
+use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use daruda_core::age::{self, AgeBucket};
@@ -165,6 +166,9 @@ pub(in crate::workspace) enum PageBody {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct PrPageList {
     pub filter: PrFilter,
+    /// How old the newest answer under the filter is; `None` until one
+    /// arrives.
+    pub refreshed: Option<String>,
     pub body: PageBody,
 }
 
@@ -178,6 +182,8 @@ pub(in crate::workspace) struct PageInputs<'a> {
     /// Pull requests a worktree is being made for.
     pub creating: &'a BTreeSet<PrKey>,
     pub now: DateTime<Utc>,
+    /// Now on the executor's clock, which answer times are read on.
+    pub clock: Instant,
 }
 
 /// The page for `inputs`; `availability` says what is known about `gh` on a host.
@@ -213,8 +219,25 @@ pub(in crate::workspace) fn page(
     };
     PrPageList {
         filter: inputs.filter,
+        refreshed: refreshed(inputs),
         body,
     }
+}
+
+/// `Updated 2m ago`, from the newest answer among this window's hosts.
+fn refreshed(inputs: &PageInputs<'_>) -> Option<String> {
+    let newest = inputs
+        .repos
+        .iter()
+        .filter_map(|repo| inputs.list.answered_at(repo.host()))
+        .max()?;
+    let seconds = inputs.clock.saturating_duration_since(newest).as_secs();
+    Some(match age::bucket(seconds) {
+        AgeBucket::JustNow => s::refreshed_now(),
+        AgeBucket::Minutes(n) => s::refreshed_minutes(n),
+        AgeBucket::Hours(n) => s::refreshed_hours(n),
+        AgeBucket::Days(n) => s::refreshed_days(n),
+    })
 }
 
 /// What `repo`'s group shows. A `gh` problem is said on any host: unlike
