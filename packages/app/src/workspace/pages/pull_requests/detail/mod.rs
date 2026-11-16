@@ -21,6 +21,7 @@ use crate::surface::strings::error;
 use crate::workspace::Workspace;
 use crate::workspace::github_ops::review_send::PrSendTarget;
 use crate::workspace::pages::Page;
+use crate::workspace::pages::detail::PageDetailId;
 use crate::workspace::spawn_helpers::spawn_bg_work_and_mutate;
 
 /// Names the page's detail. Never reused, so a read that lands after its
@@ -133,13 +134,17 @@ impl Workspace {
     }
 
     /// Show `item` over the list. The same pull request already open is
-    /// shown as it is; another replaces the detail.
+    /// shown as it is; another replaces the detail. Nothing opens while
+    /// `[github] enabled` is off, as the list shows no rows then.
     pub(in crate::workspace) fn open_pr_detail(
         &mut self,
         item: PrListItem,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !crate::github::enabled(cx) {
+            return;
+        }
         let open = self
             .pages
             .pull_requests
@@ -160,6 +165,19 @@ impl Workspace {
         self.pages.pull_requests.detail = Some(PrDetailState::new(id, item));
         self.read_pr_detail(id, cx);
         cx.notify();
+    }
+
+    /// `[github] enabled` was switched off: the detail closes with the list,
+    /// since nothing it shows is kept current and its reads and actions
+    /// would still run `gh`.
+    pub(crate) fn close_pr_detail_while_off(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(id) = self.pr_detail_id() {
+            self.drop_gone_detail(PageDetailId::PullRequest(id), window, cx);
+        }
     }
 
     /// Back to the list.

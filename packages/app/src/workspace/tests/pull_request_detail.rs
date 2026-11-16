@@ -881,3 +881,59 @@ fn a_reopened_log_does_not_take_an_earlier_reads_answer(cx: &mut TestAppContext)
         f.ws.update(cx, |ws, cx| ws.toggle_pr_check_log(id, JOB, cx));
     }
 }
+
+fn set_github_enabled(cx: &mut TestAppContext, enabled: bool) {
+    cx.update(|cx| {
+        let mut config = daruda_config::Config::default();
+        config.github.enabled = enabled;
+        cx.global_mut::<crate::settings_store::SettingsStore>()
+            .set_user_for_testing(config);
+    });
+}
+
+/// With `[github] enabled` off the page shows Off; an open detail closes
+/// with the list rather than go on reading and acting through `gh`, and
+/// none opens until the feature is back.
+#[gpui::test]
+fn turning_the_feature_off_closes_the_detail(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    set_github_enabled(cx, false);
+    cx.update(crate::github::PrPoller::tick);
+    cx.run_until_parked();
+    assert_eq!(shown(&f, cx).map(|(_, number, _)| number), None);
+    let page = f.ws.update(cx, |ws, cx| {
+        ws.stage_pr_page(cx);
+        let page = &ws.pages.pull_requests;
+        (
+            page.detail_snapshot.is_some(),
+            page.snapshot.as_ref().map(|shot| shot.list.body.clone()),
+        )
+    });
+    assert_eq!(
+        page,
+        (
+            false,
+            Some(crate::workspace::pages::pull_requests::list::PageBody::Off)
+        )
+    );
+
+    // The closed detail's buttons and a click on a row reach nothing.
+    let (reads, before) = (gh.count(GhOp::PrDetail), gh.calls().len());
+    f.ws.update(cx, |ws, cx| {
+        ws.refresh_pr_detail(id, cx);
+        ws.rerun_pr_detail_checks(id, cx);
+        ws.toggle_pr_check_log(id, JOB, cx);
+    });
+    open(&f, item(7, "feat"), cx);
+    cx.run_until_parked();
+    assert_eq!(shown(&f, cx).map(|(_, number, _)| number), None);
+    assert_eq!(gh.count(GhOp::PrDetail), reads);
+    assert_eq!(gh.calls().len(), before, "nothing reaches gh while off");
+
+    set_github_enabled(cx, true);
+    cx.update(crate::github::PrPoller::tick);
+    cx.run_until_parked();
+    open(&f, item(7, "feat"), cx);
+    cx.run_until_parked();
+    assert!(matches!(shown(&f, cx), Some((_, 7, Load::Ready(_)))));
+}

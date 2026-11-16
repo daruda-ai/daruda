@@ -76,10 +76,14 @@ impl PrList {
         wanted
     }
 
-    /// The feature was switched off: forget every answer and every list.
+    /// The feature was switched off: forget every answer and every list,
+    /// and close every pull request's detail, whose buttons would run `gh`.
     pub(super) fn disable(cx: &mut App) {
         cx.default_global::<Self>().schedule.forget_answers();
-        Self::broadcast(PrListUpdate::Disabled, cx);
+        WindowRegistry::for_each_workspace(cx, |ws, window, cx| {
+            ws.apply_pr_list(PrListUpdate::Disabled, cx);
+            ws.close_pr_detail_while_off(window, cx);
+        });
     }
 
     /// `gh` on `host` became unusable: drop what was read there.
