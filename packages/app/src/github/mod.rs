@@ -40,6 +40,8 @@ pub(crate) struct PrLink {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) enum PrLookup {
     /// Not answered for the lane's current branch, or the answer was dropped.
+    /// Also a review lane whose PR GitHub has no record of: there is nothing
+    /// to show, and it must not read as [`Self::NoPr`], which offers one.
     #[default]
     Unknown,
     /// The lane is on the repository's default branch.

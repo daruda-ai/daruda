@@ -31,7 +31,9 @@ through `GitHost`.
   looked up by name: it carries a `link::ReviewMark` (the one format of the
   mark, kept in the branch's git config), and the poller asks for its PR by
   number in the same per-repository request. Such a lane never reads as
-  having no PR, so it is never offered one to create.
+  having no PR, so it is never offered one to create. A number GitHub cannot
+  resolve fails only that alias (`NOT_FOUND`; `gh` exits non-zero but
+  prints the partial answer), so it never pauses the repository's poll.
 - `prompt` builds text for agents from outside input (CI logs, review
   comments): every piece goes through `strip_control` (`one_line` for a
   field a header holds) and is fenced or quoted so it cannot close its

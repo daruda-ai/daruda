@@ -9,9 +9,9 @@ use daruda_core::process::{CaptureError, CaptureLimits, Captured, command_on_pat
 use crate::availability::GhAuth;
 use crate::backend::Gh;
 use crate::query::{
-    REVIEW_THREADS_QUERY, RepoPrs, newest_first, parse_pr_detail, parse_prs_for_branches,
-    parse_review_threads, parse_search_prs, pr_detail_query, prs_for_branches_query,
-    search_prs_query, search_string,
+    REVIEW_THREADS_QUERY, RepoPrs, newest_first, only_numbers_not_found, parse_pr_detail,
+    parse_prs_for_branches, parse_review_threads, parse_search_prs, pr_detail_query,
+    prs_for_branches_query, search_prs_query, search_string,
 };
 use crate::{
     ActionsJob, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrSearch, RepoId, ReviewThreads,
@@ -235,8 +235,8 @@ impl Gh for SystemGh {
                 args.push("-F".to_owned());
                 args.push(format!("n{i}={number}"));
             }
-            let json = self.stdout(&args)?;
-            let part = parse_prs_for_branches(&json, branches, numbers)?;
+            let out = self.run(&args)?;
+            let part = read_lane_answer(&out, branches, numbers)?;
             all.default_branch = part.default_branch;
             all.by_branch.extend(part.by_branch);
             all.by_number.extend(part.by_number);
@@ -378,6 +378,28 @@ impl Gh for SystemGh {
     }
 }
 
+/// A lane lookup's answer from what `gh` printed. One that failed only
+/// because a number names no pull request still carries the rest; any other
+/// failure is the request's.
+fn read_lane_answer(
+    out: &Captured,
+    branches: &[String],
+    numbers: &[u64],
+) -> Result<RepoPrs, GhError> {
+    let json = std::str::from_utf8(&out.stdout).unwrap_or_default();
+    if out.status.success() {
+        return parse_prs_for_branches(json, branches, numbers);
+    }
+    let failed = GhError::Exit {
+        code: out.status.code(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    };
+    if !only_numbers_not_found(json) {
+        return Err(failed);
+    }
+    parse_prs_for_branches(json, branches, numbers).map_err(|_| failed)
+}
+
 /// The branches and numbers of each request a lane lookup sends: as many
 /// requests as the longer list needs, the shorter one riding along.
 fn lane_requests<'a>(branches: &'a [String], numbers: &'a [u64]) -> Vec<(&'a [String], &'a [u64])> {
@@ -404,6 +426,45 @@ mod tests {
             SystemGh.prs_for_branches(&repo, &[], &[]).unwrap(),
             RepoPrs::default()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_lookup_is_excused_only_for_numbers_github_cannot_resolve() {
+        use std::os::unix::process::ExitStatusExt as _;
+
+        let captured = |code: i32, stdout: &str| Captured {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: b"gh: Could not resolve".to_vec(),
+        };
+        let not_found = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/prs_number_not_found.json"),
+        )
+        .unwrap();
+        let branches = ["a".to_owned()];
+        let answer = read_lane_answer(&captured(1, &not_found), &branches, &[9, 404])
+            .expect("the rest of the answer stands");
+        assert_eq!(answer.by_number[&404], None);
+        assert!(answer.by_number[&9].is_some());
+
+        // (label, exit code, stdout)
+        let failures = [
+            ("nothing printed", 1, ""),
+            (
+                "another error",
+                1,
+                r#"{"data":null,"errors":[{"type":"RATE_LIMITED","message":"x"}]}"#,
+            ),
+            ("a login failure prints nothing", 4, ""),
+        ];
+        for (label, code, stdout) in failures {
+            match read_lane_answer(&captured(code, stdout), &branches, &[404]) {
+                Err(GhError::Exit { code: got, .. }) => assert_eq!(got, Some(code), "{label}"),
+                other => panic!("{label}: expected the exit, got {other:?}"),
+            }
+        }
     }
 
     #[test]

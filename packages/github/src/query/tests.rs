@@ -4,8 +4,10 @@
 //! rollup from `kubernetes/kubernetes` in the same answer shape.
 //! `prs_push_and_pull_request.json` is `serde-rs/serde` #3113, a same-repo
 //! PR whose workflow runs on both `push` and `pull_request`.
+//! `prs_number_not_found.json` is hand-written, not recorded: GitHub's
+//! partial answer for a `pullRequest(number:)` that resolves to nothing.
 
-use crate::query::{parse_prs_for_branches, prs_for_branches_query};
+use crate::query::{only_numbers_not_found, parse_prs_for_branches, prs_for_branches_query};
 use crate::{CheckRollup, GhError, PrState, ReviewDecision};
 
 fn fixture(name: &str) -> String {
@@ -166,4 +168,60 @@ fn a_number_answers_its_pull_request_or_nothing() {
     assert_eq!(pr.head_branch, "main");
     assert_eq!(answer.by_number[&404], None);
     assert!(answer.by_branch["a"].is_empty());
+}
+
+#[test]
+fn a_number_github_cannot_resolve_leaves_the_rest_of_the_answer() {
+    let json = fixture("prs_number_not_found.json");
+    assert!(only_numbers_not_found(&json));
+    let answer = parse_prs_for_branches(&json, &branches(&["a"]), &[9, 404]).unwrap();
+    assert_eq!(answer.by_number[&9].as_ref().map(|pr| pr.number), Some(9));
+    assert_eq!(answer.by_number[&404], None);
+    assert!(answer.by_branch["a"].is_empty());
+}
+
+#[test]
+fn any_other_error_fails_the_answer() {
+    let data =
+        r#""data":{"repository":{"defaultBranchRef":{"name":"main"},"n0":null,"b0":{"nodes":[]}}}"#;
+    // (label, errors)
+    let cases = [
+        (
+            "the repository itself is not found",
+            r#"[{"type":"NOT_FOUND","path":["repository"],"message":"no repo"}]"#,
+        ),
+        (
+            "not found on a branch alias",
+            r#"[{"type":"NOT_FOUND","path":["repository","b0"],"message":"x"}]"#,
+        ),
+        (
+            "another kind of error on a number",
+            r#"[{"type":"FORBIDDEN","path":["repository","n0"],"message":"x"}]"#,
+        ),
+        (
+            "not found beside another error",
+            r#"[{"type":"NOT_FOUND","path":["repository","n0"],"message":"x"},
+                {"type":"RATE_LIMITED","message":"slow down"}]"#,
+        ),
+        (
+            "an error with no type",
+            r#"[{"message":"Something went wrong"}]"#,
+        ),
+    ];
+    for (label, errors) in cases {
+        let json = format!("{{{data},\"errors\":{errors}}}");
+        assert!(!only_numbers_not_found(&json), "{label}");
+        assert!(
+            matches!(
+                parse_prs_for_branches(&json, &branches(&["a"]), &[404]),
+                Err(GhError::Parse(_))
+            ),
+            "{label}"
+        );
+    }
+    let clean = format!("{{{data}}}");
+    assert!(
+        !only_numbers_not_found(&clean),
+        "no errors is not a failure to excuse"
+    );
 }

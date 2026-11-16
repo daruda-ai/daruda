@@ -127,3 +127,51 @@ fn the_same_branch_without_a_mark_is_an_ordinary_branch(cx: &mut TestAppContext)
     let strip = f.ws.read_with(cx, |ws, cx| ws.pr_strip(cx));
     assert_eq!(strip, PrStrip::NoPr, "a user's own `pr-9` may open its PR");
 }
+
+#[gpui::test]
+fn a_review_lanes_missing_pr_pauses_no_other_lane(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let mut feat = fork_pr();
+    feat.number = 7;
+    feat.head_branch = "feat".into();
+    feat.cross_repo = false;
+    gh.set_prs(&repo(), vec![feat]);
+    let (review, review_id) = review_lane(cx, Some("github.com/o/r#9"));
+    let target = PushTarget {
+        remote: "origin".into(),
+        url: "git@github.com:o/r.git".into(),
+        branch: "feat".into(),
+        published: true,
+        has_upstream: false,
+        review: None,
+    };
+    let other = GitFixture::open(cx, &daruda_config::Config::default(), |repo: FakeRepo| {
+        repo.push_target(target)
+    });
+    let other_id = other.ws.read_with(cx, |ws, _| ws.active_ref());
+    other
+        .ws
+        .update(cx, |ws, cx| ws.refresh_git_status(other_id, cx));
+    cx.run_until_parked();
+    let (window, ws) = (other.window, other.ws.downgrade());
+    cx.update(|cx| crate::window_registry::WindowRegistry::register(window.into(), ws, cx));
+    tick(cx);
+
+    assert_eq!(lookup(&review, review_id, cx), PrLookup::Unknown);
+    let linked = lookup(&other, other_id, cx);
+    assert_eq!(linked.link().map(|link| link.pr.number), Some(7));
+    let polls: Vec<GhCall> = gh
+        .calls()
+        .into_iter()
+        .filter(|call| matches!(call, GhCall::PrsForBranches { .. }))
+        .collect();
+    assert_eq!(
+        polls.last(),
+        Some(&GhCall::PrsForBranches {
+            repo: repo(),
+            branches: vec!["feat".into()],
+            numbers: vec![9],
+        }),
+        "one request answers both lanes"
+    );
+}

@@ -85,10 +85,17 @@ pub(crate) fn parse_prs_for_branches(
     numbers: &[u64],
 ) -> Result<RepoPrs, GhError> {
     let response: Response = serde_json::from_str(json).map_err(parse_error)?;
+    let errors = response.errors.unwrap_or_default();
+    if !errors.iter().all(ApiError::is_number_not_found) {
+        return Err(GhError::Parse(format!(
+            "GitHub answered with errors: {}",
+            api_messages(Some(errors))
+        )));
+    }
     let Some(mut repository) = response.data.and_then(|d| d.repository) else {
         return Err(GhError::Parse(format!(
             "no repository in the answer: {}",
-            api_messages(response.errors)
+            api_messages(Some(errors))
         )));
     };
     let default_branch = repository
@@ -124,6 +131,18 @@ pub(crate) fn parse_prs_for_branches(
     })
 }
 
+/// Whether `json` is an answer to [`prs_for_branches_query`] whose every
+/// error is a number the repository has no pull request under. GitHub sends
+/// such an answer with the rest of its data, and `gh` prints it but exits
+/// non-zero, as for any answer carrying errors.
+pub(crate) fn only_numbers_not_found(json: &str) -> bool {
+    serde_json::from_str::<Response>(json).is_ok_and(|response| {
+        response.errors.is_some_and(|errors| {
+            !errors.is_empty() && errors.iter().all(ApiError::is_number_not_found)
+        })
+    })
+}
+
 #[derive(Deserialize)]
 struct Author {
     login: String,
@@ -151,6 +170,26 @@ struct Response {
 #[derive(Deserialize)]
 struct ApiError {
     message: String,
+    #[serde(default, rename = "type")]
+    kind: Option<String>,
+    /// Where in the answer the error lies: field names, or list indexes.
+    #[serde(default)]
+    path: Vec<serde_json::Value>,
+}
+
+impl ApiError {
+    /// `pullRequest(number:)` under alias `n<i>` found nothing; that field
+    /// is null and the rest of the answer stands.
+    fn is_number_not_found(&self) -> bool {
+        let alias = match self.path.as_slice() {
+            [repository, alias] if repository == "repository" => alias.as_str(),
+            _ => None,
+        };
+        self.kind.as_deref() == Some("NOT_FOUND")
+            && alias
+                .and_then(|alias| alias.strip_prefix('n'))
+                .is_some_and(|index| !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit()))
+    }
 }
 
 #[derive(Deserialize)]
