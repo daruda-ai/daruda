@@ -94,6 +94,8 @@ pub(crate) enum ScreenshotScenario {
     TasksByStatus,
     TasksByProject,
     TaskSaved,
+    TaskProjectChoice,
+    ResumeTaskPage,
     TaskEditor(TaskEditorShot),
     OrchestratorChip,
     OrchestratorTab,
@@ -441,6 +443,23 @@ pub(crate) fn drive(
                 } else if scenario == ScreenshotScenario::TasksByProject {
                     ws.set_task_grouping(TaskGrouping::Project, cx);
                 }
+            });
+        }
+        ScreenshotScenario::TaskProjectChoice => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_task_list_for_shot(
+                    daruda_store::tasks::TaskScope::AllProjects,
+                    "",
+                    window,
+                    cx,
+                );
+                ws.new_task_in_scope(window, cx);
+            });
+        }
+        ScreenshotScenario::ResumeTaskPage => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_task_editor_for_shot(TaskEditorShot::Form, window, cx);
+                ws.return_to_worktree(window, cx);
             });
         }
         ScreenshotScenario::TaskSaved => {

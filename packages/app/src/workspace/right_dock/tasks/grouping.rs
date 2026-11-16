@@ -44,10 +44,6 @@ impl TaskGroups {
             self.collapsed.retain(|collapsed| *collapsed != key);
         }
     }
-
-    pub fn reveal(&mut self, task: &TaskRecord) {
-        self.collapsed.retain(|key| !key.matches(task));
-    }
 }
 
 impl TaskGroupKey {
@@ -142,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn saving_reveals_only_its_group_and_mode_changes_reset_folds() {
+    fn mode_changes_reset_folds() {
         let task = record(ProjectUuid::new(), "Task", Lifecycle::Backlog);
         let key = TaskGroupKey::Project(task.spec.project);
         let other = TaskGroupKey::Project(ProjectUuid::new());
@@ -150,8 +146,7 @@ mod tests {
         groups.set_mode(TaskGrouping::Project);
         groups.toggle(key);
         groups.toggle(other);
-        groups.reveal(&task);
-        assert!(groups.is_open(key));
+        assert!(!groups.is_open(key));
         assert!(!groups.is_open(other));
         groups.set_mode(TaskGrouping::Status);
         assert!(groups.is_open(other));

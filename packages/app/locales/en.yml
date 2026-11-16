@@ -6,6 +6,15 @@ startup:
 
 # Common UI tokens — reused across sections
 common:
+  clear_filters: "Clear filters"
+  column_worktree: "Worktree"
+  resume_page: "Continue %{page}"
+  resume_workspace_page: "Continue previous page"
+  worktree_unassigned: "No worktree"
+  page_all_projects: "All projects"
+  page_project_hint: "Browse a project without changing the active worktree"
+  return_to_worktree: "Return to worktree"
+  choose_creation_project: "Choose the project for the new item"
   btn_review: "Review fields"
   btn_manual: "Enter manually"
   btn_back: "Back to paste"
@@ -294,10 +303,7 @@ dock:
 
 # Task panel
 task:
-  # The project picker filters tasks without switching the active worktree.
-  scope_current: "%{name} (Current)"
-  scope_hint: "Filter tasks by project without switching your worktree"
-  scope_every_project: "All projects"
+  worktree_not_open: "Worktree is not open in this window"
   # A row's project label when that project is not open in this window.
   project_not_open: "Not open"
   filter_all: "All"
@@ -322,7 +328,6 @@ task:
   empty_project_unavailable: "This project is not open. Open a project or choose another project above."
   empty_filtered: "No tasks match these filters. Try another status or clear the filters."
   clear_filters: "Clear status and search"
-  new_in_project: "Create a task in %{project}"
   # `[+ New]` button label.
   new_button: "New task"
   # Tasks tab search bar — substring filter over title / prompt /
@@ -1109,6 +1114,17 @@ git:
 
 # Pull requests page
 pull_requests:
+  count_pending: "…"
+  count_capped: "%{count}+"
+  choose_worktree_project: "Choose the project for this worktree"
+  project_choice: "%{name} — %{path}"
+  search_placeholder: "Search title, branch, author or number…"
+  result_count: "%{visible} of %{total} pull requests"
+  empty_search: "No pull requests match this search."
+  column_checks: "Checks"
+  column_review: "Review"
+  column_comments: "Comments"
+  column_title: "Pull request"
   # Page title and its entry in the left dock.
   title: "Pull requests"
   filter_mine: "Mine"
@@ -1986,6 +2002,8 @@ session_host:
 
 # Flow engine — picker, validation results, run outcomes
 flow:
+  back_to_definition: "Back to flow definition"
+  all_worktrees: "All worktrees"
   run_no_attempt: "No attempt was recorded for this node."
   run_pending: "Not started"
   run_elapsed: "Elapsed time"
@@ -2056,7 +2074,6 @@ flow:
   form_dep_chip: "%{node} ×"
   form_agent_choice: "%{name} (%{id})"
   runs_tab: "Run history"
-  scope_current: "%{name} (Current)"
   scope_hint: "Browse and run flows in a worktree without switching the active terminal"
   scope_unavailable: "Worktree not open"
   new_in_project: "Create a flow for %{project}"

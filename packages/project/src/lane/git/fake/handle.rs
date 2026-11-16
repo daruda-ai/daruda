@@ -200,6 +200,9 @@ impl GitRepo for FakeHandle {
         };
         self.write(GitOp::FetchRef, call, |_| ())
     }
+    fn remote_url(&self, remote: &str) -> Result<Option<String>, GitError> {
+        self.read(GitOp::RemoteUrl, |repo| Ok(repo.remote_url_answer(remote)))
+    }
     fn pull(&self) -> Result<(), GitError> {
         let call = GitCall::Pull { repo: self.repo() };
         self.write(GitOp::Pull, call, |_| ())
@@ -221,6 +224,14 @@ impl GitRepo for FakeHandle {
             head: head.to_owned(),
         };
         self.write(GitOp::MoveBranch, call, |_| ())
+    }
+    fn set_push_remote(&self, branch: &str, remote: &str) -> Result<(), GitError> {
+        let call = GitCall::SetPushRemote {
+            repo: self.repo(),
+            branch: branch.to_owned(),
+            remote: remote.to_owned(),
+        };
+        self.write(GitOp::SetPushRemote, call, |_| ())
     }
     fn review_mark(&self, branch: &str) -> Result<Option<String>, GitError> {
         self.read(

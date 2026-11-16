@@ -311,6 +311,7 @@ impl Workspace {
             .on_action(cx.listener(Self::on_switch_right_panel_flows))
             .on_action(cx.listener(Self::on_new_skill))
             .on_action(cx.listener(Self::on_new_task))
+            .on_action(cx.listener(Self::on_resume_workspace_page))
             .on_action(cx.listener(Self::on_open_agent_chat))
             .on_action(cx.listener(Self::on_edit_task))
             .on_action(cx.listener(Self::on_focus_skill_search))

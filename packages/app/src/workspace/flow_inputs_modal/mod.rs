@@ -99,6 +99,13 @@ impl FlowInputsModal {
         }
     }
 
+    fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(workspace) = self.workspace.upgrade() {
+            workspace.update(cx, |ws, _| ws.cancel_flow_start_navigation());
+        }
+        window.close_dialog(cx);
+    }
+
     /// The values as the form holds them. A blank field is passed on blank:
     /// the engine keeps it for a string and applies the default otherwise.
     fn values(&self, cx: &App) -> InputValues {

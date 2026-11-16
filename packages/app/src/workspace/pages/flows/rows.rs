@@ -6,8 +6,8 @@ use crate::ui::list_table::{self, Column, ListTable};
 use crate::ui::theme::list_metrics as metrics;
 use crate::ui::{Badge, theme, tooltip};
 use crate::workspace::{
-    flow_browser::FlowPageSnapshot,
     flow_browser::{FlowGrouping, RunFilter},
+    flow_browser::{FlowLaneSnapshot, FlowPageSnapshot},
 };
 use gpui::{AnyElement, App, Div, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 
@@ -16,6 +16,7 @@ pub(super) enum FileColumn {
     Title,
     Source,
     Modified,
+    Worktree,
     Actions,
 }
 
@@ -25,6 +26,7 @@ enum RunColumn {
     Status,
     Started,
     Stage,
+    Worktree,
     Actions,
 }
 
@@ -33,6 +35,10 @@ fn file_layout() -> ListTable<FileColumn> {
         (FileColumn::Title, Column::title()),
         (FileColumn::Source, Column::Fixed(metrics::SOURCE_W)),
         (FileColumn::Modified, Column::Fixed(metrics::TIMESTAMP_W)),
+        (
+            FileColumn::Worktree,
+            Column::FixedUnclipped(metrics::LANE_W),
+        ),
         (
             FileColumn::Actions,
             Column::FixedUnclipped(metrics::ACTIONS_W),
@@ -46,6 +52,7 @@ fn run_layout() -> ListTable<RunColumn> {
         (RunColumn::Status, Column::Fixed(metrics::STATUS_W)),
         (RunColumn::Started, Column::Fixed(metrics::TIMESTAMP_W)),
         (RunColumn::Stage, Column::Fixed(metrics::STAGE_W)),
+        (RunColumn::Worktree, Column::FixedUnclipped(metrics::LANE_W)),
         (
             RunColumn::Actions,
             Column::FixedUnclipped(metrics::ACTIONS_W),
@@ -70,6 +77,7 @@ fn action_heading(cell: Div) -> AnyElement {
 
 pub(super) fn definitions(
     snap: &FlowPageSnapshot,
+    group: &FlowLaneSnapshot,
     list: &DefinitionList<'_>,
     cx: &App,
 ) -> AnyElement {
@@ -84,6 +92,7 @@ pub(super) fn definitions(
                     .child(s::flow::column_origin())
                     .into_any_element(),
                 FileColumn::Modified => cell.child(s::flow::column_modified()).into_any_element(),
+                FileColumn::Worktree => cell.child(s::common::column_worktree()).into_any_element(),
                 FileColumn::Actions => action_heading(cell),
             }
         },
@@ -93,7 +102,7 @@ pub(super) fn definitions(
         body = body.children(
             list.visible
                 .iter()
-                .map(|file| super::files::flow_row(file, snap, &layout, cx)),
+                .map(|file| super::files::flow_row(file, snap, group, &layout, cx)),
         );
     } else {
         for origin in ORIGINS.into_iter().flatten() {
@@ -110,7 +119,7 @@ pub(super) fn definitions(
                 body = body.children(
                     files
                         .into_iter()
-                        .map(|file| super::files::flow_row(file, snap, &layout, cx)),
+                        .map(|file| super::files::flow_row(file, snap, group, &layout, cx)),
                 );
             }
         }
@@ -120,7 +129,12 @@ pub(super) fn definitions(
         .into_any_element()
 }
 
-pub(super) fn runs(snap: &FlowPageSnapshot, list: &RunList<'_>, cx: &App) -> AnyElement {
+pub(super) fn runs(
+    snap: &FlowPageSnapshot,
+    group: &FlowLaneSnapshot,
+    list: &RunList<'_>,
+    cx: &App,
+) -> AnyElement {
     let layout = run_layout();
     let body = layout
         .body()
@@ -130,6 +144,7 @@ pub(super) fn runs(snap: &FlowPageSnapshot, list: &RunList<'_>, cx: &App) -> Any
                 RunColumn::Status => cell.child(s::common::column_status()).into_any_element(),
                 RunColumn::Started => cell.child(s::flow::column_started()).into_any_element(),
                 RunColumn::Stage => cell.child(s::flow::column_stage()).into_any_element(),
+                RunColumn::Worktree => cell.child(s::common::column_worktree()).into_any_element(),
                 RunColumn::Actions => action_heading(cell),
             },
             cx,
@@ -137,7 +152,7 @@ pub(super) fn runs(snap: &FlowPageSnapshot, list: &RunList<'_>, cx: &App) -> Any
         .children(
             list.visible
                 .iter()
-                .map(|run| run_row(*run, snap, &layout, cx)),
+                .map(|run| run_row(*run, snap, group, &layout, cx)),
         );
     list_table::scroll("flow-runs-scroll", body)
         .debug_selector(|| "flow-table-scroll".into())
@@ -147,6 +162,7 @@ pub(super) fn runs(snap: &FlowPageSnapshot, list: &RunList<'_>, cx: &App) -> Any
 fn run_row(
     run: RunRow<'_>,
     snap: &FlowPageSnapshot,
+    group: &FlowLaneSnapshot,
     layout: &ListTable<RunColumn>,
     cx: &App,
 ) -> AnyElement {
@@ -225,12 +241,20 @@ fn run_row(
                     cell.child(detail.clone())
                 })
                 .into_any_element(),
+            RunColumn::Worktree => cell
+                .child(crate::workspace::pages::chrome::worktree_button(
+                    SharedString::from(format!("flow-run-worktree-{}", id)),
+                    group.lane,
+                    group.label.clone(),
+                    snap.workspace.clone(),
+                ))
+                .into_any_element(),
             RunColumn::Actions => match run {
                 RunRow::Live(live) => actions(cell)
                     .child(super::live::stop_button(live, snap))
                     .into_any_element(),
                 RunRow::Past(past) => actions(cell)
-                    .children(super::past::resume_button(past, snap))
+                    .children(super::past::resume_button(past, snap, group.lane))
                     .into_any_element(),
             },
         })
@@ -243,31 +267,42 @@ fn run_row(
             move || format!("flow-run-row-{}", dir.display())
         });
     match run {
-        RunRow::Live(live) => div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::GAP_SM))
-            .child(row)
-            .children(
-                live.asking
-                    .iter()
-                    .map(|ask| super::live::ask_block(live.lane, &live.run_dir, ask, snap, cx)),
-            )
-            .into_any_element(),
+        RunRow::Live(live) => {
+            let workspace = snap.workspace.clone();
+            let lane = live.lane;
+            let dir = live.run_dir.clone();
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(theme::GAP_SM))
+                .child(
+                    row.cursor_pointer()
+                        .hover(|style| style.bg(t.overlay_hover))
+                        .on_click(move |_, window, cx| {
+                            if let Some(ws) = workspace.upgrade() {
+                                ws.update(cx, |ws, cx| ws.open_run_detail(lane, &dir, window, cx));
+                            }
+                        }),
+                )
+                .children(
+                    live.asking
+                        .iter()
+                        .map(|ask| super::live::ask_block(live.lane, &live.run_dir, ask, snap, cx)),
+                )
+                .into_any_element()
+        }
         RunRow::Past(past) => {
             let workspace = snap.workspace.clone();
-            let lane = snap.flow_lane;
+            let lane = group.lane;
             let dir = past.dir.clone();
-            row.when(past.report.is_some(), |row| {
-                row.cursor_pointer()
-                    .hover(|style| style.bg(t.overlay_hover))
-                    .on_click(move |_, window, cx| {
-                        if let Some(ws) = workspace.upgrade() {
-                            ws.update(cx, |ws, cx| ws.open_run_detail(lane, &dir, window, cx));
-                        }
-                    })
-            })
-            .into_any_element()
+            row.cursor_pointer()
+                .hover(|style| style.bg(t.overlay_hover))
+                .on_click(move |_, window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.open_run_detail(lane, &dir, window, cx));
+                    }
+                })
+                .into_any_element()
         }
     }
 }

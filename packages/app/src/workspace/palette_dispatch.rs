@@ -74,6 +74,9 @@ impl Workspace {
                 "add_selection_to_input" => self.add_focused_file_to_input(true, window, cx),
                 "new_tab" => self.on_new_tab(&NewTab, window, cx),
                 "new_task" => self.on_new_task(&NewTask, window, cx),
+                "resume_workspace_page" => {
+                    self.on_resume_workspace_page(&super::ResumeWorkspacePage, window, cx)
+                }
                 "new_agent_chat" => self.on_open_agent_chat(&OpenAgentChat, window, cx),
                 "edit_task" => self.on_edit_task(&EditTask, window, cx),
                 "start_task" => self.open_task_picker_modal(

@@ -6,6 +6,7 @@
 //! [`crate::workspace::Workspace::leave_page_detail_then`].
 
 pub(in crate::workspace) mod editor;
+mod new_target;
 
 use daruda_store::project::TaskDetailTarget;
 
@@ -18,6 +19,9 @@ pub(in crate::workspace) struct TaskEditorId(pub u64);
 
 pub(in crate::workspace) struct TaskDetail {
     pub id: TaskEditorId,
+    /// Staged when the project picker changes, so scope gating never reads
+    /// an input belonging to a hidden editor during render.
+    pub project: Option<daruda_store::project::ProjectUuid>,
     pub editor: TaskEditContent,
 }
 
@@ -48,8 +52,8 @@ impl crate::workspace::Workspace {
         }
     }
 
-    /// Close editor `id` without asking — for a save that just landed, so
-    /// there is nothing to lose. A stale id closes nothing.
+    /// Close a clean editor in fixtures; stale ids close nothing.
+    #[cfg(test)]
     pub(in crate::workspace) fn close_task_detail(
         &mut self,
         id: TaskEditorId,

@@ -14,11 +14,26 @@ use crate::workspace::Workspace;
 use crate::workspace::dirty_items::DirtyItem;
 
 /// What each page remembers while it is not on screen.
-#[derive(Default)]
 pub(in crate::workspace) struct PageDetails {
+    pub(super) scope: super::scope::ProjectScope,
+    pub(super) last_page: Option<Page>,
+    pub(super) scrolls: [gpui::ScrollHandle; 3],
     pub tasks: TasksPage,
     pub flows: FlowsPage,
     pub pull_requests: PullRequestsPage,
+}
+
+impl PageDetails {
+    pub fn new(window: &mut Window, cx: &mut Context<Workspace>) -> Self {
+        Self {
+            scope: Default::default(),
+            last_page: None,
+            scrolls: std::array::from_fn(|_| gpui::ScrollHandle::new()),
+            tasks: Default::default(),
+            flows: Default::default(),
+            pull_requests: PullRequestsPage::new(window, cx),
+        }
+    }
 }
 
 /// Names the detail a page shows. Ids are never reused, so a callback that
@@ -67,6 +82,36 @@ impl From<PrDetailId> for PageDetailId {
 }
 
 impl Workspace {
+    /// A retained detail is drawn only in its own browsing context. Hidden
+    /// pages may keep unsaved work while another page changes the scope.
+    pub(in crate::workspace) fn shown_page_detail_id(&self) -> Option<PageDetailId> {
+        let page = self.active_page()?;
+        let matches = match page {
+            Page::Tasks => self.pages.tasks.detail.as_ref().is_some_and(|detail| {
+                detail.project.is_none_or(|project| {
+                    self.page_scope()
+                        .matches(project, self.active_project().map(|project| project.uuid))
+                })
+            }),
+            Page::Flows => self
+                .pages
+                .flows
+                .detail
+                .as_ref()
+                .is_some_and(|detail| self.page_scope_matches(detail.lane.project)),
+            Page::PullRequests => self
+                .pages
+                .pull_requests
+                .detail
+                .as_ref()
+                .is_some_and(|detail| {
+                    self.page_scope() == super::scope::ProjectScope::All
+                        || self.github_repos().contains(&detail.item.repo)
+                }),
+        };
+        matches.then(|| self.page_detail_id(page)).flatten()
+    }
+
     /// The detail `page` shows over its list, if any.
     pub(in crate::workspace) fn page_detail_id(&self, page: Page) -> Option<PageDetailId> {
         match page {
@@ -86,8 +131,11 @@ impl Workspace {
                 DirtyItem::of_task_editor(editor, self.task_editor(editor)?, cx)
             }
             EditableDetailId::Flow(detail) => {
-                let (_, view) = self.flow_graph(detail)?;
-                DirtyItem::of_flow_graph(detail, &view, cx)
+                if self.flow_detail_id() != Some(detail) {
+                    return None;
+                }
+                let (graph, _, view) = self.open_graph()?;
+                DirtyItem::of_flow_graph(graph, &view, cx)
             }
         }
     }
@@ -167,23 +215,44 @@ impl Workspace {
         let Some(page) = self.active_page() else {
             return false;
         };
-        if self.page_detail_id(page).is_none() {
+        if self.shown_page_detail_id().is_none() {
             return false;
         }
         self.leave_page_detail_then(page, window, cx, |_, _, _| {});
         true
     }
 
-    /// Escape on a page leaves its detail for the list. A detail that
-    /// answers Escape itself — a rename it cancels — stops it first.
+    /// Escape follows the same Back path, including execution subviews and
+    /// the definition that opened one. A local rename may consume it first.
     pub(in crate::workspace) fn on_page_key_down(
         &mut self,
         ev: &gpui::KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if ev.keystroke.key == "escape" && self.close_page_detail(window, cx) {
+        if ev.keystroke.key != "escape" {
+            return;
+        }
+        if self.back_on_page(window, cx) {
             cx.stop_propagation();
+        }
+    }
+
+    pub(in crate::workspace) fn back_on_page(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.active_page() == Some(Page::Flows)
+            && self.shown_page_detail_id().is_some()
+            && self.pages.flows.detail.as_ref().is_some_and(|detail| {
+                matches!(detail.body, super::flows::detail::FlowDetailBody::Run(_))
+            })
+        {
+            self.back_from_execution(window, cx);
+            true
+        } else {
+            self.close_page_detail(window, cx)
         }
     }
 
@@ -197,7 +266,18 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.drop_flow_detail_of_gone_lane(window, cx);
+        self.refresh_task_worktrees(cx);
         self.refresh_task_editor_choices(window, cx);
+        if let super::scope::ProjectScope::Project(project) = self.page_scope()
+            && self.project_by_uuid(project).is_none()
+        {
+            let scope = self
+                .active_project()
+                .map_or(super::scope::ProjectScope::All, |p| {
+                    super::scope::ProjectScope::Project(p.uuid)
+                });
+            self.set_page_scope(scope, cx);
+        }
     }
 
     /// Drop detail `id` and give the keyboard back to the page: the focus

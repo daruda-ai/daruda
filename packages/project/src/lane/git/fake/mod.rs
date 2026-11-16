@@ -82,6 +82,11 @@ pub enum GitCall {
         branch: String,
         head: String,
     },
+    SetPushRemote {
+        repo: PathBuf,
+        branch: String,
+        remote: String,
+    },
     SetReviewMark {
         repo: PathBuf,
         branch: String,
@@ -144,10 +149,12 @@ pub enum GitOp {
     PushHead,
     Fetch,
     FetchRef,
+    RemoteUrl,
     Pull,
     HasLocalBranch,
     LocalBranch,
     MoveBranch,
+    SetPushRemote,
     ReviewMark,
     SetReviewMark,
     AddLane,
@@ -226,6 +233,7 @@ fn fatal(message: String) -> GitError {
 /// | `has_local_branch` | exit 128 | [`FakeRepo::branch`] or one of [`FakeRepo::local_branches`] |
 /// | `local_branch` | exit 128 | `Missing` unless `has_local_branch`; then `Ahead` for one of [`FakeRepo::ahead_branches`], else `Contained` |
 /// | `review_mark` | exit 128 | what [`FakeRepo::review_mark`] set, else `None` |
+/// | `remote_url` | exit 128 | what [`FakeRepo::remote_url`] set, else `None` |
 /// | `base_tips` | exit 128 as `BaseProblem::Git` | `NotFound(name)` |
 /// | `changes_since` | exit 128 as `BaseProblem::Git` | no files, no commits |
 /// | `init` | logged, `Ok` (registers nothing) | logged, `Ok` |

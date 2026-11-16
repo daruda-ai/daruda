@@ -15,6 +15,8 @@ use gpui::{Context, Window};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FlowBrowserShot {
     Definitions,
+    Projects,
+    ProjectsCompact,
     Grouped,
     Empty,
     Runs,
@@ -48,7 +50,7 @@ impl Workspace {
     ) {
         use daruda_flow::marker::RunStatus;
         self.ensure_project_for_shot();
-        self.flows.browser.state.scope = FlowScope::Current;
+        self.flows.browser.state.scope = FlowScope::Worktree(self.active);
         let tab = match shot {
             FlowBrowserShot::Runs | FlowBrowserShot::Asking => FlowTab::Runs,
             _ => FlowTab::Definitions,
@@ -80,9 +82,11 @@ impl Workspace {
         let now = std::time::SystemTime::now();
         let modified = files.iter().map(|file| (file.path.clone(), now)).collect();
         let source = FlowSource::File(files[0].path.clone());
-        self.flows
+        let lane = self.active;
+        self.lane_scoped_mut(lane)
+            .flows
             .list
-            .put(self.active, FlowListing { files, modified });
+            .put(lane, FlowListing { files, modified });
         if shot == FlowBrowserShot::Grouped {
             self.flows.browser.state.grouping = FlowGrouping::Origin;
             self.flows.browser.state.toggle_group(FlowOrigin::Project);
@@ -157,9 +161,53 @@ impl Workspace {
             }
         })
         .collect();
-        self.flows
+        self.lane_scoped_mut(lane)
+            .flows
             .history
-            .put(self.active, FlowHistory::seeded(history));
+            .put(lane, FlowHistory::seeded(history));
+        if matches!(
+            shot,
+            FlowBrowserShot::Projects | FlowBrowserShot::ProjectsCompact
+        ) {
+            let project_id = self.next_project_id;
+            self.next_project_id += 1;
+            let mut project = crate::project::Project::bootstrap_placeholder(
+                project_id,
+                self.data_dir.join("website-preview"),
+            );
+            project.name = "website".into();
+            let other = daruda_store::project::LaneRef {
+                project: project_id,
+                lane: project.lanes[0].id,
+            };
+            self.projects.push(project);
+            let files = ["publish-docs.yaml", "preview-check.yaml"]
+                .into_iter()
+                .map(|name| FoundFlow {
+                    name: name.into(),
+                    path: root.join("website").join(name),
+                    origin: FlowOrigin::Repo,
+                })
+                .collect();
+            self.lane_scoped_mut(other).flows.list.put(
+                other,
+                FlowListing {
+                    files,
+                    modified: Vec::new(),
+                },
+            );
+            self.lane_scoped_mut(other)
+                .flows
+                .history
+                .put(other, FlowHistory::seeded(Vec::new()));
+            self.set_page_scope(crate::workspace::pages::scope::ProjectScope::All, cx);
+            if shot == FlowBrowserShot::ProjectsCompact {
+                self.docks.left.update(cx, |dock, cx| {
+                    dock.is_open = false;
+                    cx.notify();
+                });
+            }
+        }
         cx.notify();
     }
 }

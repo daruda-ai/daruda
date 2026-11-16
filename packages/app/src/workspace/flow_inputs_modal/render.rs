@@ -9,7 +9,7 @@ use gpui::{
 use super::{Control, Field, FlowInputsModal};
 use crate::surface::strings as s;
 use crate::ui::select;
-use crate::ui::{WindowExt as _, button, button_primary, checkbox, form_input, theme};
+use crate::ui::{button, button_primary, checkbox, form_input, theme};
 use crate::workspace::ModalView;
 
 impl FlowInputsModal {
@@ -72,6 +72,14 @@ impl FlowInputsModal {
 }
 
 impl ModalView for FlowInputsModal {
+    fn guards_close(&self) -> bool {
+        true
+    }
+
+    fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel(window, cx);
+    }
+
     fn fit_viewport(&self) -> bool {
         true
     }
@@ -81,7 +89,7 @@ impl ModalView for FlowInputsModal {
             crate::ui::form_footer(cx)
                 .child(
                     button("flow-inputs-cancel", s::common::btn_cancel()).on_click(
-                        cx.listener(|_, _: &ClickEvent, window, cx| window.close_dialog(cx)),
+                        cx.listener(|this, _: &ClickEvent, window, cx| this.cancel(window, cx)),
                     ),
                 )
                 .child(

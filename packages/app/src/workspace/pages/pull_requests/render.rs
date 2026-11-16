@@ -11,8 +11,8 @@ use crate::surface::strings::{common, git as git_s, pull_requests as s};
 use crate::ui::list_table::{self, Column, ListTable};
 use crate::ui::theme::list_metrics as metrics;
 use crate::ui::{
-    Badge, ButtonVariants as _, Disableable as _, Selectable as _, Sizable as _, button,
-    button_compact, button_group, button_icon, icons, list_page, theme, tooltip,
+    Badge, ButtonVariants as _, Disableable as _, Sizable as _, button_compact, button_icon, icons,
+    list_page, theme, tooltip,
 };
 use crate::workspace::left_dock::git_changes::pr_strip::{checks_label, tone_glyph};
 
@@ -42,68 +42,45 @@ fn layout() -> ListTable<PrColumn> {
     ])
 }
 
-pub(in crate::workspace) fn header(
-    snap: &PrPageSnapshot,
-    close: AnyElement,
-    cx: &App,
-) -> AnyElement {
-    let filters = {
-        let workspace = snap.workspace.clone();
-        button_group("pr-filter", cx)
-            .children(list::FILTERS.iter().enumerate().map(|(ix, filter)| {
-                button(("pr-filter", ix), list::filter_label(*filter))
-                    .debug_selector(move || format!("pr-filter-{ix}"))
-                    .selected(*filter == snap.list.filter)
-                    .tab_stop(true)
-            }))
-            .on_click(move |selected: &Vec<usize>, _, cx| {
-                if let Some(filter) = selected.first().and_then(|ix| list::FILTERS.get(*ix))
-                    && let Some(ws) = workspace.upgrade()
-                {
-                    ws.update(cx, |ws, cx| ws.set_pr_page_filter(*filter, cx));
-                }
-            })
-    };
-    let refresh = {
-        let workspace = snap.workspace.clone();
-        button_icon("pr-refresh", icons::REFRESH, cx)
-            .debug_selector(|| "pr-refresh".into())
-            .tooltip(common::refresh())
-            .on_click(move |_, _, cx| {
-                if let Some(ws) = workspace.upgrade() {
-                    ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
-                }
-            })
-    };
-    let t = theme::current(cx);
-    let action = div()
-        .flex()
-        .items_center()
-        .gap(px(theme::GAP_LG))
-        .children(snap.list.refreshed.clone().map(|refreshed| {
-            div()
-                .text_size(px(theme::FONT_SIZE_SM))
-                .text_color(t.text_subtle)
-                .child(refreshed)
-        }))
-        .child(refresh);
-    list_page::header(s::title(), filters, action, close, cx).into_any_element()
-}
+pub(in crate::workspace) use super::controls::header;
 
 pub(in crate::workspace) fn render(snap: &PrPageSnapshot, cx: &App) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::RIGHT_PANEL_SECTION_GAP))
+        .child(super::controls::filters(snap))
+        .child(super::controls::search(snap, cx))
+        .child(super::controls::results(snap, cx))
+        .child(body(snap, cx))
+        .into_any_element()
+}
+
+fn body(snap: &PrPageSnapshot, cx: &App) -> AnyElement {
     let groups = match &snap.list.body {
         PageBody::Off => return list_page::empty(s::empty_disabled(), cx).into_any_element(),
-        PageBody::NoRepos => {
-            return list_page::empty(s::empty_no_repos(), cx).into_any_element();
-        }
+        PageBody::NoRepos => return list_page::empty(s::empty_no_repos(), cx).into_any_element(),
         PageBody::Groups(groups) => groups,
     };
     let layout = layout();
-    let table = layout.body().children(
-        groups
-            .iter()
-            .map(|group| render_group(group, snap, &layout, cx)),
-    );
+    let table = layout
+        .body()
+        .child(layout.header(
+            |column, cell| match column {
+                PrColumn::Title => cell.child(s::column_title()).into_any_element(),
+                PrColumn::Checks => cell.child(s::column_checks()).into_any_element(),
+                PrColumn::Review => cell.child(s::column_review()).into_any_element(),
+                PrColumn::Comments => cell.child(s::column_comments()).into_any_element(),
+                PrColumn::Lane => cell.child(common::column_worktree()).into_any_element(),
+                PrColumn::Tone | PrColumn::Open => cell.into_any_element(),
+            },
+            cx,
+        ))
+        .children(
+            groups
+                .iter()
+                .map(|group| render_group(group, snap, &layout, cx)),
+        );
     list_table::scroll("pr-table-scroll", table).into_any_element()
 }
 
@@ -152,7 +129,17 @@ fn render_group(
                     .map(|row| render_row(row, stale, snap, layout, cx)),
             );
             if rows.is_empty() && trouble.is_none() {
-                body.push(note(s::empty_repo(), cx).into_any_element());
+                body.push(
+                    note(
+                        if snap.query.trim().is_empty() {
+                            s::empty_repo()
+                        } else {
+                            s::empty_search()
+                        },
+                        cx,
+                    )
+                    .into_any_element(),
+                );
             }
             if *truncated {
                 body.push(note(s::truncated(), cx).into_any_element());

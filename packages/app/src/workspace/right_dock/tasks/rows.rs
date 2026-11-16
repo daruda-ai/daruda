@@ -8,7 +8,7 @@ use super::{TaskGrouping, list::TaskList};
 use crate::surface::strings;
 use crate::ui::list_table::{self, Column, ListTable};
 use crate::ui::theme::list_metrics as metrics;
-use crate::ui::{theme, tooltip};
+use crate::ui::{ButtonVariants as _, theme, tooltip};
 use crate::workspace::layout::RightDockSnapshot;
 
 #[derive(Clone, Copy)]
@@ -19,6 +19,7 @@ enum TaskColumn {
     Status,
     Agent,
     Updated,
+    Worktree,
 }
 
 fn layout(show_project: bool) -> ListTable<TaskColumn> {
@@ -36,12 +37,16 @@ fn layout(show_project: bool) -> ListTable<TaskColumn> {
         (TaskColumn::Status, Column::Fixed(metrics::STATUS_W)),
         (TaskColumn::Agent, Column::Fixed(metrics::AGENT_W)),
         (TaskColumn::Updated, Column::Fixed(metrics::RELATIVE_TIME_W)),
+        (
+            TaskColumn::Worktree,
+            Column::FixedUnclipped(metrics::LANE_W),
+        ),
     ]);
     ListTable::new(columns)
 }
 
 pub(super) fn table(snap: &RightDockSnapshot, list: &TaskList<'_>, cx: &App) -> AnyElement {
-    let show_project = snap.task_browser.state.scope == TaskScope::AllProjects
+    let show_project = snap.task_browser.scope == TaskScope::AllProjects
         && snap.task_browser.state.groups.mode != TaskGrouping::Project;
     let layout = layout(show_project);
     let mut table = layout.body().child(header(&layout, cx));
@@ -76,6 +81,9 @@ fn header(layout: &ListTable<TaskColumn>, cx: &App) -> Div {
                 .child(strings::common::column_status())
                 .into_any_element(),
             TaskColumn::Agent => cell.child(strings::task::column_agent()).into_any_element(),
+            TaskColumn::Worktree => cell
+                .child(strings::common::column_worktree())
+                .into_any_element(),
             TaskColumn::Updated => cell
                 .child(strings::task::column_updated())
                 .into_any_element(),
@@ -132,6 +140,53 @@ fn row(
                     .text_color(t.text_muted)
                     .child(agent)
                     .into_any_element()
+            }
+            TaskColumn::Worktree => {
+                if let Some(path) = task.lifecycle.worktree() {
+                    let label = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
+                    if !snap.task_browser.worktrees.contains_key(task.id()) {
+                        let id = task.id().to_owned();
+                        return cell
+                            .id(SharedString::from(format!(
+                                "task-worktree-unavailable-{id}"
+                            )))
+                            .debug_selector(move || format!("task-worktree-unavailable-{id}"))
+                            .text_color(t.text_subtle)
+                            .tooltip(tooltip::text(strings::task::worktree_not_open()))
+                            .child(label)
+                            .into_any_element();
+                    }
+                    let workspace = snap.workspace.clone();
+                    let id = task.id().to_owned();
+                    cell.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(
+                            crate::ui::button_compact(
+                                SharedString::from(format!("task-worktree-{id}")),
+                                label,
+                            )
+                            .debug_selector(move || format!("task-worktree-{id}"))
+                            .ghost()
+                            .max_w_full()
+                            .tab_stop(true)
+                            .on_click({
+                                let id = task.id().to_owned();
+                                move |_, window, cx| {
+                                    if let Some(ws) = workspace.upgrade() {
+                                        ws.update(cx, |ws, cx| ws.focus_task_lane(&id, window, cx));
+                                    }
+                                }
+                            }),
+                        )
+                        .into_any_element()
+                } else {
+                    cell.text_color(t.text_subtle)
+                        .child(strings::common::worktree_unassigned())
+                        .into_any_element()
+                }
             }
             TaskColumn::Updated => {
                 let elapsed = (*snap.now - task.updated_at).to_std().unwrap_or_default();

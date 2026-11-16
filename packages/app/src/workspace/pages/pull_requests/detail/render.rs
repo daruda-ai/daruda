@@ -18,7 +18,11 @@ use crate::ui::{
 };
 use crate::workspace::Workspace;
 
-pub(in crate::workspace) fn render(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
+pub(in crate::workspace) fn render(
+    view: &PrDetailView,
+    scroll: &gpui::ScrollHandle,
+    cx: &Context<Workspace>,
+) -> AnyElement {
     let t = theme::current(cx);
     let body = div()
         .mx_auto()
@@ -53,49 +57,14 @@ pub(in crate::workspace) fn render(view: &PrDetailView, cx: &Context<Workspace>)
         .flex()
         .flex_col()
         .bg(t.dock_bg)
-        .child(crumb_bar(view, cx))
         .child(
             div()
                 .id(("pr-detail-scroll", view.id.0 as usize))
+                .track_scroll(scroll)
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
                 .child(body),
-        )
-        .into_any_element()
-}
-
-/// Back to the list, where this is, and refresh.
-fn crumb_bar(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
-    let t = theme::current(cx);
-    let id = view.id;
-    div()
-        .flex()
-        .items_center()
-        .gap(px(theme::GAP_LG))
-        .h(px(theme::TASK_EDIT_HEADER_H))
-        .px(px(theme::PAD_LG))
-        .border_b_1()
-        .border_color(t.border)
-        .child(
-            button_icon("pr-detail-back", icons::BACK, cx)
-                .tooltip(s::back_to_list())
-                .debug_selector(|| "pr-detail-back".into())
-                .on_click(cx.listener(|ws, _, window, cx| ws.back_to_pr_list(window, cx))),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_size(px(theme::FONT_SIZE_SM))
-                .text_color(t.text_muted)
-                .child(view.crumb.clone()),
-        )
-        .child(
-            button_icon("pr-detail-refresh", icons::REFRESH, cx)
-                .tooltip(common::refresh())
-                .on_click(cx.listener(move |ws, _, _, cx| ws.refresh_pr_detail(id, cx))),
         )
         .into_any_element()
 }

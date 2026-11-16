@@ -49,60 +49,57 @@ impl Workspace {
         };
         let source = daruda_core::path::strip_root(path, &cwd);
         let runs = crate::workspace::flow_paths::runs_dir(&cwd);
-        self.leave_page_detail_then(
-            crate::workspace::pages::Page::Flows,
-            window,
+        let Some(parent) = self.flow_definition_return() else {
+            return;
+        };
+        if parent.lane != lane || parent.view.read(cx).path() != path {
+            return;
+        }
+        let shown = self.flow_detail_id();
+        self.reveal_page_project(lane.project, cx);
+        self.show_page(crate::workspace::pages::Page::Flows, cx);
+        let epoch = self.alloc_id();
+        self.pages.flows.history_request = Some(epoch);
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
             cx,
-            move |ws, _, cx| {
-                ws.set_flow_scope(
-                    crate::workspace::flow_browser::FlowScope::Worktree(lane),
-                    cx,
-                );
-                ws.set_flow_tab(crate::workspace::flow_browser::FlowTab::Runs, cx);
-                ws.show_page(crate::workspace::pages::Page::Flows, cx);
-                let epoch = ws.alloc_id();
-                ws.pages.flows.history_request = Some(epoch);
-                crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
-                    cx,
-                    move || {
-                        let history =
-                            crate::workspace::flow_history::FlowHistory::read(&runs, None);
-                        history
-                            .runs()
-                            .iter()
-                            .find(|entry| {
-                                source.is_some()
-                                    && daruda_flow::run_log::reader::inspect(&entry.dir)
-                                        .ok()
-                                        .flatten()
-                                        .is_some_and(|i| i.state.source() == source.as_deref())
-                            })
-                            .map(|entry| entry.dir.clone())
-                    },
-                    move |ws, dir, cx| {
-                        if ws.pages.flows.history_request != Some(epoch)
-                            || ws.pages.flows.detail.is_some()
-                            || ws.active_page() != Some(crate::workspace::pages::Page::Flows)
-                            || ws.flow_browser_lane() != lane
-                        {
-                            return;
-                        }
-                        ws.pages.flows.history_request = None;
-                        if let Some(dir) = dir {
-                            ws.mutate_durable(cx, |ws, cx| ws.install_run_detail(lane, dir, cx));
-                            if let Some(FlowDetail {
-                                body: FlowDetailBody::Run(run),
-                                ..
-                            }) = ws.pages.flows.detail.as_mut()
-                            {
-                                run.execution.source_only = true;
-                            }
-                        }
-                    },
-                )
-                .detach();
+            move || {
+                let history = crate::workspace::flow_history::FlowHistory::read(&runs, None);
+                history
+                    .runs()
+                    .iter()
+                    .find(|entry| {
+                        source.is_some()
+                            && daruda_flow::run_log::reader::inspect(&entry.dir)
+                                .ok()
+                                .flatten()
+                                .is_some_and(|i| i.state.source() == source.as_deref())
+                    })
+                    .map(|entry| entry.dir.clone())
             },
-        );
+            move |ws, dir, cx| {
+                if ws.pages.flows.history_request != Some(epoch)
+                    || ws.flow_detail_id() != shown
+                    || ws.active_page() != Some(crate::workspace::pages::Page::Flows)
+                {
+                    return;
+                }
+                ws.pages.flows.history_request = None;
+                if let Some(dir) = dir {
+                    ws.show_flow_execution(lane, dir, Some(parent), cx);
+                } else {
+                    let report = daruda_store::observability::error_report::ErrorReport::new(
+                        s::flow::panel_past_empty(),
+                    )
+                    .severity(daruda_store::observability::error_report::ErrorSeverity::Info)
+                    .at(file!(), line!())
+                    .dedup("flow.history.empty")
+                    .build();
+                    ws.report_error(report, cx);
+                }
+            },
+        )
+        .detach();
+        self.window_runtime.focus_handle.focus(window, cx);
     }
 
     pub(in crate::workspace) fn open_flow_run_origin(
@@ -120,6 +117,7 @@ impl Workspace {
             window,
             cx,
             move |ws, _, cx| {
+                ws.reveal_page_project(origin.lane.project, cx);
                 ws.mutate_durable(cx, |ws, cx| {
                     ws.install_run_detail(origin.lane, origin.dir, cx);
                     if let Some(FlowDetail {

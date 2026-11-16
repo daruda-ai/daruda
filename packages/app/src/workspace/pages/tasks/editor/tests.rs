@@ -325,7 +325,10 @@ fn task_list_scope_preserves_worktree_and_seeds_new_task_project(cx: &mut TestAp
                 .clone()
                 .update(cx, |input, cx| input.set_value("login", window, cx));
             ws.clear_task_filters(window, cx);
-            assert_eq!(ws.right_views.tasks.state.scope, TaskScope::Project(a));
+            assert_eq!(
+                daruda_store::tasks::TaskScope::from(ws.page_scope()),
+                TaskScope::Project(a)
+            );
             assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::All);
             assert_eq!(ws.right_views.tasks.search.read(cx).value(), "");
             assert_eq!(ws.active, active);
@@ -347,10 +350,18 @@ fn task_list_scope_preserves_worktree_and_seeds_new_task_project(cx: &mut TestAp
             assert_eq!(cx.global::<GlobalTasks>().get(&id).unwrap().spec.project, a);
             assert_eq!(ws.active, active);
             ws.set_task_scope(TaskScope::AllProjects, cx);
+            let retained = ws.task_detail_id();
             ws.new_task_in_scope(window, cx);
+            assert_eq!(
+                ws.task_detail_id(),
+                retained,
+                "aggregate creation requires an explicit project"
+            );
+            crate::ui::WindowExt::close_dialog(window, cx);
+            ws.open_task_draft_for_project(b, window, cx);
             let editor = ws
                 .task_detail_id()
-                .expect("the Tasks page holds the editor");
+                .expect("the explicit project opens a draft");
             assert_eq!(ws.task_editor(editor).unwrap().project(cx), Some(b));
             let pane_count = ws.active_runtime().panes.len();
             ws.set_task_scope(
@@ -407,7 +418,7 @@ fn task_editor_save_shortcut_and_tab_order(cx: &mut TestAppContext) {
         let tasks = records(cx);
         assert_eq!(tasks.len(), 1, "shortcut saved the draft");
         assert_eq!(tasks[0].spec.title, "Keyboard save");
-        assert_eq!(ws.task_detail_id(), None, "a plain save closes the editor");
+        assert!(ws.task_detail_id().is_some(), "a plain save keeps the form");
         assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
     });
 }
@@ -446,7 +457,7 @@ fn task_editor_rejects_blank_titles_and_invalid_branches(cx: &mut TestAppContext
 }
 
 #[gpui::test]
-fn task_editor_save_returns_to_list_and_keeps_saved_subtasks(cx: &mut TestAppContext) {
+fn task_editor_save_keeps_the_editor_and_saved_subtasks(cx: &mut TestAppContext) {
     let (_project, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -465,8 +476,8 @@ fn task_editor_save_returns_to_list_and_keeps_saved_subtasks(cx: &mut TestAppCon
             ws.toggle_editor_subtask(editor, &sub, cx);
             ws.save_task_editor(editor, false, window, cx);
             assert!(
-                ws.task_editor(editor).is_none(),
-                "a saved editor leaves no tab behind"
+                !ws.task_editor(editor).unwrap().is_dirty(cx),
+                "a plain save keeps the clean editor"
             );
             let id = records(cx)[0].id().to_owned();
             let task = cx.global::<GlobalTasks>().get(&id).unwrap();
@@ -489,9 +500,9 @@ fn task_editor_save_returns_to_list_and_keeps_saved_subtasks(cx: &mut TestAppCon
     .unwrap();
 }
 
-/// The editor is not a lane's tab, and a plain save returns to the list.
+/// The editor remains outside lane tabs after saving.
 #[gpui::test]
-fn task_editor_is_no_lane_tab_and_a_plain_save_shows_the_list(cx: &mut TestAppContext) {
+fn task_editor_is_no_lane_tab_and_a_plain_save_keeps_the_form(cx: &mut TestAppContext) {
     let (_project, window, ws) = build_workspace_with_project(cx);
     cx.update_window(window.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
@@ -509,7 +520,11 @@ fn task_editor_is_no_lane_tab_and_a_plain_save_shows_the_list(cx: &mut TestAppCo
             let title = ws.task_editor(editor).unwrap().title_input.clone();
             title.update(cx, |s, cx| s.set_value("No tab", window, cx));
             ws.save_task_editor(editor, false, window, cx);
-            assert_eq!(ws.task_detail_id(), None, "a plain save shows the list");
+            assert_eq!(
+                ws.task_detail_id(),
+                Some(editor),
+                "a plain save keeps the form"
+            );
             assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
             assert_eq!(records(cx)[0].spec.title, "No tab");
         });
@@ -659,7 +674,7 @@ fn a_save_the_leave_prompt_cannot_land_is_reported(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn task_editor_save_reveals_task_without_switching_worktree(cx: &mut TestAppContext) {
+fn task_editor_save_preserves_filters_folds_and_worktree(cx: &mut TestAppContext) {
     use crate::workspace::right_dock::tasks::{TaskGroupKey, TaskGrouping};
     use daruda_store::tasks::{TaskFilter, TaskScope};
     let (_project, window, ws) = build_workspace_with_project(cx);
@@ -688,14 +703,14 @@ fn task_editor_save_reveals_task_without_switching_worktree(cx: &mut TestAppCont
             ws.save_task_editor(editor, false, window, cx);
             assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
             assert_eq!(
-                ws.right_views.tasks.state.scope,
-                TaskScope::Project(project)
+                daruda_store::tasks::TaskScope::from(ws.page_scope()),
+                TaskScope::ActiveProject
             );
-            assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::All);
-            assert_eq!(ws.right_views.tasks.search.read(cx).value(), "");
-            assert!(ws.right_views.tasks.state.groups.is_open(key));
+            assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::Failed);
+            assert_eq!(ws.right_views.tasks.search.read(cx).value(), "hidden");
+            assert!(!ws.right_views.tasks.state.groups.is_open(key));
             assert_eq!(ws.active, active);
-            assert!(ws.task_editor(editor).is_none());
+            assert!(!ws.task_editor(editor).unwrap().is_dirty(cx));
 
             ws.close_page(cx);
             let id = records(cx)[0].id().to_owned();
@@ -711,7 +726,10 @@ fn task_editor_save_reveals_task_without_switching_worktree(cx: &mut TestAppCont
                 .clone()
                 .update(cx, |s, cx| s.set_value("saved", window, cx));
             ws.save_task_editor(editor, false, window, cx);
-            assert_eq!(ws.right_views.tasks.state.scope, TaskScope::AllProjects);
+            assert_eq!(
+                daruda_store::tasks::TaskScope::from(ws.page_scope()),
+                TaskScope::AllProjects
+            );
             assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::Backlog);
             assert_eq!(ws.right_views.tasks.search.read(cx).value(), "saved");
             assert_eq!(ws.active_page(), Some(crate::workspace::pages::Page::Tasks));
@@ -746,7 +764,7 @@ fn task_editor_saving_a_rename_keeps_the_stored_branch(cx: &mut TestAppContext) 
             let task = cx.global::<GlobalTasks>().get(&id).unwrap();
             assert_eq!(task.spec.title, "Renamed");
             assert_eq!(task.spec.branch_name, branch);
-            assert!(ws.task_editor(editor).is_none());
+            assert!(!ws.task_editor(editor).unwrap().is_dirty(cx));
         });
     })
     .unwrap();

@@ -31,7 +31,10 @@ async fn task_status_controls_preserve_scope_and_clear_without_switching_worktre
     vcx.run_until_parked();
     workspace.read_with(&vcx, |ws, _| {
         assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::Running);
-        assert_eq!(ws.right_views.tasks.state.scope, TaskScope::AllProjects);
+        assert_eq!(
+            daruda_store::tasks::TaskScope::from(ws.page_scope()),
+            TaskScope::AllProjects
+        );
         assert_eq!(ws.active, active);
     });
     let clear = vcx
@@ -41,7 +44,10 @@ async fn task_status_controls_preserve_scope_and_clear_without_switching_worktre
     vcx.run_until_parked();
     workspace.read_with(&vcx, |ws, _| {
         assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::All);
-        assert_eq!(ws.right_views.tasks.state.scope, TaskScope::AllProjects);
+        assert_eq!(
+            daruda_store::tasks::TaskScope::from(ws.page_scope()),
+            TaskScope::AllProjects
+        );
         assert_eq!(ws.active, active);
     });
 }
@@ -122,7 +128,10 @@ async fn task_groups_collapse_and_reopen_without_changing_filters(cx: &mut TestA
                 expected_open
             );
             assert_eq!(ws.right_views.tasks.state.filter, TaskFilter::All);
-            assert_eq!(ws.right_views.tasks.state.scope, TaskScope::AllProjects);
+            assert_eq!(
+                daruda_store::tasks::TaskScope::from(ws.page_scope()),
+                TaskScope::AllProjects
+            );
         });
         assert_eq!(
             vcx.debug_bounds("task-row-group-fixture").is_some(),
@@ -299,4 +308,71 @@ async fn page_close_button_preserves_the_window_and_worktree(cx: &mut TestAppCon
             .expect("the page close button must be visible");
         vcx.simulate_click(bounds.center(), Modifiers::default());
     });
+}
+
+#[gpui::test]
+fn task_worktree_links_follow_registered_projects(cx: &mut TestAppContext) {
+    let a_root = tempfile::tempdir().unwrap();
+    let b_root = tempfile::tempdir().unwrap();
+    let unregistered = tempfile::tempdir().unwrap();
+    let project = daruda_store::project::Project::from_path(a_root.path());
+    let (window, ws) =
+        super::build_workspace_with(cx, &daruda_config::Config::default(), Some(project));
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    let (task, unavailable) = ws.update_in(&mut vcx, |ws, window, cx| {
+        use crate::runs::seed::{SeedEnd, SeedRun};
+        let project = ws.active_project().unwrap().uuid;
+        let seed = |title, path: &std::path::Path, cx: &mut gpui::App| {
+            let spec = crate::runs::seed::spec(project, title);
+            crate::runs::seed::task(spec, Some((&SeedRun::chat(path), SeedEnd::Done)), cx)
+        };
+        let task = seed("Open worktree", a_root.path(), cx);
+        let unavailable = seed("Unregistered worktree", unregistered.path(), cx);
+        ws.add_project(b_root.path().to_path_buf(), window, cx);
+        ws.open_page(Page::Tasks, window, cx);
+        ws.set_task_scope(daruda_store::tasks::TaskScope::AllProjects, cx);
+        (task, unavailable)
+    });
+    vcx.run_until_parked();
+    let link = Box::leak(format!("task-worktree-{task}").into_boxed_str());
+    let absent_link = Box::leak(format!("task-worktree-{unavailable}").into_boxed_str());
+    let absent_label =
+        Box::leak(format!("task-worktree-unavailable-{unavailable}").into_boxed_str());
+    assert!(vcx.debug_bounds(absent_link).is_none());
+    assert!(vcx.debug_bounds(absent_label).is_some());
+    let bounds = vcx
+        .debug_bounds(link)
+        .expect("registered worktree is linked");
+    vcx.simulate_click(bounds.center(), Default::default());
+    vcx.run_until_parked();
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        assert!(daruda_core::path::same_path(
+            &ws.active_lane().unwrap().path,
+            a_root.path()
+        ));
+        ws.close_active_project(window, cx);
+        ws.open_page(Page::Tasks, window, cx);
+        ws.set_task_scope(daruda_store::tasks::TaskScope::AllProjects, cx);
+    });
+    vcx.run_until_parked();
+    assert!(
+        a_root.path().is_dir(),
+        "the path can exist after its project closes"
+    );
+    assert!(
+        vcx.debug_bounds(link).is_none(),
+        "closed projects cannot keep a clickable link"
+    );
+    let label = Box::leak(format!("task-worktree-unavailable-{task}").into_boxed_str());
+    assert!(vcx.debug_bounds(label).is_some());
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.add_project(a_root.path().to_path_buf(), window, cx);
+        ws.open_page(Page::Tasks, window, cx);
+        ws.set_task_scope(daruda_store::tasks::TaskScope::AllProjects, cx);
+    });
+    vcx.run_until_parked();
+    assert!(
+        vcx.debug_bounds(link).is_some(),
+        "reopening the target restores the link"
+    );
 }

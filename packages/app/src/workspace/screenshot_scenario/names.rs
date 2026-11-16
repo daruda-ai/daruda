@@ -257,6 +257,12 @@ impl ScreenshotScenario {
             "flows" => Some(Self::FlowBrowser(
                 super::super::flow_browser::screenshot::FlowBrowserShot::Definitions,
             )),
+            "flows-projects" => Some(Self::FlowBrowser(
+                super::super::flow_browser::screenshot::FlowBrowserShot::Projects,
+            )),
+            "flows-projects-compact" => Some(Self::FlowBrowser(
+                super::super::flow_browser::screenshot::FlowBrowserShot::ProjectsCompact,
+            )),
             "flows-grouped" => Some(Self::FlowBrowser(
                 super::super::flow_browser::screenshot::FlowBrowserShot::Grouped,
             )),
@@ -275,6 +281,8 @@ impl ScreenshotScenario {
             "tasks-by-status" => Some(Self::TasksByStatus),
             "tasks-by-project" => Some(Self::TasksByProject),
             "task-saved" => Some(Self::TaskSaved),
+            "task-project-choice" => Some(Self::TaskProjectChoice),
+            "resume-task-page" => Some(Self::ResumeTaskPage),
             "task-editor" => Some(Self::TaskEditor(TaskEditorShot::Form)),
             "task-editor-preview" => Some(Self::TaskEditor(TaskEditorShot::Preview)),
             "task-editor-saving" => Some(Self::TaskEditor(TaskEditorShot::Saving)),

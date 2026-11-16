@@ -185,8 +185,6 @@ pub(in crate::workspace) enum DetailBody {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct PrDetailView {
     pub id: PrDetailId,
-    /// `Pull requests / owner/name`.
-    pub crumb: String,
     pub state: String,
     pub state_mood: Mood,
     /// `#480 Adjust sidebar…`.
@@ -235,12 +233,6 @@ pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_
     let (state_label, state_mood) = state_label(state_shown);
     PrDetailView {
         id: state.id,
-        crumb: format!(
-            "{} / {}/{}",
-            s::title(),
-            item.repo.owner(),
-            item.repo.name()
-        ),
         state: state_label,
         state_mood,
         title: format!("{} {}", git_s::pr_number(pr.number), pr.title),

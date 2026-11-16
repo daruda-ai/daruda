@@ -119,6 +119,11 @@ impl Workspace {
                         build_new_tab_menu(menu, &ws, &agents, window, cx)
                     }))
             })
+            .children(
+                (self.active_page().is_none())
+                    .then(|| crate::workspace::pages::chrome::resume_button(self, cx))
+                    .flatten(),
+            )
             .child(
                 div()
                     .absolute()

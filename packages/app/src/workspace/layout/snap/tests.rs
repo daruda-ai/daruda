@@ -23,6 +23,7 @@ fn fixture(window: &mut Window, cx: &mut gpui::App) -> LeftDockSnapshot {
         focused_pane: 0,
         left_dock_view: daruda_store::project::LeftDockView::default(),
         workspace_page: None,
+        page_project: None,
         lanes: Vec::new(),
         projects: Vec::new(),
         groups: Vec::new(),
@@ -81,9 +82,11 @@ fn right_fixture(window: &mut Window, cx: &mut gpui::App) -> RightDockSnapshot {
         sections: Default::default(),
         tasks: daruda_store::tasks::TasksBook::default(),
         task_browser: crate::workspace::right_dock::tasks::TaskBrowserSnapshot {
+            scope: Default::default(),
             state: Default::default(),
             search: Handle(task_search_input),
             query: String::new(),
+            worktrees: Default::default(),
         },
         task_projects: TaskProjects::default(),
         task_agents: std::sync::Arc::from([]),
@@ -172,7 +175,7 @@ fn right_content_change_differs(cx: &mut TestAppContext) {
             "a changed Tasks filter must re-stage the panel"
         );
         let mut c = right_fixture(window, cx);
-        c.task_browser.state.scope = daruda_store::tasks::TaskScope::AllProjects;
+        c.task_browser.scope = daruda_store::tasks::TaskScope::AllProjects;
         assert!(
             a.content_differs(&c),
             "a changed Tasks scope must re-stage the panel"
@@ -191,6 +194,14 @@ fn right_content_change_differs(cx: &mut TestAppContext) {
         assert!(
             a.content_differs(&e),
             "a changed Tasks query must re-stage the panel"
+        );
+        let mut f = right_fixture(window, cx);
+        f.task_browser
+            .worktrees
+            .insert("task".into(), daruda_store::project::LaneRef::default());
+        assert!(
+            a.content_differs(&f),
+            "changed link availability must re-stage the panel"
         );
         gpui::Empty
     });

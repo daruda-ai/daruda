@@ -596,7 +596,7 @@ fn a_positional_that_looks_like_an_option_is_refused_before_git_runs() {
     let nowhere = Path::new("/nonexistent/daruda-option-guard");
     let lane = nowhere.join("lane");
     // (label, call, refused `what`, refused value)
-    let cases: [(&str, Result<(), GitError>, &str, &str); 4] = [
+    let cases: [(&str, Result<(), GitError>, &str, &str); 7] = [
         (
             "remote",
             remote::fetch_ref(nowhere, "--upload-pack=x", "refs/pull/1/head:refs/x"),
@@ -620,6 +620,24 @@ fn a_positional_that_looks_like_an_option_is_refused_before_git_runs() {
             add_lane(nowhere, &lane, &LaneStart::existing_branch("--detach")),
             "branch",
             "--detach",
+        ),
+        (
+            "push remote branch",
+            remote::set_push_remote(nowhere, "--all", "origin"),
+            "branch",
+            "--all",
+        ),
+        (
+            "push remote",
+            remote::set_push_remote(nowhere, "feature", "--all"),
+            "remote",
+            "--all",
+        ),
+        (
+            "remote url",
+            remote::remote_url(nowhere, "--all").map(|_| ()),
+            "remote",
+            "--all",
         ),
     ];
     for (label, result, what, value) in cases {

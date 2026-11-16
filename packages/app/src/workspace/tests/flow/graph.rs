@@ -748,8 +748,8 @@ nodes:
 /// outside it reaches the open graph.
 ///
 /// Driven through `apply_flows_event` rather than through a real filesystem
-/// event: what a watcher delivers is one coalesced "something changed", and the
-/// FSEvents leg of it is covered where the watcher lives
+/// event: what a watcher delivers is one coalesced change naming the
+/// directories it touched, and the FSEvents leg of it is covered where the watcher lives
 /// (`hooks::flow_watcher`, `#[ignore]`d because it needs a real event stream).
 /// What is worth pinning here is the half that used to be missing — the list
 /// cache dropped, and every open graph re-read.
@@ -797,7 +797,10 @@ nodes:
     std::fs::write(flows.join("release.yaml"), ONE_AGENT).expect("write");
     std::fs::write(&flow_path, TWO_NODES).expect("write");
 
-    ws.update_in(&mut vcx, |ws, window, cx| ws.apply_flows_event(window, cx));
+    let event = crate::hooks::flow_watcher::FlowsEvent::In(vec![flows.clone()]);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.apply_flows_event(&event, window, cx)
+    });
     vcx.run_until_parked();
     ws.update(&mut vcx, |ws, cx| ws.flow_list_for_panel(cx));
     vcx.run_until_parked();
@@ -841,8 +844,13 @@ async fn a_flow_event_that_changed_nothing_costs_no_frame(cx: &mut TestAppContex
     let same = std::fs::read_to_string(&flow_path).expect("readable");
     std::fs::write(&flow_path, &same).expect("write");
 
+    let changed = crate::hooks::flow_watcher::FlowsEvent::In(vec![
+        flow_path.parent().expect("in a directory").to_path_buf(),
+    ]);
     WORKSPACE_RENDERS.with(|n| n.set(0));
-    ws.update_in(&mut vcx, |ws, window, cx| ws.apply_flows_event(window, cx));
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.apply_flows_event(&changed, window, cx)
+    });
     vcx.run_until_parked();
     assert_eq!(
         WORKSPACE_RENDERS.with(|n| n.get()),
@@ -862,7 +870,9 @@ async fn a_flow_event_that_changed_nothing_costs_no_frame(cx: &mut TestAppContex
     });
     vcx.run_until_parked();
     WORKSPACE_RENDERS.with(|n| n.set(0));
-    ws.update_in(&mut vcx, |ws, window, cx| ws.apply_flows_event(window, cx));
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.apply_flows_event(&changed, window, cx)
+    });
     vcx.run_until_parked();
     assert_eq!(
         WORKSPACE_RENDERS.with(|n| n.get()),

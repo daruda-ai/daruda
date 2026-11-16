@@ -70,6 +70,7 @@ async fn an_edit_to_a_flow_with_an_include_is_written(cx: &mut TestAppContext) {
 
     let wrote = ws.update_in(&mut vcx, |ws, window, cx| {
         ws.edit_flow(
+            ws.active,
             &flow_path,
             INCLUDING,
             |file| file.nodes[0].timeout = Some(std::time::Duration::from_secs(5)),
@@ -152,7 +153,13 @@ async fn an_edit_looks_up_includes_where_the_graph_was_opened(cx: &mut TestAppCo
     });
 
     let wrote = ws.update_in(&mut vcx, |ws, window, cx| {
+        let view = ws
+            .open_graph()
+            .map(|(_, _, view)| view)
+            .expect("the graph is open");
+        let lane = ws.graph_lane(&view).expect("the graph names its lane");
         ws.edit_flow(
+            lane,
             &flow_path,
             INCLUDING,
             |file| file.nodes[0].timeout = Some(std::time::Duration::from_secs(5)),

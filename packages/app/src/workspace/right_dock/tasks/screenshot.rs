@@ -7,8 +7,7 @@ use daruda_store::tasks::{TaskEvent, TaskFilter, TaskScope, TaskSpec};
 use gpui::{Context, Window};
 
 /// One task per status the list shows, new states included.
-fn fixtures(project: ProjectUuid) -> Vec<TaskEvent> {
-    let path = std::path::PathBuf::from("/preview/worktree");
+fn fixtures(project: ProjectUuid, path: &std::path::Path) -> Vec<TaskEvent> {
     [
         ("Improve project filtering", Some(SeedEnd::Running)),
         ("Add keyboard navigation to task picker", None),
@@ -34,7 +33,12 @@ fn fixtures(project: ProjectUuid) -> Vec<TaskEvent> {
             } else {
                 "claude"
             };
-            let run = SeedRun::chat(path.clone()).agent(agent);
+            let target = if matches!(&end, SeedEnd::Errored) {
+                path.join("removed-worktree")
+            } else {
+                path.to_path_buf()
+            };
+            let run = SeedRun::chat(target).agent(agent);
             events.extend(crate::runs::seed::run(&spec.id, &run, end));
         }
         events
@@ -81,7 +85,8 @@ impl Workspace {
             }
         }
         self.activate_lane(active, window, cx);
-        let mut events = fixtures(project);
+        let path = self.lane_for(active).unwrap().path.clone();
+        let mut events = fixtures(project, &path);
         events.extend(crate::runs::seed::created(TaskSpec::new(
             other,
             "Refresh the documentation site".into(),
@@ -108,7 +113,10 @@ mod tests {
 
     #[test]
     fn fixtures_cover_task_statuses_without_live_sessions() {
-        let tasks = crate::runs::seed::replay(fixtures(ProjectUuid::new()));
+        let tasks = crate::runs::seed::replay(fixtures(
+            ProjectUuid::new(),
+            std::path::Path::new("/preview/worktree"),
+        ));
         let kinds: Vec<_> = tasks.records().map(|task| task.lifecycle.kind()).collect();
         for kind in enum_iterator_kinds() {
             assert_eq!(kinds.iter().filter(|k| **k == kind).count(), 1, "{kind:?}");

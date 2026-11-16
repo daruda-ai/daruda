@@ -41,6 +41,9 @@ impl Workspace {
         if old == page {
             return;
         }
+        if page.is_some() {
+            self.pin_page_scope(cx);
+        }
         self.mutate_durable(cx, |ws, _| {
             ws.workspace_page.0 = page.map(|page| ws.page_state(page));
             ws.main_area.pending_resize = true;
@@ -56,6 +59,9 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let old = self.active_page();
+        if page.is_some() {
+            self.pin_page_scope(cx);
+        }
         self.workspace_page.0 = page.map(|page| self.page_state(page));
         if old != page {
             self.page_visibility_changed(old, page, cx);
@@ -78,6 +84,7 @@ impl Workspace {
 
     /// What `page` starts when it comes on screen.
     fn on_page_shown(&mut self, page: Page, cx: &mut Context<Self>) {
+        self.pages.last_page = Some(page);
         match page {
             Page::Tasks => {}
             Page::Flows => self.flows_page_shown(cx),
@@ -88,7 +95,12 @@ impl Workspace {
     /// What `page` stops when it leaves the screen.
     fn on_page_hidden(&mut self, page: Page, cx: &mut Context<Self>) {
         match page {
-            Page::Tasks | Page::Flows => {}
+            Page::Tasks => {}
+            Page::Flows => {
+                self.pages.flows.history_request = None;
+                self.cancel_flow_start_navigation();
+                self.respawn_flow_watcher(cx);
+            }
             Page::PullRequests => self.hide_pr_list(cx),
         }
     }

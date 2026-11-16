@@ -252,7 +252,6 @@ fn a_partial_check_list_shows_the_overall_verdict_and_says_it_is_partial() {
 fn the_header_says_what_the_detail_knows_once_read() {
     let loading = view(&state(Load::Loading, false), &inputs(None));
     assert_eq!(loading.body, DetailBody::Loading);
-    assert_eq!(loading.crumb, "Pull requests / o/r");
     assert_eq!(loading.title, "#7 Fix it");
     let labels: Vec<_> = loading
         .tabs

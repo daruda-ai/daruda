@@ -68,18 +68,6 @@ fn run_header(id: FlowDetailId, run: &RunDetail, cx: &mut Context<Workspace>) ->
         .px(px(theme::DOCK_PAGE_PAD))
         .py(px(theme::GAP_SM))
         .child(
-            button_icon("flow-run-back", icons::BACK, cx)
-                .tooltip(
-                    if run.execution.content == super::execution_detail::ExecutionContent::Report {
-                        s::flow::run_return_to_execution()
-                    } else {
-                        s::flow::back_to_list()
-                    },
-                )
-                .debug_selector(|| "flow-run-back".into())
-                .on_click(cx.listener(|ws, _, window, cx| ws.back_from_execution(window, cx))),
-        )
-        .child(
             div()
                 .flex_1()
                 .min_w_0()

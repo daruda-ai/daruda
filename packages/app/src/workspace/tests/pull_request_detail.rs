@@ -939,3 +939,23 @@ fn turning_the_feature_off_closes_the_detail(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(matches!(shown(&f, cx), Some((_, 7, Load::Ready(_)))));
 }
+
+#[gpui::test]
+fn returning_to_a_pull_request_keeps_its_tab_and_scroll(cx: &mut TestAppContext) {
+    let (f, _gh, _) = window(cx);
+    open(&f, item(7, "feat"), cx);
+    f.ws.update(cx, |ws, cx| {
+        let detail = ws.pages.pull_requests.detail.as_mut().unwrap();
+        let id = detail.id;
+        detail.tab = PrTab::Threads;
+        let offset = gpui::point(gpui::px(0.), gpui::px(-240.));
+        detail.scroll.set_offset(offset);
+        ws.close_page(cx);
+        ws.show_page(Page::Tasks, cx);
+        ws.show_page(Page::PullRequests, cx);
+        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        assert_eq!(detail.id, id);
+        assert_eq!(detail.tab, PrTab::Threads);
+        assert_eq!(detail.scroll.offset(), offset);
+    });
+}

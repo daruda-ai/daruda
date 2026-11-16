@@ -180,6 +180,11 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: k::SHORTCUT_NEW_TAB,
     },
     PaletteEntry {
+        id: "resume_workspace_page",
+        label: s::common::resume_workspace_page,
+        shortcut: "",
+    },
+    PaletteEntry {
         id: "new_task",
         label: s::command::new_task,
         shortcut: "",

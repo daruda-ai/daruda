@@ -46,15 +46,6 @@ impl Render for FlowGraphView {
                     .px(px(palette::PAD_STANDARD))
                     .py(px(palette::PAD_XS))
                     .child(
-                        button_icon("flow-back-to-list", icons::BACK, cx)
-                            .tooltip(s::flow::back_to_list())
-                            .debug_selector(|| "flow-back-to-list".into())
-                            .tab_stop(true)
-                            .on_click(cx.listener(|_, _, _, cx| {
-                                cx.emit(super::FlowGraphEvent::BackToList)
-                            })),
-                    )
-                    .child(
                         div()
                             .flex_1()
                             .min_w_0()

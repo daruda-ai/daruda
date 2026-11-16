@@ -28,16 +28,35 @@ use daruda_core::path::canonicalize_or_self;
 /// emits its burst well inside it, and the graph still reads as live.
 const DEBOUNCE: Duration = Duration::from_millis(100);
 
-/// One coalesced signal that *something* about this lane's flows changed.
+/// One coalesced burst of changes to flow definitions.
 ///
-/// No path travels with it. Two reasons: a graph pane's reload is a byte
-/// comparison against the text it already holds, so telling every pane costs a
-/// read of a small file and repaints only what actually differs; and an atomic
-/// save arrives as events for a temporary name, which a path filter would have
-/// to guess at.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// It names the watched directories a flow file changed in, not the files:
+/// an atomic save arrives as events for a temporary name, but always in the
+/// directory it lands in. A graph pane's reload is a byte comparison against
+/// the text it already holds, so telling every open pane stays cheap; the
+/// directories let the listings that read none of them stay as they are.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FlowsEvent {
-    Changed,
+    /// Flow files directly in these watched directories changed. Each is
+    /// the canonical form the watcher anchored on, sorted and deduplicated.
+    In(Vec<PathBuf>),
+    /// The OS dropped events, so any watched directory may have changed.
+    Unknown,
+}
+
+impl FlowsEvent {
+    /// Both bursts as one: an unknown change covers every directory.
+    fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::In(mut dirs), Self::In(more)) => {
+                dirs.extend(more);
+                dirs.sort();
+                dirs.dedup();
+                Self::In(dirs)
+            }
+            _ => Self::Unknown,
+        }
+    }
 }
 
 /// Caller-side handle. Dropping it drops the [`crate::dir_watch::DirWatcher`]
@@ -69,15 +88,16 @@ pub fn spawn(
     let classify = move |event: &notify::Event| {
         let mut out = Vec::new();
         for path in &event.paths {
-            if is_flow_in(path, &matches, &extensions) {
-                out.push(FlowsEvent::Changed);
+            if is_flow_in(path, &matches, &extensions)
+                && let Some(dir) = path.parent()
+            {
+                out.push(FlowsEvent::In(vec![dir.to_path_buf()]));
             }
         }
         out
     };
-    // An FSEvents drop cannot say what changed, and the event carries no path
-    // anyway — one signal is the whole recovery.
-    let rescan = || vec![FlowsEvent::Changed];
+    // An FSEvents drop cannot say what changed.
+    let rescan = || vec![FlowsEvent::Unknown];
 
     let (raw_rx, watcher) = crate::dir_watch::spawn_dir_watcher(
         &anchors,
@@ -88,7 +108,8 @@ pub fn spawn(
 
     // Debounce thread: collapse each burst into one event.
     std::thread::spawn(move || {
-        while raw_rx.recv().is_ok() {
+        while let Ok(first) = raw_rx.recv() {
+            let mut burst = first;
             let deadline = std::time::Instant::now() + DEBOUNCE;
             loop {
                 let now = std::time::Instant::now();
@@ -96,17 +117,17 @@ pub fn spawn(
                     break;
                 }
                 match raw_rx.recv_timeout(deadline - now) {
-                    Ok(_) => {}
+                    Ok(next) => burst = burst.merge(next),
                     Err(RecvTimeoutError::Timeout) => break,
                     Err(RecvTimeoutError::Disconnected) => {
                         // SILENT-OK: the watcher is gone; this last send is a
                         // courtesy and the receiver may already be dropped too.
-                        let _ = event_tx.send(FlowsEvent::Changed);
+                        let _ = event_tx.send(burst);
                         return;
                     }
                 }
             }
-            if event_tx.send(FlowsEvent::Changed).is_err() {
+            if event_tx.send(burst).is_err() {
                 return;
             }
         }
@@ -197,7 +218,36 @@ mod tests {
 
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(2)),
-            Ok(FlowsEvent::Changed)
+            Ok(FlowsEvent::In(vec![canonicalize_or_self(&flows)]))
         );
+    }
+
+    #[test]
+    fn a_burst_names_each_directory_once_unless_events_were_lost() {
+        let (a, b) = (PathBuf::from("/a"), PathBuf::from("/b"));
+        // (label, first, second, merged)
+        let cases = [
+            (
+                "two directories",
+                FlowsEvent::In(vec![b.clone()]),
+                FlowsEvent::In(vec![a.clone(), b.clone()]),
+                FlowsEvent::In(vec![a.clone(), b.clone()]),
+            ),
+            (
+                "a lost event covers everything",
+                FlowsEvent::In(vec![a.clone()]),
+                FlowsEvent::Unknown,
+                FlowsEvent::Unknown,
+            ),
+            (
+                "whichever comes first",
+                FlowsEvent::Unknown,
+                FlowsEvent::In(vec![a.clone()]),
+                FlowsEvent::Unknown,
+            ),
+        ];
+        for (label, first, second, merged) in cases {
+            assert_eq!(first.merge(second), merged, "{label}");
+        }
     }
 }

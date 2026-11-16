@@ -51,17 +51,24 @@ pub(in crate::workspace) struct FlowBrowserSnapshot {
     pub targets: Vec<FlowTarget>,
     pub search: Handle<Entity<InputState>>,
     pub query: String,
-    pub modified: Vec<(std::path::PathBuf, std::time::SystemTime)>,
 }
 
 /// Data staged for the central Flows page, independent of the utility dock.
 pub(in crate::workspace) struct FlowPageSnapshot {
     pub workspace: gpui::WeakEntity<Workspace>,
-    pub flows: Vec<crate::workspace::flow_rows::FlowRunRow>,
-    pub flow_lane: daruda_store::project::LaneRef,
-    pub flow_history: Option<crate::workspace::flow_history::FlowHistory>,
-    pub flow_files: Vec<crate::workspace::flow_paths::FoundFlow>,
+    pub scope: crate::workspace::pages::scope::ScopeSnapshot,
+    pub groups: Vec<FlowLaneSnapshot>,
     pub flow_browser: FlowBrowserSnapshot,
+}
+
+/// All paths and actions in a group refer to this concrete worktree.
+pub(in crate::workspace) struct FlowLaneSnapshot {
+    pub lane: daruda_store::project::LaneRef,
+    pub label: String,
+    pub flows: Vec<crate::workspace::flow_rows::FlowRunRow>,
+    pub history: Option<crate::workspace::flow_history::FlowHistory>,
+    pub files: Vec<crate::workspace::flow_paths::FoundFlow>,
+    pub modified: Vec<(std::path::PathBuf, std::time::SystemTime)>,
 }
 
 #[cfg(test)]

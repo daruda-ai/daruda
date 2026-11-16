@@ -100,6 +100,7 @@ pub(in crate::workspace) struct LeftDockSnapshot {
     pub focused_pane: u64,
     pub left_dock_view: daruda_store::project::LeftDockView,
     pub workspace_page: Option<crate::workspace::pages::Page>,
+    pub page_project: Option<daruda_store::project::ProjectId>,
     pub lanes: Vec<crate::lane::Lane>,
     /// Every project in the workspace, in `tab_order` order. Drives
     /// the multi-project tree render — each entry's `lanes` slice
@@ -201,6 +202,14 @@ pub(in crate::workspace) struct LeftDockSnapshot {
 }
 
 impl LeftDockSnapshot {
+    pub fn selected_project(&self) -> Option<daruda_store::project::ProjectId> {
+        if self.workspace_page.is_some() {
+            self.page_project
+        } else {
+            Some(self.active.project)
+        }
+    }
+
     /// True when the left-dock-relevant *content* differs from `prev`.
     ///
     /// Derived rather than hand-written: a field added to this struct joins the

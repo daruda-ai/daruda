@@ -8,10 +8,13 @@ use super::layout::LeftDockSnapshot;
 use crate::surface::strings;
 use crate::ui::icons;
 
+pub(in crate::workspace) mod chrome;
 pub(in crate::workspace) mod detail;
 pub(in crate::workspace) mod flows;
+mod location;
 pub(in crate::workspace) mod pull_requests;
 pub(super) mod render;
+pub(in crate::workspace) mod scope;
 mod shown;
 pub(in crate::workspace) mod tasks;
 
@@ -39,6 +42,13 @@ struct PageSpec {
 }
 
 impl Page {
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Tasks => 0,
+            Self::Flows => 1,
+            Self::PullRequests => 2,
+        }
+    }
     /// Every page, in navigation order.
     pub const ALL: [Self; 3] = [Self::Tasks, Self::Flows, Self::PullRequests];
 
@@ -107,6 +117,7 @@ impl PageState {
 impl Workspace {
     fn page_state(&self, page: Page) -> PageState {
         let mut state = PageState::new(page);
+        state.scroll = self.pages.scrolls[page.index()].clone();
         if page == Page::Flows {
             state.scroll = self.flows.browser.scrolls[self.flows.browser.state.tab.index()].clone();
         }
@@ -126,6 +137,7 @@ impl Workspace {
     fn flows_page_shown(&mut self, cx: &mut Context<Self>) {
         self.respawn_flow_watcher(cx);
         if let Some(detail) = &self.pages.flows.detail
+            && self.page_scope_matches(detail.lane.project)
             && matches!(detail.body, flows::detail::FlowDetailBody::Run(_))
         {
             self.refresh_execution(detail.id, cx);
@@ -140,6 +152,21 @@ impl Workspace {
     ) {
         self.show_page(page, cx);
         self.window_runtime.focus_handle.focus(window, cx);
+    }
+
+    pub(in crate::workspace) fn last_page(&self) -> Option<Page> {
+        self.pages.last_page
+    }
+
+    pub(in crate::workspace) fn on_resume_workspace_page(
+        &mut self,
+        _: &super::ResumeWorkspacePage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(page) = self.last_page() {
+            self.open_page(page, window, cx);
+        }
     }
 
     pub(in crate::workspace) fn close_page(&mut self, cx: &mut Context<Self>) {

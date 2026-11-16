@@ -8,17 +8,8 @@ use crate::workspace::flow_paths::FlowOrigin;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::workspace) enum FlowScope {
     #[default]
-    Current,
+    All,
     Worktree(LaneRef),
-}
-
-impl FlowScope {
-    pub fn resolve(self, active: LaneRef) -> LaneRef {
-        match self {
-            Self::Current => active,
-            Self::Worktree(lane) => lane,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -119,8 +110,9 @@ mod tests {
             project: 2,
             lane: 0,
         };
-        assert_eq!(FlowScope::Current.resolve(b), b);
-        assert_eq!(FlowScope::Worktree(a).resolve(b), a);
+        let selected = FlowScope::Worktree(a);
+        assert_ne!(selected, FlowScope::Worktree(b));
+        assert_ne!(selected, FlowScope::All);
     }
 
     #[test]

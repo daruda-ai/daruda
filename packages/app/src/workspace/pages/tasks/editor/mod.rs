@@ -101,46 +101,12 @@ fn render(
         .border_b_1()
         .border_color(border)
         .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(theme::GAP_LG))
-                .child(
-                    ui::button_icon(
-                        ("task-edit-back", editor_id.0 as usize),
-                        ui::icons::BACK,
-                        cx,
-                    )
-                    .tooltip(strings::task::edit_back())
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.leave_page_detail_then(
-                            crate::workspace::pages::Page::Tasks,
-                            window,
-                            cx,
-                            |_, _, _| {},
-                        )
-                    })),
-                )
-                .child(
-                    div()
-                        .text_size(px(theme::FONT_SIZE_SM))
-                        .text_color(muted)
-                        .child(status),
-                ),
-        )
-        .child(
-            ui::button_close(("task-edit-close", editor_id.0 as usize), cx).on_click(cx.listener(
-                |this, _, window, cx| {
-                    this.leave_page_detail_then(
-                        crate::workspace::pages::Page::Tasks,
-                        window,
-                        cx,
-                        |ws, window, cx| {
-                            ws.return_to_worktree(window, cx);
-                        },
-                    )
-                },
-            )),
+            div().flex().items_center().gap(px(theme::GAP_LG)).child(
+                div()
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .text_color(muted)
+                    .child(status),
+            ),
         );
 
     let body = div()

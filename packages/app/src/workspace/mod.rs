@@ -311,6 +311,7 @@ actions!(
         /// from the Command Palette `new_task`; keybinding via
         /// `[keybindings] new_task`.
         NewTask,
+        ResumeWorkspacePage,
         /// Open the task picker for all tasks; the pick gets a TaskEdit
         /// pane. Keybinding via `[keybindings] edit_task`.
         EditTask,

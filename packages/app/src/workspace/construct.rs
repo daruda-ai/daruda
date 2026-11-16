@@ -157,7 +157,7 @@ impl Workspace {
             window_runtime: window_runtime::WindowRuntime::new(window, cx),
             docks: layout::docks::Docks::new(&ws_weak, config, cx),
             workspace_page: pages::ShownPage::default(),
-            pages: pages::detail::PageDetails::default(),
+            pages: pages::detail::PageDetails::new(window, cx),
             unseen_outcomes: unseen_outcomes::UnseenOutcomes::default(),
             agent_usage: agent_usage::AgentUsageState {
                 _limits_pumps: sync::limits::spawn(cx),
@@ -280,6 +280,7 @@ impl Workspace {
                     cx.notify();
                 }),
                 cx.observe_global::<crate::runs::GlobalTasks>(|ws, cx| {
+                    ws.refresh_task_worktrees(cx);
                     ws.ensure_task_live_tick(cx);
                     cx.notify();
                 }),
@@ -314,6 +315,7 @@ impl Workspace {
             // host gets a scratch task log here.
             crate::runs::RunsHost::ensure_installed(cx);
             Self::install_task_effects(cx);
+            ws.refresh_task_worktrees(cx);
             return ws;
         }
         // The test scheduler jumps the clock to the next timer whenever a test
@@ -345,6 +347,7 @@ impl Workspace {
         // (and so never discards) task state.
         crate::runs::RunsHost::ensure_installed(cx);
         Self::install_task_effects(cx);
+        ws.refresh_task_worktrees(cx);
         // The projection predates this window's `observe_global`, so start
         // the live tick for any run already active.
         ws.ensure_task_live_tick(cx);

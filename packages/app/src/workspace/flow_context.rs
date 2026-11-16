@@ -10,31 +10,23 @@ use gpui::{Context, WeakEntity, Window};
 use super::Workspace;
 use super::flow_ask_modal::FlowAskModal;
 use super::flow_browser::FlowBrowser;
-use super::flow_browser::listing::FlowListing;
-use super::flow_cache::LaneCache;
-use super::flow_history::FlowHistory;
 
 pub(in crate::workspace) struct FlowContext {
-    /// One worktree's past runs, read from disk when the Flows tab needs
-    /// them. See [`LaneCache`] for the rule both caches share.
-    pub(in crate::workspace) history: LaneCache<FlowHistory>,
-    /// The browsed worktree's flow files, listed from disk. Cached because the
-    /// snapshot that needs it is rebuilt every frame, and a directory listing
-    /// per frame is not what a panel costs.
-    pub(in crate::workspace) list: LaneCache<FlowListing>,
     pub(in crate::workspace) browser: FlowBrowser,
     /// The question modal this window raised. Weak: the dialog owns it, so
     /// once the dialog closes this no longer upgrades.
     pub(in crate::workspace) ask_modal: Option<WeakEntity<FlowAskModal>>,
+    /// The lanes whose flow directories the watcher covers, as
+    /// `respawn_flow_watcher` last anchored it; its one writer.
+    pub(in crate::workspace) watched_lanes: Vec<daruda_store::project::LaneRef>,
 }
 
 impl FlowContext {
     pub(in crate::workspace) fn new(window: &mut Window, cx: &mut Context<Workspace>) -> Self {
         Self {
-            history: LaneCache::default(),
-            list: LaneCache::default(),
             browser: FlowBrowser::new(window, cx),
             ask_modal: None,
+            watched_lanes: Vec::new(),
         }
     }
 }

@@ -2,7 +2,7 @@
 
 use crate::surface::strings;
 use crate::ui::{DropdownMenu as _, theme, tooltip};
-use crate::workspace::flow_browser::FlowPageSnapshot;
+use crate::workspace::flow_browser::{FlowLaneSnapshot, FlowPageSnapshot};
 use crate::workspace::root_menu::RootContextMenuExt as _;
 use gpui::{IntoElement, SharedString, div, prelude::*};
 
@@ -86,11 +86,12 @@ fn flow_row_menu(
 fn run_button(
     found: &crate::workspace::flow_paths::FoundFlow,
     snap: &FlowPageSnapshot,
+    group: &FlowLaneSnapshot,
     cx: &gpui::App,
 ) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     let path = found.path.clone();
-    let lane = snap.flow_lane;
+    let lane = group.lane;
     let id = SharedString::from(format!("flow-run-{}", path.display()));
     let selector = id.to_string();
     div()
@@ -112,6 +113,7 @@ fn run_button(
 pub(super) fn flow_row(
     found: &crate::workspace::flow_paths::FoundFlow,
     snap: &FlowPageSnapshot,
+    group: &FlowLaneSnapshot,
     layout: &crate::ui::list_table::ListTable<super::rows::FileColumn>,
     cx: &gpui::App,
 ) -> impl IntoElement {
@@ -124,10 +126,9 @@ pub(super) fn flow_row(
     let name = found.name.clone();
     let menu_name = name.clone();
     let origin = found.origin;
-    let lane = snap.flow_lane;
+    let lane = group.lane;
     let selector = format!("flow-file-{}", path.display());
-    let modified = snap
-        .flow_browser
+    let modified = group
         .modified
         .iter()
         .find(|(held, _)| *held == path)
@@ -163,12 +164,20 @@ pub(super) fn flow_row(
                 .text_color(t.text_muted)
                 .child(modified.clone())
                 .into_any_element(),
+            FileColumn::Worktree => cell
+                .child(crate::workspace::pages::chrome::worktree_button(
+                    SharedString::from(format!("flow-worktree-{}", path.display())),
+                    group.lane,
+                    group.label.clone(),
+                    snap.workspace.clone(),
+                ))
+                .into_any_element(),
             FileColumn::Actions => {
                 let dropdown_path = path.clone();
                 let dropdown_name = name.clone();
                 let dropdown_workspace = ws_for_menu.clone();
                 super::rows::actions(cell)
-                    .child(run_button(found, snap, cx))
+                    .child(run_button(found, snap, group, cx))
                     .child(
                         crate::ui::button_icon(
                             SharedString::from(format!("flow-menu-{}", path.display())),

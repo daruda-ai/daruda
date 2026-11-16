@@ -30,12 +30,12 @@ pub(super) fn project(
             .child(
                 div()
                     .rounded(px(theme::RADIUS_SM))
-                    .when(!project.is_collapsed, |element| {
+                    .when(snap.selected_project() == Some(id), |element| {
                         element.bg(theme.rail_project_bg)
                     })
                     .border_1()
                     .border_color(theme.border.opacity(theme::DOCK_RAIL_INITIAL_BORDER_ALPHA))
-                    .size(px(snap.metrics.row(theme::DOCK_RAIL_INITIAL_SIZE)))
+                    .size(px(snap.metrics.target(theme::CONTROL_TARGET_SIZE)))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -47,6 +47,28 @@ pub(super) fn project(
                         project.display_alias.as_deref(),
                     )),
             )
+            .child({
+                let workspace = snap.workspace.clone();
+                ui::button_icon_sized(
+                    ("rail-project-fold", id as usize),
+                    if project.is_collapsed {
+                        ui::icons::CHEVRON_RIGHT
+                    } else {
+                        ui::icons::EXPAND_MORE
+                    },
+                    snap.metrics,
+                    cx,
+                )
+                .debug_selector(move || format!("rail-project-fold-{id}"))
+                .tab_stop(true)
+                .tooltip(project.name.clone())
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.toggle_project_collapse(id, cx));
+                    }
+                })
+            })
             .tooltip(ui::tooltip::text(project.name.clone()))
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
             .on_key_down(move |event, window, cx| {
@@ -56,11 +78,9 @@ pub(super) fn project(
                     });
                 }
             })
-            .on_click(move |_, _, cx| {
+            .on_click(move |_, window, cx| {
                 if let Some(workspace) = workspace.upgrade() {
-                    workspace.update(cx, |workspace, cx| {
-                        workspace.toggle_project_collapse(id, cx)
-                    });
+                    workspace.update(cx, |workspace, cx| workspace.select_project(id, window, cx));
                 }
             })
             .root_context_menu(snap.workspace.clone(), move |menu, _, _| {

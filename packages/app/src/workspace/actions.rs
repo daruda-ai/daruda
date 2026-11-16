@@ -244,7 +244,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_task_editor(None, window, cx);
+        self.new_task_in_scope(window, cx);
     }
 
     /// Bound to the [`OpenAgentChat`] action — opens a fresh Agent chat

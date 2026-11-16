@@ -20,6 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
+use daruda_core::path::canonicalize_or_self;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{App, Context, WeakEntity, Window};
 
@@ -150,7 +151,7 @@ impl Workspace {
             self.report_flow_file_error(s::flow::create_failed_title(), &path, &e, cx);
             return;
         }
-        self.invalidate_flow_list();
+        self.invalidate_flow_lists_holding(&path);
         // The write above may have created the directory itself, which the
         // watcher can only anchor on once it exists.
         self.respawn_flow_watcher(cx);
@@ -195,7 +196,7 @@ impl Workspace {
             return Ok(());
         }
         self.repoint_flow_graph(from, &to, window, cx);
-        self.invalidate_flow_list();
+        self.invalidate_flow_lists_holding(&to);
         cx.notify();
         Ok(())
     }
@@ -211,14 +212,47 @@ impl Workspace {
         if let Some((_, _, view)) = self.open_graph_of(path, cx) {
             view.update(cx, |view, cx| view.report_file_gone(cx));
         }
-        self.invalidate_flow_list();
+        self.invalidate_flow_lists_holding(path);
         cx.notify();
     }
 
-    /// Mark the cached listing wrong so the panel reads the directory again;
-    /// the old one stays on screen until that read lands.
-    pub(in crate::workspace) fn invalidate_flow_list(&mut self) {
-        self.flows.list.invalidate();
+    /// Mark wrong every cached listing that reads one of `dirs`, so the page
+    /// reads those directories again; the old lists stay on screen until the
+    /// reads land. A listing reading none of them is still right.
+    pub(in crate::workspace) fn invalidate_flow_lists_in(&mut self, dirs: &[PathBuf]) {
+        let dirs: Vec<PathBuf> = dirs.iter().map(canonicalize_or_self).collect();
+        let stale: Vec<_> = self
+            .lane_scoped
+            .keys()
+            .copied()
+            .filter(|lane| {
+                self.flow_sources_for(*lane).is_some_and(|sources| {
+                    sources
+                        .dirs()
+                        .into_iter()
+                        .any(|(dir, _)| dirs.contains(&canonicalize_or_self(&dir)))
+                })
+            })
+            .collect();
+        for lane in stale {
+            if let Some(state) = self.lane_scoped.get_mut(&lane) {
+                state.flows.list.invalidate();
+            }
+        }
+    }
+
+    /// The listings holding `path`'s directory, for a change this app made.
+    pub(in crate::workspace) fn invalidate_flow_lists_holding(&mut self, path: &Path) {
+        if let Some(dir) = path.parent() {
+            self.invalidate_flow_lists_in(&[dir.to_path_buf()]);
+        }
+    }
+
+    /// Mark every cached listing wrong, for a change that cannot say where.
+    pub(in crate::workspace) fn invalidate_every_flow_list(&mut self) {
+        for state in self.lane_scoped.values_mut() {
+            state.flows.list.invalidate();
+        }
     }
 
     fn report_flow_no_agent(&mut self, cx: &mut Context<Self>) {
@@ -259,6 +293,7 @@ impl Workspace {
     /// no such place uses [`Self::report_edit_refusal`].
     pub(in crate::workspace) fn edit_flow(
         &mut self,
+        lane: daruda_store::project::LaneRef,
         path: &Path,
         base: &str,
         update: impl FnOnce(&mut daruda_flow::parse::FlowFile),
@@ -277,12 +312,9 @@ impl Workspace {
             return Err(EditRefusal::NothingToDo);
         }
         let candidate = daruda_flow_edit::apply(base, &edits);
-        // An include is looked up where this file's runs will look: the lane
-        // the graph drawing it was opened for, which the page may have moved
-        // away from browsing — else the browsed one.
-        let lane = self
-            .open_graph_of(path, cx)
-            .map_or_else(|| self.flow_browser_lane(), |(_, lane, _)| lane);
+        // An include is looked up where this file's runs will look: `lane`,
+        // the worktree the edit was made for, which the page may have moved
+        // away from browsing.
         let sources = self.flow_sources_for(lane);
         if let Err(e) = super::flow_include::load_flow(&candidate, None, sources.as_ref()) {
             return Err(EditRefusal::WouldNotLoad {
@@ -298,7 +330,7 @@ impl Workspace {
         // those bytes, so this is for the panes that are not: another lane's
         // graph of the same file, and this one before its watcher event lands.
         self.reload_flow_graphs(Some(path), window, cx);
-        self.invalidate_flow_list();
+        self.invalidate_flow_lists_holding(path);
         Ok(())
     }
 
@@ -390,40 +422,17 @@ impl Workspace {
         })
     }
 
-    /// The browsed worktree's files, read only while Flows is visible. Empty
-    /// until a read off the main thread lands; the old list stays while it is
-    /// read again. Scope changes, file operations, and watcher events
-    /// invalidate the cache.
-    pub(in crate::workspace) fn flow_list_for_panel(
-        &mut self,
-        cx: &Context<Self>,
-    ) -> Vec<super::flow_paths::FoundFlow> {
-        if self.active_page() != Some(super::pages::Page::Flows) {
-            return Vec::new();
-        }
-        self.read_flow_list(self.flow_browser_lane(), cx);
-        self.shown_flow_listing()
-            .map(|listing| listing.files.clone())
-            .unwrap_or_default()
-    }
-
-    /// The listing to draw for the browsed worktree — nothing once that
-    /// worktree is gone, though the cache may still hold its last read.
-    pub(in crate::workspace) fn shown_flow_listing(
-        &self,
-    ) -> Option<&super::flow_browser::listing::FlowListing> {
-        let lane = self.flow_browser_lane();
-        self.lane_for(lane)?;
-        self.flows.list.shown(lane)
-    }
-
     /// List `lane`'s flow files on the background executor and repaint once
     /// they land — the same rule as the run history beside it.
-    fn read_flow_list(&mut self, lane: daruda_store::project::LaneRef, cx: &Context<Self>) {
+    pub(in crate::workspace) fn read_flow_list(
+        &mut self,
+        lane: daruda_store::project::LaneRef,
+        cx: &Context<Self>,
+    ) {
         let Some(sources) = self.flow_sources_for(lane) else {
             return;
         };
-        let Some(ticket) = self.flows.list.begin_read(lane) else {
+        let Some(ticket) = self.lane_scoped_mut(lane).flows.list.begin_read(lane) else {
             return;
         };
         cx.spawn(async move |this, cx| {
@@ -433,7 +442,11 @@ impl Workspace {
                 .await;
             // SILENT-OK: the window may close while the files are listed
             let _ = this.update(cx, |ws, cx| {
-                if ws.flows.list.finish_read(lane, ticket, read) {
+                if ws
+                    .lane_scoped
+                    .get_mut(&lane)
+                    .is_some_and(|state| state.flows.list.finish_read(lane, ticket, read))
+                {
                     cx.notify();
                 }
             });

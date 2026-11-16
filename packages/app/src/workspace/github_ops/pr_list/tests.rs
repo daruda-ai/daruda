@@ -54,7 +54,7 @@ fn shown(filter: PrFilter, host: Option<HostList>) -> PrListState {
     let mut state = PrListState::default();
     state.show(filter, idle);
     if let (PrListState::Shown { hosts, .. }, Some(list)) = (&mut state, host) {
-        hosts.insert(HOST.to_owned(), list);
+        hosts.insert((filter, HOST.to_owned()), list);
     }
     state
 }
@@ -115,11 +115,11 @@ fn updates_change_only_the_shown_filter() {
             false,
         ),
         (
-            "another filter's answer is ignored",
+            "another filter fills counts without changing selected rows",
             shown(PrFilter::AllOpen, None),
             fresh,
             HostList::Loading,
-            false,
+            true,
         ),
         (
             "hidden ignores answers",
@@ -182,11 +182,11 @@ fn updates_change_only_the_shown_filter() {
             false,
         ),
         (
-            "another filter's cached answer is ignored",
+            "another filter fills its count from cache",
             shown(PrFilter::AllOpen, None),
             cached,
             HostList::Loading,
-            false,
+            true,
         ),
         (
             "a failure keeps the last answer on show",
@@ -291,6 +291,11 @@ fn show_and_hide_report_changes() {
         state.host(HOST),
         &HostList::Loading,
         "another filter starts over"
+    );
+    assert!(state.show(PrFilter::Mine, idle));
+    assert!(
+        matches!(state.host(HOST), HostList::Ready(_)),
+        "tab changes retain cached answers"
     );
     assert!(state.hide());
     assert!(!state.hide(), "already hidden");

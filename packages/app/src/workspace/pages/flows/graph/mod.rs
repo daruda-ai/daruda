@@ -97,7 +97,6 @@ enum FlowGraphState {
 /// reference, so nothing needed changing for that.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum FlowGraphEvent {
-    BackToList,
     History,
     Save,
     Revert,

@@ -60,7 +60,7 @@ pub(crate) enum PrListState {
     Hidden,
     Shown {
         filter: PrFilter,
-        hosts: HashMap<String, HostList>,
+        hosts: HashMap<(PrFilter, String), HostList>,
         /// Repaints the page every [`AGE_REPAINT`]; ends with this state.
         _aging: Task<()>,
     },
@@ -76,9 +76,14 @@ impl PrListState {
 
     /// What `host` has under the shown filter; `Loading` while hidden.
     pub(crate) fn host(&self, host: &str) -> &HostList {
+        self.filter()
+            .map_or(&LOADING, |filter| self.host_for(filter, host))
+    }
+
+    pub(crate) fn host_for(&self, filter: PrFilter, host: &str) -> &HostList {
         match self {
             Self::Hidden => &LOADING,
-            Self::Shown { hosts, .. } => hosts.get(host).unwrap_or(&LOADING),
+            Self::Shown { hosts, .. } => hosts.get(&(filter, host.to_owned())).unwrap_or(&LOADING),
         }
     }
 
@@ -88,11 +93,14 @@ impl PrListState {
         self.host(host).answer().map(|answer| answer.at)
     }
 
-    /// Show `filter`; another filter starts over, with a new task from
-    /// `aging`. Returns whether it changed.
+    /// Switch the selected rows while retaining answers for the other tab counts.
     fn show(&mut self, filter: PrFilter, aging: impl FnOnce() -> Task<()>) -> bool {
         if self.filter() == Some(filter) {
             return false;
+        }
+        if let Self::Shown { filter: shown, .. } = self {
+            *shown = filter;
+            return true;
         }
         *self = Self::Shown {
             filter,
@@ -109,26 +117,21 @@ impl PrListState {
     /// Apply what the poller says. Returns whether anything changed; a new
     /// arrival time alone does, since the header says how old the list is.
     fn apply(&mut self, update: PrListUpdate<'_>) -> bool {
-        let Self::Shown {
-            filter: shown,
-            hosts,
-            ..
-        } = self
-        else {
+        let Self::Shown { hosts, .. } = self else {
             return false;
         };
-        let (host, list) = match update {
+        let (host, filter, list) = match update {
             PrListUpdate::Answer {
                 host,
                 filter,
                 answer,
-            } if filter == *shown => (host, HostList::Ready(answer.clone())),
+            } => (host, filter, HostList::Ready(answer.clone())),
             PrListUpdate::Cached {
                 host,
                 filter,
                 answer,
-            } if filter == *shown => {
-                let held = hosts.get(host).unwrap_or(&LOADING);
+            } => {
+                let held = hosts.get(&(filter, host.to_owned())).unwrap_or(&LOADING);
                 if !held.lacks(answer) {
                     return false;
                 }
@@ -140,36 +143,41 @@ impl PrListState {
                     },
                     HostList::Loading | HostList::Ready(_) => HostList::Ready(answer.clone()),
                 };
-                (host, list)
+                (host, filter, list)
             }
-            PrListUpdate::Failed { host, filter } if filter == *shown => {
-                let last = hosts.get(host).and_then(HostList::answer).cloned();
-                (host, HostList::Failed { last })
+            PrListUpdate::Failed { host, filter } => {
+                let last = hosts
+                    .get(&(filter, host.to_owned()))
+                    .and_then(HostList::answer)
+                    .cloned();
+                (host, filter, HostList::Failed { last })
             }
-            PrListUpdate::HostBlocked { host } => return hosts.remove(host).is_some(),
+            PrListUpdate::HostBlocked { host } => {
+                let before = hosts.len();
+                hosts.retain(|(_, held), _| held != host);
+                return hosts.len() != before;
+            }
             PrListUpdate::Disabled => {
                 let had = !hosts.is_empty();
                 hosts.clear();
                 return had;
             }
-            PrListUpdate::Answer { .. }
-            | PrListUpdate::Cached { .. }
-            | PrListUpdate::Failed { .. } => return false,
         };
-        if hosts.get(host) == Some(&list) {
+        if hosts.get(&(filter, host.to_owned())) == Some(&list) {
             return false;
         }
-        hosts.insert(host.to_owned(), list);
+        hosts.insert((filter, host.to_owned()), list);
         true
     }
 }
 
 impl Workspace {
-    /// Every GitHub repository this window's lanes push to.
+    /// GitHub repositories pushed to by lanes in the shared project scope.
     pub(crate) fn github_repos(&self) -> BTreeSet<RepoId> {
         self.lane_scoped
-            .values()
-            .filter_map(|state| state.github_push().map(|(repo, _)| repo))
+            .iter()
+            .filter(|(lane, _)| self.page_scope_matches(lane.project))
+            .filter_map(|(_, state)| state.github_push().map(|(repo, _)| repo))
             .collect()
     }
 
@@ -177,6 +185,17 @@ impl Workspace {
     /// is on screen.
     pub(crate) fn pr_list_demand(&self) -> Option<(PrFilter, BTreeSet<RepoId>)> {
         Some((self.pr_list.filter()?, self.github_repos()))
+    }
+
+    /// Counts and selected rows share the process cache and its refresh cadence.
+    pub(crate) fn pr_list_demands(&self) -> Vec<(PrFilter, BTreeSet<RepoId>)> {
+        let Some((_, repos)) = self.pr_list_demand() else {
+            return Vec::new();
+        };
+        crate::workspace::pages::pull_requests::list::FILTERS
+            .into_iter()
+            .map(|filter| (filter, repos.clone()))
+            .collect()
     }
 
     pub(crate) fn pr_list(&self) -> &PrListState {

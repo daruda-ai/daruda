@@ -72,6 +72,7 @@ impl Workspace {
                 .collect(),
             left_dock_view: self.docks.left_view,
             workspace_page: self.active_page(),
+            page_project: self.page_project(),
             lanes: self.active_lanes().to_vec(),
             projects: {
                 let mut projects: Vec<crate::workspace::layout::snap::ProjectSnapshot> = self
@@ -554,7 +555,10 @@ impl Workspace {
             skill_plugin_expanded: self.right_views.skill_plugin_expanded.clone(),
             sections: self.right_views.sections.clone(),
             tasks: cx.global::<crate::runs::GlobalTasks>().book().clone(),
-            task_browser: self.right_views.tasks.snapshot(cx),
+            task_browser: self
+                .right_views
+                .tasks
+                .snapshot(self.page_scope().into(), cx),
             task_agents: self.mirrors.agents.clone(),
             task_projects: crate::workspace::layout::TaskProjects {
                 active: self.active_project().map(|p| p.uuid),

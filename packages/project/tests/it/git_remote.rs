@@ -50,6 +50,93 @@ fn a_commit_lands_its_message_and_a_push_reaches_the_remote() {
     assert_eq!(git(&origin, &["log", "-1", "--format=%s", "main"]), "mine");
 }
 
+#[test]
+fn a_new_pr_branch_pushes_back_to_the_selected_repository() {
+    if !has_git() {
+        return;
+    }
+    for split_urls in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let (origin, work) = pushed_repo(temp.path());
+        let target = temp.path().join("push repository.git");
+        git(
+            temp.path(),
+            &[
+                "clone",
+                "-q",
+                "--bare",
+                origin.to_str().unwrap(),
+                target.to_str().unwrap(),
+            ],
+        );
+        let fetch_url = if split_urls { &origin } else { &target };
+        git(&work, &["remote", "add", "pr", fetch_url.to_str().unwrap()]);
+        git(
+            &work,
+            &[
+                "remote",
+                "set-url",
+                "--push",
+                "pr",
+                target.to_str().unwrap(),
+            ],
+        );
+        git(&work, &["config", "remote.pushDefault", "origin"]);
+        git(&work, &["checkout", "-qb", "feature"]);
+        std::fs::write(work.join("f.txt"), "pr head\n").unwrap();
+        git(&work, &["commit", "-qam", "pr head"]);
+        git(&work, &["push", "-q", "pr", "feature"]);
+        let expected_head = git(&work, &["rev-parse", "HEAD"]);
+        git(&work, &["checkout", "-q", "main"]);
+        git(&work, &["branch", "-D", "feature"]);
+        let repo = open(&work);
+        assert_eq!(
+            repo.remote_url("pr").unwrap().as_deref(),
+            fetch_url.to_str(),
+            "the fetch URL, not the push URL"
+        );
+        assert_eq!(repo.remote_url("nowhere").unwrap(), None);
+        repo.set_push_remote("main", "pr").unwrap();
+        let push = repo.push_target().unwrap().unwrap();
+        assert_eq!(push.url, target.to_str().unwrap());
+        assert_eq!(
+            git(&work, &["config", "branch.main.remote"]),
+            "origin",
+            "the existing upstream stays"
+        );
+
+        repo.fetch_ref(&push.url, "+refs/heads/feature:refs/remotes/pr/feature")
+            .unwrap();
+        repo.move_branch("feature", "refs/remotes/pr/feature")
+            .unwrap();
+        repo.set_push_remote("feature", "pr").unwrap();
+        let lane = temp.path().join("pr worktree");
+        repo.add_lane(&lane, LaneStart::existing_branch("feature"))
+            .unwrap();
+        assert_eq!(
+            git(&lane, &["rev-parse", "HEAD"]),
+            expected_head,
+            "split URLs: {split_urls}"
+        );
+        std::fs::write(lane.join("f.txt"), "pr fix\n").unwrap();
+        git(&lane, &["commit", "-qam", "pr fix"]);
+        open(&lane).push().unwrap();
+        assert_eq!(
+            git(&target, &["log", "-1", "--format=%s", "feature"]),
+            "pr fix"
+        );
+        assert!(
+            !git_output(&origin, &["rev-parse", "--verify", "refs/heads/feature"])
+                .status
+                .success()
+        );
+        assert_eq!(
+            open(&lane).tracking().unwrap().upstream.as_deref(),
+            Some("pr/feature")
+        );
+    }
+}
+
 /// A fetch moves one remote-tracking ref under the shared common dir — the
 /// directory the app's watcher fans out from — and every lane tracking that
 /// ref then reads itself behind.

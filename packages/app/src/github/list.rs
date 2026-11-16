@@ -62,15 +62,14 @@ impl PrList {
     fn wanted_now(cx: &mut App) -> ListWanted {
         let mut wanted: ListWanted = HashMap::new();
         WindowRegistry::for_each_workspace(cx, |ws, _, _| {
-            let Some((filter, repos)) = ws.pr_list_demand() else {
-                return;
-            };
-            for repo in repos {
-                let key = ListKey {
-                    host: repo.host().to_owned(),
-                    filter,
-                };
-                wanted.entry(key).or_default().insert(repo);
+            for (filter, repos) in ws.pr_list_demands() {
+                for repo in repos {
+                    let key = ListKey {
+                        host: repo.host().to_owned(),
+                        filter,
+                    };
+                    wanted.entry(key).or_default().insert(repo);
+                }
             }
         });
         wanted

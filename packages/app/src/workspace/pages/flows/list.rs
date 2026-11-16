@@ -24,11 +24,17 @@ pub(super) struct DefinitionList<'a> {
 }
 
 impl<'a> DefinitionList<'a> {
-    pub fn project(files: &'a [FoundFlow], origin: Option<FlowOrigin>, query: &str) -> Self {
+    pub fn project(
+        files: impl IntoIterator<Item = &'a FoundFlow>,
+        origin: Option<FlowOrigin>,
+        query: &str,
+    ) -> Self {
         let query = query.trim().to_lowercase();
         let mut counts = [0; 4];
+        let mut total = 0;
         let visible = files
-            .iter()
+            .into_iter()
+            .inspect(|_| total += 1)
             .filter(|file| {
                 file.name.to_lowercase().contains(&query)
                     || file.path.to_string_lossy().to_lowercase().contains(&query)
@@ -45,8 +51,29 @@ impl<'a> DefinitionList<'a> {
         Self {
             visible,
             counts,
-            total: files.len(),
+            total,
         }
+    }
+}
+
+impl<'a> DefinitionList<'a> {
+    /// Several worktrees' files as one list, each path once. A project or
+    /// global flow is listed under every worktree it runs in, yet it is one
+    /// file, so the page's own counts take it once.
+    pub fn distinct(
+        lists: impl IntoIterator<Item = &'a [FoundFlow]>,
+        origin: Option<FlowOrigin>,
+        query: &str,
+    ) -> Self {
+        let mut seen = std::collections::HashSet::new();
+        Self::project(
+            lists
+                .into_iter()
+                .flatten()
+                .filter(|file| seen.insert(file.path.as_path())),
+            origin,
+            query,
+        )
     }
 }
 
@@ -227,6 +254,22 @@ mod tests {
             named.visible[0].path,
             std::path::PathBuf::from("repo/Ship.yaml")
         );
+    }
+
+    #[test]
+    fn a_flow_shared_by_worktrees_is_counted_once() {
+        let found = |path: &str, origin| FoundFlow {
+            path: path.into(),
+            name: path.into(),
+            origin,
+        };
+        let global = found("own/ship.yaml", FlowOrigin::Global);
+        let a = vec![found("a/repo.yaml", FlowOrigin::Repo), global.clone()];
+        let b = vec![found("b/repo.yaml", FlowOrigin::Repo), global];
+        let list = DefinitionList::distinct([a.as_slice(), b.as_slice()], None, "");
+        assert_eq!(list.total, 3, "two repository flows and one global");
+        assert_eq!(list.visible.len(), 3);
+        assert_eq!(list.counts, [3, 2, 0, 1]);
     }
 
     #[test]

@@ -102,12 +102,16 @@ fn group(f: &GitFixture, name: &str, cx: &mut TestAppContext) -> Option<Vec<u64>
     }
 }
 
-/// The repositories each search asked about, in order.
+/// Mine coverage, independent of the two tab-count searches.
 fn searched(gh: &FakeGh) -> Vec<Vec<RepoId>> {
     gh.calls()
         .into_iter()
         .filter_map(|call| match call {
-            GhCall::SearchPrs { repos, .. } => Some(repos),
+            GhCall::SearchPrs {
+                repos,
+                filter: PrFilter::Mine,
+                ..
+            } => Some(repos),
             _ => None,
         })
         .collect()

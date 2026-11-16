@@ -19,6 +19,7 @@ pub struct FakeRepo {
     local_branches: Vec<String>,
     ahead_branches: Vec<String>,
     review_marks: HashMap<String, String>,
+    remote_urls: HashMap<String, String>,
     default_branch: Option<String>,
     pub(super) tracking: Option<GitTracking>,
     pub(super) status: Option<GitWorktreeStatus>,
@@ -47,6 +48,7 @@ impl FakeRepo {
             local_branches: Vec::new(),
             ahead_branches: Vec::new(),
             review_marks: HashMap::new(),
+            remote_urls: HashMap::new(),
             default_branch: None,
             tracking: None,
             status: None,
@@ -113,6 +115,11 @@ impl FakeRepo {
     /// The pull request `branch` was recorded to review.
     pub fn review_mark(mut self, branch: impl Into<String>, mark: impl Into<String>) -> Self {
         self.review_marks.insert(branch.into(), mark.into());
+        self
+    }
+    /// The fetch URL `remote_url(remote)` answers; unlisted remotes are unknown.
+    pub fn remote_url(mut self, remote: impl Into<String>, url: impl Into<String>) -> Self {
+        self.remote_urls.insert(remote.into(), url.into());
         self
     }
     pub fn default_branch(mut self, branch: impl Into<String>) -> Self {
@@ -263,6 +270,9 @@ impl FakeRepo {
     }
     pub(super) fn review_mark_answer(&self, branch: &str) -> Option<String> {
         self.review_marks.get(branch).cloned()
+    }
+    pub(super) fn remote_url_answer(&self, remote: &str) -> Option<String> {
+        self.remote_urls.get(remote).cloned()
     }
     pub(super) fn push_target_answer(&self) -> Option<PushTarget> {
         self.push_target.clone()

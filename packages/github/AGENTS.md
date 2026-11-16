@@ -55,7 +55,9 @@ through `GitHost`.
   repository per round, however many windows show its lanes. Its timing,
   backoff and auth-recheck rules are GPUI-free in `app/src/github/schedule.rs`.
 - The pull request list (`app/src/github/list.rs`) runs from the same tick:
-  one search per (host, filter) per round, only while a window's page shows
-  that filter, and only to hosts the poller's host state lets through. Its
-  host-wide failures feed that same host state; its timing is GPUI-free in
+  one search per (host, filter) per round while a window's page is shown.
+  All three filters supply tab counts through that same cache and cadence;
+  selecting a tab reuses its answer. Only hosts the poller's state lets
+  through are asked. Host-wide failures feed that same host state;
+  timing is GPUI-free in
   `app/src/github/list_schedule.rs`.

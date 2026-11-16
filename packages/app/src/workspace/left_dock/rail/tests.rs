@@ -66,8 +66,9 @@ async fn project_and_group_folding_preserve_the_active_pane_and_input(
     let project_selector = Box::leak(format!("rail-project-{}", active.project).into_boxed_str());
     let empty_selector = Box::leak(format!("rail-lane-{}-77", active.project).into_boxed_str());
     assert!(bounds(vcx, empty_selector).is_some());
+    let fold_selector = Box::leak(format!("rail-project-fold-{}", active.project).into_boxed_str());
     for _ in 0..2 {
-        let project = bounds(vcx, project_selector).unwrap();
+        let project = bounds(vcx, fold_selector).unwrap();
         vcx.simulate_click(project.center(), Default::default());
         vcx.run_until_parked();
         vcx.update(|window, cx| {

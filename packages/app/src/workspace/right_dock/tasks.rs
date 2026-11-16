@@ -10,6 +10,7 @@ mod rows;
 #[cfg(feature = "screenshot")]
 mod screenshot;
 mod state;
+mod worktrees;
 
 pub(in crate::workspace) use browser::{TaskBrowser, TaskBrowserSnapshot};
 pub(in crate::workspace) use controls::header;
@@ -32,7 +33,7 @@ use crate::ui::Badge;
 pub(in crate::workspace) fn render(snap: &RightDockSnapshot, cx: &gpui::App) -> AnyElement {
     let list = list::TaskList::project(
         &snap.tasks,
-        snap.task_browser.state.scope,
+        snap.task_browser.scope,
         snap.task_projects.active,
         snap.task_browser.state.filter,
         &snap.task_browser.query,

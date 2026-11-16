@@ -108,7 +108,8 @@ impl Workspace {
             Some((_, _, view)) => view.update(cx, |view, cx| view.report_file_gone(cx)),
             None => {}
         }
-        self.invalidate_flow_list();
+        self.invalidate_flow_lists_holding(from);
+        self.invalidate_flow_lists_holding(&plan.to);
         // The repository's flows directory may have just been created, and
         // the watcher can only anchor on one that exists.
         self.respawn_flow_watcher(cx);

@@ -31,6 +31,7 @@ async fn an_edit_passes_both_gates_or_the_file_is_untouched(cx: &mut TestAppCont
     let base_for_bad = base.clone();
     let refused = ws.update_in(&mut vcx, |ws, window, cx| {
         ws.edit_flow(
+            ws.active,
             &flow_path,
             &base_for_bad,
             |file| file.nodes[0].deps = vec!["nobody".into()],
@@ -54,6 +55,7 @@ async fn an_edit_passes_both_gates_or_the_file_is_untouched(cx: &mut TestAppCont
     let base_for_stale = base.clone();
     let refused = ws.update_in(&mut vcx, |ws, window, cx| {
         ws.edit_flow(
+            ws.active,
             &flow_path,
             &base_for_stale,
             |file| file.nodes[0].timeout = Some(std::time::Duration::from_secs(5)),
@@ -76,6 +78,7 @@ async fn an_edit_passes_both_gates_or_the_file_is_untouched(cx: &mut TestAppCont
     // keeping the line somebody else added.
     let wrote = ws.update_in(&mut vcx, |ws, window, cx| {
         ws.edit_flow(
+            ws.active,
             &flow_path,
             &outside,
             |file| file.nodes[0].timeout = Some(std::time::Duration::from_secs(5)),
@@ -424,6 +427,7 @@ async fn a_rename_that_forgets_a_mention_is_refused(cx: &mut TestAppContext) {
 
     let refused = ws.update_in(&mut vcx, |ws, window, cx| {
         ws.edit_flow(
+            ws.active,
             &flow_path,
             &before,
             // Only the id, deliberately leaving `deps: [design]` behind.

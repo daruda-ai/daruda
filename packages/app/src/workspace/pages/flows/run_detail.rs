@@ -11,9 +11,9 @@ use crate::workspace::Workspace;
 use crate::workspace::pages::Page;
 
 impl Workspace {
-    /// Show `lane`'s past run `dir` as the Flows page's detail. The same run
-    /// already open is shown as it is; anything else replaces the detail,
-    /// asking first if that holds edits.
+    /// Show `lane`'s past run `dir` as the Flows page's detail. Navigation
+    /// within visible history retains its definition; other entry points
+    /// replace the detail after guarding unsaved edits.
     pub(in crate::workspace) fn open_run_detail(
         &mut self,
         lane: LaneRef,
@@ -26,6 +26,7 @@ impl Workspace {
                 && matches!(&detail.body, FlowDetailBody::Run(run) if run.dir == dir)
         });
         if open {
+            self.reveal_page_project(lane.project, cx);
             self.show_page(Page::Flows, cx);
             return;
         }
@@ -42,21 +43,42 @@ impl Workspace {
                 _ => None,
             })
             .unwrap_or_default();
-        let dir = dir.to_path_buf();
-        self.leave_page_detail_then(Page::Flows, window, cx, move |ws, _, cx| {
-            ws.mutate_durable(cx, |ws, cx| {
-                ws.install_run_detail(lane, dir, cx);
-                if let Some(FlowDetail {
-                    body: FlowDetailBody::Run(run),
-                    ..
-                }) = ws.pages.flows.detail.as_mut()
-                {
-                    run.execution.source_only = source_only;
-                    run.execution.filter = filter;
-                }
+        let parent = self
+            .pages
+            .flows
+            .detail
+            .as_ref()
+            .filter(|detail| {
+                detail.lane == lane
+                    && self.active_page() == Some(Page::Flows)
+                    && self.shown_page_detail_id() == Some(detail.id.into())
+            })
+            .and_then(|detail| match &detail.body {
+                FlowDetailBody::Run(run) => run.return_to.clone(),
+                FlowDetailBody::Graph(_) => None,
             });
+        let retaining_definition = parent.is_some();
+        let dir = dir.to_path_buf();
+        let open = move |ws: &mut Self, _: &mut Window, cx: &mut Context<Self>| {
+            ws.reveal_page_project(lane.project, cx);
+            ws.show_flow_execution(lane, dir, parent, cx);
+            if let Some(FlowDetail {
+                body: FlowDetailBody::Run(run),
+                ..
+            }) = &mut ws.pages.flows.detail
+            {
+                run.execution.source_only = source_only;
+                run.execution.filter = filter;
+            }
             ws.show_page(Page::Flows, cx);
-        });
+        };
+        if retaining_definition {
+            // Selecting another run stays inside the retained definition;
+            // its unsaved form is still protected when the definition is left.
+            open(self, window, cx);
+        } else {
+            self.leave_page_detail_then(Page::Flows, window, cx, open);
+        }
     }
 
     /// Make run `dir` the page's detail and read its report. Shared by opening
@@ -75,6 +97,7 @@ impl Workspace {
             id,
             lane,
             body: FlowDetailBody::Run(RunDetail {
+                return_to: None,
                 dir,
                 started,
                 report: Default::default(),
@@ -145,7 +168,22 @@ impl Workspace {
             cx.notify();
             return;
         }
-        self.back_to_flow_list(window, cx);
+        let parent = match &self.pages.flows.detail {
+            Some(FlowDetail {
+                body: FlowDetailBody::Run(run),
+                ..
+            }) => run.return_to.clone(),
+            _ => None,
+        };
+        // The retained graph comes back as it was, so nothing is reopened that
+        // could fail after the browser state was restored. Its worktree may
+        // have been removed meanwhile; the list is then the only way back.
+        match parent {
+            Some(parent) if self.lane_for(parent.lane).is_some() => {
+                self.restore_flow_definition(parent, window, cx);
+            }
+            _ => self.back_to_flow_list(window, cx),
+        }
     }
 
     /// Open run detail `id`'s report as a file, in the worktree holding it —

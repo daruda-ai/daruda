@@ -75,6 +75,7 @@ fn calls(f: &GitFixture) -> Vec<GitCall> {
                 call,
                 GitCall::FetchRef { .. }
                     | GitCall::MoveBranch { .. }
+                    | GitCall::SetPushRemote { .. }
                     | GitCall::SetReviewMark { .. }
                     | GitCall::AddLane { .. }
             )
@@ -154,18 +155,24 @@ fn a_pull_request_opens_on_a_branch_brought_to_its_fetched_head(cx: &mut TestApp
         click(&f, &pr, cx);
         cx.run_until_parked();
 
-        let mut expected = vec![
-            GitCall::FetchRef {
-                repo: f.root.clone(),
-                remote: "upstream".into(),
-                refspec: refspec.into(),
-            },
-            GitCall::MoveBranch {
+        let mut expected = vec![GitCall::FetchRef {
+            repo: f.root.clone(),
+            remote: "git@github.com:o/r.git".into(),
+            refspec: refspec.into(),
+        }];
+        expected.push(GitCall::MoveBranch {
+            repo: f.root.clone(),
+            branch: branch.into(),
+            head: start.into(),
+        });
+        // Set once the branch exists, so deleting the branch removes it.
+        if !pr.pr.cross_repo {
+            expected.push(GitCall::SetPushRemote {
                 repo: f.root.clone(),
                 branch: branch.into(),
-                head: start.into(),
-            },
-        ];
+                remote: "upstream".into(),
+            });
+        }
         expected.extend(review.map(|mark| GitCall::SetReviewMark {
             repo: f.root.clone(),
             branch: branch.into(),
@@ -449,10 +456,48 @@ fn the_details_button_makes_the_worktree_its_row_would(cx: &mut TestAppContext) 
         calls(&f),
         vec![GitCall::FetchRef {
             repo: f.root.clone(),
-            remote: "upstream".into(),
+            remote: "git@github.com:o/r.git".into(),
             refspec: "+refs/heads/fix/scroll:refs/remotes/upstream/fix/scroll".into(),
         }]
     );
     assert_eq!(detail_slot(&f, cx), LaneSlot::Absent { review: false });
     assert_eq!(error_titles(&f, cx), vec![error::lane_create_failed()]);
+}
+
+#[gpui::test]
+fn aggregate_worktree_creation_asks_which_copy_of_a_repo_to_use(cx: &mut TestAppContext) {
+    let (f, _gh) = window(cx, |r| r);
+    f.ws.update(cx, |ws, cx| {
+        let push = ws
+            .lane_scoped
+            .get(&ws.active)
+            .unwrap()
+            .git
+            .push_target
+            .clone();
+        let project = ws.next_project_id;
+        ws.next_project_id += 1;
+        let other = crate::project::Project::bootstrap_placeholder(
+            project,
+            std::env::temp_dir().join("daruda-pr-second-copy"),
+        );
+        let lane = LaneRef {
+            project,
+            lane: other.lanes[0].id,
+        };
+        ws.projects.push(other);
+        ws.lane_scoped_mut(lane).git.push_target = push;
+        ws.set_task_scope(daruda_store::tasks::TaskScope::AllProjects, cx);
+    });
+    let active = f.ws.read_with(cx, |ws, _| ws.active);
+    click(&f, &item(9, "feature", false), cx);
+    assert!(
+        cx.has_pending_prompt(),
+        "a physical project must be chosen before git runs"
+    );
+    assert!(calls(&f).is_empty());
+    cx.simulate_prompt_answer(&crate::surface::strings::common::btn_cancel());
+    cx.run_until_parked();
+    assert!(calls(&f).is_empty());
+    assert_eq!(f.ws.read_with(cx, |ws, _| ws.active), active);
 }

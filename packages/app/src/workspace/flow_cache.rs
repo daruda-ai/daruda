@@ -229,8 +229,8 @@ mod tests {
         );
     }
 
-    /// Reading for a second lane replaces the first — one lane's worth is all
-    /// the panel ever shows.
+    /// A cache slot cannot expose another lane's value. The page keeps a
+    /// separate slot in each LaneScoped, including during aggregate browsing.
     #[test]
     fn a_second_lane_takes_the_place_of_the_first() {
         let mut cache: LaneCache<u32> = LaneCache::default();

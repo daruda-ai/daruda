@@ -69,9 +69,11 @@ pub trait GitRepo: Send + Sync {
     /// [`push_target`](Self::push_target) named.
     fn push_head(&self, remote: &str, branch: &str, set_upstream: bool) -> Result<(), GitError>;
     fn fetch(&self) -> Result<(), GitError>;
-    /// `git fetch <remote> <refspec>`: one ref from one remote, where
+    /// `git fetch <remote> <refspec>`: one ref from a remote name or URL, where
     /// [`fetch`](Self::fetch) brings every branch of every remote.
     fn fetch_ref(&self, remote: &str, refspec: &str) -> Result<(), GitError>;
+    /// The fetch URL of the named remote, `None` when there is no such remote.
+    fn remote_url(&self, remote: &str) -> Result<Option<String>, GitError>;
     fn pull(&self) -> Result<(), GitError>;
     /// Whether `refs/heads/<branch>` exists in the repository.
     fn has_local_branch(&self, branch: &str) -> Result<bool, GitError>;
@@ -80,6 +82,8 @@ pub trait GitRepo: Send + Sync {
     /// Create `branch` at `head` or move it there, never touching its
     /// upstream. Refused for a branch checked out in any worktree.
     fn move_branch(&self, branch: &str, head: &str) -> Result<(), GitError>;
+    /// Choose a named push remote for `branch`, preserving its upstream.
+    fn set_push_remote(&self, branch: &str, remote: &str) -> Result<(), GitError>;
     /// The pull request `branch` was checked out to review, as
     /// [`set_review_mark`](Self::set_review_mark) recorded it.
     fn review_mark(&self, branch: &str) -> Result<Option<String>, GitError>;
@@ -218,6 +222,9 @@ impl GitRepo for SystemRepo {
     fn fetch_ref(&self, remote: &str, refspec: &str) -> Result<(), GitError> {
         remote::fetch_ref(&self.path, remote, refspec)
     }
+    fn remote_url(&self, remote: &str) -> Result<Option<String>, GitError> {
+        remote::remote_url(&self.path, remote)
+    }
     fn pull(&self) -> Result<(), GitError> {
         status::git_pull(&self.path)
     }
@@ -229,6 +236,9 @@ impl GitRepo for SystemRepo {
     }
     fn move_branch(&self, branch: &str, head: &str) -> Result<(), GitError> {
         remote::move_branch(&self.path, branch, head)
+    }
+    fn set_push_remote(&self, branch: &str, remote: &str) -> Result<(), GitError> {
+        remote::set_push_remote(&self.path, branch, remote)
     }
     fn review_mark(&self, branch: &str) -> Result<Option<String>, GitError> {
         remote::review_mark(&self.path, branch)

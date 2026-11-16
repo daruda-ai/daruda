@@ -5,13 +5,14 @@
 //! marked with the pull request it copies: the Git panel and this page find
 //! the pull request by the mark, and neither offers to open another for it.
 
+use daruda_github::remote_parse::parse_remote;
 use daruda_github::{PrCheckout, PrListItem, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::project::ProjectId;
 use gpui::{Context, Window};
 
 use super::list::{self, PrKey};
-use crate::lane::git::{GitError, GitRepo, LaneStart, LocalBranch};
+use crate::lane::git::{GitError, GitRepo, LaneStart, LocalBranch, PushTarget};
 use crate::surface::strings::{error, pull_requests as s};
 use crate::workspace::Workspace;
 use crate::workspace::lane_ops::{
@@ -58,6 +59,7 @@ impl From<GitError> for CheckoutError {
 fn check_out(
     repo: &dyn GitRepo,
     checkout: &PrCheckout,
+    push_url: &str,
     new_path: &std::path::Path,
 ) -> Result<CheckedOut, CheckoutError> {
     let (branch, head) = (checkout.branch.as_str(), checkout.start.as_str());
@@ -71,13 +73,21 @@ fn check_out(
     {
         return Err(CheckoutError::Foreign(branch.to_owned()));
     }
-    repo.fetch_ref(&checkout.remote, &checkout.refspec)?;
+    repo.fetch_ref(
+        fetch_source(repo, &checkout.remote, push_url)?,
+        &checkout.refspec,
+    )?;
     let at_head = match before {
         LocalBranch::Missing | LocalBranch::Contained => true,
         LocalBranch::Ahead => repo.local_branch(branch, head)? == LocalBranch::Contained,
     };
     if at_head {
         repo.move_branch(branch, head)?;
+    }
+    // Only once the branch exists: its config section goes with it when the
+    // branch is deleted, so a failed checkout leaves no orphaned key.
+    if before == LocalBranch::Missing && checkout.review.is_none() {
+        repo.set_push_remote(branch, &checkout.remote)?;
     }
     if let Some(mark) = &checkout.review
         && before == LocalBranch::Missing
@@ -89,6 +99,26 @@ fn check_out(
         CheckedOut::AtHead
     } else {
         CheckedOut::KeptLocal
+    })
+}
+
+/// Where to fetch the pull request's ref from. The page lists the push
+/// repository, so the named remote is used only when its fetch URL names that
+/// same repository — then the remote's own transport, proxy and credentials
+/// apply. A remote that fetches elsewhere falls back to the push URL.
+fn fetch_source<'a>(
+    repo: &dyn GitRepo,
+    remote: &'a str,
+    push_url: &'a str,
+) -> Result<&'a str, GitError> {
+    let fetches_pushed_repo = repo
+        .remote_url(remote)?
+        .and_then(|url| parse_remote(&url))
+        .is_some_and(|fetched| parse_remote(push_url) == Some(fetched));
+    Ok(if fetches_pushed_repo {
+        remote
+    } else {
+        push_url
     })
 }
 
@@ -122,14 +152,18 @@ impl Workspace {
             self.activate_lane(lane.lane, window, cx);
             return;
         }
-        let Some((project, remote)) = self.pr_lane_home(&item.repo) else {
+        if self.choose_pr_lane_project(&item, window, cx) {
+            return;
+        }
+        let Some((project, push)) = self.pr_lane_home(&item.repo) else {
             self.report_pr_lane_failure(
                 format!("no worktree pushes to {}", item.repo.qualified()),
                 cx,
             );
             return;
         };
-        let checkout = PrCheckout::of(&item, &remote);
+        let remote = &push.remote;
+        let checkout = PrCheckout::of(&item, remote);
         // `git worktree add` refuses a branch checked out in another
         // worktree. A lane on the PR's own branch is the one to go to, linked
         // or not yet; one on the review branch's name that was not found as
@@ -177,7 +211,7 @@ impl Workspace {
         // it; the pipeline logs a checkout left behind.
         self.spawn_worktree_create(
             create,
-            move |repo, new_path| check_out(repo, &checkout, new_path),
+            move |repo, new_path| check_out(repo, &checkout, &push.url, new_path),
             move |ws, made, window, cx| ws.finish_pr_lane(key, project, plan, made, window, cx),
             window,
             cx,
@@ -218,16 +252,85 @@ impl Workspace {
         }
     }
 
-    /// The project to make `repo`'s pull request worktrees in, and the remote
-    /// its lanes reach `repo` through: the active project's when it pushes
-    /// there, else the first that does.
-    fn pr_lane_home(&self, repo: &RepoId) -> Option<(ProjectId, String)> {
-        let mut homes = self.projects.lanes().filter_map(|(lane, _, _)| {
-            let (pushed, push) = self.lane_scoped.get(&lane)?.github_push()?;
-            (pushed == *repo).then(|| (lane.project, push.remote.clone()))
-        });
+    /// A repo opened as several projects needs an explicit physical checkout
+    /// target before the aggregate page can create a worktree.
+    fn choose_pr_lane_project(
+        &mut self,
+        item: &PrListItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.page_scope() != super::super::scope::ProjectScope::All {
+            return false;
+        }
+        let projects: Vec<_> = self
+            .projects
+            .iter()
+            .filter(|project| {
+                self.projects.lanes().any(|(lane, _, _)| {
+                    lane.project == project.id
+                        && self
+                            .lane_scoped
+                            .get(&lane)
+                            .and_then(|state| state.github_push())
+                            .is_some_and(|(repo, _)| repo == item.repo)
+                })
+            })
+            // Two checkouts of one repository usually share a name, so each
+            // choice also names the directory the worktree would branch from.
+            .map(|project| {
+                (
+                    project.uuid,
+                    s::project_choice(&project.name, project.root.display()),
+                )
+            })
+            .collect();
+        if projects.len() < 2 {
+            return false;
+        }
+        let mut labels: Vec<_> = projects.iter().map(|(_, label)| label.clone()).collect();
+        labels.push(crate::surface::strings::common::btn_cancel());
+        let buttons: Vec<_> = labels.iter().map(String::as_str).collect();
+        let answer = window.prompt(
+            gpui::PromptLevel::Info,
+            &crate::surface::strings::pull_requests::choose_worktree_project(),
+            None,
+            &buttons,
+            cx,
+        );
+        let item = item.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(answer) = answer.await else {
+                return;
+            };
+            let Some((project, _)) = projects.get(answer) else {
+                return;
+            };
+            let project = *project;
+            // SILENT-OK: the window can close while choosing the project.
+            let _ = this.update_in(cx, |ws, window, cx| {
+                if ws.project_by_uuid(project).is_some() {
+                    ws.set_page_scope(super::super::scope::ProjectScope::Project(project), cx);
+                    ws.create_lane_from_pr(item, window, cx);
+                }
+            });
+        })
+        .detach();
+        true
+    }
+
+    fn pr_lane_home(&self, repo: &RepoId) -> Option<(ProjectId, PushTarget)> {
+        let selected = self.page_project();
+        let mut homes = self
+            .projects
+            .lanes()
+            .filter(|(lane, _, _)| selected.is_none_or(|project| lane.project == project))
+            .filter_map(|(lane, _, _)| {
+                let (pushed, push) = self.lane_scoped.get(&lane)?.github_push()?;
+                (pushed == *repo).then(|| (lane.project, push.clone()))
+            });
         let first = homes.next()?;
-        let active = self.active.project;
+        let active = self.page_project().unwrap_or(self.active.project);
         if first.0 == active {
             return Some(first);
         }
@@ -299,6 +402,7 @@ mod tests {
     }
 
     const ROOT: &str = "/fake/repo";
+    const PUSH_URL: &str = "git@github.com:o/r.git";
 
     /// What `check_out` asked git to change, the reads left out.
     fn run(repo: FakeRepo, cross_repo: bool) -> (Result<CheckedOut, CheckoutError>, Vec<GitCall>) {
@@ -307,6 +411,7 @@ mod tests {
         let made = check_out(
             &*git.open(Path::new(ROOT)),
             &checkout,
+            PUSH_URL,
             Path::new("/fake/lane"),
         );
         (made, git.calls())
@@ -320,7 +425,7 @@ mod tests {
         };
         GitCall::FetchRef {
             repo: ROOT.into(),
-            remote: "up".into(),
+            remote: PUSH_URL.into(),
             refspec: refspec.into(),
         }
     }
@@ -388,6 +493,11 @@ mod tests {
                 vec![
                     fetch(false),
                     moved("fix/scroll", SAME_HEAD),
+                    GitCall::SetPushRemote {
+                        repo: ROOT.into(),
+                        branch: "fix/scroll".into(),
+                        remote: "up".into(),
+                    },
                     added("fix/scroll"),
                 ],
             ),
@@ -414,6 +524,32 @@ mod tests {
             let (made, logged) = run(repo, cross_repo);
             assert_eq!(made.ok(), Some(outcome), "{label}");
             assert_eq!(logged, calls, "{label}");
+        }
+    }
+
+    #[test]
+    fn the_named_remote_is_fetched_only_when_it_fetches_the_pushed_repository() {
+        // (label, repository, where the ref is fetched from)
+        let cases = [
+            (
+                "same repository over another transport: the remote",
+                FakeRepo::at(ROOT).remote_url("up", "https://github.com/o/r.git"),
+                "up",
+            ),
+            (
+                "fetches another repository: the push URL",
+                FakeRepo::at(ROOT).remote_url("up", "https://github.com/elsewhere/r.git"),
+                PUSH_URL,
+            ),
+            ("unknown remote: the push URL", FakeRepo::at(ROOT), PUSH_URL),
+        ];
+        for (label, repo, source) in cases {
+            let (made, calls) = run(repo, true);
+            assert!(made.is_ok(), "{label}: {made:?}");
+            assert!(
+                matches!(calls.first(), Some(GitCall::FetchRef { remote, .. }) if remote == source),
+                "{label}: {calls:?}"
+            );
         }
     }
 

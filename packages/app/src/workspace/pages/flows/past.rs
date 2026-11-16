@@ -48,6 +48,7 @@ pub(super) fn status_color(status: daruda_flow::marker::RunStatus) -> gpui::Hsla
 pub(super) fn resume_button(
     run: &crate::workspace::flow_history::FlowRunEntry,
     snap: &FlowPageSnapshot,
+    lane: daruda_store::project::LaneRef,
 ) -> Option<impl IntoElement + use<>> {
     if !daruda_flow::resume::is_resumable(run.status) {
         return None;
@@ -57,7 +58,6 @@ pub(super) fn resume_button(
     // Taken from the same snapshot as `run_dir`, so the directory and the
     // lane it lives in are one lane's worth even if the active lane moves
     // on before the click.
-    let lane = snap.flow_lane;
     Some(
         div().flex_none().child(
             crate::ui::button(

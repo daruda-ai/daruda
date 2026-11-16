@@ -37,7 +37,8 @@ impl Workspace {
         let dir =
             crate::workspace::flow_paths::runs_dir(&self.active_lane_root().unwrap_or_default());
         let shot = crate::workspace::flow_history::FlowHistory::for_shot(dir);
-        self.flows.history.put(self.active, shot);
+        let lane = self.active;
+        self.lane_scoped_mut(lane).flows.history.put(lane, shot);
         cx.notify();
     }
 

@@ -200,8 +200,7 @@ pub(in crate::workspace::left_dock::projects) struct ProjectHeaderArgs {
 /// per-project "create lane" affordance, so the row carries every
 /// project-scoped action.
 ///
-/// The project initial toggles its fold state; the rest of the row stays bound to
-/// `activate_lane(last_active)` so a header click still snaps the focus.
+/// The name and initial select the project; its separate chevron folds lanes.
 pub(in crate::workspace::left_dock::projects) fn project_header_row(
     args: ProjectHeaderArgs,
     snap: &LeftDockSnapshot,
@@ -247,6 +246,7 @@ pub(in crate::workspace::left_dock::projects) fn project_header_row(
     let row_group = SharedString::from(format!("project-row-{project_id}"));
     super::tree::row(snap.metrics)
         .id(("project-header", project_id as usize))
+        .debug_selector(move || format!("project-header-{project_id}"))
         .group(row_group.clone())
         .flex()
         .flex_row()
@@ -257,17 +257,9 @@ pub(in crate::workspace::left_dock::projects) fn project_header_row(
         .text_color(label_color)
         .cursor_pointer()
         .hover(move |d| d.bg(row_hover_bg))
-        // Header click snaps the workspace focus to this project's
-        // last-active lane. No-op when the click lands on
-        // the already-active project — the snap target would equal
-        // the current focus and `activate_lane` short-circuits.
         .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
             if let Some(ws) = ws_for_click.upgrade() {
-                let target = daruda_store::project::LaneRef {
-                    project: project_id,
-                    lane: last_active_lane_id,
-                };
-                ws.update(cx, |ws, cx| ws.activate_lane(target, window, cx));
+                ws.update(cx, |ws, cx| ws.select_project(project_id, window, cx));
             }
         }))
         .on_drag(drag_payload, |dragged, _offset, _window, cx| {
@@ -311,12 +303,29 @@ pub(in crate::workspace::left_dock::projects) fn project_header_row(
                 }
             }),
         )
-        // One glyph shows the fold state and toggles it, so no chevron
-        // column sits in front of the name. It stays a quiet outline
-        // whatever weight the name carries.
         .child({
             let ws_for_toggle = snap.workspace.clone();
-            crate::ui::button_bare_compact(("project-fold", project_id as usize))
+            crate::ui::button_icon_sized(
+                ("project-fold", project_id as usize),
+                if is_collapsed {
+                    crate::ui::icons::CHEVRON_RIGHT
+                } else {
+                    crate::ui::icons::EXPAND_MORE
+                },
+                snap.metrics,
+                cx,
+            )
+            .debug_selector(move || format!("project-fold-{project_id}"))
+            .tooltip(name.clone())
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                if let Some(ws) = ws_for_toggle.upgrade() {
+                    ws.update(cx, |ws, cx| ws.toggle_project_collapse(project_id, cx));
+                }
+            }))
+        })
+        .child(
+            crate::ui::button_bare_compact(("project-badge", project_id as usize))
                 .label(crate::workspace::left_dock::rail::project_badge_label(
                     &name,
                     display_alias.as_deref(),
@@ -324,15 +333,9 @@ pub(in crate::workspace::left_dock::projects) fn project_header_row(
                 .text_size(px(snap.metrics.text(theme::FONT_SIZE_MD)))
                 .w(px(row_metrics.leading_width))
                 .h(px(row_metrics.leading_width))
-                .when(is_collapsed, |button| button.bg(t.overlay_prominent))
-                .tooltip(name.clone())
-                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                    cx.stop_propagation();
-                    if let Some(ws) = ws_for_toggle.upgrade() {
-                        ws.update(cx, |ws, cx| ws.toggle_project_collapse(project_id, cx));
-                    }
-                }))
-        })
+                .when(is_active, |button| button.bg(t.overlay_prominent))
+                .tooltip(name.clone()),
+        )
         .child(div().flex_1().text_ellipsis().child(name))
         // Keep branch metadata quiet beside the project name.
         .when_some(default_branch.filter(|_| !is_unavailable), |row, branch| {

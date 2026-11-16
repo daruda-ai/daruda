@@ -90,13 +90,24 @@ pub(crate) fn push_head(
     run_git(wt, args).map(|_| ())
 }
 
-/// `git fetch <remote> <refspec>`. The refspec names its destination, so
-/// what was fetched has a name the caller can use afterwards; `FETCH_HEAD`
-/// would be rewritten by any other fetch in between.
+/// `git fetch <remote> <refspec>`, from a remote name or URL. An explicit
+/// destination keeps the fetched commit addressable afterwards, unlike
+/// `FETCH_HEAD`, which any later fetch can overwrite.
 pub(crate) fn fetch_ref(wt: &Path, remote: &str, refspec: &str) -> Result<(), GitError> {
     reject_option_like("remote", remote)?;
     reject_option_like("refspec", refspec)?;
     run_git(wt, ["fetch", remote, refspec]).map(|_| ())
+}
+
+/// `git remote get-url <remote>`: the fetch URL after `insteadOf`
+/// rewriting. `None` for a remote git does not know (exit 2).
+pub(crate) fn remote_url(wt: &Path, remote: &str) -> Result<Option<String>, GitError> {
+    reject_option_like("remote", remote)?;
+    match run_git(wt, ["remote", "get-url", remote]) {
+        Ok(url) => Ok(Some(url.trim().to_owned())),
+        Err(GitError::Exit { code: Some(2), .. }) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 pub(crate) fn has_local_branch(wt: &Path, branch: &str) -> Result<bool, GitError> {
@@ -129,6 +140,14 @@ pub(crate) fn move_branch(wt: &Path, branch: &str, head: &str) -> Result<(), Git
     reject_option_like("branch", branch)?;
     reject_option_like("head", head)?;
     run_git(wt, ["branch", "-f", "--no-track", branch, head]).map(|_| ())
+}
+
+/// Pin a branch's push destination without replacing its fetch upstream.
+pub(crate) fn set_push_remote(wt: &Path, branch: &str, remote: &str) -> Result<(), GitError> {
+    reject_option_like("branch", branch)?;
+    reject_option_like("remote", remote)?;
+    let key = format!("branch.{branch}.pushRemote");
+    run_git(wt, ["config", "--local", key.as_str(), remote]).map(|_| ())
 }
 
 /// The pull request `branch` was checked out to review, if daruda made it.

@@ -3,8 +3,7 @@
 use gpui::{AnyElement, App, Context, IntoElement, Window, div, prelude::*, px};
 
 use super::{Page, PageState};
-use crate::surface::strings;
-use crate::ui::{ButtonVariants as _, button_icon, button_with_icon_sized, icons, theme};
+use crate::ui::{ButtonVariants as _, button_with_icon_sized, theme};
 use crate::workspace::Workspace;
 use crate::workspace::layout::{DockSnapshot, LeftDockSnapshot, RightDockSnapshot};
 use crate::workspace::right_dock;
@@ -62,10 +61,13 @@ pub(in crate::workspace) fn body(
 ) -> Option<AnyElement> {
     match state.page {
         Page::Tasks => {
-            if let Some(detail) = &ws.pages.tasks.detail {
-                return Some(super::tasks::editor::render_detail(
-                    detail.id,
-                    &detail.editor,
+            if let Some(detail) = &ws.pages.tasks.detail
+                && ws.shown_page_detail_id().is_some()
+            {
+                return Some(detail_frame(
+                    ws,
+                    state.page,
+                    super::tasks::editor::render_detail(detail.id, &detail.editor, cx),
                     cx,
                 ));
             }
@@ -75,12 +77,19 @@ pub(in crate::workspace) fn body(
             Some(content(state, snap, cx))
         }
         Page::Flows => {
-            if let Some(detail) = &ws.pages.flows.detail {
-                return Some(super::flows::detail_render::render(
-                    detail,
-                    state,
-                    ws.flow_session_problem(detail.id),
-                    ws.execution_layout(window, cx),
+            if let Some(detail) = &ws.pages.flows.detail
+                && ws.shown_page_detail_id().is_some()
+            {
+                return Some(detail_frame(
+                    ws,
+                    state.page,
+                    super::flows::detail_render::render(
+                        detail,
+                        state,
+                        ws.flow_session_problem(detail.id),
+                        ws.execution_layout(window, cx),
+                        cx,
+                    ),
                     cx,
                 ));
             }
@@ -90,11 +99,52 @@ pub(in crate::workspace) fn body(
         Page::PullRequests => {
             let pages = &ws.pages.pull_requests;
             if let Some(detail) = &pages.detail_snapshot {
-                return Some(super::pull_requests::detail::render::render(detail, cx));
+                return Some(detail_frame(
+                    ws,
+                    state.page,
+                    super::pull_requests::detail::render::render(
+                        detail,
+                        &pages.detail.as_ref()?.scroll,
+                        cx,
+                    ),
+                    cx,
+                ));
             }
             Some(pr_content(state, pages.snapshot.as_ref()?, cx))
         }
     }
+}
+
+fn detail_frame(
+    ws: &Workspace,
+    page: Page,
+    body: AnyElement,
+    cx: &Context<Workspace>,
+) -> AnyElement {
+    let header = crate::ui::list_page::header(
+        page.label(),
+        super::chrome::project_picker(&ws.scope_snapshot(), cx.weak_entity(), cx),
+        div(),
+        super::chrome::return_button(cx.weak_entity()),
+        cx,
+    );
+    div()
+        .flex()
+        .flex_col()
+        .size_full()
+        .min_w_0()
+        .min_h_0()
+        .bg(theme::current(cx).dock_bg)
+        .child(
+            div()
+                .flex_none()
+                .border_b_1()
+                .border_color(theme::current(cx).border)
+                .child(header),
+        )
+        .children(super::location::render(ws, page, cx))
+        .child(div().flex_1().min_h_0().child(body))
+        .into_any_element()
 }
 
 pub(in crate::workspace) fn content(
@@ -139,16 +189,8 @@ pub(in crate::workspace) fn pr_content(
     )
 }
 
-fn close_button(workspace: gpui::WeakEntity<crate::workspace::Workspace>, cx: &App) -> AnyElement {
-    button_icon("close-workspace-page", icons::CLOSE, cx)
-        .debug_selector(|| "close-workspace-page".into())
-        .tooltip(strings::common::btn_close())
-        .on_click(move |_, window, cx| {
-            if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.return_to_worktree(window, cx));
-            }
-        })
-        .into_any_element()
+fn close_button(workspace: gpui::WeakEntity<Workspace>, _cx: &App) -> AnyElement {
+    super::chrome::return_button(workspace)
 }
 
 pub(in crate::workspace) fn frame(

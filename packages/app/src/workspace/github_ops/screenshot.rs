@@ -331,16 +331,19 @@ impl Workspace {
         gh.set_auth(CORP_HOST, GhAuth::LoggedOut);
         gh.set_prs(&repo(), vec![sidebar.clone(), scroll.clone()]);
         let sidebar_row = list_item(sidebar.clone(), "comelf", 3);
+        let rows = vec![
+            list_item(draft, "comelf", 0),
+            sidebar_row.clone(),
+            list_item(scroll, "comelf", 0),
+            list_item(fork, "contributor", 1),
+            list_item(unreviewed, "hanji", 2),
+        ];
         gh.set_pr_list(
-            PrFilter::Mine,
-            vec![
-                list_item(draft, "comelf", 0),
-                sidebar_row.clone(),
-                list_item(scroll, "comelf", 0),
-                list_item(fork, "contributor", 1),
-                list_item(unreviewed, "hanji", 2),
-            ],
+            PrFilter::ReviewRequested,
+            vec![rows[1].clone(), rows[3].clone()],
         );
+        gh.set_pr_list(PrFilter::AllOpen, rows.clone());
+        gh.set_pr_list(PrFilter::Mine, rows);
         GhHost::set_global(Arc::new(gh.clone()), cx);
         PrPoller::seed_for_shot(GITHUB_HOST, GhAvailability::Ready, cx);
         PrPoller::seed_for_shot(CORP_HOST, GhAvailability::LoggedOut, cx);

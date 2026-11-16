@@ -52,7 +52,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_task_editor_with(None, Some(project), window, cx);
+        if self.project_by_uuid(project).is_some() {
+            self.open_task_editor_with(None, Some(project), window, cx);
+        }
     }
 
     /// Show `task_id`'s editor (`None`: a fresh draft) as the Tasks page's
@@ -78,6 +80,12 @@ impl Workspace {
             window,
             cx,
             move |ws, window, cx| {
+                if let Some(project) = draft_project {
+                    ws.set_page_scope(
+                        crate::workspace::pages::scope::ProjectScope::Project(project),
+                        cx,
+                    );
+                }
                 let initial = task_id
                     .as_deref()
                     .and_then(|id| cx.global::<crate::runs::GlobalTasks>().get(id).cloned());
@@ -111,6 +119,23 @@ impl Workspace {
                 }
             }
         }
+        if self.active_page() == Some(crate::workspace::pages::Page::Tasks)
+            && let Some(project) = self
+                .pages
+                .tasks
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.project)
+            && self.project_by_uuid(project).is_some()
+            && !self
+                .page_scope()
+                .matches(project, self.active_project().map(|p| p.uuid))
+        {
+            self.set_page_scope(
+                crate::workspace::pages::scope::ProjectScope::Project(project),
+                cx,
+            );
+        }
     }
 
     /// Make a new editor the page's detail. The caller has left the old one,
@@ -125,12 +150,29 @@ impl Workspace {
     ) -> TaskEditorId {
         let id = TaskEditorId(self.alloc_id());
         let editor = self.build_task_editor(id, task_id, initial, draft_project, window, cx);
-        self.pages.tasks.detail = Some(TaskDetail { id, editor });
+        let project = editor.project(cx);
+        self.pages.tasks.detail = Some(TaskDetail {
+            id,
+            project,
+            editor,
+        });
         id
     }
 
     /// Bring the Tasks page up on editor `id` and put the cursor in its title.
     fn show_task_detail(&mut self, id: TaskEditorId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(project) = self.task_editor(id).and_then(|editor| editor.project(cx))
+            && !self
+                .page_scope()
+                .matches(project, self.active_project().map(|p| p.uuid))
+        {
+            let scope = if self.project_by_uuid(project).is_some() {
+                crate::workspace::pages::scope::ProjectScope::Project(project)
+            } else {
+                crate::workspace::pages::scope::ProjectScope::All
+            };
+            self.set_page_scope(scope, cx);
+        }
         self.show_page(crate::workspace::pages::Page::Tasks, cx);
         if let Some(te) = self.task_editor(id) {
             te.title_input.read(cx).focus_handle(cx).focus(window, cx);
@@ -459,6 +501,29 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let shown = self.shown_page_detail_id() == Some(editor_id.into());
+        self.refresh_task_edit_project(editor_id, window, cx);
+        if shown
+            && let Some(project) = self
+                .task_editor(editor_id)
+                .and_then(|editor| editor.project(cx))
+            && !self
+                .page_scope()
+                .matches(project, self.active_project().map(|p| p.uuid))
+        {
+            self.set_page_scope(
+                crate::workspace::pages::scope::ProjectScope::Project(project),
+                cx,
+            );
+        }
+    }
+
+    fn refresh_task_edit_project(
+        &mut self,
+        editor_id: TaskEditorId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(te) = self.task_editor(editor_id) else {
             return;
         };
@@ -466,6 +531,15 @@ impl Workspace {
         let branch = te.branch_input.read(cx).text().to_string();
         let editable = super::run_in_ops::location_editable(te, cx.global());
         let (base_select, lane_select) = (te.base_select.clone(), te.lane_select.clone());
+        if let Some(detail) = self
+            .pages
+            .tasks
+            .detail
+            .as_mut()
+            .filter(|detail| detail.id == editor_id)
+        {
+            detail.project = project;
+        }
         let base_options = base_lane_options(self, project);
         let lane_options = super::run_in_ops::lane_options(self, project);
         base_select.update(cx, |state, cx| {
@@ -520,7 +594,7 @@ impl Workspace {
             reselect(state, project.map(super::state::project_value), window, cx);
         });
         if kept.is_none() {
-            self.on_task_edit_project_changed(editor_id, window, cx);
+            self.refresh_task_edit_project(editor_id, window, cx);
             return;
         }
         let base_options = base_lane_options(self, project);

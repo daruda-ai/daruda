@@ -42,39 +42,13 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Keep matching filters; relax only those hiding the saved task.
-    pub(in crate::workspace) fn show_saved_task(
-        &mut self,
-        id: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(task) = cx.global::<GlobalTasks>().get(id) else {
-            return;
-        };
-        let active = self.active_project().map(|project| project.uuid);
-        self.right_views.tasks.state.reveal(task, active);
-        let query = self
-            .right_views
-            .tasks
-            .search
-            .read(cx)
-            .value()
-            .trim()
-            .to_ascii_lowercase();
-        if !super::tasks::matches_task(task, &query) {
-            self.clear_task_search(window, cx);
-        }
-        self.open_page(crate::workspace::pages::Page::Tasks, window, cx);
-    }
-
+    #[cfg(any(test, feature = "screenshot"))]
     pub(in crate::workspace) fn set_task_scope(
         &mut self,
         scope: daruda_store::tasks::TaskScope,
         cx: &mut Context<Self>,
     ) {
-        self.right_views.tasks.state.scope = scope;
-        cx.notify();
+        self.set_page_scope(scope.into(), cx);
     }
 
     pub(in crate::workspace) fn new_task_in_scope(
@@ -82,16 +56,16 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let active = self.active_project().map(|p| p.uuid);
-        let project = self
-            .right_views
-            .tasks
-            .state
-            .scope
-            .project(active)
-            .or(active);
+        let current = self.active_project().map(|project| project.uuid);
+        let project = if self.active_page().is_some() {
+            self.page_scope().project(current)
+        } else {
+            current
+        };
         if let Some(project) = project.filter(|id| self.project_by_uuid(*id).is_some()) {
             self.open_task_draft_for_project(project, window, cx);
+        } else if self.page_scope() == crate::workspace::pages::scope::ProjectScope::All {
+            self.choose_new_task_project(window, cx);
         }
     }
 

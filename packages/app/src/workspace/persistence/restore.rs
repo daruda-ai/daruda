@@ -298,6 +298,7 @@ impl Workspace {
             }
         }
 
+        self.refresh_task_worktrees(cx);
         // After the runtimes, so the editor's id is minted past every pane's.
         if let Some(target) = &workspace.task_detail {
             self.restore_task_detail(target, window, cx);

@@ -188,7 +188,10 @@ async fn the_panel_lists_the_lane_s_flow_files_only_while_showing(cx: &mut TestA
     });
     cx.run_until_parked();
     let read = ws.read_with(cx, |ws, _| {
-        ws.flows.list.shown(ws.flow_browser_lane()).is_some()
+        ws.lane_scoped
+            .get(&ws.flow_browser_lane())
+            .and_then(|state| state.flows.list.shown(ws.flow_browser_lane()))
+            .is_some()
     });
     assert!(!read, "nothing was read for a tab that is not showing");
     assert!(

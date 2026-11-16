@@ -91,6 +91,12 @@ fn searches(gh: &FakeGh) -> Vec<PrFilter> {
         .collect()
 }
 
+fn search_totals(gh: &FakeGh) -> [usize; 3] {
+    let searches = searches(gh);
+    crate::workspace::pages::pull_requests::list::FILTERS
+        .map(|filter| searches.iter().filter(|held| **held == filter).count())
+}
+
 fn linked(slot: &LaneSlot) -> Option<LaneRef> {
     match slot {
         LaneSlot::Linked(lane) => Some(lane.lane),
@@ -136,7 +142,7 @@ fn opening_the_page_lists_its_pull_requests_with_their_lanes(cx: &mut TestAppCon
         "nothing is searched before the page opens"
     );
     show_page(&f, cx);
-    assert_eq!(searches(&gh), vec![PrFilter::Mine]);
+    assert_eq!(search_totals(&gh), [1, 1, 1]);
     assert_eq!(
         rows(&f, cx),
         vec![
@@ -220,7 +226,7 @@ fn a_failed_search_keeps_its_rows_and_try_again_searches_now(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-fn switching_the_filter_searches_only_that_filter(cx: &mut TestAppContext) {
+fn switching_the_filter_reuses_answers_and_counts_share_the_cadence(cx: &mut TestAppContext) {
     let (f, gh, _) = linked_window(cx);
     show_page(&f, cx);
     f.ws.update(cx, |ws, cx| {
@@ -228,25 +234,17 @@ fn switching_the_filter_searches_only_that_filter(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     assert_eq!(
-        searches(&gh),
-        vec![PrFilter::Mine, PrFilter::ReviewRequested]
+        search_totals(&gh),
+        [1, 1, 1],
+        "switching tabs uses the cache"
     );
     assert_eq!(rows(&f, cx), vec![("github.com/o/r#8".to_owned(), None)]);
-
     cx.executor().advance_clock(Duration::from_secs(120));
     tick(cx);
     assert_eq!(
-        searches(&gh).last(),
-        Some(&PrFilter::ReviewRequested),
-        "the cadence asks the shown filter"
-    );
-    assert_eq!(
-        searches(&gh)
-            .iter()
-            .filter(|f| **f == PrFilter::Mine)
-            .count(),
-        1,
-        "the filter left is not asked again"
+        search_totals(&gh),
+        [2, 2, 2],
+        "rows and counts share the cadence"
     );
 
     // Reopening shows the filter last chosen.
@@ -260,15 +258,15 @@ fn switching_the_filter_searches_only_that_filter(cx: &mut TestAppContext) {
 fn closing_the_page_stops_its_searches(cx: &mut TestAppContext) {
     let (f, gh, _) = linked_window(cx);
     show_page(&f, cx);
-    assert_eq!(gh.count(GhOp::SearchPrs), 1);
+    assert_eq!(search_totals(&gh), [1, 1, 1]);
     f.ws.update(cx, |ws, cx| ws.close_page(cx));
     cx.executor().advance_clock(Duration::from_secs(600));
     tick(cx);
     f.ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
     cx.run_until_parked();
     assert_eq!(
-        gh.count(GhOp::SearchPrs),
-        1,
+        search_totals(&gh),
+        [1, 1, 1],
         "nothing is searched while closed"
     );
     assert_eq!(f.ws.read_with(cx, |ws, _| ws.pr_list().filter()), None);
@@ -311,4 +309,33 @@ fn the_saved_state_never_holds_the_page(cx: &mut TestAppContext) {
 fn the_dock_counts_the_open_pull_requests_lanes_are_on(cx: &mut TestAppContext) {
     let (f, _gh, _) = linked_window(cx);
     assert_eq!(f.ws.read_with(cx, |ws, _| ws.open_lane_pr_count()), 1);
+}
+
+#[gpui::test]
+fn tab_counts_keep_their_query_meaning_and_clear_resets_filter_and_search(cx: &mut TestAppContext) {
+    let (f, _gh, _) = linked_window(cx);
+    show_page(&f, cx);
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    f.ws.update_in(&mut vcx, |ws, _, cx| {
+        ws.stage_pr_page(cx);
+        assert_eq!(
+            ws.pages.pull_requests.snapshot.as_ref().unwrap().counts,
+            ["2", "1", "0"]
+        );
+        ws.set_pr_page_filter(PrFilter::ReviewRequested, cx);
+    });
+    vcx.run_until_parked();
+    let clear = vcx
+        .debug_bounds("pr-clear-filters")
+        .expect("filter reset action");
+    vcx.simulate_click(clear.center(), Default::default());
+    vcx.run_until_parked();
+    f.ws.read_with(&vcx, |ws, cx| {
+        assert_eq!(ws.pr_list().filter(), Some(PrFilter::Mine));
+        let snap = ws.pages.pull_requests.snapshot.as_ref().unwrap();
+        assert!(snap.query.is_empty());
+        assert_eq!(snap.visible, 2);
+        assert_eq!(snap.counts, ["2", "1", "0"]);
+        let _ = cx;
+    });
 }

@@ -84,6 +84,7 @@ pub(in crate::workspace) struct PrDetailState {
     pub item: PrListItem,
     pub load: Load<PrDetail>,
     pub tab: PrTab,
+    pub scroll: gpui::ScrollHandle,
     /// The unresolved threads, read when their tab is first shown.
     pub threads: Option<Load<ReviewThreads>>,
     /// The failed Actions jobs whose log is open.
@@ -106,6 +107,7 @@ impl PrDetailState {
             item,
             load: Load::Loading,
             tab: PrTab::default(),
+            scroll: gpui::ScrollHandle::new(),
             threads: None,
             logs: BTreeMap::new(),
             action: ActionState::Idle,
@@ -145,6 +147,19 @@ impl Workspace {
         if !crate::github::enabled(cx) {
             return;
         }
+        if !self.github_repos().contains(&item.repo) {
+            let project = self.lane_scoped.iter().find_map(|(lane, state)| {
+                state
+                    .github_push()
+                    .filter(|(repo, _)| *repo == item.repo)
+                    .map(|_| lane.project)
+            });
+            if let Some(project) = project {
+                self.reveal_page_project(project, cx);
+            } else {
+                self.set_page_scope(crate::workspace::pages::scope::ProjectScope::All, cx);
+            }
+        }
         let open = self
             .pages
             .pull_requests
@@ -181,12 +196,19 @@ impl Workspace {
     }
 
     /// Back to the list.
+    #[cfg(test)]
     pub(in crate::workspace) fn back_to_pr_list(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.leave_page_detail_then(Page::PullRequests, window, cx, |_, _, _| {});
+    }
+
+    pub(in crate::workspace) fn refresh_shown_pr_detail(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self.pr_detail_id() {
+            self.refresh_pr_detail(id, cx);
+        }
     }
 
     /// Read the detail and the list again: the detail's refresh button.

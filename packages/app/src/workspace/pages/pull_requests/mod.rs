@@ -4,9 +4,10 @@
 //! the page is shown (its hooks in `pages/shown.rs`); this page stages what
 //! it draws.
 
+use crate::ui::InputState;
 use daruda_github::PrFilter;
 use daruda_store::project::LaneKind;
-use gpui::{App, Context, WeakEntity};
+use gpui::{App, AppContext as _, Context, Entity, WeakEntity, Window};
 
 use super::Page;
 use crate::github::PrPoller;
@@ -14,10 +15,13 @@ use crate::workspace::Workspace;
 use crate::workspace::lane_scoped::LaneScoped;
 
 pub(in crate::workspace) mod actions;
+mod controls;
+mod counts;
 pub(in crate::workspace) mod detail;
 mod lane;
 pub(in crate::workspace) mod list;
 pub(in crate::workspace) mod render;
+mod search;
 
 use std::collections::BTreeSet;
 
@@ -29,6 +33,7 @@ use list::{LaneFacts, PageInputs, PrKey, PrPageList};
 pub(in crate::workspace) struct PullRequestsPage {
     /// The filter the page shows, and shows again when reopened.
     filter: PrFilter,
+    search: Entity<InputState>,
     /// Pull requests a worktree is being made for, so their rows do not
     /// offer to make a second one.
     creating: BTreeSet<PrKey>,
@@ -40,10 +45,14 @@ pub(in crate::workspace) struct PullRequestsPage {
     pub(in crate::workspace) detail_snapshot: Option<PrDetailView>,
 }
 
-impl Default for PullRequestsPage {
-    fn default() -> Self {
+impl PullRequestsPage {
+    pub fn new(window: &mut Window, cx: &mut Context<Workspace>) -> Self {
         Self {
             filter: PrFilter::Mine,
+            search: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(crate::surface::strings::pull_requests::search_placeholder())
+            }),
             creating: BTreeSet::new(),
             snapshot: None,
             detail: None,
@@ -56,6 +65,12 @@ impl Default for PullRequestsPage {
 pub(in crate::workspace) struct PrPageSnapshot {
     pub workspace: WeakEntity<Workspace>,
     pub list: PrPageList,
+    pub scope: super::scope::ScopeSnapshot,
+    pub search: Entity<InputState>,
+    pub query: String,
+    pub visible: usize,
+    pub total: usize,
+    pub counts: [String; 3],
 }
 
 impl Workspace {
@@ -90,7 +105,7 @@ impl Workspace {
             .pull_requests
             .detail
             .as_ref()
-            .filter(|_| shown)
+            .filter(|_| shown && self.shown_page_detail_id().is_some())
             .map(|state| {
                 let lane = self.pr_detail_lane(&state.item);
                 let inputs = detail::view::DetailInputs {
@@ -105,10 +120,45 @@ impl Workspace {
             });
         let list = shown && detail.is_none();
         self.pages.pull_requests.detail_snapshot = detail;
-        self.pages.pull_requests.snapshot = list.then(|| PrPageSnapshot {
-            workspace: cx.weak_entity(),
-            list: self.pr_page_list(cx),
+        self.pages.pull_requests.snapshot = list.then(|| {
+            let search = self.pages.pull_requests.search.clone();
+            let query = search.read(cx).value().to_string();
+            let mut list = self.pr_page_list(cx);
+            let (visible, total) = search::narrow(&mut list, &query);
+            PrPageSnapshot {
+                workspace: cx.weak_entity(),
+                scope: self.scope_snapshot(),
+                list,
+                search,
+                query,
+                visible,
+                total,
+                counts: counts::labels(self.pr_list(), &self.github_repos()),
+            }
         });
+    }
+
+    pub(in crate::workspace) fn clear_pr_search(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pages
+            .pull_requests
+            .search
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn clear_pr_filters(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_pr_page_filter(PrFilter::Mine, cx);
+        self.clear_pr_search(window, cx);
+        self.pages.scrolls[Page::PullRequests.index()]
+            .set_offset(gpui::point(gpui::Pixels::ZERO, gpui::Pixels::ZERO));
     }
 
     pub(in crate::workspace) fn pr_page_list(&self, cx: &App) -> PrPageList {
@@ -131,9 +181,14 @@ impl Workspace {
     fn pr_page_lanes(&self) -> Vec<LaneFacts> {
         self.projects
             .lanes()
-            .map(|(lane, _, record)| LaneFacts {
+            .filter(|(lane, _, _)| self.page_scope_matches(lane.project))
+            .map(|(lane, project, record)| LaneFacts {
                 lane,
-                name: record.display_name(),
+                name: if self.page_scope() == super::scope::ProjectScope::All {
+                    format!("{} / {}", project.name, record.display_name())
+                } else {
+                    record.display_name()
+                },
                 branch: match &record.kind {
                     LaneKind::Git { branch, .. } => branch.clone(),
                     LaneKind::Default => None,

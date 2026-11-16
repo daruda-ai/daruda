@@ -317,7 +317,7 @@ impl Workspace {
         .detach();
     }
 
-    /// Show the saved task in the list, or start it from the editor.
+    /// Keep a saved form open, or start it from the editor.
     fn after_task_editor_saved(
         &mut self,
         editor_id: TaskEditorId,
@@ -333,11 +333,8 @@ impl Workspace {
             return;
         }
         let id = id.to_owned();
-        // The list is where a saved task is found again, so a plain save
-        // closes its editor and shows the list.
         if !start {
-            self.close_task_detail(editor_id, cx);
-            self.show_saved_task(&id, window, cx);
+            cx.notify();
             return;
         }
         let branch = cx

@@ -10,7 +10,7 @@
 //! So the result is cached per lane and rebuilt only when something makes
 //! it wrong, never per frame. [`super::flow_cache::LaneCache::get`] is
 //! where that rule lives — it answers only for the lane it was read for —
-//! and `FlowContext::history` is the one field holding it.
+//! and `LaneScoped::flows.history` holds it until that lane is removed.
 
 use std::path::{Path, PathBuf};
 
@@ -105,31 +105,14 @@ impl FlowHistory {
 }
 
 impl Workspace {
-    /// The browsed worktree's history, read only while Flows is visible.
-    /// `None` until a read off the main thread lands; the lane-keyed cache
-    /// then holds it until its scope changes or a run transition
-    /// invalidates it, and shows the old one while it is read again.
-    pub(in crate::workspace) fn flow_history_for_panel(
-        &mut self,
-        cx: &Context<Self>,
-    ) -> Option<FlowHistory> {
-        if self.active_page() != Some(super::pages::Page::Flows) {
-            return None;
-        }
-        let lane = self.flow_browser_lane();
-        self.lane_for(lane)?;
-        self.read_flow_history(lane, cx);
-        self.flows.history.shown(lane).cloned()
-    }
-
     /// List `lane`'s runs on the background executor and repaint once they
     /// land. A read already under way, or one overtaken by an invalidation,
     /// starts nothing and lands nothing.
-    fn read_flow_history(&mut self, lane: LaneRef, cx: &Context<Self>) {
+    pub(in crate::workspace) fn read_flow_history(&mut self, lane: LaneRef, cx: &Context<Self>) {
         let Some(cwd) = self.lane_for(lane).map(|l| l.path.clone()) else {
             return;
         };
-        let Some(ticket) = self.flows.history.begin_read(lane) else {
+        let Some(ticket) = self.lane_scoped_mut(lane).flows.history.begin_read(lane) else {
             return;
         };
         let lock_dir = super::flow_paths::lane_lock_dir(&self.lock_root, &cwd);
@@ -141,7 +124,11 @@ impl Workspace {
                 .await;
             // SILENT-OK: the window may close while the runs are listed
             let _ = this.update(cx, |ws, cx| {
-                if ws.flows.history.finish_read(lane, ticket, read) {
+                if ws
+                    .lane_scoped
+                    .get_mut(&lane)
+                    .is_some_and(|state| state.flows.history.finish_read(lane, ticket, read))
+                {
                     cx.notify();
                 }
             });
@@ -154,7 +141,9 @@ impl Workspace {
     /// Scoped to the lane it happened in — another lane's run says nothing
     /// about this lane's directory.
     pub(in crate::workspace) fn invalidate_flow_history(&mut self, lane: LaneRef) {
-        self.flows.history.invalidate_for(lane);
+        if let Some(state) = self.lane_scoped.get_mut(&lane) {
+            state.flows.history.invalidate_for(lane);
+        }
     }
 }
 

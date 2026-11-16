@@ -335,8 +335,8 @@ impl Workspace {
     pub(super) fn shows_flows_of(&self, lane: LaneRef) -> bool {
         self.active_page() == Some(super::pages::Page::Flows)
             && match &self.pages.flows.detail {
-                Some(detail) => detail.lane == lane,
-                None => self.flow_browser_lane() == lane,
+                Some(detail) if self.page_scope_matches(detail.lane.project) => detail.lane == lane,
+                Some(_) | None => self.flow_browser_lanes().contains(&lane),
             }
     }
 

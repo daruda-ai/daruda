@@ -112,8 +112,11 @@ impl Workspace {
         };
         // A refusal has already said so on screen — this caller is the graph's
         // ▶, and the person pressing it is looking at that toast.
-        let _refused_on_screen =
-            self.run_flow_at(lane, &path, FlowPurpose::Run, selection, window, cx);
+        self.begin_flow_start_navigation(lane, &path);
+        let accepted = self.run_flow_at(lane, &path, FlowPurpose::Run, selection, window, cx);
+        if !accepted {
+            self.cancel_flow_start_navigation();
+        }
     }
 
     /// Pin the graph's selection, or unpin it.
@@ -176,6 +179,16 @@ impl Workspace {
 
     /// Bring the Flows page up on graph `id` and give it the keyboard.
     fn show_flow_graph(&mut self, id: FlowDetailId, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(parent) = self
+            .flow_definition_return()
+            .filter(|parent| parent.id == id)
+            && self.flow_detail_id() != Some(id)
+        {
+            self.restore_flow_definition(parent, window, cx);
+        }
+        if let Some(detail) = &self.pages.flows.detail {
+            self.reveal_page_project(detail.lane.project, cx);
+        }
         self.show_page(Page::Flows, cx);
         if let Some((_, view)) = self.flow_graph(id) {
             view.read(cx).focus_handle(cx).focus(window, cx);
@@ -266,7 +279,6 @@ impl Workspace {
         };
         let path = view.read(cx).path().to_path_buf();
         match event {
-            FlowGraphEvent::BackToList => self.back_to_flow_list(window, cx),
             FlowGraphEvent::History => self.open_graph_execution_history(lane, &path, window, cx),
             FlowGraphEvent::Save => self.save_node_form(&path, view, window, cx),
             FlowGraphEvent::Revert => self.revert_node_form(&path, view, window, cx),

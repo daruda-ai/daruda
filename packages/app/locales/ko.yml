@@ -6,6 +6,15 @@ startup:
   failure_log_unavailable: "진단 로그를 저장할 수 없습니다: %{error}"
 
 common:
+  clear_filters: "필터 초기화"
+  column_worktree: "Worktree"
+  resume_page: "%{page} 탐색 계속하기"
+  resume_workspace_page: "직전 페이지 탐색 계속하기"
+  worktree_unassigned: "Worktree 없음"
+  page_all_projects: "모든 프로젝트"
+  page_project_hint: "작업 중인 worktree를 바꾸지 않고 프로젝트 조회"
+  return_to_worktree: "Worktree로 돌아가기"
+  choose_creation_project: "새 항목을 만들 프로젝트 선택"
   btn_review: "필드 확인"
   btn_manual: "직접 입력"
   btn_back: "붙여넣기로 돌아가기"
@@ -278,9 +287,7 @@ dock:
 
 # Task panel
 task:
-  scope_current: "%{name} (현재)"
-  scope_hint: "작업 중인 Worktree는 유지하고 프로젝트별 작업만 조회합니다"
-  scope_every_project: "모든 프로젝트"
+  worktree_not_open: "이 창에 열려 있지 않은 worktree"
   project_not_open: "열려 있지 않음"
   filter_all: "전체"
   filter_backlog: "대기"
@@ -304,7 +311,6 @@ task:
   empty_project_unavailable: "열려 있지 않은 프로젝트입니다. 프로젝트를 열거나 위에서 다른 프로젝트를 선택하세요."
   empty_filtered: "조건에 맞는 작업이 없습니다. 다른 상태를 선택하거나 필터를 초기화하세요."
   clear_filters: "상태·검색 초기화"
-  new_in_project: "%{project}에 새 작업 만들기"
   new_button: "새 작업"
   search_placeholder: "작업 검색…"
   action_start: "시작"
@@ -844,6 +850,17 @@ git:
 
 # Pull requests page
 pull_requests:
+  count_pending: "…"
+  count_capped: "%{count}+"
+  choose_worktree_project: "이 worktree를 만들 프로젝트 선택"
+  project_choice: "%{name} — %{path}"
+  search_placeholder: "제목, 브랜치, 작성자, 번호 검색…"
+  result_count: "Pull request %{total}개 중 %{visible}개"
+  empty_search: "검색과 일치하는 pull request가 없습니다."
+  column_checks: "검사"
+  column_review: "리뷰"
+  column_comments: "댓글"
+  column_title: "Pull request"
   title: "Pull requests"
   filter_mine: "내 PR"
   filter_review_requested: "리뷰 요청"
@@ -1409,6 +1426,8 @@ session_host:
 
 # 플로우 엔진 — 피커, 검증 결과, 실행 결과
 flow:
+  back_to_definition: "플로우 정의로 돌아가기"
+  all_worktrees: "모든 worktree"
   run_no_attempt: "이 노드에는 시도 기록이 없습니다."
   run_pending: "시작 전"
   run_elapsed: "전체 경과 시간"
@@ -1479,7 +1498,6 @@ flow:
   form_dep_chip: "%{node} ×"
   form_agent_choice: "%{name} (%{id})"
   runs_tab: "실행 기록"
-  scope_current: "%{name} (현재)"
   scope_hint: "활성 터미널을 바꾸지 않고 Worktree의 Flow를 조회하고 실행합니다"
   scope_unavailable: "열려 있지 않은 Worktree"
   new_in_project: "%{project}에 Flow 생성"

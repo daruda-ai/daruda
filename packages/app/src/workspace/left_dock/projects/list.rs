@@ -178,7 +178,7 @@ fn ungrouped_project_block(
         .flex_col()
         .w_full()
         .gap(px(theme::LANE_LIST_GAP_Y));
-    let is_active_project = project.id == active_project;
+    let is_active_project = snap.selected_project() == Some(project.id);
     let project_is_git = project
         .lanes
         .iter()

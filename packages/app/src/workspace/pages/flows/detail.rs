@@ -24,7 +24,16 @@ pub(in crate::workspace) enum FlowDetailBody {
     Run(RunDetail),
 }
 
+#[derive(Clone)]
+pub(in crate::workspace) struct FlowReturn {
+    pub id: FlowDetailId,
+    pub lane: LaneRef,
+    pub view: Entity<FlowGraphView>,
+    pub browser: crate::workspace::flow_browser::FlowBrowserState,
+}
+
 pub(in crate::workspace) struct RunDetail {
+    pub return_to: Option<FlowReturn>,
     pub dir: PathBuf,
     /// When it started, as the history worded it. Empty when the history no
     /// longer lists it.
@@ -46,6 +55,7 @@ pub(in crate::workspace) struct FlowDetail {
 pub(in crate::workspace) struct FlowsPage {
     pub detail: Option<FlowDetail>,
     pub history_request: Option<u64>,
+    pub pending_start: Option<super::start_navigation::PendingFlowStart>,
 }
 
 impl Workspace {
@@ -60,11 +70,8 @@ impl Workspace {
         &self,
         id: FlowDetailId,
     ) -> Option<(LaneRef, Entity<FlowGraphView>)> {
-        let detail = self.pages.flows.detail.as_ref().filter(|d| d.id == id)?;
-        match &detail.body {
-            FlowDetailBody::Graph(view) => Some((detail.lane, view.clone())),
-            FlowDetailBody::Run(_) => None,
-        }
+        let (held, lane, view) = self.open_graph()?;
+        (held == id).then_some((lane, view))
     }
 
     /// The open graph, whatever its id — for what reaches it by file or by
@@ -75,7 +82,10 @@ impl Workspace {
         let detail = self.pages.flows.detail.as_ref()?;
         match &detail.body {
             FlowDetailBody::Graph(view) => Some((detail.id, detail.lane, view.clone())),
-            FlowDetailBody::Run(_) => None,
+            FlowDetailBody::Run(run) => run
+                .return_to
+                .as_ref()
+                .map(|parent| (parent.id, parent.lane, parent.view.clone())),
         }
     }
 
@@ -87,6 +97,13 @@ impl Workspace {
     ) -> Option<(FlowDetailId, LaneRef, Entity<FlowGraphView>)> {
         self.open_graph()
             .filter(|(_, _, view)| view.read(cx).path() == path)
+    }
+
+    /// The lane `view` runs in, while it is still the page's graph.
+    pub(in crate::workspace) fn graph_lane(&self, view: &Entity<FlowGraphView>) -> Option<LaneRef> {
+        self.open_graph()
+            .filter(|(_, _, open)| open == view)
+            .map(|(_, lane, _)| lane)
     }
 
     /// What the detail shows, as the workspace file records it.
@@ -135,6 +152,9 @@ impl Workspace {
             }
             FlowDetailTarget::Run { dir, .. } => self.install_run_detail(lane, dir.clone(), cx),
         }
+        if self.active_page() == Some(super::super::Page::Flows) {
+            self.reveal_page_project(project, cx);
+        }
     }
 
     /// Close the detail once the worktree it runs in is gone — removed, or
@@ -162,6 +182,12 @@ impl Workspace {
             && detail.lane == from
         {
             detail.lane = to;
+            if let FlowDetailBody::Run(run) = &mut detail.body
+                && let Some(parent) = &mut run.return_to
+                && parent.lane == from
+            {
+                parent.lane = to;
+            }
         }
     }
 }

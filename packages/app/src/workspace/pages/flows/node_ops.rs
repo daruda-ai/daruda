@@ -52,6 +52,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        // The include lookup belongs to the lane this graph was opened in.
+        let Some(lane) = self.graph_lane(&view) else {
+            return false;
+        };
         let Some(plan) = view.update(cx, |view, cx| view.prepare_form_save(window, cx)) else {
             return false;
         };
@@ -76,6 +80,7 @@ impl Workspace {
             view.begin_form_save(cx);
         });
         let outcome = self.edit_flow(
+            lane,
             path,
             &base,
             move |file| {
@@ -163,7 +168,11 @@ impl Workspace {
         // The name the write chose, so the selection can land on it.
         let added = std::rc::Rc::new(std::cell::RefCell::new(NodeId::from("")));
         let record = added.clone();
+        let Some(lane) = self.graph_lane(&view) else {
+            return;
+        };
         let outcome = self.edit_flow(
+            lane,
             path,
             &base,
             move |file| {
@@ -204,7 +213,11 @@ impl Workspace {
             return;
         };
         let (out_of, into) = (out_of.clone(), into.clone());
+        let Some(lane) = self.graph_lane(&view) else {
+            return;
+        };
         let outcome = self.edit_flow(
+            lane,
             path,
             &base,
             move |file| super::graph::inspector::apply::connect(file, &out_of, &into),
@@ -238,7 +251,11 @@ impl Workspace {
             return;
         };
         let (out_of, into) = (out_of.clone(), into.clone());
+        let Some(lane) = self.graph_lane(&view) else {
+            return;
+        };
         let outcome = self.edit_flow(
+            lane,
             path,
             &base,
             move |file| super::graph::inspector::apply::disconnect(file, &out_of, &into),
@@ -295,7 +312,11 @@ impl Workspace {
             return;
         }
         let targets = nodes.clone();
+        let Some(lane) = self.graph_lane(&view) else {
+            return;
+        };
         let outcome = self.edit_flow(
+            lane,
             path,
             &base,
             move |file| {

@@ -133,7 +133,7 @@ fn shown(host_list: Option<HostList>) -> PrListState {
     PrListState::Shown {
         filter: PrFilter::Mine,
         hosts: host_list
-            .map(|list| HashMap::from([(HOST.to_owned(), list)]))
+            .map(|list| HashMap::from([((PrFilter::Mine, HOST.to_owned()), list)]))
             .unwrap_or_default(),
         _aging: gpui::Task::ready(()),
     }
@@ -399,7 +399,7 @@ fn the_header_says_how_old_the_newest_answer_is() {
                 .into_iter()
                 .map(|(host, at)| {
                     let list = HostList::Ready(answer_at(Vec::new(), &[], at));
-                    (host.to_owned(), list)
+                    ((PrFilter::Mine, host.to_owned()), list)
                 })
                 .collect(),
             _aging: gpui::Task::ready(()),

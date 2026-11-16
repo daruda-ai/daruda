@@ -90,6 +90,7 @@ impl Workspace {
         purpose: FlowPurpose,
         cx: &mut Context<Self>,
     ) {
+        self.cancel_flow_start_navigation();
         if self.overlays.flow_picker.is_open() {
             self.overlays.flow_picker.close();
             cx.notify();
@@ -201,6 +202,7 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn close_flow_picker(&mut self, cx: &mut Context<Self>) {
+        self.cancel_flow_start_navigation();
         self.overlays.flow_picker.close();
         cx.notify();
     }
@@ -415,8 +417,12 @@ impl Workspace {
                     crate::runs::FlowSubmitter::Desktop,
                     cx,
                 );
-                if let Err(refused) = started {
-                    self.answer_flow_start_refusal(lane, refused, cx);
+                match started {
+                    Ok(_) => self.finish_flow_start_navigation(lane, path, window, cx),
+                    Err(refused) => {
+                        self.cancel_flow_start_navigation();
+                        self.answer_flow_start_refusal(lane, refused, cx);
+                    }
                 }
             }
             // The picker's worktree is the one the graph then runs in.

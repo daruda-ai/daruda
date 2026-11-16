@@ -399,15 +399,24 @@ async fn a_started_run_updates_the_flow_page_independently_of_the_right_dock(
                 .page_snapshot
                 .as_ref()
                 .unwrap()
-                .flows
-                .is_empty()
+                .groups
+                .iter()
+                .all(|group| group.flows.is_empty())
         );
         let before = ws.prepare_right_dock_snapshot(cx);
         let here = ws.active;
         ws.seed_flow_run_for_test(here, lane.path().join("run-here"), cx);
         ws.stage_flow_page(cx);
         assert_eq!(
-            ws.flows.browser.page_snapshot.as_ref().unwrap().flows.len(),
+            ws.flows
+                .browser
+                .page_snapshot
+                .as_ref()
+                .unwrap()
+                .groups
+                .iter()
+                .map(|group| group.flows.len())
+                .sum::<usize>(),
             1
         );
         let after = ws.prepare_right_dock_snapshot(cx);
@@ -456,7 +465,13 @@ async fn the_panel_reads_past_runs_off_disk_when_its_tab_is_showing(cx: &mut Tes
     cx.run_until_parked();
     ws.update(cx, |ws, cx| {
         let here = ws.flow_browser_lane();
-        assert!(ws.flows.history.get(here).is_none(), "nothing was read");
+        assert!(
+            ws.lane_scoped
+                .get(&here)
+                .and_then(|state| state.flows.history.get(here))
+                .is_none(),
+            "nothing was read"
+        );
         ws.show_page(crate::workspace::pages::Page::Flows, cx);
         assert!(
             ws.flow_history_for_panel(cx).is_none(),
@@ -511,7 +526,10 @@ async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext)
     });
     ws.update(cx, |ws, cx| {
         assert!(
-            ws.flows.history.get(here).is_none(),
+            ws.lane_scoped
+                .get(&here)
+                .and_then(|state| state.flows.history.get(here))
+                .is_none(),
             "a swept run would stay on screen for the length of the run"
         );
         ws.flow_history_for_panel(cx);
@@ -528,7 +546,10 @@ async fn only_a_run_leaving_setup_refreshes_the_history(cx: &mut TestAppContext)
         });
         ws.read_with(cx, |ws, _| {
             assert!(
-                ws.flows.history.get(here).is_some(),
+                ws.lane_scoped
+                    .get(&here)
+                    .and_then(|state| state.flows.history.get(here))
+                    .is_some(),
                 "re-read the directory at node `{node}`"
             );
         });

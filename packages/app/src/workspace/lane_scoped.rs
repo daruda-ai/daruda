@@ -16,12 +16,21 @@ use crate::workspace::main_area::bottom_dock::{InputHistory, QueuedInputCache};
 pub(in crate::workspace) struct LaneScoped {
     pub git: GitLaneState,
     pub files: FileTreeLaneState,
+    pub flows: FlowLaneState,
     pub input_history: InputHistory,
     pub queued_input_cache: QueuedInputCache,
     /// The pull request this lane's branch belongs to, and work on it.
     pub pr: crate::workspace::github_ops::lane_pr::LanePr,
     /// Expanded-sidebar disclosure for this app session, independent of rail grouping.
     pub show_individual_panes: bool,
+}
+
+/// Listings are retained independently for every browsed worktree and are
+/// dropped with it. In-flight reads cannot recreate a removed lane's state.
+#[derive(Default)]
+pub(in crate::workspace) struct FlowLaneState {
+    pub history: super::flow_cache::LaneCache<super::flow_history::FlowHistory>,
+    pub list: super::flow_cache::LaneCache<super::flow_browser::listing::FlowListing>,
 }
 
 #[derive(Default)]

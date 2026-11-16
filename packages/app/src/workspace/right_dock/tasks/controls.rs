@@ -1,14 +1,14 @@
 //! Task-page scope, status tabs, and recoverable empty states.
 
 use daruda_store::tasks::{TaskFilter, TaskScope};
-use gpui::{AnyElement, App, IntoElement, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, App, IntoElement, SharedString, prelude::*};
 
 use super::list::{FILTERS, TaskList};
 use super::{TaskGroupKey, TaskGrouping, grouping::TaskGroup};
 use crate::surface::strings;
 use crate::ui::{
-    ButtonVariants as _, Disableable as _, DropdownMenu as _, PopupMenuItem, button, button_bare,
-    button_with_icon, icons, list_page, menu_builder, tab, tab_bar, theme,
+    ButtonVariants as _, Disableable as _, DropdownMenu as _, PopupMenuItem, button,
+    button_with_icon, icons, list_page, menu_builder, tab, tab_bar,
 };
 use crate::workspace::layout::{RightDockSnapshot, TaskProjects};
 
@@ -19,7 +19,25 @@ pub(in crate::workspace) fn header(
 ) -> AnyElement {
     list_page::header(
         strings::dock::right_tab_tasks(),
-        scope_picker(snap, cx),
+        crate::workspace::pages::chrome::project_picker(
+            &crate::workspace::pages::scope::ScopeSnapshot {
+                selected: snap.task_browser.scope.into(),
+                current: snap.task_projects.active,
+                projects: snap
+                    .task_projects
+                    .names
+                    .iter()
+                    .map(
+                        |(uuid, name)| crate::workspace::pages::scope::ScopeProject {
+                            uuid: *uuid,
+                            name: name.clone(),
+                        },
+                    )
+                    .collect(),
+            },
+            (*snap.workspace).clone(),
+            cx,
+        ),
         new_button(snap),
         close,
         cx,
@@ -29,91 +47,38 @@ pub(in crate::workspace) fn header(
 
 fn project_label(scope: TaskScope, projects: &TaskProjects) -> String {
     if scope == TaskScope::AllProjects {
-        return strings::task::scope_every_project();
+        return strings::common::page_all_projects();
     }
-    let project = scope.project(projects.active);
-    let name = project.and_then(|id| projects.name(id));
-    match (project, name) {
-        (Some(id), Some(name)) if Some(id) == projects.active => strings::task::scope_current(name),
-        (_, Some(name)) => name.to_owned(),
-        _ => strings::task::project_not_open(),
-    }
+    scope
+        .project(projects.active)
+        .and_then(|id| projects.name(id))
+        .map(str::to_owned)
+        .unwrap_or_else(strings::task::project_not_open)
 }
 
-fn scope_picker(snap: &RightDockSnapshot, cx: &App) -> impl IntoElement {
-    let projects = snap.task_projects.clone();
-    let selected = snap.task_browser.state.scope;
+fn new_button(snap: &RightDockSnapshot) -> AnyElement {
     let workspace = snap.workspace.clone();
-    let label = project_label(selected, &projects);
-    button_bare("task-scope")
-        .debug_selector(|| "task-scope".into())
-        .tab_stop(true)
-        .min_w_0()
-        .tooltip(strings::task::scope_hint())
-        .child(icons::icon(icons::FOLDER).text_color(theme::current(cx).text_muted))
-        .child(
-            div()
-                .min_w_0()
-                .max_w(px(theme::list_metrics::PROJECT_W))
-                .truncate()
-                .child(label),
-        )
-        .child(icons::icon(icons::EXPAND_MORE))
-        .dropdown_menu(menu_builder(move |menu, _, _| {
-            let mut scopes = vec![TaskScope::AllProjects];
-            scopes.extend(projects.names.iter().map(|(id, _)| {
-                if Some(*id) == projects.active {
-                    TaskScope::ActiveProject
-                } else {
-                    TaskScope::Project(*id)
-                }
-            }));
-            scopes
-                .into_iter()
-                .fold(menu.scrollable(true), |menu, scope| {
-                    let workspace = workspace.clone();
-                    let checked = scope == selected
-                        || (scope != TaskScope::AllProjects
-                            && selected != TaskScope::AllProjects
-                            && scope.project(projects.active) == selected.project(projects.active));
-                    menu.item(
-                        PopupMenuItem::new(project_label(scope, &projects))
-                            .checked(checked)
-                            .on_click(move |_, _, cx| {
-                                if let Some(ws) = workspace.upgrade() {
-                                    ws.update(cx, |ws, cx| ws.set_task_scope(scope, cx));
-                                }
-                            }),
-                    )
-                })
-        }))
-}
-
-fn new_button(snap: &RightDockSnapshot) -> impl IntoElement {
-    let workspace = snap.workspace.clone();
-    let project = snap
-        .task_browser
-        .state
-        .scope
-        .project(snap.task_projects.active)
-        .or(snap.task_projects.active);
-    let target = project.and_then(|id| snap.task_projects.name(id));
-    button_with_icon("task-new", strings::task::new_button(), icons::ADD)
+    let project = snap.task_browser.scope.project(snap.task_projects.active);
+    let projects = snap.task_projects.names.clone();
+    let button = button_with_icon("task-new", strings::task::new_button(), icons::ADD)
         .debug_selector(|| "task-new".into())
         .primary()
         .flex_none()
         .tab_stop(true)
-        .disabled(target.is_none())
-        .tooltip(
-            target
-                .map(strings::task::new_in_project)
-                .unwrap_or_else(strings::task::project_not_open),
-        )
+        .disabled(
+            projects.is_empty()
+                || project.is_some_and(|id| !projects.iter().any(|(uuid, _)| *uuid == id)),
+        );
+    button
+        .when(project.is_none(), |button| {
+            button.tooltip(strings::common::choose_creation_project())
+        })
         .on_click(move |_, window, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.new_task_in_scope(window, cx));
             }
         })
+        .into_any_element()
 }
 
 pub(super) fn filter_label(filter: TaskFilter) -> String {
@@ -154,10 +119,9 @@ pub(super) fn status_tabs(snap: &RightDockSnapshot, list: &TaskList<'_>) -> impl
 }
 
 pub(super) fn empty_state(snap: &RightDockSnapshot, scoped_count: usize, cx: &App) -> AnyElement {
-    let project_available = snap.task_browser.state.scope == TaskScope::AllProjects
+    let project_available = snap.task_browser.scope == TaskScope::AllProjects
         || snap
             .task_browser
-            .state
             .scope
             .project(snap.task_projects.active)
             .and_then(|id| snap.task_projects.name(id))
@@ -165,10 +129,7 @@ pub(super) fn empty_state(snap: &RightDockSnapshot, scoped_count: usize, cx: &Ap
     let message = if !project_available {
         strings::task::empty_project_unavailable()
     } else if scoped_count == 0 {
-        strings::task::empty_scope(project_label(
-            snap.task_browser.state.scope,
-            &snap.task_projects,
-        ))
+        strings::task::empty_scope(project_label(snap.task_browser.scope, &snap.task_projects))
     } else {
         strings::task::empty_filtered()
     };
@@ -282,29 +243,8 @@ pub(super) fn group_header(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use daruda_store::project::ProjectUuid;
-
     #[test]
-    fn current_project_is_a_marker_on_its_name_not_another_scope() {
-        let current = ProjectUuid::new();
-        let other = ProjectUuid::new();
-        let projects = TaskProjects {
-            active: Some(current),
-            names: vec![(current, "app".into()), (other, "site".into())],
-        };
-        assert_eq!(
-            project_label(TaskScope::ActiveProject, &projects),
-            strings::task::scope_current("app")
-        );
-        assert_eq!(
-            project_label(TaskScope::Project(current), &projects),
-            strings::task::scope_current("app")
-        );
-        assert_eq!(project_label(TaskScope::Project(other), &projects), "site");
-        assert_eq!(
-            project_label(TaskScope::Project(ProjectUuid::default()), &projects),
-            strings::task::project_not_open()
-        );
+    fn task_filters_keep_their_status_meaning() {
+        assert_eq!(super::FILTERS[0], super::TaskFilter::All);
     }
 }

@@ -12,9 +12,15 @@ use crate::workspace::{
 };
 use gpui::{AnyElement, App, IntoElement, div, prelude::*, px};
 
-pub(super) fn search(snap: &FlowPageSnapshot, cx: &App) -> impl IntoElement {
+pub(super) fn search(
+    snap: &FlowPageSnapshot,
+    files: usize,
+    runs: usize,
+    cx: &App,
+) -> impl IntoElement {
     let workspace = snap.workspace.clone();
     list_page::toolbar()
+        .child(super::controls::section_tabs(snap, files, runs))
         .child(div().flex_1().min_w_0().child(list_page::search(
             "flow-search-clear",
             s::common::search_clear().into(),
@@ -120,12 +126,7 @@ pub(super) fn results(
 }
 
 pub(super) fn empty(snap: &FlowPageSnapshot, total: usize, cx: &App) -> AnyElement {
-    let message = if !snap
-        .flow_browser
-        .targets
-        .iter()
-        .any(|target| target.lane == snap.flow_lane)
-    {
+    let message = if snap.groups.is_empty() {
         s::flow::empty_unavailable()
     } else if total > 0 {
         s::flow::empty_filtered()
