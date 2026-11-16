@@ -3,9 +3,9 @@
 //! node the other requests share: `search` lists open pull requests across
 //! repositories, `detail` reads one, `threads` reads its review threads.
 //!
-//! One aliased field per branch (`b0`, `b1`, ...) keeps the request count per
-//! repository, not per lane. Branch names travel as variables, never inside
-//! the query text.
+//! One aliased field per branch (`b0`, `b1`, ...) and per pull request number
+//! (`n0`, ...) keeps the request count per repository, not per lane. Branch
+//! names and numbers travel as variables, never inside the query text.
 
 use std::collections::HashMap;
 
@@ -37,12 +37,20 @@ pub struct RepoPrs {
     pub default_branch: Option<String>,
     /// Candidates per requested branch, most recently updated first.
     pub by_branch: HashMap<String, Vec<PrSummary>>,
+    /// Each requested pull request number, with `None` for one the
+    /// repository has no pull request under.
+    pub by_number: HashMap<u64, Option<PrSummary>>,
 }
 
-/// The query for `count` branches, bound to `$owner`, `$name`, `$b0`...
-pub(crate) fn prs_for_branches_query(count: usize) -> String {
+/// The query for `count` branches and `numbers` pull request numbers, bound
+/// to `$owner`, `$name`, `$b0`... and `$n0`...
+pub(crate) fn prs_for_branches_query(count: usize, numbers: usize) -> String {
     let mut declarations = String::from("$owner: String!, $name: String!");
     let mut fields = String::new();
+    for i in 0..numbers {
+        declarations.push_str(&format!(", $n{i}: Int!"));
+        fields.push_str(&format!(" n{i}: pullRequest(number: $n{i}) {{ ...pr }}"));
+    }
     for i in 0..count {
         declarations.push_str(&format!(", $b{i}: String!"));
         fields.push_str(&format!(
@@ -69,9 +77,13 @@ fn pr_fragment() -> String {
     )
 }
 
-/// Parse the answer to [`prs_for_branches_query`] for `branches`, in the
-/// order their variables were bound.
-pub(crate) fn parse_prs_for_branches(json: &str, branches: &[String]) -> Result<RepoPrs, GhError> {
+/// Parse the answer to [`prs_for_branches_query`] for `branches` and
+/// `numbers`, in the order their variables were bound.
+pub(crate) fn parse_prs_for_branches(
+    json: &str,
+    branches: &[String],
+    numbers: &[u64],
+) -> Result<RepoPrs, GhError> {
     let response: Response = serde_json::from_str(json).map_err(parse_error)?;
     let Some(mut repository) = response.data.and_then(|d| d.repository) else {
         return Err(GhError::Parse(format!(
@@ -97,9 +109,18 @@ pub(crate) fn parse_prs_for_branches(json: &str, branches: &[String]) -> Result<
             .collect::<Result<Vec<_>, _>>()?;
         by_branch.insert(branch.clone(), prs);
     }
+    let mut by_number = HashMap::new();
+    for (i, number) in numbers.iter().enumerate() {
+        let field = repository
+            .remove(&format!("n{i}"))
+            .ok_or_else(|| GhError::Parse(format!("missing field n{i}")))?;
+        let node: Option<PrNode> = serde_json::from_value(field).map_err(parse_error)?;
+        by_number.insert(*number, node.map(PrNode::into_summary).transpose()?);
+    }
     Ok(RepoPrs {
         default_branch,
         by_branch,
+        by_number,
     })
 }
 

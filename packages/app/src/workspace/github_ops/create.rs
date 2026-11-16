@@ -43,6 +43,8 @@ pub(crate) enum CreatePrError {
     NoTarget,
     /// The branch pushes to the PR's own base.
     HeadIsBase(String),
+    /// The branch was made to review someone else's pull request.
+    ReviewBranch,
     Read(GitError),
     Push(GitError),
     Gh(GhError),
@@ -56,6 +58,7 @@ impl std::fmt::Display for CreatePrError {
             Self::HeadIsBase(branch) => {
                 write!(f, "the branch pushes to {branch}, the pull request's base")
             }
+            Self::ReviewBranch => write!(f, "the branch reviews another pull request"),
             Self::Read(e) => write!(f, "read where the branch pushes: {e}"),
             Self::Push(e) => write!(f, "push before creating the pull request: {e}"),
             Self::Gh(e) => e.fmt(f),
@@ -73,6 +76,7 @@ impl CreatePrError {
             Self::LaneGone => s::github_pr_lane_gone(),
             Self::NoTarget => s::github_pr_no_remote(),
             Self::HeadIsBase(branch) => s::github_pr_head_is_base(branch),
+            Self::ReviewBranch => s::github_pr_review_branch(),
             Self::Read(e) | Self::Push(e) => format!("{}: {e}", s::github_pr_create_failed()),
             Self::Gh(e) => format!("{}: {e}", s::github_pr_create_failed()),
         }
@@ -114,6 +118,11 @@ fn plan_pr(
     default_base: Option<&str>,
     worktree: PathBuf,
 ) -> Result<PrPlan, CreatePrError> {
+    // Pushing a review branch would copy a fork's head into this
+    // repository and open a second pull request for it.
+    if push.review.is_some() {
+        return Err(CreatePrError::ReviewBranch);
+    }
     let repo = parse_remote(&push.url).ok_or(CreatePrError::NoTarget)?;
     let base = request
         .base
@@ -386,6 +395,18 @@ mod tests {
             .unwrap();
             assert_eq!(plan.set_upstream, expected, "{label}");
         }
+    }
+
+    #[test]
+    fn a_review_branch_is_never_pushed_for_a_pull_request() {
+        let target = PushTarget {
+            review: Some("github.com/o/r#9".into()),
+            ..push("pr-9", false, false)
+        };
+        assert!(matches!(
+            plan_pr(target, request(None), None, PathBuf::new()),
+            Err(CreatePrError::ReviewBranch)
+        ));
     }
 
     #[test]

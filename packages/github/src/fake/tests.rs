@@ -25,17 +25,24 @@ fn scripted_prs_answer_per_branch_and_calls_are_logged() {
     let gh = FakeGh::new();
     gh.set_prs(&repo(), vec![pr(1, "a"), pr(2, "b"), pr(3, "a")]);
     let branches = vec!["a".to_owned(), "c".to_owned()];
-    let answer = gh.prs_for_branches(&repo(), &branches).unwrap();
+    let answer = gh.prs_for_branches(&repo(), &branches, &[2, 8]).unwrap();
     assert_eq!(answer.default_branch.as_deref(), Some("main"));
     let numbers: Vec<u64> = answer.by_branch["a"].iter().map(|p| p.number).collect();
     assert_eq!(numbers, [3, 1], "most recently updated first");
     assert!(answer.by_branch["c"].is_empty());
+    let named = answer.by_number[&2].as_ref().expect("PR 2");
+    assert_eq!(named.head_branch, "b", "a number names its PR");
+    assert_eq!(
+        answer.by_number[&8], None,
+        "one the repo lacks answers none"
+    );
     assert_eq!(gh.count(GhOp::PrsForBranches), 1);
     assert_eq!(
         gh.calls(),
         vec![GhCall::PrsForBranches {
             repo: repo(),
-            branches
+            branches,
+            numbers: vec![2, 8],
         }]
     );
 }
@@ -54,7 +61,9 @@ fn a_created_pr_is_found_by_the_next_lookup() {
     };
     let url = gh.create_pr(&repo(), &new).unwrap();
     assert_eq!(url, "https://github.com/o/r/pull/5");
-    let found = gh.prs_for_branches(&repo(), &["feat".to_owned()]).unwrap();
+    let found = gh
+        .prs_for_branches(&repo(), &["feat".to_owned()], &[])
+        .unwrap();
     let pr = &found.by_branch["feat"][0];
     assert_eq!((pr.number, pr.state), (5, PrState::Draft));
 }
@@ -199,7 +208,9 @@ fn a_mutation_moves_the_scripted_pr_to_its_new_state() {
         );
         gh.set_pr_detail(&repo(), 7, detail(7, before, "abc"));
         mutate(&gh, &repo(), 7).unwrap();
-        let listed = gh.prs_for_branches(&repo(), &["a".to_owned()]).unwrap();
+        let listed = gh
+            .prs_for_branches(&repo(), &["a".to_owned()], &[])
+            .unwrap();
         assert_eq!(listed.by_branch["a"][0].state, after, "{label}: listed");
         let shown = gh.pr_detail(&repo(), 7).unwrap();
         assert_eq!(shown.summary.state, after, "{label}: detail");

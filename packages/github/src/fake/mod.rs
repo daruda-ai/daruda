@@ -4,7 +4,7 @@
 //! | Method | Unscripted answer |
 //! |---|---|
 //! | `auth` | `Ready` |
-//! | `prs_for_branches` | default branch `main`, no PRs for any branch |
+//! | `prs_for_branches` | default branch `main`, no PRs for any branch or number |
 //! | `search_prs` | none, not truncated |
 //! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL |
 //! | `failed_log` | exit 1, as for a run that has no failed log |
@@ -39,6 +39,7 @@ pub enum GhCall {
     PrsForBranches {
         repo: RepoId,
         branches: Vec<String>,
+        numbers: Vec<u64>,
     },
     SearchPrs {
         host: String,
@@ -158,7 +159,7 @@ impl FakeGh {
     }
 
     /// The PRs `repo` has; `prs_for_branches` answers each branch with those
-    /// whose head is that branch.
+    /// whose head is that branch, and each number with the PR it names.
     pub fn set_prs(&self, repo: &RepoId, prs: Vec<PrSummary>) {
         self.lock().prs.insert(repo.clone(), prs);
     }
@@ -271,11 +272,17 @@ impl Gh for FakeGh {
         Ok(state.auth.get(host).copied().unwrap_or(GhAuth::Ready))
     }
 
-    fn prs_for_branches(&self, repo: &RepoId, branches: &[String]) -> Result<RepoPrs, GhError> {
+    fn prs_for_branches(
+        &self,
+        repo: &RepoId,
+        branches: &[String],
+        numbers: &[u64],
+    ) -> Result<RepoPrs, GhError> {
         let mut state = self.lock();
         state.calls.push(GhCall::PrsForBranches {
             repo: repo.clone(),
             branches: branches.to_vec(),
+            numbers: numbers.to_vec(),
         });
         if let Some(failure) = state.failures.get(&GhOp::PrsForBranches) {
             return Err(failure.to_error());
@@ -293,6 +300,13 @@ impl Gh for FakeGh {
                 (branch.clone(), matching)
             })
             .collect();
+        let by_number = numbers
+            .iter()
+            .map(|number| {
+                let pr = prs.iter().find(|pr| pr.number == *number).cloned();
+                (*number, pr)
+            })
+            .collect();
         Ok(RepoPrs {
             default_branch: Some(
                 state
@@ -302,6 +316,7 @@ impl Gh for FakeGh {
                     .unwrap_or_else(|| "main".to_owned()),
             ),
             by_branch,
+            by_number,
         })
     }
 

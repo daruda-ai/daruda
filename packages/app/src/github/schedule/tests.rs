@@ -13,6 +13,7 @@ fn repo(name: &str) -> RepoId {
 fn demand(branches: &[&str], focused: bool) -> RepoDemand {
     RepoDemand {
         branches: branches.iter().map(|b| (*b).to_owned()).collect(),
+        numbers: Default::default(),
         focused,
     }
 }
@@ -32,6 +33,7 @@ fn answer(branches: &[&str]) -> RepoPrs {
             .iter()
             .map(|b| ((*b).to_owned(), Vec::new()))
             .collect::<HashMap<_, _>>(),
+        by_number: HashMap::new(),
     }
 }
 
@@ -186,6 +188,26 @@ fn a_repository_is_polled_when_its_answer_is_missing_stale_or_short() {
 }
 
 #[test]
+fn a_number_is_asked_until_an_answer_covers_it_even_with_no_such_pr() {
+    let now = Instant::now();
+    let r = repo("r");
+    let mut schedule = ready(now);
+    answered(&mut schedule, &r, &["a"], now);
+    let mut review = demand(&["a"], true);
+    review.numbers.insert(9);
+    let ask = || wanted(&[(&r, review.clone())]);
+    let due = schedule.begin_polls(ask(), FOCUSED, now);
+    assert_eq!(due, vec![(r.clone(), review.clone())], "a new number");
+    let mut covered = answer(&["a"]);
+    covered.by_number.insert(9, None);
+    schedule.finish_poll(&r, Ok(covered), true, now);
+    assert!(
+        schedule.begin_polls(ask(), FOCUSED, now).is_empty(),
+        "answered, if only with no PR, so it waits for the cadence"
+    );
+}
+
+#[test]
 fn nothing_is_polled_on_a_host_that_cannot_answer_or_while_in_flight() {
     let now = Instant::now();
     let r = repo("r");
@@ -221,7 +243,7 @@ fn transient_failures_pause_the_repository_alone_and_grow() {
     let due = schedule.begin_polls(both(), FOCUSED, now + MINUTE / 2);
     assert_eq!(
         due,
-        vec![(other.clone(), vec!["a".to_owned()])],
+        vec![(other.clone(), demand(&["a"], true))],
         "only the failing one waits"
     );
 

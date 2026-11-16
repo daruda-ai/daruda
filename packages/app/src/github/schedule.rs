@@ -15,11 +15,12 @@ const UNFOCUSED_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// How long a missing or logged-out `gh` is trusted before asking again.
 const AUTH_RECHECK: Duration = Duration::from_secs(5 * 60);
 
-/// One repository's share of a round: its branches, and whether any lane
-/// on it is focused.
+/// One repository's share of a round: its branches, the pull requests review
+/// lanes name, and whether any lane on it is focused.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(super) struct RepoDemand {
     pub branches: BTreeSet<String>,
+    pub numbers: BTreeSet<u64>,
     pub focused: bool,
 }
 
@@ -158,11 +159,16 @@ impl RepoState {
         let Some((last, at)) = &self.answer else {
             return true;
         };
-        // A branch the last answer did not cover is asked about at once.
+        // A branch or number the last answer did not cover is asked about
+        // at once.
         let uncovered = demand
             .branches
             .iter()
-            .any(|branch| !last.by_branch.contains_key(branch));
+            .any(|branch| !last.by_branch.contains_key(branch))
+            || demand
+                .numbers
+                .iter()
+                .any(|number| !last.by_number.contains_key(number));
         let interval = if demand.focused {
             focused_interval
         } else {
@@ -315,14 +321,13 @@ impl Schedule {
         })
     }
 
-    /// The repositories to ask now with the branches to ask about, marked
-    /// in flight.
+    /// The repositories to ask now with what to ask about, marked in flight.
     pub(super) fn begin_polls(
         &mut self,
         wanted: BTreeMap<RepoId, RepoDemand>,
         focused_interval: Duration,
         now: Instant,
-    ) -> Vec<(RepoId, Vec<String>)> {
+    ) -> Vec<(RepoId, RepoDemand)> {
         let mut due = Vec::new();
         for (repo, demand) in wanted {
             if !self.takes_requests(repo.host(), now) {
@@ -334,7 +339,7 @@ impl Schedule {
             }
             state.in_flight = true;
             state.nudged = false;
-            due.push((repo, demand.branches.into_iter().collect()));
+            due.push((repo, demand));
         }
         due
     }

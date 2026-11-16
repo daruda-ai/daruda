@@ -60,11 +60,21 @@ impl PrLookup {
     }
 }
 
-/// One lane's question for the poller: which PR is `branch` in `repo`.
+/// What a lane's pull request is looked up by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PrSubject {
+    /// The branch the lane pushes to: GitHub is asked which PR it heads.
+    Branch(String),
+    /// A review lane names its PR, whose head is a fork's branch that the
+    /// base repository cannot be asked about by name.
+    Review(u64),
+}
+
+/// One lane's question for the poller: which PR in `repo` it works on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PrDemand {
     pub repo: RepoId,
-    pub branch: String,
+    pub subject: PrSubject,
     /// The lane is the one its window shows, so it is polled more often.
     pub focused: bool,
 }

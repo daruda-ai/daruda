@@ -46,13 +46,12 @@ fn item(number: u64, cross_repo: bool) -> PrListItem {
 
 // ---- Which lane works on a pull request ----
 
-fn lane(project: u64, id: u64, repo: Option<RepoId>, branch: &str, pr: Option<u64>) -> LaneFacts {
+fn lane(project: u64, id: u64, branch: &str, pr: Option<(RepoId, u64)>) -> LaneFacts {
     LaneFacts {
         lane: LaneRef { project, lane: id },
         name: branch.into(),
-        pr: pr.map(|number| (repo.clone().unwrap(), number)),
-        repo,
         branch: Some(branch.into()),
+        pr,
     }
 }
 
@@ -60,13 +59,13 @@ fn lane(project: u64, id: u64, repo: Option<RepoId>, branch: &str, pr: Option<u6
 fn a_pull_request_finds_the_lane_working_on_it() {
     let other = RepoId::new(HOST, "o", "other");
     let lanes = vec![
-        // Project 1 pushes to o/r: its linked lane and a fork review lane.
-        lane(1, 0, Some(repo()), "feat", Some(7)),
-        lane(1, 1, Some(repo()), "pr-9", None),
-        // Project 2 pushes elsewhere, with a review branch of the same name.
-        lane(2, 0, Some(other.clone()), "pr-10", None),
-        lane(2, 1, Some(other), "pr-11", None),
-        lane(1, 2, Some(repo()), "pr-11", None),
+        // Project 1: a linked lane, and a review lane its mark resolved.
+        lane(1, 0, "feat", Some((repo(), 7))),
+        lane(1, 1, "pr-9", Some((repo(), 9))),
+        // A branch named like a review branch, for no pull request.
+        lane(1, 2, "pr-11", None),
+        // The same number in another repository.
+        lane(2, 0, "pr-10", Some((other, 10))),
     ];
     /// `(project, lane)` ids.
     type Ids = Option<(u64, u64)>;
@@ -74,30 +73,32 @@ fn a_pull_request_finds_the_lane_working_on_it() {
     let cases: Vec<(&str, PrListItem, Ids)> = vec![
         ("linked by its branch", item(7, false), Some((1, 0))),
         ("same repository, not linked", item(8, false), None),
+        ("a fork PR by its review mark", item(9, true), Some((1, 1))),
         (
-            "a same-repository PR is not matched by branch name",
-            item(9, false),
-            None,
-        ),
-        (
-            "a fork PR on its review branch",
-            item(9, true),
-            Some((1, 1)),
-        ),
-        (
-            "a review branch in a project that pushes elsewhere",
+            "the same number in another repository",
             item(10, true),
             None,
         ),
-        (
-            "the review branch in the PR's own project wins",
-            item(11, true),
-            Some((1, 2)),
-        ),
+        ("a branch name alone links nothing", item(11, true), None),
     ];
     for (label, item, expected) in cases {
         let found = list::linked_lane(&item, &lanes).map(|lane| lane.lane);
         let expected = expected.map(|(project, lane)| LaneRef { project, lane });
+        assert_eq!(found, expected, "{label}");
+    }
+}
+
+#[test]
+fn a_branch_is_held_by_the_lane_of_that_project_on_it() {
+    let lanes = vec![lane(1, 0, "pr-9", None), lane(2, 3, "feat", None)];
+    // (label, project, branch, expected lane id)
+    let cases = [
+        ("on it", 1, "pr-9", Some(0)),
+        ("another project's branch", 1, "feat", None),
+        ("no lane on it", 2, "pr-9", None),
+    ];
+    for (label, project, branch, expected) in cases {
+        let found = list::lane_on_branch(&lanes, project, branch).map(|lane| lane.lane.lane);
         assert_eq!(found, expected, "{label}");
     }
 }

@@ -23,7 +23,7 @@ const LIMITS: CaptureLimits = CaptureLimits {
     stderr: 1024 * 1024,
 };
 
-/// Branches per request; the query grows with each one.
+/// Branches, and separately numbers, per request; the query grows with each.
 const BRANCHES_PER_REQUEST: usize = 50;
 /// Repositories per search; GitHub caps the search text's length.
 const REPOS_PER_SEARCH: usize = 20;
@@ -201,31 +201,45 @@ impl Gh for SystemGh {
         }
     }
 
-    fn prs_for_branches(&self, repo: &RepoId, branches: &[String]) -> Result<RepoPrs, GhError> {
+    fn prs_for_branches(
+        &self,
+        repo: &RepoId,
+        branches: &[String],
+        numbers: &[u64],
+    ) -> Result<RepoPrs, GhError> {
         let mut all = RepoPrs::default();
-        for chunk in branches.chunks(BRANCHES_PER_REQUEST) {
-            // `-f`, never `-F`: `-F` would turn a branch or owner named
-            // like a number or boolean into one.
+        for (branches, numbers) in lane_requests(branches, numbers) {
+            // `-f` for strings, never `-F`: `-F` would turn a branch or owner
+            // named like a number or boolean into one.
             let mut args = vec![
                 "api".to_owned(),
                 "graphql".to_owned(),
                 "--hostname".to_owned(),
                 repo.host().to_owned(),
                 "-f".to_owned(),
-                format!("query={}", prs_for_branches_query(chunk.len())),
+                format!(
+                    "query={}",
+                    prs_for_branches_query(branches.len(), numbers.len())
+                ),
                 "-f".to_owned(),
                 format!("owner={}", repo.owner()),
                 "-f".to_owned(),
                 format!("name={}", repo.name()),
             ];
-            for (i, branch) in chunk.iter().enumerate() {
+            for (i, branch) in branches.iter().enumerate() {
                 args.push("-f".to_owned());
                 args.push(format!("b{i}={branch}"));
             }
+            for (i, number) in numbers.iter().enumerate() {
+                // `-F`: a number must reach GraphQL as an Int.
+                args.push("-F".to_owned());
+                args.push(format!("n{i}={number}"));
+            }
             let json = self.stdout(&args)?;
-            let part = parse_prs_for_branches(&json, chunk)?;
+            let part = parse_prs_for_branches(&json, branches, numbers)?;
             all.default_branch = part.default_branch;
             all.by_branch.extend(part.by_branch);
+            all.by_number.extend(part.by_number);
         }
         Ok(all)
     }
@@ -364,6 +378,21 @@ impl Gh for SystemGh {
     }
 }
 
+/// The branches and numbers of each request a lane lookup sends: as many
+/// requests as the longer list needs, the shorter one riding along.
+fn lane_requests<'a>(branches: &'a [String], numbers: &'a [u64]) -> Vec<(&'a [String], &'a [u64])> {
+    let branches: Vec<&[String]> = branches.chunks(BRANCHES_PER_REQUEST).collect();
+    let numbers: Vec<&[u64]> = numbers.chunks(BRANCHES_PER_REQUEST).collect();
+    (0..branches.len().max(numbers.len()))
+        .map(|i| {
+            (
+                branches.get(i).copied().unwrap_or_default(),
+                numbers.get(i).copied().unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,9 +401,36 @@ mod tests {
     fn no_branches_sends_no_request() {
         let repo = RepoId::new("github.com", "o", "r");
         assert_eq!(
-            SystemGh.prs_for_branches(&repo, &[]).unwrap(),
+            SystemGh.prs_for_branches(&repo, &[], &[]).unwrap(),
             RepoPrs::default()
         );
+    }
+
+    #[test]
+    fn numbers_ride_with_branches_and_need_no_branch_to_be_asked() {
+        let many: Vec<String> = (0..=BRANCHES_PER_REQUEST)
+            .map(|i| format!("b{i}"))
+            .collect();
+        /// (label, branches, numbers, (branches, numbers) per request)
+        type Case<'a> = (&'a str, &'a [String], &'a [u64], Vec<(usize, usize)>);
+        let cases: [Case; 4] = [
+            ("nothing", &[], &[], vec![]),
+            ("numbers alone", &[], &[7, 9], vec![(0, 2)]),
+            ("both in one", &many[..2], &[7], vec![(2, 1)]),
+            (
+                "numbers in the first of two",
+                &many,
+                &[7],
+                vec![(BRANCHES_PER_REQUEST, 1), (1, 0)],
+            ),
+        ];
+        for (label, branches, numbers, expected) in cases {
+            let sizes: Vec<(usize, usize)> = lane_requests(branches, numbers)
+                .into_iter()
+                .map(|(b, n)| (b.len(), n.len()))
+                .collect();
+            assert_eq!(sizes, expected, "{label}");
+        }
     }
 
     #[test]

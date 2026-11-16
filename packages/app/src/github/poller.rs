@@ -13,7 +13,7 @@ use daruda_store::observability::log_writer::LogWriter;
 use gpui::{App, Global};
 
 use super::schedule::{HostVerdict, PollOutcome, RepoDemand, Schedule};
-use super::{PrDemand, PrList, PrUpdate};
+use super::{PrDemand, PrList, PrSubject, PrUpdate};
 use crate::gh_host::GhHost;
 use crate::settings_store::SettingsStore;
 use crate::window_registry::WindowRegistry;
@@ -118,12 +118,15 @@ impl PrPoller {
         WindowRegistry::for_each_workspace(cx, |ws, _, _| {
             for PrDemand {
                 repo,
-                branch,
+                subject,
                 focused,
             } in ws.pr_demand()
             {
                 let entry = wanted.entry(repo).or_default();
-                entry.branches.insert(branch);
+                match subject {
+                    PrSubject::Branch(branch) => entry.branches.insert(branch),
+                    PrSubject::Review(number) => entry.numbers.insert(number),
+                };
                 entry.focused |= focused;
             }
         });
@@ -138,8 +141,8 @@ impl PrPoller {
         for host in checks {
             Self::check_host(host, cx);
         }
-        for (repo, branches) in polls {
-            Self::poll_repo(repo, branches, cx);
+        for (repo, demand) in polls {
+            Self::poll_repo(repo, demand, cx);
         }
         PrList::tick(cx);
     }
@@ -224,12 +227,14 @@ impl PrPoller {
         }
     }
 
-    fn poll_repo(repo: RepoId, branches: Vec<String>, cx: &mut App) {
+    fn poll_repo(repo: RepoId, demand: RepoDemand, cx: &mut App) {
         let gh = GhHost::global(cx);
         let request = repo.clone();
+        let branches: Vec<String> = demand.branches.into_iter().collect();
+        let numbers: Vec<u64> = demand.numbers.into_iter().collect();
         let task = cx
             .background_executor()
-            .spawn(async move { gh.prs_for_branches(&request, &branches) });
+            .spawn(async move { gh.prs_for_branches(&request, &branches, &numbers) });
         cx.spawn(async move |cx| {
             let result = task.await;
             cx.update(|cx| Self::finish_poll(repo, result, cx));

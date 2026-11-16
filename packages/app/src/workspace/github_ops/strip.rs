@@ -62,7 +62,7 @@ impl Workspace {
         let enabled = crate::github::enabled(cx);
         let state = self.lane_scoped.get(&self.active);
         let repo = state
-            .and_then(|state| state.github_push())
+            .and_then(|state| state.pr_subject())
             .map(|(repo, _)| repo);
         let availability = repo.as_ref().map_or(GhAvailability::Unknown, |repo| {
             PrPoller::availability(repo.host(), cx)

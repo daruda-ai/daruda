@@ -70,14 +70,27 @@ fn calls(f: &GitFixture) -> Vec<GitCall> {
     f.fake
         .calls()
         .into_iter()
-        .filter(|call| matches!(call, GitCall::FetchRef { .. } | GitCall::AddLane { .. }))
+        .filter(|call| {
+            matches!(
+                call,
+                GitCall::FetchRef { .. }
+                    | GitCall::MoveBranch { .. }
+                    | GitCall::SetReviewMark { .. }
+                    | GitCall::AddLane { .. }
+            )
+        })
         .collect()
 }
 
 /// What was reported about making a worktree. The fixture's watcher also
 /// reports its missing git directory, which is not this feature's to judge.
 fn error_titles(f: &GitFixture, cx: &mut TestAppContext) -> Vec<String> {
-    let ours = [error::lane_create_busy(), error::lane_create_failed()];
+    let ours = [
+        error::lane_create_busy(),
+        error::lane_create_failed(),
+        error::lane_review_branch_taken("pr-9"),
+        error::lane_kept_local_commits("pr-9"),
+    ];
     f.ws.read_with(cx, |ws, _| {
         ws.error_history()
             .iter()
@@ -98,9 +111,26 @@ fn lock_free(f: &GitFixture, cx: &mut TestAppContext) -> bool {
     })
 }
 
+/// A worktree git made for review branch `pr-9`, reading back the mark
+/// the checkout wrote, as real git's config would.
+fn review_lane(f: &GitFixture, path: &std::path::Path) {
+    std::fs::create_dir_all(path).unwrap();
+    f.fake
+        .add_repo(FakeRepo::at(path).branch("pr-9").push_target(PushTarget {
+            remote: "origin".into(),
+            url: "git@github.com:o/r.git".into(),
+            branch: "pr-9".into(),
+            published: false,
+            has_upstream: false,
+            review: Some(MARK.into()),
+        }));
+}
+
+const MARK: &str = "github.com/o/r#9";
+
 #[gpui::test]
-fn a_pull_request_opens_on_a_branch_started_from_its_fetched_head(cx: &mut TestAppContext) {
-    // (label, pull request, local branch, refspec, branch, start)
+fn a_pull_request_opens_on_a_branch_brought_to_its_fetched_head(cx: &mut TestAppContext) {
+    // (label, pull request, local branch, refspec, start, review mark)
     let cases = [
         (
             "same repository: its own branch, so a push updates it",
@@ -108,38 +138,47 @@ fn a_pull_request_opens_on_a_branch_started_from_its_fetched_head(cx: &mut TestA
             "fix/scroll",
             "+refs/heads/fix/scroll:refs/remotes/upstream/fix/scroll",
             "refs/remotes/upstream/fix/scroll",
+            None,
         ),
         (
-            "fork: a review branch",
+            "fork: a review branch marked with its pull request",
             item(9, "feature", true),
             "pr-9",
             "+refs/pull/9/head:refs/daruda/pr/9",
             "refs/daruda/pr/9",
+            Some(MARK),
         ),
     ];
-    for (label, pr, branch, refspec, start) in cases {
+    for (label, pr, branch, refspec, start, review) in cases {
         let (f, _gh) = window(cx, |repo| repo);
         let new_path = crate::workspace::lane_ops::lane_checkout_path(&f.root, branch);
         fake_lane(&f.fake, &new_path, branch);
         click(&f, &pr, cx);
         cx.run_until_parked();
 
-        assert_eq!(
-            calls(&f),
-            vec![
-                GitCall::FetchRef {
-                    repo: f.root.clone(),
-                    remote: "upstream".into(),
-                    refspec: refspec.into(),
-                },
-                GitCall::AddLane {
-                    repo: f.root.clone(),
-                    new_path: new_path.clone(),
-                    start: LaneStart::new_branch(branch, Some(start)),
-                },
-            ],
-            "{label}"
-        );
+        let mut expected = vec![
+            GitCall::FetchRef {
+                repo: f.root.clone(),
+                remote: "upstream".into(),
+                refspec: refspec.into(),
+            },
+            GitCall::MoveBranch {
+                repo: f.root.clone(),
+                branch: branch.into(),
+                head: start.into(),
+            },
+        ];
+        expected.extend(review.map(|mark| GitCall::SetReviewMark {
+            repo: f.root.clone(),
+            branch: branch.into(),
+            mark: mark.into(),
+        }));
+        expected.push(GitCall::AddLane {
+            repo: f.root.clone(),
+            new_path: new_path.clone(),
+            start: LaneStart::existing_branch(branch),
+        });
+        assert_eq!(calls(&f), expected, "{label}");
         f.ws.read_with(cx, |ws, _| {
             let lane = ws.active_lane().expect("the new lane is active");
             assert_eq!(lane.path, new_path, "{label}");
@@ -161,21 +200,55 @@ fn a_pull_request_opens_on_a_branch_started_from_its_fetched_head(cx: &mut TestA
 }
 
 #[gpui::test]
-fn an_existing_local_branch_is_checked_out_rather_than_created(cx: &mut TestAppContext) {
-    let (f, _gh) = window(cx, |repo| repo.local_branches(["fix/scroll"]));
-    let new_path = crate::workspace::lane_ops::lane_checkout_path(&f.root, "fix/scroll");
-    fake_lane(&f.fake, &new_path, "fix/scroll");
-    click(&f, &item(8, "fix/scroll", false), cx);
+fn a_branch_with_commits_of_its_own_is_kept_and_the_user_told(cx: &mut TestAppContext) {
+    let (f, _gh) = window(cx, |repo| {
+        repo.ahead_branches(["pr-9"]).review_mark("pr-9", MARK)
+    });
+    let new_path = crate::workspace::lane_ops::lane_checkout_path(&f.root, "pr-9");
+    review_lane(&f, &new_path);
+    click(&f, &item(9, "feature", true), cx);
     cx.run_until_parked();
     assert_eq!(
         calls(&f).last(),
         Some(&GitCall::AddLane {
             repo: f.root.clone(),
-            new_path,
-            start: LaneStart::existing_branch("fix/scroll"),
+            new_path: new_path.clone(),
+            start: LaneStart::existing_branch("pr-9"),
         })
     );
-    assert_eq!(f.fake.reads(GitOp::HasLocalBranch, &f.root), 1);
+    assert!(
+        !calls(&f)
+            .iter()
+            .any(|call| matches!(call, GitCall::MoveBranch { .. })),
+        "the commits stay: {:?}",
+        calls(&f)
+    );
+    f.ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_lane().unwrap().path, new_path)
+    });
+    assert_eq!(
+        error_titles(&f, cx),
+        vec![error::lane_kept_local_commits("pr-9")]
+    );
+}
+
+#[gpui::test]
+fn a_users_own_branch_named_like_the_review_branch_is_not_taken(cx: &mut TestAppContext) {
+    let (f, _gh) = window(cx, |repo| repo.local_branches(["pr-9"]));
+    let main = f.ws.read_with(cx, |ws, _| ws.active_ref());
+    let lanes_before = f.ws.read_with(cx, |ws, _| ws.projects.lanes().count());
+    click(&f, &item(9, "feature", true), cx);
+    cx.run_until_parked();
+    assert!(calls(&f).is_empty(), "{:?}", calls(&f));
+    assert_eq!(
+        error_titles(&f, cx),
+        vec![error::lane_review_branch_taken("pr-9")]
+    );
+    assert!(lock_free(&f, cx));
+    f.ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_ref(), main);
+        assert_eq!(ws.projects.lanes().count(), lanes_before);
+    });
 }
 
 #[gpui::test]
@@ -184,18 +257,21 @@ fn a_second_click_goes_to_the_worktree_the_first_made(cx: &mut TestAppContext) {
     let main = f.ws.read_with(cx, |ws, _| ws.active_ref());
     let pr = item(9, "feature", true);
     let new_path = crate::workspace::lane_ops::lane_checkout_path(&f.root, "pr-9");
-    fake_lane(&f.fake, &new_path, "pr-9");
+    review_lane(&f, &new_path);
     click(&f, &pr, cx);
     cx.run_until_parked();
     let made = f.ws.read_with(cx, |ws, _| ws.active_ref());
     assert_ne!(made, main);
-
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| f.ws.update(cx, |ws, cx| ws.activate_lane(main, window, cx)));
     click(&f, &pr, cx);
     cx.run_until_parked();
     assert_eq!(f.ws.read_with(cx, |ws, _| ws.active_ref()), made);
-    assert_eq!(calls(&f).len(), 2, "git ran once: {:?}", calls(&f));
+    assert_eq!(calls(&f).len(), 4, "git ran once: {:?}", calls(&f));
+    assert!(
+        error_titles(&f, cx).is_empty(),
+        "found by its mark, not refused as someone else's pr-9"
+    );
 }
 
 #[gpui::test]

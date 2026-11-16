@@ -27,7 +27,11 @@ through `GitHost`.
 
 - `checks::summarize` is the only place that decides what checks add up to.
 - `link::pick` decides which PR a branch belongs to: same repository only;
-  a lane on the default branch has none.
+  a lane on the default branch has none. A fork PR's review branch is not
+  looked up by name: it carries a `link::ReviewMark` (the one format of the
+  mark, kept in the branch's git config), and the poller asks for its PR by
+  number in the same per-repository request. Such a lane never reads as
+  having no PR, so it is never offered one to create.
 - `prompt` builds text for agents from outside input (CI logs, review
   comments): every piece goes through `strip_control` (`one_line` for a
   field a header holds) and is fenced or quoted so it cannot close its

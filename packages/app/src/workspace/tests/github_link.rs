@@ -92,6 +92,7 @@ fn two_windows_on_one_repository_cost_one_request(cx: &mut TestAppContext) {
         vec![GhCall::PrsForBranches {
             repo: repo(),
             branches: vec!["feat".into()],
+            numbers: vec![],
         }],
         "one request, the shared branch asked once"
     );

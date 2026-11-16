@@ -31,6 +31,7 @@ mod git_discard;
 mod git_fixture;
 mod git_remote;
 mod github_link;
+mod github_review_lane;
 mod keep_awake;
 mod kept_worktree;
 mod lane_unread;

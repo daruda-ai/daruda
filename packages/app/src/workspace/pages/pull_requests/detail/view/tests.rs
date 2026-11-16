@@ -105,7 +105,6 @@ fn lane() -> LaneFacts {
             lane: 2,
         },
         name: "fix".into(),
-        repo: None,
         branch: None,
         pr: None,
     }

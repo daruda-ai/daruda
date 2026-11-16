@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use daruda_core::age::{self, AgeBucket};
 use daruda_github::availability::{BackoffReason, GhAvailability};
 use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, RepoId, ReviewDecision};
-use daruda_store::project::LaneRef;
+use daruda_store::project::{LaneRef, ProjectId};
 
 use crate::surface::strings::{git as git_s, pull_requests as s};
 use crate::workspace::github_ops::pr_list::{HostList, PrListState};
@@ -21,43 +21,35 @@ use crate::workspace::github_ops::tone::PrTone;
 pub(in crate::workspace) struct LaneFacts {
     pub lane: LaneRef,
     pub name: String,
-    /// The GitHub repository the lane's branch pushes to.
-    pub repo: Option<RepoId>,
-    /// The branch checked out in the lane.
+    /// The branch the lane's record says it is on.
     pub branch: Option<String>,
-    /// The pull request the lane's branch is linked to.
-    pub pr: Option<(RepoId, u64)>,
+    /// The pull request the lane works on, as the Git panel's strip reads
+    /// it: a review lane's from its mark, any other's from its branch's link.
+    pub pr: Option<PrKey>,
 }
 
-/// The branch a worktree made to review fork pull request `number` is on.
-pub(in crate::workspace) fn review_branch(number: u64) -> String {
-    format!("pr-{number}")
-}
-
-/// The lane working on `item`: the one whose branch is linked to it, or, for
-/// a pull request from a fork, a lane on its review branch in a project that
-/// pushes to the pull request's repository.
+/// The lane working on `item`.
 pub(in crate::workspace) fn linked_lane<'a>(
     item: &PrListItem,
     lanes: &'a [LaneFacts],
 ) -> Option<&'a LaneFacts> {
-    let linked = lanes.iter().find(|lane| {
+    lanes.iter().find(|lane| {
         lane.pr
             .as_ref()
             .is_some_and(|(repo, number)| *repo == item.repo && *number == item.pr.number)
-    });
-    if linked.is_some() || !item.pr.cross_repo {
-        return linked;
-    }
-    let branch = review_branch(item.pr.number);
-    let projects: Vec<_> = lanes
-        .iter()
-        .filter(|lane| lane.repo.as_ref() == Some(&item.repo))
-        .map(|lane| lane.lane.project)
-        .collect();
-    lanes.iter().find(|lane| {
-        projects.contains(&lane.lane.project) && lane.branch.as_deref() == Some(branch.as_str())
     })
+}
+
+/// The lane of `project` on `branch`, which `git worktree add` would refuse
+/// to check out a second time.
+pub(in crate::workspace) fn lane_on_branch<'a>(
+    lanes: &'a [LaneFacts],
+    project: ProjectId,
+    branch: &str,
+) -> Option<&'a LaneFacts> {
+    lanes
+        .iter()
+        .find(|lane| lane.lane.project == project && lane.branch.as_deref() == Some(branch))
 }
 
 /// Why a host's `gh` cannot be asked at all; the user has to act.

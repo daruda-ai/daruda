@@ -1,19 +1,27 @@
 //! Opening a worktree from a pull request row. A pull request whose branch
 //! lives in its own repository gets a worktree on that branch, so pushing
 //! updates it; one from a fork gets a local review branch `pr-<N>`, since
-//! this repository's remote cannot push to the fork's branch.
+//! this repository's remote cannot push to the fork's branch. That branch is
+//! marked with the pull request it copies: the Git panel and this page find
+//! the pull request by the mark, and neither offers to open another for it.
 
+use daruda_github::link::ReviewMark;
 use daruda_github::{PrListItem, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
-use daruda_store::project::{LaneKind, LaneRef, ProjectId};
+use daruda_store::project::ProjectId;
 use gpui::{Context, Window};
 
-use super::list::{self, PrKey, review_branch};
-use crate::lane::git::{GitError, GitRepo, LaneStart};
+use super::list::{self, PrKey};
+use crate::lane::git::{GitError, GitRepo, LaneStart, LocalBranch};
 use crate::surface::strings::{error, pull_requests as s};
 use crate::workspace::Workspace;
 use crate::workspace::lane_ops::{CreateWorktreePlan, LaneReveal, lane_checkout_path};
+
+/// The branch a worktree made to review fork pull request `number` is on.
+fn review_branch(number: u64) -> String {
+    format!("pr-{number}")
+}
 
 /// What git is asked for to put a pull request's head in a worktree,
 /// decided before any of it runs.
@@ -28,52 +36,122 @@ pub(in crate::workspace) struct PrCheckout {
     pub refspec: String,
     /// The local branch the worktree is on.
     pub branch: String,
-    /// The fetched ref a new `branch` starts at.
+    /// The fetched ref `branch` is brought to.
     pub start: String,
+    /// For a fork's pull request, the mark its review branch carries.
+    pub review: Option<String>,
 }
 
 impl PrCheckout {
     pub(in crate::workspace) fn of(item: &PrListItem, remote: &str) -> Self {
         let number = item.pr.number;
-        let (refspec, branch, start) = if item.pr.cross_repo {
+        let (refspec, branch, start, review) = if item.pr.cross_repo {
             // GitHub keeps every pull request's head in the base repository
             // under `refs/pull/<N>/head`; a private namespace keeps it out of
             // the branch lists.
             let start = format!("refs/daruda/pr/{number}");
+            let mark = ReviewMark {
+                repo: item.repo.clone(),
+                number,
+            };
             (
                 format!("+refs/pull/{number}/head:{start}"),
                 review_branch(number),
                 start,
+                Some(mark.encode()),
             )
         } else {
             let head = &item.pr.head_branch;
             let start = format!("refs/remotes/{remote}/{head}");
-            (format!("+refs/heads/{head}:{start}"), head.clone(), start)
+            (
+                format!("+refs/heads/{head}:{start}"),
+                head.clone(),
+                start,
+                None,
+            )
         };
         Self {
             remote: remote.to_owned(),
             refspec,
             branch,
             start,
+            review,
         }
     }
 }
 
-/// Fetch the pull request's head, then add the worktree: on the existing
-/// local branch when there is one (it may hold the person's own commits),
-/// else on a new branch at what was fetched. Blocking; runs off the UI thread.
+/// Where the worktree's branch was left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CheckedOut {
+    /// At the pull request's fetched head: made there, or moved there from a
+    /// commit that head, or the one fetched before it, already held.
+    AtHead,
+    /// Where it was: it has commits of its own the head lacks, which moving
+    /// it would drop.
+    KeptLocal,
+}
+
+#[derive(Debug)]
+enum CheckoutError {
+    /// A branch of the review branch's name exists that was not made to
+    /// review this pull request; it is the person's, and is left alone.
+    Foreign(String),
+    Git(GitError),
+}
+
+impl std::fmt::Display for CheckoutError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Foreign(branch) => write!(f, "{branch} exists and reviews no such pull request"),
+            Self::Git(e) => e.fmt(f),
+        }
+    }
+}
+
+impl From<GitError> for CheckoutError {
+    fn from(e: GitError) -> Self {
+        Self::Git(e)
+    }
+}
+
+/// Fetch the pull request's head, bring the local branch to it unless that
+/// would drop commits of the person's, then add the worktree on the branch.
+/// Blocking; runs off the UI thread.
 fn check_out(
     repo: &dyn GitRepo,
     checkout: &PrCheckout,
     new_path: &std::path::Path,
-) -> Result<(), GitError> {
+) -> Result<CheckedOut, CheckoutError> {
+    let (branch, head) = (checkout.branch.as_str(), checkout.start.as_str());
+    // Measured before the fetch as well: after a force push the new head no
+    // longer holds the old one, yet a branch inside the old one has nothing
+    // of the person's to lose.
+    let before = repo.local_branch(branch, head)?;
+    if let Some(mark) = &checkout.review
+        && before != LocalBranch::Missing
+        && repo.review_mark(branch)?.as_ref() != Some(mark)
+    {
+        return Err(CheckoutError::Foreign(branch.to_owned()));
+    }
     repo.fetch_ref(&checkout.remote, &checkout.refspec)?;
-    let start = if repo.has_local_branch(&checkout.branch)? {
-        LaneStart::existing_branch(&checkout.branch)
-    } else {
-        LaneStart::new_branch(&checkout.branch, Some(&checkout.start))
+    let at_head = match before {
+        LocalBranch::Missing | LocalBranch::Contained => true,
+        LocalBranch::Ahead => repo.local_branch(branch, head)? == LocalBranch::Contained,
     };
-    repo.add_lane(new_path, start)
+    if at_head {
+        repo.move_branch(branch, head)?;
+    }
+    if let Some(mark) = &checkout.review
+        && before == LocalBranch::Missing
+    {
+        repo.set_review_mark(branch, mark)?;
+    }
+    repo.add_lane(new_path, LaneStart::existing_branch(branch))?;
+    Ok(if at_head {
+        CheckedOut::AtHead
+    } else {
+        CheckedOut::KeptLocal
+    })
 }
 
 /// The lane description of a worktree made for `item`; `None` for one on
@@ -101,7 +179,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(lane) = list::linked_lane(&item, &self.pr_page_lanes()) {
+        let lanes = self.pr_page_lanes();
+        if let Some(lane) = list::linked_lane(&item, &lanes) {
             self.activate_lane(lane.lane, window, cx);
             return;
         }
@@ -114,9 +193,14 @@ impl Workspace {
         };
         let checkout = PrCheckout::of(&item, &remote);
         // `git worktree add` refuses a branch checked out in another
-        // worktree, so a lane on it is the one to go to, linked or not yet.
-        if let Some(lane) = self.lane_on_branch(project, &checkout.branch) {
-            self.activate_lane(lane, window, cx);
+        // worktree. A lane on the PR's own branch is the one to go to, linked
+        // or not yet; one on the review branch's name that was not found as
+        // this PR's above is not its review branch.
+        if let Some(lane) = list::lane_on_branch(&lanes, project, &checkout.branch) {
+            match checkout.review {
+                None => self.activate_lane(lane.lane, window, cx),
+                Some(_) => self.report_review_branch_taken(&checkout.branch, cx),
+            }
             return;
         }
         let Some(repo_root) = self.git_repo_root_for_project(project) else {
@@ -152,7 +236,7 @@ impl Workspace {
                 .background_executor()
                 .spawn({
                     let new_path = plan.new_path.clone();
-                    async move { check_out(&*repo, &checkout, &new_path).map_err(|e| e.to_string()) }
+                    async move { check_out(&*repo, &checkout, &new_path) }
                 })
                 .await;
             let created = made.is_ok().then(|| plan.new_path.clone());
@@ -184,7 +268,7 @@ impl Workspace {
         key: PrKey,
         project: ProjectId,
         plan: CreateWorktreePlan,
-        made: Result<(), String>,
+        made: Result<CheckedOut, CheckoutError>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -192,16 +276,21 @@ impl Workspace {
         self.pages.pull_requests.creating.remove(&key);
         cx.notify();
         match made {
-            Err(detail) => self.report_pr_lane_failure(detail, cx),
-            Ok(()) if self.project_for(project).is_none() => self.report_pr_lane_failure(
+            Err(CheckoutError::Foreign(branch)) => self.report_review_branch_taken(&branch, cx),
+            Err(CheckoutError::Git(e)) => self.report_pr_lane_failure(e.to_string(), cx),
+            Ok(_) if self.project_for(project).is_none() => self.report_pr_lane_failure(
                 format!(
                     "the project closed; the worktree is at {}",
                     plan.new_path.display()
                 ),
                 cx,
             ),
-            Ok(()) => {
+            Ok(checked_out) => {
+                let branch = plan.branch.clone();
                 self.register_created_lane(plan, project, None, LaneReveal::Foreground, window, cx);
+                if checked_out == CheckedOut::KeptLocal {
+                    self.report_kept_local_commits(&branch, cx);
+                }
             }
         }
     }
@@ -226,18 +315,6 @@ impl Workspace {
         )
     }
 
-    /// The lane of `project` checked out on `branch`, as its record says.
-    fn lane_on_branch(&self, project: ProjectId, branch: &str) -> Option<LaneRef> {
-        self.project_for(project)?
-            .lanes
-            .iter()
-            .find(|lane| matches!(&lane.kind, LaneKind::Git { branch: Some(b), .. } if b == branch))
-            .map(|lane| LaneRef {
-                project,
-                lane: lane.id,
-            })
-    }
-
     fn report_pr_lane_failure(&mut self, detail: String, cx: &mut Context<Self>) {
         let report = ErrorReport::new(error::lane_create_failed())
             .severity(ErrorSeverity::Error)
@@ -247,13 +324,34 @@ impl Workspace {
             .build();
         self.report_error(report, cx);
     }
+
+    fn report_review_branch_taken(&mut self, branch: &str, cx: &mut Context<Self>) {
+        let report = ErrorReport::new(error::lane_review_branch_taken(branch))
+            .severity(ErrorSeverity::Warning)
+            .at(file!(), line!())
+            .dedup("pull_requests.review_branch_taken")
+            .build();
+        self.report_error(report, cx);
+    }
+
+    fn report_kept_local_commits(&mut self, branch: &str, cx: &mut Context<Self>) {
+        let report = ErrorReport::new(error::lane_kept_local_commits(branch))
+            .severity(ErrorSeverity::Warning)
+            .at(file!(), line!())
+            .dedup("pull_requests.kept_local_commits")
+            .build();
+        self.report_error(report, cx);
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use daruda_github::{CheckRollup, PrState, PrSummary};
 
     use super::*;
+    use crate::lane::git::{FakeGit, FakeRepo, Git as _, GitCall};
 
     fn item(cross_repo: bool, author: Option<&str>, head_owner: Option<&str>) -> PrListItem {
         PrListItem {
@@ -279,7 +377,7 @@ mod tests {
 
     #[test]
     fn a_pull_request_is_fetched_to_a_name_its_branch_starts_from() {
-        // (label, cross_repo, refspec, branch, start)
+        // (label, cross_repo, refspec, branch, start, review mark)
         let cases = [
             (
                 "same repository: its own branch",
@@ -287,16 +385,18 @@ mod tests {
                 "+refs/heads/fix/scroll:refs/remotes/up/fix/scroll",
                 "fix/scroll",
                 "refs/remotes/up/fix/scroll",
+                None,
             ),
             (
-                "fork: a review branch",
+                "fork: a review branch marked with its PR",
                 true,
                 "+refs/pull/9/head:refs/daruda/pr/9",
                 "pr-9",
                 "refs/daruda/pr/9",
+                Some("github.com/o/r#9"),
             ),
         ];
-        for (label, cross_repo, refspec, branch, start) in cases {
+        for (label, cross_repo, refspec, branch, start, review) in cases {
             let checkout = PrCheckout::of(&item(cross_repo, Some("me"), None), "up");
             assert_eq!(
                 checkout,
@@ -305,8 +405,153 @@ mod tests {
                     refspec: refspec.into(),
                     branch: branch.into(),
                     start: start.into(),
+                    review: review.map(str::to_owned),
                 },
                 "{label}"
+            );
+        }
+    }
+
+    const ROOT: &str = "/fake/repo";
+
+    /// What `check_out` asked git to change, the reads left out.
+    fn run(repo: FakeRepo, cross_repo: bool) -> (Result<CheckedOut, CheckoutError>, Vec<GitCall>) {
+        let git = FakeGit::new().with(repo);
+        let checkout = PrCheckout::of(&item(cross_repo, Some("me"), None), "up");
+        let made = check_out(
+            &*git.open(Path::new(ROOT)),
+            &checkout,
+            Path::new("/fake/lane"),
+        );
+        (made, git.calls())
+    }
+
+    fn fetch(cross_repo: bool) -> GitCall {
+        let refspec = if cross_repo {
+            "+refs/pull/9/head:refs/daruda/pr/9"
+        } else {
+            "+refs/heads/fix/scroll:refs/remotes/up/fix/scroll"
+        };
+        GitCall::FetchRef {
+            repo: ROOT.into(),
+            remote: "up".into(),
+            refspec: refspec.into(),
+        }
+    }
+
+    fn moved(branch: &str, head: &str) -> GitCall {
+        GitCall::MoveBranch {
+            repo: ROOT.into(),
+            branch: branch.into(),
+            head: head.into(),
+        }
+    }
+
+    fn added(branch: &str) -> GitCall {
+        GitCall::AddLane {
+            repo: ROOT.into(),
+            new_path: "/fake/lane".into(),
+            start: LaneStart::existing_branch(branch),
+        }
+    }
+
+    const MARK: &str = "github.com/o/r#9";
+    const REVIEW_HEAD: &str = "refs/daruda/pr/9";
+    const SAME_HEAD: &str = "refs/remotes/up/fix/scroll";
+
+    #[test]
+    fn a_branch_is_brought_to_the_fetched_head_unless_it_has_commits_of_its_own() {
+        let mark = GitCall::SetReviewMark {
+            repo: ROOT.into(),
+            branch: "pr-9".into(),
+            mark: MARK.into(),
+        };
+        let at = FakeRepo::at(ROOT);
+        // (label, repository, cross_repo, outcome, calls)
+        let cases = vec![
+            (
+                "new review branch: made at the head and marked",
+                at.clone(),
+                true,
+                CheckedOut::AtHead,
+                vec![fetch(true), moved("pr-9", REVIEW_HEAD), mark, added("pr-9")],
+            ),
+            (
+                "an old review branch is reset to the fresh head",
+                at.clone()
+                    .local_branches(["pr-9"])
+                    .review_mark("pr-9", MARK),
+                true,
+                CheckedOut::AtHead,
+                vec![fetch(true), moved("pr-9", REVIEW_HEAD), added("pr-9")],
+            ),
+            (
+                "a review branch with commits of its own is kept",
+                at.clone()
+                    .ahead_branches(["pr-9"])
+                    .review_mark("pr-9", MARK),
+                true,
+                CheckedOut::KeptLocal,
+                vec![fetch(true), added("pr-9")],
+            ),
+            (
+                "same repository, new: made at the head",
+                at.clone(),
+                false,
+                CheckedOut::AtHead,
+                vec![
+                    fetch(false),
+                    moved("fix/scroll", SAME_HEAD),
+                    added("fix/scroll"),
+                ],
+            ),
+            (
+                "same repository, behind: fast-forwarded",
+                at.clone().local_branches(["fix/scroll"]),
+                false,
+                CheckedOut::AtHead,
+                vec![
+                    fetch(false),
+                    moved("fix/scroll", SAME_HEAD),
+                    added("fix/scroll"),
+                ],
+            ),
+            (
+                "same repository, with unpushed commits: kept",
+                at.clone().ahead_branches(["fix/scroll"]),
+                false,
+                CheckedOut::KeptLocal,
+                vec![fetch(false), added("fix/scroll")],
+            ),
+        ];
+        for (label, repo, cross_repo, outcome, calls) in cases {
+            let (made, logged) = run(repo, cross_repo);
+            assert_eq!(made.ok(), Some(outcome), "{label}");
+            assert_eq!(logged, calls, "{label}");
+        }
+    }
+
+    #[test]
+    fn a_branch_of_the_review_branchs_name_made_otherwise_is_left_alone() {
+        // (label, repository)
+        let cases = [
+            ("unmarked", FakeRepo::at(ROOT).local_branches(["pr-9"])),
+            (
+                "marked for another pull request",
+                FakeRepo::at(ROOT)
+                    .local_branches(["pr-9"])
+                    .review_mark("pr-9", "github.com/fork/r#9"),
+            ),
+        ];
+        for (label, repo) in cases {
+            let (made, calls) = run(repo, true);
+            assert!(
+                matches!(made, Err(CheckoutError::Foreign(ref b)) if b == "pr-9"),
+                "{label}: {made:?}"
+            );
+            assert!(
+                calls.is_empty(),
+                "{label}: nothing fetched or moved: {calls:?}"
             );
         }
     }

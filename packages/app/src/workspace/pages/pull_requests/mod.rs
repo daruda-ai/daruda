@@ -4,11 +4,13 @@
 //! when it is searched (only while shown) and stages what it draws.
 
 use daruda_github::PrFilter;
+use daruda_store::project::LaneKind;
 use gpui::{App, Context, WeakEntity};
 
 use super::Page;
 use crate::github::PrPoller;
 use crate::workspace::Workspace;
+use crate::workspace::lane_scoped::LaneScoped;
 
 pub(in crate::workspace) mod actions;
 pub(in crate::workspace) mod detail;
@@ -131,21 +133,14 @@ impl Workspace {
     fn pr_page_lanes(&self) -> Vec<LaneFacts> {
         self.projects
             .lanes()
-            .map(|(lane, _, record)| {
-                let state = self.lane_scoped.get(&lane);
-                LaneFacts {
-                    lane,
-                    name: record.display_name(),
-                    repo: state
-                        .and_then(|state| state.github_push())
-                        .map(|(repo, _)| repo),
-                    branch: state
-                        .and_then(|state| state.git.tracking.as_ref())
-                        .and_then(|tracking| tracking.branch.clone()),
-                    pr: state
-                        .and_then(|state| state.pr.link())
-                        .map(|link| (link.repo.clone(), link.pr.number)),
-                }
+            .map(|(lane, _, record)| LaneFacts {
+                lane,
+                name: record.display_name(),
+                branch: match &record.kind {
+                    LaneKind::Git { branch, .. } => branch.clone(),
+                    LaneKind::Default => None,
+                },
+                pr: self.lane_scoped.get(&lane).and_then(LaneScoped::pr_key),
             })
             .collect()
     }

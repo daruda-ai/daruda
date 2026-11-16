@@ -12,9 +12,15 @@ use crate::{
 pub trait Gh: Send + Sync {
     /// Whether `gh` is installed and logged in to `host`.
     fn auth(&self, host: &str) -> Result<GhAuth, GhError>;
-    /// The pull requests whose head is each of `branches` in `repo`, plus the
-    /// repository's default branch.
-    fn prs_for_branches(&self, repo: &RepoId, branches: &[String]) -> Result<RepoPrs, GhError>;
+    /// The pull requests whose head is each of `branches` in `repo`, the
+    /// pull requests `numbers` name there, and the repository's default
+    /// branch. Neither branches nor numbers sends no request.
+    fn prs_for_branches(
+        &self,
+        repo: &RepoId,
+        branches: &[String],
+        numbers: &[u64],
+    ) -> Result<RepoPrs, GhError>;
     /// The open pull requests of `repos`, all on `host`, that match
     /// `filter`, most recently updated first; at most 50 per 20
     /// repositories, the rest left out and marked `truncated`. No
