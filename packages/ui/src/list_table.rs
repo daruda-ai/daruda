@@ -54,12 +54,13 @@ impl<K: Copy> ListTable<K> {
     }
 
     pub fn body(&self) -> Div {
-        div().flex().flex_col().min_w(px(self.min_width()))
+        div().flex().flex_col().w_full().min_w(px(self.min_width()))
     }
 
     pub fn row(&self, mut render_cell: impl FnMut(K, Div) -> AnyElement) -> Div {
         div()
             .flex()
+            .w_full()
             .items_center()
             .gap(px(theme::GAP_LG))
             .px(px(theme::PAD_LG))
@@ -82,7 +83,12 @@ impl<K: Copy> ListTable<K> {
 }
 
 pub fn scroll(id: impl Into<ElementId>, body: impl IntoElement) -> Stateful<Div> {
-    div().id(id).overflow_x_scroll().child(body)
+    div()
+        .id(id)
+        .w_full()
+        .min_w_0()
+        .overflow_x_scroll()
+        .child(body)
 }
 
 #[cfg(test)]

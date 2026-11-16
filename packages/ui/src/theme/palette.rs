@@ -202,7 +202,6 @@ pub const DOCK_NAV_ROW_GAP: f32 = 3.0;
 pub const DOCK_NAV_PAD_X: f32 = PAD_STANDARD;
 pub const DOCK_NAV_PAD_Y: f32 = 12.0;
 pub const DOCK_PAGE_PAD: f32 = 24.0;
-pub const DOCK_PAGE_MAX_WIDTH: f32 = 960.0;
 pub const DOCK_TREE_ROW_HEIGHT: f32 = 28.0;
 pub const DOCK_TREE_ROW_PAD_Y: f32 = 2.0;
 pub const DOCK_TREE_ROW_LINE_MIN_H: f32 = DOCK_TREE_ROW_HEIGHT - 2.0 * DOCK_TREE_ROW_PAD_Y;

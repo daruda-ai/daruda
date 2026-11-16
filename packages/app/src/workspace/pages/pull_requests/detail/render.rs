@@ -25,9 +25,8 @@ pub(in crate::workspace) fn render(
 ) -> AnyElement {
     let t = theme::current(cx);
     let body = div()
-        .mx_auto()
         .w_full()
-        .max_w(px(theme::DOCK_PAGE_MAX_WIDTH))
+        .min_w_0()
         .p(px(theme::DOCK_PAGE_PAD))
         .flex()
         .flex_col()

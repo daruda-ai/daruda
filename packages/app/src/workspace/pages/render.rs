@@ -205,20 +205,28 @@ pub(in crate::workspace) fn frame(
         .flex_col()
         .size_full()
         .min_w_0()
+        .min_h_0()
         .bg(t.dock_bg)
-        .child(div().border_b_1().border_color(t.border).child(header))
+        .child(
+            div()
+                .flex_none()
+                .border_b_1()
+                .border_color(t.border)
+                .child(header),
+        )
         .child(
             div()
                 .id("workspace-page-scroll")
+                .debug_selector(|| "workspace-page-scroll".into())
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
                 .track_scroll(&state.scroll)
                 .child(
                     div()
-                        .mx_auto()
                         .w_full()
-                        .max_w(px(theme::DOCK_PAGE_MAX_WIDTH))
+                        .min_w_0()
+                        .debug_selector(|| "workspace-page-content".into())
                         .p(px(theme::DOCK_PAGE_PAD))
                         .child(body),
                 ),
@@ -227,12 +235,4 @@ pub(in crate::workspace) fn frame(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::Page;
-
-    #[test]
-    fn navigation_artwork_distinguishes_the_pages() {
-        let icons: std::collections::HashSet<_> = Page::ALL.map(Page::icon).into();
-        assert_eq!(icons.len(), Page::ALL.len());
-    }
-}
+mod tests;
