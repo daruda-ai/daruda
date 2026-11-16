@@ -1,6 +1,7 @@
 //! The GraphQL request that finds the pull requests of several branches at
-//! once, the search that lists open pull requests across repositories, the
-//! request for one pull request's detail, and the parsers for their answers.
+//! once and the parser for its answer, plus the pull request fragment and
+//! node the other requests share: `search` lists open pull requests across
+//! repositories, `detail` reads one, `threads` reads its review threads.
 //!
 //! One aliased field per branch (`b0`, `b1`, ...) keeps the request count per
 //! repository, not per lane. Branch names travel as variables, never inside
@@ -11,14 +12,15 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::checks::{check_run_status, rollup_from_state, status_context_status, summarize};
-use crate::{
-    CheckKind, CheckRollup, CheckRun, GhError, PrFilter, PrListItem, PrSearch, PrState, PrSummary,
-    RepoId, ReviewComment, ReviewDecision, ReviewThread, ReviewThreads,
-};
+use crate::{CheckKind, CheckRollup, CheckRun, GhError, PrState, PrSummary, ReviewDecision};
 
 mod detail;
+mod search;
+mod threads;
 
 pub(crate) use detail::{parse_pr_detail, pr_detail_query};
+pub(crate) use search::{newest_first, parse_search_prs, search_prs_query, search_string};
+pub(crate) use threads::{REVIEW_THREADS_QUERY, parse_review_threads};
 
 /// PRs fetched per branch: enough to find an open one among old closed ones.
 /// Fork PRs with the same head name count against it; `ref.associatedPullRequests`
@@ -27,8 +29,6 @@ pub(crate) use detail::{parse_pr_detail, pr_detail_query};
 const PRS_PER_BRANCH: u32 = 5;
 /// Checks fetched per PR; beyond this GitHub's own rollup state is used.
 const CHECKS_PER_PR: u32 = 100;
-/// Pull requests one search answers; more are left out of the list.
-const SEARCH_RESULTS: u32 = 50;
 
 /// What [`crate::Gh::prs_for_branches`] answers.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -103,204 +103,6 @@ pub(crate) fn parse_prs_for_branches(json: &str, branches: &[String]) -> Result<
     })
 }
 
-/// The search text for open pull requests of `repos` matching `filter`,
-/// most recently updated first so a truncated answer keeps the live ones.
-/// Archived repositories take no new work, so their PRs are left out.
-pub(crate) fn search_string(repos: &[RepoId], filter: PrFilter) -> String {
-    let mut text = String::from("is:pr is:open archived:false sort:updated-desc");
-    for repo in repos {
-        text.push_str(&format!(" repo:{}/{}", repo.owner(), repo.name()));
-    }
-    match filter {
-        PrFilter::Mine => text.push_str(" author:@me"),
-        PrFilter::ReviewRequested => text.push_str(" review-requested:@me"),
-        PrFilter::AllOpen => {}
-    }
-    text
-}
-
-/// The search for open pull requests, bound to `$q` ([`search_string`]).
-pub(crate) fn search_prs_query() -> String {
-    format!(
-        "query($q: String!) {{ search(query: $q, type: ISSUE, first: {SEARCH_RESULTS}) {{ \
-         issueCount nodes {{ ... on PullRequest {{ ...pr repository {{ nameWithOwner }} \
-         headRepositoryOwner {{ login }} author {{ login }} baseRefName \
-         comments {{ totalCount }} }} }} }} }} {}",
-        pr_fragment()
-    )
-}
-
-/// Parse the answer to [`search_prs_query`] asked of `host`.
-pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<PrSearch, GhError> {
-    let response: SearchResponse = serde_json::from_str(json).map_err(parse_error)?;
-    let Some(search) = response.data.and_then(|d| d.search) else {
-        return Err(GhError::Parse(format!(
-            "no search in the answer: {}",
-            api_messages(response.errors)
-        )));
-    };
-    let truncated = search.issue_count as usize > search.nodes.len();
-    let items = search
-        .nodes
-        .into_iter()
-        .filter(|node| !is_not_a_pull_request(node))
-        .map(|node| {
-            let node: SearchNode = serde_json::from_value(node).map_err(parse_error)?;
-            let (owner, name) =
-                node.repository
-                    .name_with_owner
-                    .split_once('/')
-                    .ok_or_else(|| {
-                        GhError::Parse(format!(
-                            "repository {} is not owner/name",
-                            node.repository.name_with_owner
-                        ))
-                    })?;
-            Ok(PrListItem {
-                repo: RepoId::new(host, owner, name),
-                head_owner: node.head_repository_owner.map(|a| a.login),
-                author: node.author.map(|a| a.login),
-                base_branch: node.base_ref_name,
-                comments: node.comments.total_count,
-                pr: node.pr.into_summary()?,
-            })
-        })
-        .collect::<Result<Vec<_>, GhError>>()?;
-    Ok(PrSearch { items, truncated })
-}
-
-/// A search node that carries no pull request: `null`, or the empty object
-/// `... on PullRequest` leaves for a match of another type. One such entry
-/// must not fail the whole list; a node with fields still has to parse.
-fn is_not_a_pull_request(node: &serde_json::Value) -> bool {
-    match node {
-        serde_json::Value::Null => true,
-        serde_json::Value::Object(fields) => fields.is_empty(),
-        _ => false,
-    }
-}
-
-/// Order list items most recently updated first. `updated_at` is RFC 3339
-/// in UTC, so string order is time order; the sort is stable for ties.
-pub(crate) fn newest_first(items: &mut [PrListItem]) {
-    items.sort_by(|a, b| b.pr.updated_at.cmp(&a.pr.updated_at));
-}
-
-/// Unresolved review threads of one pull request, bound to `$owner`,
-/// `$name` and `$number`.
-pub(crate) const REVIEW_THREADS_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
-    repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
-    reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved isOutdated path \
-    line startLine originalLine originalStartLine \
-    comments(first: 20) { totalCount nodes { author { login } body } } } } } } }";
-
-/// Parse the answer to [`REVIEW_THREADS_QUERY`], keeping the unresolved
-/// threads. An outdated thread has no current line; where it was written is
-/// used instead.
-pub(crate) fn parse_review_threads(json: &str) -> Result<ReviewThreads, GhError> {
-    let response: ThreadsResponse = serde_json::from_str(json).map_err(parse_error)?;
-    let Some(connection) = response
-        .data
-        .and_then(|d| d.repository)
-        .and_then(|r| r.pull_request)
-        .map(|pr| pr.review_threads)
-    else {
-        return Err(GhError::Parse(format!(
-            "no pull request in the answer: {}",
-            api_messages(response.errors)
-        )));
-    };
-    let threads = connection
-        .nodes
-        .into_iter()
-        .filter(|thread| !thread.is_resolved)
-        .map(|thread| {
-            let end = thread.line.or(thread.original_line);
-            let start = thread.start_line.or(thread.original_start_line).or(end);
-            let more_comments = thread
-                .comments
-                .total_count
-                .is_some_and(|total| total as usize > thread.comments.nodes.len());
-            ReviewThread {
-                path: thread.path,
-                lines: end.zip(start).map(|(end, start)| (start.min(end), end)),
-                outdated: thread.is_outdated,
-                more_comments,
-                comments: thread
-                    .comments
-                    .nodes
-                    .into_iter()
-                    .map(|c| ReviewComment {
-                        author: c.author.map(|a| a.login),
-                        body: c.body,
-                    })
-                    .collect(),
-            }
-        })
-        .collect();
-    Ok(ReviewThreads {
-        threads,
-        truncated: connection.page_info.has_next_page,
-    })
-}
-
-#[derive(Deserialize)]
-struct ThreadsResponse {
-    data: Option<ThreadsData>,
-    errors: Option<Vec<ApiError>>,
-}
-
-#[derive(Deserialize)]
-struct ThreadsData {
-    repository: Option<ThreadsRepository>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ThreadsRepository {
-    pull_request: Option<ThreadsPr>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ThreadsPr {
-    review_threads: ThreadConnection,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ThreadConnection {
-    page_info: PageInfo,
-    nodes: Vec<ThreadNode>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ThreadNode {
-    is_resolved: bool,
-    is_outdated: bool,
-    path: String,
-    line: Option<u32>,
-    start_line: Option<u32>,
-    original_line: Option<u32>,
-    original_start_line: Option<u32>,
-    comments: CommentConnection,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CommentConnection {
-    #[serde(default)]
-    total_count: Option<u32>,
-    nodes: Vec<CommentNode>,
-}
-
-#[derive(Deserialize)]
-struct CommentNode {
-    author: Option<Author>,
-    body: String,
-}
-
 #[derive(Deserialize)]
 struct Author {
     login: String,
@@ -317,49 +119,6 @@ fn api_messages(errors: Option<Vec<ApiError>>) -> String {
         .map(|e| e.message)
         .collect();
     messages.join("; ")
-}
-
-#[derive(Deserialize)]
-struct SearchResponse {
-    data: Option<SearchData>,
-    errors: Option<Vec<ApiError>>,
-}
-
-#[derive(Deserialize)]
-struct SearchData {
-    search: Option<SearchConnection>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SearchConnection {
-    issue_count: u32,
-    /// Parsed one by one, so an entry that is not a pull request is skipped.
-    nodes: Vec<serde_json::Value>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SearchNode {
-    #[serde(flatten)]
-    pr: PrNode,
-    repository: NameWithOwner,
-    head_repository_owner: Option<Author>,
-    author: Option<Author>,
-    base_ref_name: String,
-    comments: TotalCount,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NameWithOwner {
-    name_with_owner: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TotalCount {
-    total_count: u32,
 }
 
 #[derive(Deserialize)]
