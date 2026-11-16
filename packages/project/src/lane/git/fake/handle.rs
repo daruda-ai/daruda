@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use super::super::base::{self, AgainstBase, BaseProblem, BaseTips, ResolvedBase};
 use super::super::{
-    GitDirs, GitError, GitRepo, GitTracking, GitWorktreeStatus, LaneStart, MergeOutcome, PushTarget,
+    GitDirs, GitError, GitRepo, GitTracking, GitWorktreeStatus, LaneStart, LocalBranch,
+    MergeOutcome, PushTarget,
 };
 use super::{FakeRepo, FakeState, GitCall, GitOp, lock, not_a_repo};
 
@@ -207,6 +208,33 @@ impl GitRepo for FakeHandle {
         self.read(GitOp::HasLocalBranch, |repo| {
             Ok(repo.has_local_branch_answer(branch))
         })
+    }
+    fn local_branch(&self, branch: &str, _head: &str) -> Result<LocalBranch, GitError> {
+        self.read(GitOp::LocalBranch, |repo| {
+            Ok(repo.local_branch_answer(branch))
+        })
+    }
+    fn move_branch(&self, branch: &str, head: &str) -> Result<(), GitError> {
+        let call = GitCall::MoveBranch {
+            repo: self.repo(),
+            branch: branch.to_owned(),
+            head: head.to_owned(),
+        };
+        self.write(GitOp::MoveBranch, call, |_| ())
+    }
+    fn review_mark(&self, branch: &str) -> Result<Option<String>, GitError> {
+        self.read(
+            GitOp::ReviewMark,
+            |repo| Ok(repo.review_mark_answer(branch)),
+        )
+    }
+    fn set_review_mark(&self, branch: &str, mark: &str) -> Result<(), GitError> {
+        let call = GitCall::SetReviewMark {
+            repo: self.repo(),
+            branch: branch.to_owned(),
+            mark: mark.to_owned(),
+        };
+        self.write(GitOp::SetReviewMark, call, |_| ())
     }
 
     fn add_lane(&self, new_path: &Path, start: LaneStart) -> Result<(), GitError> {

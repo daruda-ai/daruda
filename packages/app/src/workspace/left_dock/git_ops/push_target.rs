@@ -73,6 +73,7 @@ mod tests {
             branch: branch.into(),
             published: true,
             has_upstream: false,
+            review: None,
         }
     }
 

@@ -293,6 +293,7 @@ mod tests {
             branch: branch.into(),
             published,
             has_upstream,
+            review: None,
         }
     }
 

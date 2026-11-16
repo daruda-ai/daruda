@@ -48,6 +48,7 @@ fn window(
             branch: "main".into(),
             published: true,
             has_upstream: true,
+            review: None,
         }))
     });
     let id = f.ws.read_with(cx, |ws, _| ws.active_ref());
@@ -209,6 +210,7 @@ fn a_linked_worktree_is_gone_to_without_git(cx: &mut TestAppContext) {
             branch: "feat".into(),
             published: true,
             has_upstream: false,
+            review: None,
         })
     });
     let linked = f.ws.read_with(cx, |ws, _| ws.active_ref());

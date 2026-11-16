@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use super::super::base::{AgainstBase, BaseProblem, BaseTips};
 use super::super::{
-    GitDirs, GitError, GitTracking, GitWorktreeInfo, GitWorktreeStatus, MergeOutcome, PushTarget,
-    RepoProbe,
+    GitDirs, GitError, GitTracking, GitWorktreeInfo, GitWorktreeStatus, LocalBranch, MergeOutcome,
+    PushTarget, RepoProbe,
 };
 use super::fatal;
 
@@ -17,6 +17,8 @@ pub struct FakeRepo {
     root: PathBuf,
     branch: Option<String>,
     local_branches: Vec<String>,
+    ahead_branches: Vec<String>,
+    review_marks: HashMap<String, String>,
     default_branch: Option<String>,
     pub(super) tracking: Option<GitTracking>,
     pub(super) status: Option<GitWorktreeStatus>,
@@ -43,6 +45,8 @@ impl FakeRepo {
             root: root.into(),
             branch: None,
             local_branches: Vec::new(),
+            ahead_branches: Vec::new(),
+            review_marks: HashMap::new(),
             default_branch: None,
             tracking: None,
             status: None,
@@ -95,6 +99,20 @@ impl FakeRepo {
         branches: impl IntoIterator<Item = S>,
     ) -> Self {
         self.local_branches = branches.into_iter().map(Into::into).collect();
+        self
+    }
+    /// Existing branches holding commits any fetched head lacks; they also
+    /// count as [`local_branches`](Self::local_branches).
+    pub fn ahead_branches<S: Into<String>>(
+        mut self,
+        branches: impl IntoIterator<Item = S>,
+    ) -> Self {
+        self.ahead_branches = branches.into_iter().map(Into::into).collect();
+        self
+    }
+    /// The pull request `branch` was recorded to review.
+    pub fn review_mark(mut self, branch: impl Into<String>, mark: impl Into<String>) -> Self {
+        self.review_marks.insert(branch.into(), mark.into());
         self
     }
     pub fn default_branch(mut self, branch: impl Into<String>) -> Self {
@@ -230,7 +248,21 @@ impl FakeRepo {
         })
     }
     pub(super) fn has_local_branch_answer(&self, branch: &str) -> bool {
-        self.branch.as_deref() == Some(branch) || self.local_branches.iter().any(|b| b == branch)
+        self.branch.as_deref() == Some(branch)
+            || self.local_branches.iter().any(|b| b == branch)
+            || self.ahead_branches.iter().any(|b| b == branch)
+    }
+    pub(super) fn local_branch_answer(&self, branch: &str) -> LocalBranch {
+        if self.ahead_branches.iter().any(|b| b == branch) {
+            LocalBranch::Ahead
+        } else if self.has_local_branch_answer(branch) {
+            LocalBranch::Contained
+        } else {
+            LocalBranch::Missing
+        }
+    }
+    pub(super) fn review_mark_answer(&self, branch: &str) -> Option<String> {
+        self.review_marks.get(branch).cloned()
     }
     pub(super) fn push_target_answer(&self) -> Option<PushTarget> {
         self.push_target.clone()

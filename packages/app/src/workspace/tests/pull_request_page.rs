@@ -64,6 +64,7 @@ fn linked_window(cx: &mut TestAppContext) -> (GitFixture, FakeGh, LaneRef) {
             branch: "feat".into(),
             published: true,
             has_upstream: false,
+            review: None,
         })
     });
     let id = f.ws.read_with(cx, |ws, _| ws.active_ref());

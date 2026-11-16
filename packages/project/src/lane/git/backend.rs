@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use super::base::{self, AgainstBase, BaseProblem, BaseTips};
 use super::{
-    GitDirs, GitError, GitTracking, GitWorktreeStatus, LaneStart, MergeOutcome, PushTarget,
-    RepoProbe, discard, remote, status,
+    GitDirs, GitError, GitTracking, GitWorktreeStatus, LaneStart, LocalBranch, MergeOutcome,
+    PushTarget, RepoProbe, discard, remote, status,
 };
 
 /// Factory for repository handles plus the operations that precede one.
@@ -75,6 +75,17 @@ pub trait GitRepo: Send + Sync {
     fn pull(&self) -> Result<(), GitError>;
     /// Whether `refs/heads/<branch>` exists in the repository.
     fn has_local_branch(&self, branch: &str) -> Result<bool, GitError>;
+    /// Where local `branch` stands against `head`, a ref the caller fetched.
+    fn local_branch(&self, branch: &str, head: &str) -> Result<LocalBranch, GitError>;
+    /// Create `branch` at `head` or move it there, never touching its
+    /// upstream. Refused for a branch checked out in any worktree.
+    fn move_branch(&self, branch: &str, head: &str) -> Result<(), GitError>;
+    /// The pull request `branch` was checked out to review, as
+    /// [`set_review_mark`](Self::set_review_mark) recorded it.
+    fn review_mark(&self, branch: &str) -> Result<Option<String>, GitError>;
+    /// Record in the repository's config that `branch` reviews the pull
+    /// request `mark` names; [`push_target`](Self::push_target) reports it.
+    fn set_review_mark(&self, branch: &str, mark: &str) -> Result<(), GitError>;
 
     /// `new_path` must be absolute: the follow-up config step runs git in it,
     /// where a relative path would resolve against the process cwd and be
@@ -212,6 +223,18 @@ impl GitRepo for SystemRepo {
     }
     fn has_local_branch(&self, branch: &str) -> Result<bool, GitError> {
         remote::has_local_branch(&self.path, branch)
+    }
+    fn local_branch(&self, branch: &str, head: &str) -> Result<LocalBranch, GitError> {
+        remote::local_branch(&self.path, branch, head)
+    }
+    fn move_branch(&self, branch: &str, head: &str) -> Result<(), GitError> {
+        remote::move_branch(&self.path, branch, head)
+    }
+    fn review_mark(&self, branch: &str) -> Result<Option<String>, GitError> {
+        remote::review_mark(&self.path, branch)
+    }
+    fn set_review_mark(&self, branch: &str, mark: &str) -> Result<(), GitError> {
+        remote::set_review_mark(&self.path, branch, mark)
     }
 
     fn add_lane(&self, new_path: &Path, start: LaneStart) -> Result<(), GitError> {

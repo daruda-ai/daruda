@@ -44,6 +44,7 @@ fn pushing_to(repo: FakeRepo, name: &str) -> FakeRepo {
         branch: "feat".into(),
         published: true,
         has_upstream: false,
+        review: None,
     })
 }
 

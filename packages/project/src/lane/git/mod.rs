@@ -23,7 +23,7 @@ pub use environment::GitEnvironmentFailure;
 pub mod discard;
 mod remote;
 mod removal;
-pub use remote::PushTarget;
+pub use remote::{LocalBranch, PushTarget};
 pub use removal::{LaneRemovalState, RemovalError};
 mod status;
 

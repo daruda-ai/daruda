@@ -43,6 +43,7 @@ fn lane_pushing_feat(cx: &mut TestAppContext) -> (GitFixture, LaneRef) {
             branch: "feat".into(),
             published: true,
             has_upstream: false,
+            review: None,
         })
     });
     let id = f.ws.read_with(cx, |ws, _| ws.active_ref());
@@ -187,6 +188,7 @@ fn lane_with(cx: &mut TestAppContext, published: bool) -> (GitFixture, LaneRef) 
             branch: "feat".into(),
             published,
             has_upstream: false,
+            review: None,
         })
     });
     let id = f.ws.read_with(cx, |ws, _| ws.active_ref());
@@ -559,6 +561,7 @@ fn push_target(url: &str, branch: &str) -> PushTarget {
         branch: branch.into(),
         published: true,
         has_upstream: false,
+        review: None,
     }
 }
 

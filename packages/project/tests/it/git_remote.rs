@@ -3,8 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::fixture::{git, has_git, init, open};
-use daruda_project::lane::git::{GitError, LaneStart};
+use crate::fixture::{git, git_output, has_git, init, open};
+use daruda_project::lane::git::{GitError, LaneStart, LocalBranch};
 
 /// A repository with one commit pushed to a bare `origin.git` beside it,
 /// tracking `origin/main`. Returns `(origin, work)`.
@@ -221,4 +221,140 @@ fn only_a_local_branch_is_checked_out_as_an_existing_one() {
         !repo.has_local_branch("theirs").unwrap(),
         "no tracking branch was created"
     );
+}
+
+/// A local branch is measured against a fetched head, moved only when that
+/// loses nothing of its own, and never while a worktree has it checked out.
+#[test]
+fn a_local_branch_moves_to_a_fetched_head_that_contains_it() {
+    if !has_git() {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let (_origin, work) = pushed_repo(temp.path());
+    let repo = open(&work);
+    git(&work, &["branch", "old", "main"]);
+    git(&work, &["checkout", "-qb", "next"]);
+    std::fs::write(work.join("f.txt"), "next\n").unwrap();
+    git(&work, &["commit", "-qam", "next"]);
+    git(&work, &["update-ref", "refs/daruda/pr/1", "next"]);
+    git(&work, &["checkout", "-q", "main"]);
+
+    // (label, branch, head, expected)
+    let cases = [
+        ("absent", "nope", "refs/daruda/pr/1", LocalBranch::Missing),
+        (
+            "behind the head",
+            "old",
+            "refs/daruda/pr/1",
+            LocalBranch::Contained,
+        ),
+        (
+            "at the head",
+            "next",
+            "refs/daruda/pr/1",
+            LocalBranch::Contained,
+        ),
+        ("past the head", "next", "main", LocalBranch::Ahead),
+        (
+            "a head that does not resolve",
+            "old",
+            "refs/daruda/pr/2",
+            LocalBranch::Ahead,
+        ),
+    ];
+    for (label, branch, head, expected) in cases {
+        assert_eq!(
+            repo.local_branch(branch, head).unwrap(),
+            expected,
+            "{label}"
+        );
+    }
+
+    let tip = git(&work, &["rev-parse", "refs/daruda/pr/1"]);
+    repo.move_branch("old", "refs/daruda/pr/1").unwrap();
+    assert_eq!(git(&work, &["rev-parse", "refs/heads/old"]), tip);
+    repo.move_branch("made", "refs/daruda/pr/1").unwrap();
+    assert_eq!(git(&work, &["rev-parse", "refs/heads/made"]), tip);
+    assert!(
+        git_output(&work, &["config", "--get", "branch.made.remote"])
+            .stdout
+            .is_empty(),
+        "a branch made from a non-remote ref has no upstream"
+    );
+
+    // `main` tracks `origin/main`; moving it keeps that upstream.
+    let lane = temp.path().join("lane");
+    repo.add_lane(&lane, LaneStart::existing_branch("old"))
+        .unwrap();
+    assert!(
+        repo.move_branch("old", "main").is_err(),
+        "a branch a worktree has checked out is not moved under it"
+    );
+    git(&work, &["checkout", "-q", "next"]);
+    repo.move_branch("main", "refs/daruda/pr/1").unwrap();
+    assert_eq!(
+        git(&work, &["config", "--get", "branch.main.remote"]),
+        "origin"
+    );
+
+    for (label, branch, head) in [("branch", "-x", "main"), ("head", "old", "--all")] {
+        assert!(
+            matches!(
+                repo.move_branch(branch, head),
+                Err(GitError::OptionLike { .. })
+            ),
+            "{label}"
+        );
+        assert!(
+            matches!(
+                repo.local_branch(branch, head),
+                Err(GitError::OptionLike { .. })
+            ),
+            "{label}"
+        );
+    }
+}
+
+/// The review mark lives in the branch's config: the push target reports
+/// it, and deleting the branch takes it along.
+#[test]
+fn a_review_mark_follows_its_branch() {
+    if !has_git() {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let (_origin, work) = pushed_repo(temp.path());
+    let repo = open(&work);
+    git(&work, &["branch", "pr-7", "main"]);
+    assert_eq!(repo.review_mark("pr-7").unwrap(), None);
+
+    repo.set_review_mark("pr-7", "github.com/o/r#7").unwrap();
+    assert_eq!(
+        repo.review_mark("pr-7").unwrap().as_deref(),
+        Some("github.com/o/r#7")
+    );
+    let lane = temp.path().join("review");
+    repo.add_lane(&lane, LaneStart::existing_branch("pr-7"))
+        .unwrap();
+    let target = open(&lane).push_target().unwrap().expect("origin");
+    assert_eq!(target.review.as_deref(), Some("github.com/o/r#7"));
+    assert_eq!(
+        repo.push_target().unwrap().unwrap().review,
+        None,
+        "main has none"
+    );
+
+    repo.remove_lane(&lane, false).unwrap();
+    repo.delete_branch("pr-7").unwrap();
+    git(&work, &["branch", "pr-7", "main"]);
+    assert_eq!(
+        repo.review_mark("pr-7").unwrap(),
+        None,
+        "a new branch of the same name is not the old review branch"
+    );
+    assert!(matches!(
+        repo.set_review_mark("pr-7", "-x"),
+        Err(GitError::OptionLike { .. })
+    ));
 }

@@ -1,5 +1,6 @@
-//! Where `git push` sends a branch, read the way git itself decides it, and
-//! the single-ref fetches that talk to the same remotes.
+//! Where `git push` sends a branch, read the way git itself decides it, the
+//! single-ref fetches that talk to the same remotes, and the local branches
+//! those fetches start or move.
 
 use std::path::Path;
 
@@ -21,6 +22,26 @@ pub struct PushTarget {
     /// A first push must not replace it: in a fork workflow it names the
     /// repository the branch came from, not the one it pushes to.
     pub has_upstream: bool,
+    /// The pull request daruda checked this branch out to review, as
+    /// [`REVIEW_KEY`] records it: the branch copies someone else's head, so
+    /// it has no pull request of its own to push for.
+    pub review: Option<String>,
+}
+
+/// The `branch.<name>.` variable naming the pull request a review branch
+/// was made for. Git config, not a lane record: it describes the branch,
+/// lives as long as it does (`git branch -D` drops it), and outlives a lane.
+const REVIEW_KEY: &str = "daruda-review";
+
+/// Where a local branch stands against a fetched head.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalBranch {
+    /// No `refs/heads/<branch>`.
+    Missing,
+    /// Every commit on it is in the head: moving it there loses nothing.
+    Contained,
+    /// It has commits the head lacks, or the head does not resolve.
+    Ahead,
 }
 
 /// `None` when HEAD is detached or no remote can be chosen.
@@ -38,6 +59,7 @@ pub(crate) fn push_target(wt: &Path) -> Result<Option<PushTarget>, GitError> {
     let url = run_git(wt, ["remote", "get-url", "--push", remote.as_str()])?
         .trim()
         .to_owned();
+    let review = last(&entries, &format!("branch.{branch}.{REVIEW_KEY}")).map(str::to_owned);
     let tracking_ref = format!("refs/remotes/{remote}/{remote_branch}");
     let published = ref_exists(wt, &tracking_ref)?;
     Ok(Some(PushTarget {
@@ -46,6 +68,7 @@ pub(crate) fn push_target(wt: &Path) -> Result<Option<PushTarget>, GitError> {
         branch: remote_branch,
         published,
         has_upstream,
+        review,
     }))
 }
 
@@ -78,6 +101,54 @@ pub(crate) fn fetch_ref(wt: &Path, remote: &str, refspec: &str) -> Result<(), Gi
 
 pub(crate) fn has_local_branch(wt: &Path, branch: &str) -> Result<bool, GitError> {
     ref_exists(wt, &format!("refs/heads/{branch}"))
+}
+
+/// Where `branch` stands against `head`, a ref the caller fetched.
+pub(crate) fn local_branch(wt: &Path, branch: &str, head: &str) -> Result<LocalBranch, GitError> {
+    reject_option_like("branch", branch)?;
+    reject_option_like("head", head)?;
+    let local = format!("refs/heads/{branch}");
+    if !ref_exists(wt, &local)? {
+        return Ok(LocalBranch::Missing);
+    }
+    if !ref_exists(wt, head)? {
+        return Ok(LocalBranch::Ahead);
+    }
+    match run_git(wt, ["merge-base", "--is-ancestor", local.as_str(), head]) {
+        Ok(_) => Ok(LocalBranch::Contained),
+        Err(GitError::Exit { code: Some(1), .. }) => Ok(LocalBranch::Ahead),
+        Err(e) => Err(e),
+    }
+}
+
+/// `git branch -f --no-track <branch> <head>`: create `branch` at `head` or
+/// move it there. Git refuses a branch checked out in any worktree, so no
+/// worktree is left on a moved branch. `--no-track` keeps an upstream the
+/// branch has and gives a new one none.
+pub(crate) fn move_branch(wt: &Path, branch: &str, head: &str) -> Result<(), GitError> {
+    reject_option_like("branch", branch)?;
+    reject_option_like("head", head)?;
+    run_git(wt, ["branch", "-f", "--no-track", branch, head]).map(|_| ())
+}
+
+/// The pull request `branch` was checked out to review, if daruda made it.
+pub(crate) fn review_mark(wt: &Path, branch: &str) -> Result<Option<String>, GitError> {
+    reject_option_like("branch", branch)?;
+    let key = format!("branch.{branch}.{REVIEW_KEY}");
+    match run_git(wt, ["config", "--get", key.as_str()]) {
+        Ok(value) => Ok(Some(value.trim_end_matches('\n').to_owned())),
+        // Exit 1 is an unset key.
+        Err(GitError::Exit { code: Some(1), .. }) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Record that `branch` reviews the pull request `mark` names.
+pub(crate) fn set_review_mark(wt: &Path, branch: &str, mark: &str) -> Result<(), GitError> {
+    reject_option_like("branch", branch)?;
+    reject_option_like("review mark", mark)?;
+    let key = format!("branch.{branch}.{REVIEW_KEY}");
+    run_git(wt, ["config", key.as_str(), mark]).map(|_| ())
 }
 
 fn current_branch(wt: &Path) -> Result<Option<String>, GitError> {

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use super::*;
 use crate::lane::git::base::{BaseProblem, BaseTips, ResolvedBase};
-use crate::lane::git::{GitFileEntry, MergeOutcome};
+use crate::lane::git::{GitFileEntry, LocalBranch, MergeOutcome};
 
 const ROOT: &str = "/fake/repo";
 
@@ -186,6 +186,63 @@ fn a_branch_exists_when_checked_out_or_scripted() {
 }
 
 #[test]
+fn a_local_branch_stands_against_a_head_as_scripted() {
+    let git = FakeGit::new().with(
+        FakeRepo::at(ROOT)
+            .branch("main")
+            .local_branches(["feat"])
+            .ahead_branches(["mine"])
+            .review_mark("pr-9", "github.com/o/r#9"),
+    );
+    let repo = git.open(Path::new(ROOT));
+    // (label, branch, expected)
+    let cases = [
+        ("checked out", "main", LocalBranch::Contained),
+        ("scripted", "feat", LocalBranch::Contained),
+        (
+            "scripted with commits of its own",
+            "mine",
+            LocalBranch::Ahead,
+        ),
+        ("absent", "other", LocalBranch::Missing),
+    ];
+    for (label, branch, expected) in cases {
+        assert_eq!(
+            repo.local_branch(branch, "refs/x").unwrap(),
+            expected,
+            "{label}"
+        );
+    }
+    assert!(
+        repo.has_local_branch("mine").unwrap(),
+        "ahead is still present"
+    );
+    assert_eq!(
+        repo.review_mark("pr-9").unwrap().as_deref(),
+        Some("github.com/o/r#9")
+    );
+    assert_eq!(repo.review_mark("feat").unwrap(), None);
+
+    repo.move_branch("pr-9", "refs/daruda/pr/9").unwrap();
+    repo.set_review_mark("pr-9", "github.com/o/r#9").unwrap();
+    assert_eq!(
+        git.calls(),
+        vec![
+            GitCall::MoveBranch {
+                repo: PathBuf::from(ROOT),
+                branch: "pr-9".into(),
+                head: "refs/daruda/pr/9".into(),
+            },
+            GitCall::SetReviewMark {
+                repo: PathBuf::from(ROOT),
+                branch: "pr-9".into(),
+                mark: "github.com/o/r#9".into(),
+            },
+        ]
+    );
+}
+
+#[test]
 fn a_ref_fetch_is_logged_with_its_remote_and_refspec() {
     let git = FakeGit::new().with(FakeRepo::at(ROOT));
     git.open(Path::new(ROOT))
@@ -322,6 +379,7 @@ fn a_scripted_push_target_is_answered_and_an_upstream_push_logged() {
         branch: "feat".into(),
         published: false,
         has_upstream: false,
+        review: None,
     };
     let git = FakeGit::new()
         .with(FakeRepo::at(ROOT).branch("feat"))
