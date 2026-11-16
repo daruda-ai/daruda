@@ -5,8 +5,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
+use daruda_github::RepoPrs;
 use daruda_github::availability::{GhAuth, GhAvailability};
-use daruda_github::query::RepoPrs;
 use daruda_github::{FailureKind, GhError, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;

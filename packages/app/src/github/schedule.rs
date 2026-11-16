@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use daruda_github::RepoPrs;
 use daruda_github::availability::{BackoffReason, GhAuth, GhAvailability, backoff_delay};
-use daruda_github::query::RepoPrs;
 use daruda_github::{FailureKind, RepoId};
 
 /// The cadence of a repository no window is focused on.

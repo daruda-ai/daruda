@@ -5,8 +5,7 @@
 //! marked with the pull request it copies: the Git panel and this page find
 //! the pull request by the mark, and neither offers to open another for it.
 
-use daruda_github::link::ReviewMark;
-use daruda_github::{PrListItem, RepoId};
+use daruda_github::{PrCheckout, PrListItem, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::project::ProjectId;
@@ -17,68 +16,6 @@ use crate::lane::git::{GitError, GitRepo, LaneStart, LocalBranch};
 use crate::surface::strings::{error, pull_requests as s};
 use crate::workspace::Workspace;
 use crate::workspace::lane_ops::{CreateWorktreePlan, LaneReveal, lane_checkout_path};
-
-/// The branch a worktree made to review fork pull request `number` is on.
-fn review_branch(number: u64) -> String {
-    format!("pr-{number}")
-}
-
-/// What git is asked for to put a pull request's head in a worktree,
-/// decided before any of it runs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workspace) struct PrCheckout {
-    pub remote: String,
-    /// What `git fetch <remote>` is given. It names its destination, so the
-    /// fetched commit has a name `git worktree add` can start from: a plain
-    /// `git fetch <remote> <head>` only moves `<remote>/<head>` when the
-    /// remote's configured refspec covers the branch, which a single-branch
-    /// clone's does not, and `FETCH_HEAD` is rewritten by any other fetch.
-    pub refspec: String,
-    /// The local branch the worktree is on.
-    pub branch: String,
-    /// The fetched ref `branch` is brought to.
-    pub start: String,
-    /// For a fork's pull request, the mark its review branch carries.
-    pub review: Option<String>,
-}
-
-impl PrCheckout {
-    pub(in crate::workspace) fn of(item: &PrListItem, remote: &str) -> Self {
-        let number = item.pr.number;
-        let (refspec, branch, start, review) = if item.pr.cross_repo {
-            // GitHub keeps every pull request's head in the base repository
-            // under `refs/pull/<N>/head`; a private namespace keeps it out of
-            // the branch lists.
-            let start = format!("refs/daruda/pr/{number}");
-            let mark = ReviewMark {
-                repo: item.repo.clone(),
-                number,
-            };
-            (
-                format!("+refs/pull/{number}/head:{start}"),
-                review_branch(number),
-                start,
-                Some(mark.encode()),
-            )
-        } else {
-            let head = &item.pr.head_branch;
-            let start = format!("refs/remotes/{remote}/{head}");
-            (
-                format!("+refs/heads/{head}:{start}"),
-                head.clone(),
-                start,
-                None,
-            )
-        };
-        Self {
-            remote: remote.to_owned(),
-            refspec,
-            branch,
-            start,
-            review,
-        }
-    }
-}
 
 /// Where the worktree's branch was left.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -372,43 +309,6 @@ mod tests {
             head_owner: head_owner.map(str::to_owned),
             base_branch: "main".into(),
             comments: 0,
-        }
-    }
-
-    #[test]
-    fn a_pull_request_is_fetched_to_a_name_its_branch_starts_from() {
-        // (label, cross_repo, refspec, branch, start, review mark)
-        let cases = [
-            (
-                "same repository: its own branch",
-                false,
-                "+refs/heads/fix/scroll:refs/remotes/up/fix/scroll",
-                "fix/scroll",
-                "refs/remotes/up/fix/scroll",
-                None,
-            ),
-            (
-                "fork: a review branch marked with its PR",
-                true,
-                "+refs/pull/9/head:refs/daruda/pr/9",
-                "pr-9",
-                "refs/daruda/pr/9",
-                Some("github.com/o/r#9"),
-            ),
-        ];
-        for (label, cross_repo, refspec, branch, start, review) in cases {
-            let checkout = PrCheckout::of(&item(cross_repo, Some("me"), None), "up");
-            assert_eq!(
-                checkout,
-                PrCheckout {
-                    remote: "up".into(),
-                    refspec: refspec.into(),
-                    branch: branch.into(),
-                    start: start.into(),
-                    review: review.map(str::to_owned),
-                },
-                "{label}"
-            );
         }
     }
 

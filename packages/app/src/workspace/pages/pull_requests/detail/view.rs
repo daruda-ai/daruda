@@ -4,11 +4,11 @@
 
 use chrono::{DateTime, Utc};
 use daruda_github::{
-    ActionsJob, BlockReason, CheckEntry, CheckStatus, MergeMethod, Mergeability, PrDetail,
-    PrListItem, PrState, ReviewThread, ReviewThreads, ReviewerState,
+    ActionsJob, BlockReason, CheckEntry, CheckStatus, MergeBlock, MergeMethod, Mergeability,
+    PrDetail, PrListItem, PrState, ReviewThread, ReviewThreads, ReviewerState,
 };
 
-use super::super::actions::{self, ActionState, MergeBlock, PrAction};
+use super::super::actions::{self, ActionState, PrAction};
 use super::super::list::{self, LaneFacts, RowLane};
 use super::{Load, PrDetailId, PrDetailState, PrTab};
 use crate::surface::strings::{git as git_s, notification, pull_requests as s};
@@ -233,7 +233,7 @@ pub(in crate::workspace) fn view(
         lane: lane.lane,
         name: lane.name.clone(),
     });
-    let state_shown = if loaded.is_some_and(actions::is_draft) {
+    let state_shown = if loaded.is_some_and(PrDetail::is_draft) {
         PrState::Draft
     } else {
         pr.state
@@ -300,7 +300,7 @@ fn ready(
             .map(|entry| check_row(entry, state))
             .collect(),
         checks_send: send(loaded.summary.failed.is_empty()),
-        rerun: (!actions::failed_runs(&loaded.checks).is_empty())
+        rerun: (!loaded.failed_runs().is_empty())
             .then(|| ActionSlot::of(&state.action, PrAction::Rerunning, None)),
         threads: match &state.threads {
             None | Some(Load::Loading) => ThreadsView::Loading,
@@ -321,13 +321,13 @@ fn header_actions(loaded: &PrDetail, running: &ActionState) -> Option<HeaderActi
     if !loaded.summary.state.is_active() {
         return None;
     }
-    let draft = actions::is_draft(loaded);
-    let methods: Vec<(MergeMethod, String)> =
-        actions::merge_menu(&loaded.methods, loaded.default_method)
-            .into_iter()
-            .map(|method| (method, actions::merge_action_label(method)))
-            .collect();
-    let blocked = actions::merge_block(loaded).map(|block| match block {
+    let draft = loaded.is_draft();
+    let methods: Vec<(MergeMethod, String)> = loaded
+        .merge_menu()
+        .into_iter()
+        .map(|method| (method, actions::merge_action_label(method)))
+        .collect();
+    let blocked = loaded.merge_block().map(|block| match block {
         MergeBlock::NoMethods => s::merge_no_methods(),
         MergeBlock::Draft => s::merge_blocked(s::blocked_draft()),
         MergeBlock::Conflicting => s::merge_blocked(s::merge_conflicting()),

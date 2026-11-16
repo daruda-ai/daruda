@@ -3,12 +3,7 @@
 //! runs `gh` on the background executor, one at a time per detail, and lands
 //! only on the detail that asked (detail ids are never reused).
 
-use std::collections::BTreeSet;
-
-use daruda_github::{
-    BlockReason, CheckEntry, CheckStatus, GhError, MergeMethod, Mergeability, PrDetail, PrState,
-    RepoId,
-};
+use daruda_github::{GhError, MergeMethod, PrDetail, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use gpui::{Context, Window};
@@ -50,65 +45,6 @@ impl ActionState {
     }
 }
 
-/// Why the merge button is off. Anything else GitHub would refuse (a
-/// missing review, a branch behind its base, a state not worked out yet) is
-/// left to GitHub to say: the reason shows in the sub-line, and a refusal
-/// comes back as the action's error.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::workspace) enum MergeBlock {
-    NoMethods,
-    /// A draft is made ready for review first, with its own button.
-    Draft,
-    Conflicting,
-}
-
-/// Whether `loaded` is a draft. GitHub says so twice, as the pull request's
-/// own flag and as why it cannot merge, and the two can disagree for a
-/// moment; either one makes it a draft, so the merge button, Ready for
-/// review and the state shown never decide differently.
-pub(in crate::workspace) fn is_draft(loaded: &PrDetail) -> bool {
-    match loaded.summary.state {
-        PrState::Draft => true,
-        PrState::Open => loaded.mergeability == Mergeability::Blocked(BlockReason::Draft),
-        PrState::Merged | PrState::Closed => false,
-    }
-}
-
-pub(in crate::workspace) fn merge_block(loaded: &PrDetail) -> Option<MergeBlock> {
-    if loaded.methods.is_empty() {
-        Some(MergeBlock::NoMethods)
-    } else if is_draft(loaded) {
-        Some(MergeBlock::Draft)
-    } else if loaded.mergeability == Mergeability::Conflicting {
-        Some(MergeBlock::Conflicting)
-    } else {
-        None
-    }
-}
-
-/// Whether `method` may be asked of GitHub for `loaded`.
-fn can_merge(loaded: &PrDetail, method: MergeMethod) -> bool {
-    merge_block(loaded).is_none() && loaded.methods.contains(&method)
-}
-
-/// The merge methods the menu offers: only those the repository allows,
-/// GitHub's preselected one for the viewer first, since it labels the
-/// button. Without one (or one no longer allowed) a fixed order stands in:
-/// Squash, then Merge, then Rebase.
-pub(in crate::workspace) fn merge_menu(
-    allowed: &[MergeMethod],
-    default: Option<MergeMethod>,
-) -> Vec<MergeMethod> {
-    let fallback = [MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase];
-    let mut menu: Vec<MergeMethod> = default
-        .into_iter()
-        .chain(fallback.into_iter().filter(|m| Some(*m) != default))
-        .filter(|method| allowed.contains(method))
-        .collect();
-    menu.dedup();
-    menu
-}
-
 /// What merging with `method` is called on its button, menu item and
 /// confirmation.
 pub(in crate::workspace) fn merge_action_label(method: MergeMethod) -> String {
@@ -117,17 +53,6 @@ pub(in crate::workspace) fn merge_action_label(method: MergeMethod) -> String {
         MergeMethod::Merge => s::merge_commit(),
         MergeMethod::Rebase => s::merge_rebase(),
     }
-}
-
-/// Each Actions run with a failed job, once: `gh run rerun --failed` reruns
-/// every failed job of a run, so two failed jobs of one run are one rerun.
-pub(in crate::workspace) fn failed_runs(checks: &[CheckEntry]) -> Vec<u64> {
-    let runs: BTreeSet<u64> = checks
-        .iter()
-        .filter(|entry| entry.run.status == CheckStatus::Failure)
-        .filter_map(|entry| entry.job.map(|job| job.run))
-        .collect();
-    runs.into_iter().collect()
 }
 
 /// What a failed `action` on pull request `number` is called, wherever it
@@ -230,7 +155,7 @@ impl Workspace {
         let Some(target) = self.pr_action_target(id) else {
             return;
         };
-        if !can_merge(&target.loaded, method) {
+        if !target.loaded.can_merge(method) {
             return;
         }
         let head_sha = target.loaded.head_sha.clone();
@@ -303,7 +228,7 @@ impl Workspace {
         let Some(target) = self.pr_action_target(id) else {
             return;
         };
-        let runs = failed_runs(&target.loaded.checks);
+        let runs = target.loaded.failed_runs();
         if !runs.is_empty() {
             self.run_pr_action(id, Request::Rerun(runs), cx);
         }
@@ -314,9 +239,9 @@ impl Workspace {
             return;
         };
         let applies = match &request {
-            Request::Merge { method, .. } => can_merge(&target.loaded, *method),
+            Request::Merge { method, .. } => target.loaded.can_merge(*method),
             Request::Close => true,
-            Request::Ready => is_draft(&target.loaded),
+            Request::Ready => target.loaded.is_draft(),
             Request::Rerun(runs) => !runs.is_empty(),
         };
         if !applies {
@@ -430,182 +355,7 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use daruda_github::{ActionsJob, CheckKind, CheckRun};
-
     use super::*;
-
-    #[test]
-    fn the_menu_offers_only_allowed_methods_default_first() {
-        use MergeMethod::{Merge, Rebase, Squash};
-        /// (label, allowed as GitHub lists them, GitHub's default, menu)
-        type Case = (
-            &'static str,
-            Vec<MergeMethod>,
-            Option<MergeMethod>,
-            Vec<MergeMethod>,
-        );
-        let cases: [Case; 8] = [
-            (
-                "the default leads",
-                vec![Merge, Squash, Rebase],
-                Some(Rebase),
-                vec![Rebase, Squash, Merge],
-            ),
-            (
-                "merge as default",
-                vec![Merge, Squash, Rebase],
-                Some(Merge),
-                vec![Merge, Squash, Rebase],
-            ),
-            (
-                "a default no longer allowed falls back",
-                vec![Merge, Rebase],
-                Some(Squash),
-                vec![Merge, Rebase],
-            ),
-            (
-                "no default: the fixed order",
-                vec![Merge, Squash, Rebase],
-                None,
-                vec![Squash, Merge, Rebase],
-            ),
-            ("no squash", vec![Rebase, Merge], None, vec![Merge, Rebase]),
-            ("rebase only", vec![Rebase], Some(Rebase), vec![Rebase]),
-            (
-                "squash and rebase",
-                vec![Rebase, Squash],
-                None,
-                vec![Squash, Rebase],
-            ),
-            ("none", vec![], Some(Merge), vec![]),
-        ];
-        for (label, allowed, default, menu) in cases {
-            assert_eq!(merge_menu(&allowed, default), menu, "{label}");
-        }
-    }
-
-    #[test]
-    fn merge_is_off_only_for_a_draft_a_conflict_or_no_method() {
-        use daruda_github::{CheckRollup, PrSummary};
-        let detail = |state, mergeability, methods: Vec<MergeMethod>| PrDetail {
-            summary: PrSummary {
-                number: 1,
-                url: String::new(),
-                title: String::new(),
-                state,
-                head_branch: "h".into(),
-                cross_repo: false,
-                checks: CheckRollup::None,
-                failed: Vec::new(),
-                review: None,
-                updated_at: String::new(),
-            },
-            body: String::new(),
-            head_sha: "abc".into(),
-            base_branch: "main".into(),
-            author: None,
-            mergeability,
-            methods,
-            default_method: None,
-            reviewers: Vec::new(),
-            checks: Vec::new(),
-            open_threads: 0,
-        };
-        let squash = || vec![MergeMethod::Squash];
-        let blocked = Mergeability::Blocked(BlockReason::Requirements);
-        let draft = Mergeability::Blocked(BlockReason::Draft);
-        // (label, state, mergeability, methods, block)
-        let cases = [
-            ("ready", PrState::Open, Mergeability::Ready, squash(), None),
-            (
-                "GitHub may refuse: it says so",
-                PrState::Open,
-                blocked,
-                squash(),
-                None,
-            ),
-            (
-                "not worked out yet",
-                PrState::Open,
-                Mergeability::Unknown,
-                squash(),
-                None,
-            ),
-            (
-                "a conflict",
-                PrState::Open,
-                Mergeability::Conflicting,
-                squash(),
-                Some(MergeBlock::Conflicting),
-            ),
-            (
-                "a draft",
-                PrState::Draft,
-                blocked,
-                squash(),
-                Some(MergeBlock::Draft),
-            ),
-            (
-                "a draft only by why it cannot merge",
-                PrState::Open,
-                draft,
-                squash(),
-                Some(MergeBlock::Draft),
-            ),
-            (
-                "a draft only by its own flag",
-                PrState::Draft,
-                Mergeability::Unknown,
-                squash(),
-                Some(MergeBlock::Draft),
-            ),
-            (
-                "no method",
-                PrState::Open,
-                Mergeability::Ready,
-                vec![],
-                Some(MergeBlock::NoMethods),
-            ),
-        ];
-        for (label, state, mergeability, methods, block) in cases {
-            let loaded = detail(state, mergeability, methods);
-            assert_eq!(merge_block(&loaded), block, "{label}");
-            assert_eq!(
-                is_draft(&loaded),
-                block == Some(MergeBlock::Draft),
-                "{label}"
-            );
-            assert_eq!(
-                can_merge(&loaded, MergeMethod::Squash),
-                block.is_none(),
-                "{label}"
-            );
-        }
-        let merged = detail(PrState::Merged, draft, squash());
-        assert!(!is_draft(&merged), "a merged pull request is no draft");
-        let ready = detail(PrState::Open, Mergeability::Ready, squash());
-        assert!(
-            !can_merge(&ready, MergeMethod::Rebase),
-            "a method not allowed"
-        );
-    }
-
-    fn entry(status: CheckStatus, job: Option<ActionsJob>) -> CheckEntry {
-        CheckEntry {
-            run: CheckRun {
-                kind: CheckKind::Run,
-                workflow: None,
-                event: None,
-                name: "c".into(),
-                status,
-                details_url: None,
-                started_at: None,
-                completed_at: None,
-            },
-            job,
-            duration: None,
-        }
-    }
 
     #[test]
     fn a_failure_no_window_can_show_goes_to_the_log() {
@@ -622,20 +372,5 @@ mod tests {
         let moved = unshown_failure(PrAction::Merging, &repo, 7, &Err(GhError::HeadMoved))
             .expect("a moved head is logged");
         assert_eq!(moved.title, error::github_pr_head_moved(7));
-    }
-
-    #[test]
-    fn each_failed_run_is_rerun_once() {
-        let job = |run, job| Some(ActionsJob { run, job });
-        let checks = [
-            entry(CheckStatus::Failure, job(9, 1)),
-            entry(CheckStatus::Failure, job(9, 2)),
-            entry(CheckStatus::Failure, job(4, 3)),
-            entry(CheckStatus::Failure, None),
-            entry(CheckStatus::Success, job(5, 4)),
-            entry(CheckStatus::Pending, job(6, 5)),
-        ];
-        assert_eq!(failed_runs(&checks), [4, 9]);
-        assert!(failed_runs(&checks[3..]).is_empty());
     }
 }

@@ -3,8 +3,8 @@
 //! moments that can change it: a poll answer, a moved push target, `gh`
 //! becoming unusable, and the feature being switched off.
 
+use daruda_github::RepoPrs;
 use daruda_github::link::{ReviewMark, pick};
-use daruda_github::query::RepoPrs;
 use daruda_github::remote_parse::parse_remote;
 use daruda_github::{PrSummary, RepoId};
 use daruda_store::project::LaneRef;

@@ -6,8 +6,10 @@
 //! [`Gh`] trait, so this crate stores no token and speaks no HTTP itself.
 //! Tests use `FakeGh` (feature `test-support`) and never spawn `gh`.
 
+mod actions;
 pub mod availability;
 mod backend;
+mod checkout;
 mod checks;
 mod error;
 #[cfg(any(test, feature = "test-support"))]
@@ -15,11 +17,13 @@ pub mod fake;
 pub mod link;
 pub mod model;
 pub mod prompt;
-pub mod query;
+mod query;
 pub mod remote_parse;
 mod system;
 
+pub use actions::MergeBlock;
 pub use backend::Gh;
+pub use checkout::PrCheckout;
 pub use error::{FailureKind, GhError};
 pub use model::{
     ActionsJob, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus,
@@ -27,4 +31,5 @@ pub use model::{
     PrSearch, PrState, PrSummary, RepoId, ReviewComment, ReviewDecision, ReviewThread,
     ReviewThreads, ReviewerState,
 };
+pub use query::RepoPrs;
 pub use system::SystemGh;

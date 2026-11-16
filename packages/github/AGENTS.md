@@ -34,6 +34,13 @@ through `GitHost`.
   having no PR, so it is never offered one to create. A number GitHub cannot
   resolve fails only that alias (`NOT_FOUND`; `gh` exits non-zero but
   prints the partial answer), so it never pauses the repository's poll.
+- `PrDetail`'s `is_draft`, `merge_block`, `can_merge`, `merge_menu` and
+  `failed_runs` (`actions.rs`) decide what the detail may ask of GitHub;
+  the app maps their answers to labels and buttons and never re-derives them.
+- `PrCheckout::of` decides how a pull request's head reaches a worktree:
+  a same-repository PR's own branch, or a fork's `pr-<N>` review branch
+  fetched from `refs/pull/<N>/head` and marked with its `ReviewMark`.
+  The app runs the git it names.
 - `prompt` builds text for agents from outside input (CI logs, review
   comments): every piece goes through `strip_control` (`one_line` for a
   field a header holds) and is fenced or quoted so it cannot close its

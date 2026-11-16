@@ -14,8 +14,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+use daruda_github::RepoPrs;
 use daruda_github::availability::GhAvailability;
-use daruda_github::query::RepoPrs;
 use daruda_github::{PrFilter, PrSearch, PrSummary, RepoId};
 use gpui::App;
 
