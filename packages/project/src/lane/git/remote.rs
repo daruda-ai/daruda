@@ -22,9 +22,9 @@ pub struct PushTarget {
     /// A first push must not replace it: in a fork workflow it names the
     /// repository the branch came from, not the one it pushes to.
     pub has_upstream: bool,
-    /// The pull request daruda checked this branch out to review, as
-    /// [`REVIEW_KEY`] records it: the branch copies someone else's head, so
-    /// it has no pull request of its own to push for.
+    /// The pull request daruda checked this branch out to review, as the
+    /// `branch.<name>.daruda-review` key records it: the branch copies
+    /// someone else's head, so it has no pull request of its own to push for.
     pub review: Option<String>,
 }
 
