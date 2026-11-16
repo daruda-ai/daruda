@@ -33,6 +33,11 @@ through `GitHost`.
   field a header holds) and is fenced or quoted so it cannot close its
   quote or end a bracketed paste. The app sends it only to writable agent
   chats, inserted and never submitted.
+- Mutations (`merge_pr`, `set_ready`, `close_pr`, `rerun_failed`) run only
+  on the user's action. A merge is pinned with `--match-head-commit` to the
+  head the user saw and never passes `--delete-branch`, `--auto` or
+  `--admin`. A mutation's error is reported to the user who asked; it is
+  not a poll failure and does not feed the poller's host state.
 - Polling (`app/src/github/poller.rs`) is process-wide and asks once per
   repository per round, however many windows show its lanes. Its timing,
   backoff and auth-recheck rules are GPUI-free in `app/src/github/schedule.rs`.
