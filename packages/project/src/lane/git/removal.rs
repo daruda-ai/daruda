@@ -92,14 +92,26 @@ pub(super) fn remove_orphan(repo: &Path, path: &Path) -> Result<(), RemovalError
     }
     let target = canonicalize(path).map_err(|e| io_error(path, e))?;
     let common = git_dirs(repo)?.common_dir;
-    if worktrees.iter().any(|lane| overlaps(&target, &lane.path)) || overlaps(&target, &common) {
+    if worktrees.iter().any(|lane| is_within(&lane.path, &target)) || overlaps(&target, &common) {
+        return Err(protected());
+    }
+    let marker = target.join(".git");
+    let owned_orphan =
+        metadata(&marker)?.is_some_and(|m| m.is_file()) && dangling_link(&marker, &common)?;
+    // Only a stale link into this repository proves a child checkout's
+    // ownership. Ordinary folders inside its working trees stay protected.
+    if worktrees.iter().any(|lane| is_within(&target, &lane.path)) && !owned_orphan {
         return Err(protected());
     }
     // A path inside another repository can lack its own .git marker.
-    // Inspect parents too, instead of treating a failed git probe as absence.
+    // An owned nested checkout may cross this repository's registered roots,
+    // but never an unrelated repository on the way up.
     for parent in target.ancestors().skip(1) {
         if metadata(&parent.join(".git"))?.is_some() || bare_repository(parent)? {
-            return Err(protected());
+            let registered_parent = worktrees.iter().any(|lane| same_path(parent, &lane.path));
+            if !owned_orphan || !registered_parent {
+                return Err(protected());
+            }
         }
     }
     check_contents(&target, &target, &common)?;
@@ -129,7 +141,11 @@ fn check_contents(dir: &Path, root: &Path, common: &Path) -> Result<(), RemovalE
         let entry = entry.map_err(|e| io_error(dir, e))?;
         let path = entry.path();
         let kind = entry.file_type().map_err(|e| io_error(&path, e))?;
-        if entry.file_name() == ".git" {
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.eq_ignore_ascii_case(".git"))
+        {
             if dir == root && kind.is_file() && dangling_link(&path, common)? {
                 continue;
             }

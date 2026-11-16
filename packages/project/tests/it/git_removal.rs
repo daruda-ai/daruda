@@ -134,6 +134,77 @@ fn orphan_cleanup_allows_a_dangling_link_to_this_repository_only() {
 }
 
 #[test]
+fn orphan_cleanup_preserves_mixed_case_gitfiles_at_any_depth() {
+    for (marker, nested) in [(".GIT", false), (".Git", false), (".GIT", true)] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("main");
+        let other = temp.path().join("other");
+        repository(&root);
+        repository(&other);
+        let leftover = temp.path().join("leftover");
+        let lane = if nested {
+            leftover.join("nested")
+        } else {
+            leftover.clone()
+        };
+        open(&other).add_lane(&lane, Some("feature"), None).unwrap();
+        // Rename through a distinct name so case-insensitive filesystems
+        // also change the directory entry's spelling.
+        std::fs::rename(lane.join(".git"), lane.join("git-link")).unwrap();
+        std::fs::rename(lane.join("git-link"), lane.join(marker)).unwrap();
+        if lane.join(".git").exists() {
+            let toplevel = git(&lane, &["rev-parse", "--show-toplevel"]);
+            assert!(daruda_core::path::same_path(
+                std::path::Path::new(&toplevel),
+                &lane
+            ));
+        }
+        assert!(
+            open(&root).remove_orphaned_lane(&leftover).is_err(),
+            "{marker}, nested={nested}"
+        );
+        assert!(lane.join(marker).exists());
+    }
+}
+
+#[test]
+fn orphan_cleanup_allows_an_owned_worktree_inside_the_main_checkout() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("main");
+    repository(&root);
+    let lane = root.join(".worktrees").join("feature");
+    let repo = open(&root);
+    repo.add_lane(&lane, Some("feature"), None).unwrap();
+    let dirs = open(&lane).dirs().unwrap();
+    std::fs::remove_dir_all(&dirs.git_dir).unwrap();
+    assert_eq!(
+        repo.lane_removal_state(&lane).unwrap(),
+        LaneRemovalState::Unregistered
+    );
+    repo.remove_orphaned_lane(&lane).unwrap();
+    assert!(!lane.exists());
+    assert!(root.join(".git").exists());
+    assert!(repo.has_local_branch("feature").unwrap());
+}
+
+#[test]
+fn orphan_cleanup_does_not_allow_an_owned_link_to_bypass_another_repository() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("main");
+    let other = temp.path().join("other");
+    repository(&root);
+    repository(&other);
+    let lane = other.join(".worktrees").join("feature");
+    let repo = open(&root);
+    repo.add_lane(&lane, Some("feature"), None).unwrap();
+    let dirs = open(&lane).dirs().unwrap();
+    std::fs::remove_dir_all(&dirs.git_dir).unwrap();
+    assert!(repo.remove_orphaned_lane(&lane).is_err());
+    assert!(lane.join(".git").exists());
+    assert!(other.join(".git").exists());
+}
+
+#[test]
 fn orphan_cleanup_requires_a_usable_repository_even_when_target_is_missing() {
     let temp = tempfile::tempdir().unwrap();
     let missing = temp.path().join("missing");
@@ -177,21 +248,33 @@ fn orphan_cleanup_preserves_bare_repositories_with_symlinked_storage() {
 }
 
 #[test]
-fn removal_inspection_preserves_unusual_worktree_path_characters() {
-    for name in ["한글 ' $ `", "tab\tname", "line\nname", "trailing space "] {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join("main");
-        repository(&root);
-        let lane = temp.path().join(name);
-        let repo = open(&root);
-        repo.add_lane(&lane, Some("feature"), None).unwrap();
-        assert_eq!(
-            repo.lane_removal_state(&lane).unwrap(),
-            LaneRemovalState::Registered,
-            "{name:?}"
-        );
-        assert!(repo.remove_orphaned_lane(&lane).is_err(), "{name:?}");
-        repo.remove_lane(&lane, false).unwrap();
-        assert!(!lane.exists(), "{name:?}");
+fn removal_inspection_preserves_portable_worktree_path_characters() {
+    for name in ["한글 ' $ `", "space name"] {
+        assert_worktree_path_roundtrip(name);
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn removal_inspection_preserves_unix_worktree_path_characters() {
+    for name in ["tab\tname", "line\nname", "trailing space "] {
+        assert_worktree_path_roundtrip(name);
+    }
+}
+
+fn assert_worktree_path_roundtrip(name: &str) {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("main");
+    repository(&root);
+    let lane = temp.path().join(name);
+    let repo = open(&root);
+    repo.add_lane(&lane, Some("feature"), None).unwrap();
+    assert_eq!(
+        repo.lane_removal_state(&lane).unwrap(),
+        LaneRemovalState::Registered,
+        "{name:?}"
+    );
+    assert!(repo.remove_orphaned_lane(&lane).is_err(), "{name:?}");
+    repo.remove_lane(&lane, false).unwrap();
+    assert!(!lane.exists(), "{name:?}");
 }
