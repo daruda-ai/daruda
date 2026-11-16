@@ -364,7 +364,8 @@ pub struct Workspace {
     /// The three docks and which view each side shows — see
     /// [`layout::docks::Docks`].
     pub(in crate::workspace) docks: layout::docks::Docks,
-    pub(in crate::workspace) workspace_page: Option<pages::PageState>,
+    /// The page shown in place of the lane's tabs — see [`pages::ShownPage`].
+    pub(in crate::workspace) workspace_page: pages::ShownPage,
     /// What each page keeps while it is not on screen — see
     /// [`pages::detail::PageDetails`].
     pub(in crate::workspace) pages: pages::detail::PageDetails,

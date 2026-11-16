@@ -11,7 +11,10 @@ pub(in crate::workspace) mod detail;
 pub(in crate::workspace) mod flows;
 pub(in crate::workspace) mod pull_requests;
 pub(super) mod render;
+mod shown;
 pub(in crate::workspace) mod tasks;
+
+pub(in crate::workspace) use shown::ShownPage;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum Page {
@@ -74,7 +77,7 @@ impl PageState {
 }
 
 impl Workspace {
-    pub(in crate::workspace) fn page_state(&self, page: Page) -> PageState {
+    fn page_state(&self, page: Page) -> PageState {
         let mut state = PageState::new(page);
         if page == Page::Flows {
             state.scroll = self.flows.browser.scrolls[self.flows.browser.state.tab.index()].clone();
@@ -83,27 +86,22 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn active_page(&self) -> Option<Page> {
-        self.workspace_page.as_ref().map(|state| state.page)
+        self.workspace_page.page()
     }
 
     pub(in crate::workspace) fn show_page(&mut self, page: Page, cx: &mut Context<Self>) {
-        if self.active_page() == Some(page) {
-            return;
+        self.set_workspace_page(Some(page), cx);
+    }
+
+    /// The Flows page came on screen: watch the browsed worktree's flows too,
+    /// and catch a shown run up on what it missed while hidden.
+    fn flows_page_shown(&mut self, cx: &mut Context<Self>) {
+        self.respawn_flow_watcher(cx);
+        if let Some(detail) = &self.pages.flows.detail
+            && matches!(detail.body, flows::detail::FlowDetailBody::Run(_))
+        {
+            self.refresh_execution(detail.id, cx);
         }
-        self.mutate_durable(cx, |ws, _| {
-            ws.workspace_page = Some(ws.page_state(page));
-            ws.main_area.pending_resize = true;
-        });
-        self.follow_pr_page(cx);
-        if page == Page::Flows {
-            self.respawn_flow_watcher(cx);
-            if let Some(detail) = &self.pages.flows.detail
-                && matches!(detail.body, flows::detail::FlowDetailBody::Run(_))
-            {
-                self.refresh_execution(detail.id, cx);
-            }
-        }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn open_page(
@@ -118,14 +116,7 @@ impl Workspace {
 
     pub(in crate::workspace) fn close_page(&mut self, cx: &mut Context<Self>) {
         self.pages.flows.history_request = None;
-        if self.workspace_page.is_some() {
-            self.mutate_durable(cx, |ws, _| {
-                ws.workspace_page = None;
-                ws.main_area.pending_resize = true;
-            });
-            self.follow_pr_page(cx);
-            cx.notify();
-        }
+        self.set_workspace_page(None, cx);
     }
 
     /// Consume a page close before a command can reach the hidden tab or pane.
@@ -134,7 +125,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.workspace_page.is_none() {
+        if self.active_page().is_none() {
             return false;
         }
         self.close_page(cx);

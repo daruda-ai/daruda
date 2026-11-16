@@ -73,13 +73,8 @@ impl Workspace {
 
     pub(in crate::workspace) fn set_flow_tab(&mut self, tab: FlowTab, cx: &mut Context<Self>) {
         self.flows.browser.state.tab = tab;
-        if let Some(page) = self
-            .workspace_page
-            .as_mut()
-            .filter(|p| p.page == Page::Flows)
-        {
-            page.scroll = self.flows.browser.scrolls[tab.index()].clone();
-        }
+        self.workspace_page
+            .set_scroll(Page::Flows, self.flows.browser.scrolls[tab.index()].clone());
         cx.notify();
     }
 

@@ -277,6 +277,20 @@ fn closing_the_page_stops_its_searches(cx: &mut TestAppContext) {
     show_page(&f, cx);
     f.ws.update(cx, |ws, cx| ws.show_page(Page::Tasks, cx));
     assert_eq!(f.ws.read_with(cx, |ws, _| ws.pr_list().filter()), None);
+
+    // So does restoring a saved state, which never holds the page.
+    use gpui::AppContext as _;
+    show_page(&f, cx);
+    let ws = f.ws.clone();
+    cx.update_window(f.window.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            let (state, projects) = ws.snapshot_for_disk(cx);
+            ws.restore_from_disk(&state, &projects, window, cx);
+        });
+    })
+    .unwrap();
+    assert_eq!(f.ws.read_with(cx, |ws, _| ws.active_page()), None);
+    assert_eq!(f.ws.read_with(cx, |ws, _| ws.pr_list().filter()), None);
 }
 
 #[gpui::test]

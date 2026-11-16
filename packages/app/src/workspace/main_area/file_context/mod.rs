@@ -31,7 +31,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.workspace_page.is_none() && self.focused_file_view().is_some() {
+        if self.active_page().is_none() && self.focused_file_view().is_some() {
             self.add_file_reference(self.active_runtime().focused_pane_id, selection, window, cx);
         }
     }

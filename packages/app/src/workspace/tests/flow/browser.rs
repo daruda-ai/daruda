@@ -147,19 +147,19 @@ async fn flow_browser_tabs_retain_separate_queries_and_scroll_offsets(cx: &mut T
         ws.set_flow_tab(FlowTab::Definitions, cx);
         assert_eq!(ws.flow_browser_snapshot(cx).query, "ship");
         assert_eq!(
-            ws.workspace_page.as_ref().unwrap().scroll.offset().y,
+            ws.workspace_page.state().unwrap().scroll.offset().y,
             gpui::px(-80.0)
         );
         ws.close_page(cx);
         ws.open_page(Page::Flows, window, cx);
         assert_eq!(
-            ws.workspace_page.as_ref().unwrap().scroll.offset().y,
+            ws.workspace_page.state().unwrap().scroll.offset().y,
             gpui::px(-80.0)
         );
         ws.set_flow_tab(FlowTab::Runs, cx);
         assert_eq!(ws.flow_browser_snapshot(cx).query, "other");
         assert_eq!(
-            ws.workspace_page.as_ref().unwrap().scroll.offset().y,
+            ws.workspace_page.state().unwrap().scroll.offset().y,
             gpui::px(-20.0)
         );
     });

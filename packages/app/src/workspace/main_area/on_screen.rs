@@ -10,7 +10,7 @@ impl Workspace {
     /// Settings, a page or an unavailable lane's empty state. Every pane of a
     /// split counts, not only the focused one. Mirrors `render::center`.
     pub(in crate::workspace) fn pane_on_screen(&self, pane_id: PaneId) -> bool {
-        if self.settings.is_some() || self.workspace_page.is_some() {
+        if self.settings.is_some() || self.active_page().is_some() {
             return false;
         }
         if self.active_lane().is_some_and(|lane| {

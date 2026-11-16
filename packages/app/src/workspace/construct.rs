@@ -156,7 +156,7 @@ impl Workspace {
             next_id: 0,
             window_runtime: window_runtime::WindowRuntime::new(window, cx),
             docks: layout::docks::Docks::new(&ws_weak, config, cx),
-            workspace_page: None,
+            workspace_page: pages::ShownPage::default(),
             pages: pages::detail::PageDetails::default(),
             unseen_outcomes: unseen_outcomes::UnseenOutcomes::default(),
             agent_usage: agent_usage::AgentUsageState {

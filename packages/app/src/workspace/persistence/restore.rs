@@ -55,10 +55,12 @@ impl Workspace {
         });
         self.docks.left_view = workspace.active_dock_view;
         self.docks.right_view = workspace.active_right_panel_view;
-        self.workspace_page = workspace
-            .active_page
-            .map(|page| self.page_state(crate::workspace::pages::Page::from_stored(page)));
-        self.follow_pr_page(cx);
+        self.restore_workspace_page(
+            workspace
+                .active_page
+                .map(crate::workspace::pages::Page::from_stored),
+            cx,
+        );
         let bottom_open = workspace.docks.bottom_open;
         let bottom_size = workspace.docks.bottom_size;
         self.docks.bottom.update(cx, |d, _| {
@@ -320,7 +322,7 @@ impl Workspace {
 
         if let Some(focus) = active_focus {
             self.bump_activity(focus);
-            if self.workspace_page.is_none() {
+            if self.active_page().is_none() {
                 self.focus_pane(focus, window, cx);
             } else {
                 self.window_runtime.focus_handle.focus(window, cx);

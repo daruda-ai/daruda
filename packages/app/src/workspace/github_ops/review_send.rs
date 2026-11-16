@@ -67,7 +67,7 @@ impl Workspace {
     /// Whether `lane` is what the main area shows: the active lane, with no
     /// workspace page over it.
     fn shows_lane(&self, lane: LaneRef) -> bool {
-        self.active == lane && self.workspace_page.is_none()
+        self.active == lane && self.active_page().is_none()
     }
 
     /// The active lane and its linked pull request, which the Git panel's

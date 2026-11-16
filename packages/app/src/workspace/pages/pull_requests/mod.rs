@@ -1,7 +1,8 @@
 //! The Pull requests page: the open pull requests of every GitHub repository
 //! this window's worktrees push to, grouped by repository. The list itself
-//! is kept by [`crate::workspace::github_ops::pr_list`]; this page decides
-//! when it is searched (only while shown) and stages what it draws.
+//! is kept by [`crate::workspace::github_ops::pr_list`], searched only while
+//! the page is shown (its hooks in `pages/shown.rs`); this page stages what
+//! it draws.
 
 use daruda_github::PrFilter;
 use daruda_store::project::LaneKind;
@@ -58,14 +59,9 @@ pub(in crate::workspace) struct PrPageSnapshot {
 }
 
 impl Workspace {
-    /// Search for the list while the page is on screen and stop when it
-    /// leaves. Called wherever the shown page changes.
-    pub(in crate::workspace) fn follow_pr_page(&mut self, cx: &mut Context<Self>) {
-        if self.active_page() == Some(Page::PullRequests) {
-            self.show_pr_list(self.pages.pull_requests.filter, cx);
-        } else {
-            self.hide_pr_list(cx);
-        }
+    /// The page came on screen: search for its list until it leaves.
+    pub(super) fn pr_page_shown(&mut self, cx: &mut Context<Self>) {
+        self.show_pr_list(self.pages.pull_requests.filter, cx);
     }
 
     /// Show `filter`'s pull requests, now and whenever the page reopens.
@@ -78,7 +74,9 @@ impl Workspace {
             return;
         }
         self.pages.pull_requests.filter = filter;
-        self.follow_pr_page(cx);
+        if self.active_page() == Some(Page::PullRequests) {
+            self.show_pr_list(filter, cx);
+        }
         cx.notify();
     }
 

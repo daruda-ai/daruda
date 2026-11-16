@@ -772,7 +772,7 @@ The Workspace entity and its subsystems.
 - **`layout/`** — `Dock` entity (left/bottom/right; named `left_dock`/`right_dock`/`bottom_dock` on `Workspace`), divider + dock drag ops, plain-data snapshots for re-entrancy-safe render.
 - **`main_area/`** — TabBar + recursive PaneTree runtime. Houses `MainAreaContext`, the pure pane split-tree, pane structs + PTY spawn, directional navigation, tab lifecycle, viewport resize propagation, and the recursive `PaneLayout` renderer. `pane/mod.rs` owns pane models and view coordination; `pane/accounts/model.rs` resolves account selection without GPUI; `pane/accounts/mod.rs` owns workspace queries and preparation; `pane/terminal.rs` starts PTYs; `pane/output.rs` drains output and owns the adaptive poll policy. Sub-domains: `file_view_pane/` (file viewer), `bottom_dock/` (macro grid + terminal input + tab strip + macro data ops).
 - **`left_dock/`** — Lanes view (displayed as "Worktrees" tab) rendered as a 2-level tree (`TopRow::Group(GroupId)` / `TopRow::UngroupedProject(ProjectId)` at the top rank, expanding into project headers and lane rows). Group/Project drag payloads share a single `Vec<TopRow>` ordering pool with 0..N renumbering on drop; intra-project lane DnD stays within its project. Also git-changes view, files view, lazy file-tree context + walker, git-status fetch.
-- **`pages/`** — Tasks and Flows, shown in place of the lane's tabs and belonging to no lane. What a page shows on top of its list lives in `Workspace.pages` and survives the page being hidden; only `leave_page_detail_then` (`pages/detail.rs`) clears it, asking first about unsaved edits. `tasks/editor/` is the Task editor; `flows/graph/` is the flow graph, which runs in the worktree it was opened for, not the active one.
+- **`pages/`** — Tasks, Flows and Pull requests, shown in place of the lane's tabs and belonging to no lane. Which page is shown changes only through `set_workspace_page` (`restore_workspace_page` on restore), which runs each page's shown/hidden hook; work a page does only while on screen, such as the Pull requests search, starts and stops there. What a page shows on top of its list lives in `Workspace.pages` and survives the page being hidden; only `leave_page_detail_then` (`pages/detail.rs`) clears it, asking first about unsaved edits. `tasks/editor/` is the Task editor; `flows/graph/` is the flow graph, which runs in the worktree it was opened for, not the active one.
 - **`right_dock/`** — Usage / skills / tasks / tools views.
 - **`render/`** — `impl Render for Workspace`. Reads only plain-data snapshots — no re-entrant entity reads.
 - **`sync/`** — Background event pumps: PTY drain (tick), HTTP usage/limits poll, MCP filesystem watcher, skills filesystem watcher.
@@ -930,7 +930,7 @@ Workspace
 | `Pane` | `PaneLayout::Pane` | `workspace/main_area/pane_tree.rs` |
 | `TerminalPane` | `PaneContent::Terminal` | `workspace/main_area/pane/mod.rs` |
 | `FileViewPane` | `PaneContent::File` | `workspace/main_area/pane/mod.rs` |
-| `Page` | `workspace_page: Option<PageState>` | `workspace/pages/mod.rs` |
+| `Page` | `workspace_page: ShownPage`, changed only through `set_workspace_page` | `workspace/pages/shown.rs` |
 | `PageDetail` | `pages: PageDetails`, left only through `leave_page_detail_then` | `workspace/pages/detail.rs` |
 | `TaskEditor` | `TasksPage.detail` | `workspace/pages/tasks/editor/` |
 | `FlowGraph` / `RunDetail` | `FlowsPage.detail` (`FlowDetailBody`) | `workspace/pages/flows/graph/`, `workspace/pages/flows/run_detail.rs` |

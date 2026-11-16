@@ -9,7 +9,7 @@ pub(in crate::workspace) fn selection_action(
     ws: &Workspace,
     cx: &mut Context<Workspace>,
 ) -> Option<AnyElement> {
-    if ws.workspace_page.is_some() {
+    if ws.active_page().is_some() {
         return None;
     }
     let pane = ws.active_runtime().focused_pane_id;

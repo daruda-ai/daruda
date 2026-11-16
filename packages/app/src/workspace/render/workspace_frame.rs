@@ -102,7 +102,7 @@ impl Workspace {
             .flex_col()
             .relative()
             .overflow_hidden()
-            .when(self.workspace_page.is_none(), |el| el.child(tab_bar))
+            .when(self.active_page().is_none(), |el| el.child(tab_bar))
             .child(pane_area)
             // `.cached()`: when the bottom dock isn't notified (its
             // snapshot was staged unchanged above), GPUI recycles its
@@ -110,7 +110,7 @@ impl Workspace {
             // grid / terminal input on every parent repaint. The
             // self-notifying terminal input entity inside still repaints
             // on its own edits (Pitfall #10).
-            .when(bottom_dock_open && self.workspace_page.is_none(), |el| {
+            .when(bottom_dock_open && self.active_page().is_none(), |el| {
                 el.child(
                     gpui::AnyView::from(self.docks.bottom.clone()).cached(
                         gpui::StyleRefinement::default()
@@ -119,7 +119,7 @@ impl Workspace {
                     ),
                 )
             })
-            .when(bottom_dock_open && self.workspace_page.is_none(), |el| {
+            .when(bottom_dock_open && self.active_page().is_none(), |el| {
                 el.child(dock_resize_handle(
                     DockPosition::Bottom,
                     bottom_dock_size,
@@ -187,7 +187,7 @@ impl Workspace {
         // pane's content. Each open file pane carries its own search
         // state; "the file viewer" for action-routing purposes is the
         // one that currently has focus — never while a page hides it.
-        let focused_is_file = self.workspace_page.is_none() && self.focused_file_view().is_some();
+        let focused_is_file = self.active_page().is_none() && self.focused_file_view().is_some();
         let focused_search_open = self
             .focused_file_view()
             .is_some_and(|fv| fv.search.is_some());
@@ -225,7 +225,7 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &FileViewerSearchPrev, _window, cx| {
                 this.file_view_search_prev(cx);
             }))
-            .when(self.workspace_page.is_some(), |el| {
+            .when(self.active_page().is_some(), |el| {
                 el.on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                     this.on_page_key_down(ev, window, cx)
                 }))

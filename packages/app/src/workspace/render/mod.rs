@@ -83,7 +83,7 @@ impl Workspace {
     /// Everything a frame has to settle before it is drawn.
     fn prepare_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) -> FramePrep {
         if self.settings_view().is_none()
-            && self.workspace_page.is_none()
+            && self.active_page().is_none()
             && self.input_dock.visible
             && self.docks.bottom.read(cx).is_open
         {

@@ -34,7 +34,7 @@ pub(super) fn render_center_content(
 ) -> AnyElement {
     // Each page shows its detail when it holds one, its list otherwise. The
     // detail is read off the workspace, not a dock's snapshot.
-    if let Some(page) = &ws.workspace_page
+    if let Some(page) = ws.workspace_page.state()
         && page.page == crate::workspace::pages::Page::Flows
         && let Some(detail) = &ws.pages.flows.detail
     {
@@ -46,13 +46,13 @@ pub(super) fn render_center_content(
             cx,
         );
     }
-    if let Some(page) = &ws.workspace_page
+    if let Some(page) = ws.workspace_page.state()
         && page.page == crate::workspace::pages::Page::Flows
         && let Some(snap) = &ws.flows.browser.page_snapshot
     {
         return crate::workspace::pages::render::flow_content(page, snap, cx);
     }
-    if let Some(page) = &ws.workspace_page
+    if let Some(page) = ws.workspace_page.state()
         && page.page == crate::workspace::pages::Page::Tasks
         && let Some(detail) = &ws.pages.tasks.detail
     {
@@ -62,19 +62,19 @@ pub(super) fn render_center_content(
             cx,
         );
     }
-    if let Some(page) = &ws.workspace_page
+    if let Some(page) = ws.workspace_page.state()
         && page.page == crate::workspace::pages::Page::Tasks
         && let crate::workspace::layout::DockSnapshot::Right(snap) = &ws.docks.right.read(cx).snap
     {
         return crate::workspace::pages::render::content(page, snap, cx);
     }
-    if let Some(page) = &ws.workspace_page
+    if let Some(page) = ws.workspace_page.state()
         && page.page == crate::workspace::pages::Page::PullRequests
         && let Some(detail) = &ws.pages.pull_requests.detail_snapshot
     {
         return crate::workspace::pages::pull_requests::detail::render::render(detail, cx);
     }
-    if let Some(page) = &ws.workspace_page
+    if let Some(page) = ws.workspace_page.state()
         && page.page == crate::workspace::pages::Page::PullRequests
         && let Some(snap) = &ws.pages.pull_requests.snapshot
     {
