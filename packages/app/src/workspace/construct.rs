@@ -230,7 +230,7 @@ impl Workspace {
             right_views: right_dock::context::RightDockViews::new(window, cx),
             input_dock: main_area::bottom_dock::input_dock::InputDock::new(config, window, cx),
             persistence_suspended: false,
-            pending_lane_creates: HashSet::new(),
+            pending_lane_creates: Default::default(),
             flow_resume_reads: HashSet::new(),
             // The shared root in production; under the test's own data
             // directory otherwise, so a suite takes no lock the developer's

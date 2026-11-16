@@ -20,14 +20,13 @@ use gpui::{Context, Window};
 
 use super::task_existing_lane_ops::ExistingLaneStart;
 use super::task_start::{
-    Answer, StartedOn, TaskStartError, TaskStarted, WorktreeStart, abandon_start,
-    window_closed_after,
+    Answer, StartedOn, TaskStartError, TaskStarted, WorktreeStart, abandon_start, window_closed,
 };
 use crate::runs::{FlowSubmitter, GlobalTasks, RunsHost};
 use crate::workspace::Workspace;
 use crate::workspace::flow_ops::FlowStartRefused;
 use crate::workspace::flow_request::FlowSelection;
-use crate::workspace::lane_ops::LaneReveal;
+use crate::workspace::lane_ops::{LaneReveal, RepoLock, WorktreeCreate, add_new_branch};
 use crate::workspace::task_flow::{TaskFlowProblem, TaskFlowTarget};
 
 /// A flow task's start, checked before it is recorded.
@@ -56,10 +55,10 @@ impl TaskFlowStart {
         }
     }
 
-    /// The repository whose lock the start holds, if it makes a worktree.
-    pub(super) fn repo_lock(&self) -> Option<&Path> {
-        match &self.place {
-            FlowPlace::New(start) => Some(&start.plan.repo_root),
+    /// The repository lock the start holds, if it makes a worktree.
+    pub(super) fn into_repo_lock(self) -> Option<RepoLock> {
+        match self.place {
+            FlowPlace::New(start) => Some(start.lock),
             FlowPlace::Existing(_) => None,
         }
     }
@@ -197,57 +196,50 @@ impl Workspace {
     ) {
         let WorktreeStart {
             plan,
+            lock,
             project_id,
             reveal,
-            ..
         } = start;
-        let repo = crate::git_host::GitHost::global(cx).open(&plan.repo_root);
-        cx.spawn_in(window, async move |ws, cx| {
-            let added = cx
-                .background_executor()
-                .spawn({
-                    let plan = plan.clone();
-                    async move {
-                        repo.add_lane(
-                            &plan.new_path,
-                            crate::lane::git::LaneStart::new_branch(
-                                &plan.branch,
-                                plan.base_ref.as_deref(),
-                            ),
-                        )
-                        .map_err(|e| e.to_string())
+        let create = WorktreeCreate {
+            lock,
+            new_path: plan.new_path.clone(),
+            dedup: "task_flow.lane_create.unregistered",
+        };
+        let created = self.spawn_worktree_create(
+            create,
+            add_new_branch(&plan),
+            {
+                let (exec, answer) = (exec.clone(), answer.clone());
+                move |ws, added, window, cx| {
+                    if let Err(detail) = added {
+                        ws.finish_task_start(
+                            Err(TaskStartError::GitAddFailed { detail }),
+                            Some(&exec),
+                            &answer,
+                            cx,
+                        );
+                        return;
                     }
-                })
-                .await;
-            let gone = window_closed_after(&added, &plan.new_path);
-            let continued = ws.update_in(cx, |ws, window, cx| {
-                // Released before registering, as a chat task's start does:
-                // the worktree is on disk either way.
-                ws.release_repo_lock(&plan.repo_root);
-                if let Err(detail) = added {
-                    ws.finish_task_start(
-                        Err(TaskStartError::GitAddFailed { detail }),
-                        Some(&exec),
-                        &answer,
-                        cx,
-                    );
-                    return;
+                    if ws.project_for(project_id).is_none() {
+                        let closed =
+                            TaskStartError::ProjectNotOpen.left_unregistered(plan.new_path.clone());
+                        ws.finish_task_start(Err(closed), Some(&exec), &answer, cx);
+                        return;
+                    }
+                    let worktree = plan.new_path.clone();
+                    let lane = ws.register_created_lane(plan, project_id, None, reveal, window, cx);
+                    let lane = RunLane::Created(lane);
+                    let mut launch = launch;
+                    launch.target.path = on_branch(&launch.target, &worktree);
+                    ws.launch_task_flow(exec, lane, worktree, launch, answer, cx);
                 }
-                if ws.project_for(project_id).is_none() {
-                    let closed =
-                        TaskStartError::ProjectNotOpen.left_unregistered(plan.new_path.clone());
-                    ws.finish_task_start(Err(closed), Some(&exec), &answer, cx);
-                    return;
-                }
-                let worktree = plan.new_path.clone();
-                let lane = ws.register_created_lane(plan, project_id, None, reveal, window, cx);
-                let lane = RunLane::Created(lane);
-                let mut launch = launch;
-                launch.target.path = on_branch(&launch.target, &worktree);
-                ws.launch_task_flow(exec.clone(), lane, worktree, launch, answer.clone(), cx);
-            });
-            if continued.is_err() {
-                abandon_start(&exec, gone, &answer, cx);
+            },
+            window,
+            cx,
+        );
+        cx.spawn(async move |_, cx| {
+            if let Err(gone) = created.await {
+                abandon_start(&exec, window_closed(gone), &answer, cx);
             }
         })
         .detach();

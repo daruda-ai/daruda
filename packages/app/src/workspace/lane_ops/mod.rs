@@ -11,9 +11,14 @@ use gpui::Context;
 use super::Workspace;
 
 mod activation;
+mod create;
 mod lifecycle;
 mod metadata;
 mod switcher;
+
+pub(in crate::workspace) use create::{
+    CreateAbandoned, RepoLock, RepoLocks, WorktreeCreate, add_new_branch,
+};
 
 /// Immutable plan from `CreateWorktreeModal::validate` — sanitized
 /// branch, derived new-path, and repo_root, so the modal can ship clones

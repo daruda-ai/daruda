@@ -5,17 +5,18 @@
 //! waits on it, because a phone cannot see a desktop toast. A refusal is
 //! answered before git is touched, so a caller hears it in the same turn.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::tasks::{
     ExecutionRef, Lifecycle, StartedBy, TaskExecutionSource, TaskRecord, TaskRunIn,
 };
 use gpui::{App, Context, Window};
 
 use crate::runs::{GlobalTasks, RunsHost, TaskCommitError};
-use crate::workspace::lane_ops::{CreateWorktreePlan, FinalizeError, LaneReveal};
+use crate::workspace::lane_ops::{
+    CreateAbandoned, CreateWorktreePlan, FinalizeError, LaneReveal, RepoLock, WorktreeCreate,
+    add_new_branch,
+};
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{ChatAgent, ChatOpen, Workspace};
 
@@ -278,8 +279,8 @@ impl Workspace {
             let continued = ws.update_in(cx, |ws, window, cx| match recorded {
                 Ok(_) => ws.continue_task_start(route, exec.clone(), answer.clone(), window, cx),
                 Err(e) => {
-                    if let Some(repo_root) = route.repo_lock() {
-                        ws.release_repo_lock(repo_root);
+                    if let Some(lock) = route.into_repo_lock() {
+                        ws.release_repo_lock(lock);
                     }
                     let refused = match e {
                         TaskCommitError::Rejected(_) => TaskStartError::NotBacklog,
@@ -312,9 +313,7 @@ impl Workspace {
         let repo_root = self
             .git_repo_root_for_project(project_id)
             .ok_or(TaskStartError::NoGitRepo)?;
-        if !self.acquire_repo_lock(&repo_root) {
-            return Err(TaskStartError::RepoBusy);
-        }
+        let lock = self.lock_repo(&repo_root).ok_or(TaskStartError::RepoBusy)?;
         let spec = &task.spec;
         let new_path =
             crate::workspace::lane_ops::lane_checkout_path(&repo_root, &spec.branch_name);
@@ -330,6 +329,7 @@ impl Workspace {
         };
         Ok(WorktreeStart {
             plan,
+            lock,
             project_id,
             reveal,
         })
@@ -370,108 +370,84 @@ impl Workspace {
     ) {
         let WorktreeStart {
             plan,
+            lock,
             project_id,
             reveal,
         } = start;
-        let me = cx.weak_entity();
-        let repo = crate::git_host::GitHost::global(cx).open(&plan.repo_root);
-        window
-            .spawn(cx, async move |async_cx| {
-                let result: Result<(), String> = async_cx
-                    .background_executor()
-                    .spawn({
-                        let plan = plan.clone();
-                        async move {
-                            repo.add_lane(
-                                &plan.new_path,
-                                crate::lane::git::LaneStart::new_branch(
-                                    &plan.branch,
-                                    plan.base_ref.as_deref(),
-                                ),
+        let create = WorktreeCreate {
+            lock,
+            new_path: plan.new_path.clone(),
+            dedup: "task_workflow.completion.update_failed",
+        };
+        let created = self.spawn_worktree_create(
+            create,
+            add_new_branch(&plan),
+            {
+                let (exec, answer) = (exec.clone(), answer.clone());
+                move |ws, result, window, cx| {
+                    // The worktree is on disk either way: a project closed
+                    // meanwhile leaves it unregistered, named by its path; a
+                    // removed agent registers it with nothing open.
+                    let started = result
+                        .map_err(|detail| TaskStartError::GitAddFailed { detail })
+                        .and_then(|()| {
+                            ws.finalize_chat_lane(
+                                plan.clone(),
+                                project_id,
+                                chat,
+                                reveal,
+                                window,
+                                cx,
                             )
-                            .map_err(|e| e.to_string())
-                        }
-                    })
-                    .await;
-                let gone = window_closed_after(&result, &plan.new_path);
-
-                let update_result = async_cx.update(|window, app_cx| {
-                    let Some(workspace) = me.upgrade() else {
-                        return false;
-                    };
-                    workspace.update(app_cx, |ws, cx| {
-                        // Lock is released *before* finalize_chat_lane runs,
-                        // so a retry against the same repo isn't blocked.
-                        // The worktree is on disk either way: a project
-                        // closed meanwhile leaves it unregistered, named by
-                        // its path; a removed agent registers it with
-                        // nothing open.
-                        ws.release_repo_lock(&plan.repo_root);
-                        let started = result
-                            .map_err(|detail| TaskStartError::GitAddFailed { detail })
-                            .and_then(|()| {
-                                ws.finalize_chat_lane(
-                                    plan.clone(),
-                                    project_id,
-                                    chat.clone(),
-                                    reveal,
+                            .map_err(|e| match e {
+                                FinalizeError::ProjectClosed => TaskStartError::ProjectNotOpen
+                                    .left_unregistered(plan.new_path.clone()),
+                                FinalizeError::AgentUnavailable { lane } => {
+                                    TaskStartError::AgentUnavailable.kept_in(lane)
+                                }
+                            })
+                        })
+                        .and_then(|pane| {
+                            // From here on a failure leaves the worktree
+                            // registered with the pane.
+                            let lane = ws.lane_ref_at(&plan.new_path);
+                            let kept = move |e: TaskStartError| match lane {
+                                Some(lane) => e.kept_in(lane),
+                                None => e,
+                            };
+                            let dispatched = ws
+                                .dispatch_task_to_chat(
+                                    &exec,
+                                    &plan.new_path,
+                                    &plan.branch,
+                                    pane,
                                     window,
                                     cx,
                                 )
-                                .map_err(|e| match e {
-                                    FinalizeError::ProjectClosed => TaskStartError::ProjectNotOpen
-                                        .left_unregistered(plan.new_path.clone()),
-                                    FinalizeError::AgentUnavailable { lane } => {
-                                        TaskStartError::AgentUnavailable.kept_in(lane)
-                                    }
-                                })
-                            })
-                            .and_then(|pane| {
-                                // From here on a failure leaves the
-                                // worktree registered with the pane.
-                                let lane = ws.lane_ref_at(&plan.new_path);
-                                let kept = move |e: TaskStartError| match lane {
-                                    Some(lane) => e.kept_in(lane),
-                                    None => e,
-                                };
-                                let dispatched = ws
-                                    .dispatch_task_to_chat(
-                                        &exec,
-                                        &plan.new_path,
-                                        &plan.branch,
-                                        pane,
-                                        window,
-                                        cx,
-                                    )
-                                    .map_err(kept)?;
-                                let dispatched =
-                                    cx.spawn(async move |_, _| dispatched.await.map_err(kept));
-                                Ok((
-                                    TaskStarted {
-                                        exec: exec.clone(),
-                                        worktree: plan.new_path.clone(),
-                                        on: StartedOn::Chat(pane),
-                                    },
-                                    dispatched,
-                                ))
-                            });
-                        ws.answer_when_dispatched(started, exec.clone(), answer.clone(), cx);
-                    });
-                    true
-                });
-                if !matches!(update_result, Ok(true)) {
-                    LogWriter::log(
-                        ErrorReport::new("Task workflow completion could not reach workspace")
-                            .severity(ErrorSeverity::Warning)
-                            .at(file!(), line!())
-                            .with_context("error", format!("{update_result:?}"))
-                            .dedup("task_workflow.completion.update_failed")
-                            .build(),
-                    );
-                    abandon_start(&exec, gone, &answer, async_cx);
+                                .map_err(kept)?;
+                            let dispatched =
+                                cx.spawn(async move |_, _| dispatched.await.map_err(kept));
+                            Ok((
+                                TaskStarted {
+                                    exec: exec.clone(),
+                                    worktree: plan.new_path.clone(),
+                                    on: StartedOn::Chat(pane),
+                                },
+                                dispatched,
+                            ))
+                        });
+                    ws.answer_when_dispatched(started, exec, answer, cx);
                 }
-            })
-            .detach();
+            },
+            window,
+            cx,
+        );
+        cx.spawn(async move |_, cx| {
+            if let Err(gone) = created.await {
+                abandon_start(&exec, window_closed(gone), &answer, cx);
+            }
+        })
+        .detach();
     }
 }
 
@@ -489,6 +465,7 @@ struct StartRequest {
 /// A new worktree's start, checked and holding the repository's lock.
 pub(super) struct WorktreeStart {
     pub(super) plan: CreateWorktreePlan,
+    pub(super) lock: RepoLock,
     pub(super) project_id: daruda_store::project::ProjectId,
     pub(super) reveal: LaneReveal,
 }
@@ -519,11 +496,11 @@ enum StartRoute {
 }
 
 impl StartRoute {
-    /// The repository whose lock the start holds until its worktree exists.
-    fn repo_lock(&self) -> Option<&Path> {
+    /// The repository lock the start holds until its worktree exists.
+    fn into_repo_lock(self) -> Option<RepoLock> {
         match self {
-            Self::New { start, .. } => Some(&start.plan.repo_root),
-            Self::Flow(start) => start.repo_lock(),
+            Self::New { start, .. } => Some(start.lock),
+            Self::Flow(start) => start.into_repo_lock(),
             Self::Existing { .. } => None,
         }
     }
@@ -542,12 +519,12 @@ pub(super) fn fail_start(exec: &ExecutionRef, e: &TaskStartError, cx: &mut App) 
     RunsHost::delivery_failed(exec.clone(), crate::runs::DeliveryFailure::Start(cause), cx);
 }
 
-/// The window closed once `git worktree add` answered `added`: a checkout
-/// git made is left on disk with no lane, so the failure names its `path`.
-pub(super) fn window_closed_after(added: &Result<(), String>, path: &Path) -> TaskStartError {
-    match added {
-        Ok(()) => TaskStartError::WindowClosed.left_unregistered(path.to_path_buf()),
-        Err(_) => TaskStartError::WindowClosed,
+/// The window closed while the worktree was made: a checkout git made is
+/// left on disk with no lane, so the failure names its path.
+pub(super) fn window_closed(gone: CreateAbandoned) -> TaskStartError {
+    match gone.left_at {
+        Some(path) => TaskStartError::WindowClosed.left_unregistered(path),
+        None => TaskStartError::WindowClosed,
     }
 }
 

@@ -30,8 +30,6 @@ use crate::workspace::Workspace;
 use crate::workspace::lane_ops::CreateWorktreePlan;
 use daruda_config::SessionHostEntry;
 use daruda_core::git::sanitize_branch_name;
-use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::project::{LaneSessionHost, ProjectId};
 
 /// Registry-select sentinel for "no host" — a fresh lane has no "keep
@@ -276,80 +274,54 @@ impl CreateWorktreeModal {
                 return;
             }
         };
-        // Resolve base_ref against the project at submit time. Best-effort:
-        // if the workspace is gone we proceed with the raw input and
-        // finalize_terminal_lane will reject if the project itself is gone.
-        if let Some(ws) = self.workspace.upgrade() {
-            plan.base_ref = ws
-                .read(cx)
-                .resolve_lane_base_ref(std::mem::take(&mut plan.base_ref));
-        }
+        let Some(workspace) = self.workspace.upgrade() else {
+            // No workspace to register a lane in; nothing is made.
+            self.dismiss(window, cx);
+            return;
+        };
         let project_id = self.project_id;
+        let created = workspace.update(cx, |ws, cx| {
+            // Resolved against the project at submit time.
+            plan.base_ref = ws.resolve_lane_base_ref(std::mem::take(&mut plan.base_ref));
+            ws.create_worktree_from_form(plan, project_id, window, cx)
+        });
+        let created = match created {
+            Ok(created) => created,
+            Err(msg) => {
+                self.error = Some(msg.into());
+                cx.notify();
+                return;
+            }
+        };
         self.submitting = true;
         cx.notify();
+        cx.spawn_in(window, async move |me, cx| {
+            // A closed workspace already logged the checkout it left; the
+            // form has nothing more to show.
+            let outcome = created.await.unwrap_or(Ok(()));
+            // The workspace side has already finished or logged the create.
+            // SILENT-OK: the form was dismissed or its window closed meanwhile.
+            let _ = me.update_in(cx, |modal, window, cx| {
+                modal.finish_submit(outcome, window, cx)
+            });
+        })
+        .detach();
+    }
 
-        let me = cx.entity().downgrade();
-        let workspace = self.workspace.clone();
-        let git_repo = crate::git_host::GitHost::global(cx).open(&plan.repo_root);
-        let git_path = plan.new_path.clone();
-        let git_branch = plan.branch.clone();
-        let git_base = plan.base_ref.clone();
-        window
-            .spawn(cx, async move |async_cx| {
-                let result: Result<(), String> = async_cx
-                    .background_executor()
-                    .spawn(async move {
-                        let start = crate::lane::git::LaneStart::new_branch(
-                            &git_branch,
-                            git_base.as_deref(),
-                        );
-                        git_repo
-                            .add_lane(&git_path, start)
-                            .map_err(|e| e.to_string())
-                    })
-                    .await;
-
-                let update_result = async_cx.update(|window, app_cx| {
-                    let Some(me) = me.upgrade() else { return };
-                    // Nested entity.update calls must not overlap, so
-                    // run the workspace finalize first and feed its
-                    // outcome back into the modal in a separate step.
-                    let final_result: Result<(), String> = match result {
-                        Err(msg) => Err(msg),
-                        Ok(()) => match workspace.upgrade() {
-                            Some(ws) => ws
-                                .update(app_cx, |ws, cx| {
-                                    ws.finalize_terminal_lane(plan.clone(), project_id, window, cx)
-                                })
-                                // The left dock opener doesn't need the
-                                // newly-spawned pane id. Discard it.
-                                .map(|_pane_id| ()),
-                            None => Ok(()),
-                        },
-                    };
-                    me.update(app_cx, |modal, cx| {
-                        modal.submitting = false;
-                        match final_result {
-                            Ok(()) => modal.dismiss(window, cx),
-                            Err(msg) => {
-                                modal.error = Some(msg.into());
-                                cx.notify();
-                            }
-                        }
-                    });
-                });
-                if let Err(e) = update_result {
-                    LogWriter::log(
-                        ErrorReport::new("Create lane completion could not reach workspace")
-                            .severity(ErrorSeverity::Warning)
-                            .at(file!(), line!())
-                            .with_context("error", format!("{e}"))
-                            .dedup("lane.create.modal.completion")
-                            .build(),
-                    );
-                }
-            })
-            .detach();
+    fn finish_submit(
+        &mut self,
+        outcome: Result<(), String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.submitting = false;
+        match outcome {
+            Ok(()) => self.dismiss(window, cx),
+            Err(msg) => {
+                self.error = Some(msg.into());
+                cx.notify();
+            }
+        }
     }
 }
 

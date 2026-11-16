@@ -71,23 +71,6 @@ impl Workspace {
     // Lifecycle (start / cancel / focus / reopen / retry)
     // ------------------------------------------------------------------
 
-    /// Per-repo lock acquisition. Two concurrent `start_task` calls
-    /// against the same repo race on `git worktree add`; we make the
-    /// second one fail fast with a user-visible error rather than
-    /// risk a half-created lane.
-    ///
-    /// `pub(super)` because the race is a property of the
-    /// repository, not of this path: an agent-requested creation
-    /// (`control_lane_ops`) has to take the same lock or it can interleave
-    /// with the user's own.
-    pub(in crate::workspace) fn acquire_repo_lock(&mut self, repo_root: &Path) -> bool {
-        self.pending_lane_creates.insert(repo_root.to_path_buf())
-    }
-
-    pub(in crate::workspace) fn release_repo_lock(&mut self, repo_root: &Path) {
-        self.pending_lane_creates.remove(repo_root);
-    }
-
     /// Resolve the branch name we should base the new lane on.
     /// Looks the path up in the workspace's lane list and returns
     /// `lane.branch.clone()` when it's a git worktree. `None`

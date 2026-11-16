@@ -17,6 +17,7 @@ use daruda_store::project::{LaneRef, ProjectId};
 use crate::control::result::ControlError;
 use crate::remote_channel::bridge::PaneRef;
 use crate::workspace::Workspace;
+use crate::workspace::lane_ops::{WorktreeCreate, add_new_branch};
 
 /// What a finished creation reports: the worktree, and the chat that came with
 /// it, so a caller can talk to the new agent without listing again.
@@ -73,86 +74,54 @@ impl Workspace {
                 return rx;
             }
         };
-        // The same lock the task workflow takes. Two `git worktree add` runs
-        // against one repo can leave a half-created checkout, and an agent
-        // asking while a task-driven create is in flight is exactly that
-        // case. Note the *create form* takes no lock today, so this does not
-        // serialize against the user's own dialog — and the set is
-        // per-`Workspace`, so it does not serialize across windows either.
-        if !self.acquire_repo_lock(&plan.repo_root) {
+        // Two `git worktree add` runs against one repo can leave a
+        // half-created checkout, and an agent asking while another create is
+        // in flight is exactly that case.
+        let Some(lock) = self.lock_repo(&plan.repo_root) else {
             let _ = tx.try_send(Err(ControlError::LaneCreateBusy));
             return rx;
-        }
-
-        let weak = cx.weak_entity();
-        let repo = crate::git_host::GitHost::global(cx).open(&plan.repo_root);
-        window
-            .spawn(cx, async move |async_cx| {
-                let add = {
-                    let plan = plan.clone();
-                    async_cx
-                        .background_executor()
-                        .spawn(async move {
-                            repo.add_lane(
-                                &plan.new_path,
-                                crate::lane::git::LaneStart::new_branch(
-                                    &plan.branch,
-                                    plan.base_ref.as_deref(),
-                                ),
-                            )
-                            .map_err(|e| e.to_string())
-                        })
-                        .await
-                };
-
-                // Once git made the checkout, a window gone before it is
-                // registered leaves it on disk with no lane: name its path.
-                let gone = match &add {
-                    Ok(()) => Unregistered::WindowClosed.at(plan.new_path.clone()),
-                    Err(_) => ControlError::TargetGone,
-                };
-                let outcome = match async_cx.update(|window, app_cx| {
-                    let Some(workspace) = weak.upgrade() else {
-                        return Err(gone.clone());
-                    };
-                    workspace.update(app_cx, |ws, cx| {
-                        // The lock is released before finalizing, matching the
-                        // task path: a half-created entry must not block the
-                        // user's own next attempt on the same repo.
-                        ws.release_repo_lock(&plan.repo_root);
-                        match &add {
-                            Err(detail) => {
-                                ws.report_error(
-                                    ErrorReport::new(
-                                        crate::surface::strings::error::lane_create_failed(),
-                                    )
-                                    .severity(ErrorSeverity::Error)
-                                    .at(file!(), line!())
-                                    .with_context("detail", detail.clone())
-                                    .dedup("control.lane_create")
-                                    .build(),
-                                    cx,
-                                );
-                                // git's message rides out with the code: the
-                                // caller is a model that has to fix an
-                                // argument, and the log it cannot read is no
-                                // help to it.
-                                Err(ControlError::LaneCreateFailed {
-                                    detail: detail.clone(),
-                                })
-                            }
-                            Ok(()) => {
-                                ws.control_lane_finalize(plan.clone(), project, chat, window, cx)
-                            }
-                        }
-                    })
-                }) {
-                    Ok(outcome) => outcome,
-                    Err(_) => Err(gone),
-                };
-                let _ = tx.try_send(outcome);
-            })
-            .detach();
+        };
+        let create = WorktreeCreate {
+            lock,
+            new_path: plan.new_path.clone(),
+            dedup: "control.lane_create.unregistered",
+        };
+        let created = self.spawn_worktree_create(
+            create,
+            add_new_branch(&plan),
+            move |ws, added, window, cx| match added {
+                Err(detail) => {
+                    ws.report_error(
+                        ErrorReport::new(crate::surface::strings::error::lane_create_failed())
+                            .severity(ErrorSeverity::Error)
+                            .at(file!(), line!())
+                            .with_context("detail", detail.clone())
+                            .dedup("control.lane_create")
+                            .build(),
+                        cx,
+                    );
+                    // git's message rides out with the code: the caller is a
+                    // model that has to fix an argument, and the log it
+                    // cannot read is no help to it.
+                    Err(ControlError::LaneCreateFailed { detail })
+                }
+                Ok(()) => ws.control_lane_finalize(plan, project, chat, window, cx),
+            },
+            window,
+            cx,
+        );
+        cx.spawn(async move |_, _| {
+            // Once git made the checkout, a window gone before it is
+            // registered leaves it on disk with no lane: name its path.
+            let outcome = created.await.unwrap_or_else(|gone| {
+                Err(match gone.left_at {
+                    Some(path) => Unregistered::WindowClosed.at(path),
+                    None => ControlError::TargetGone,
+                })
+            });
+            let _ = tx.try_send(outcome);
+        })
+        .detach();
         rx
     }
 }

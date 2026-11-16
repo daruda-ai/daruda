@@ -514,10 +514,9 @@ pub struct Workspace {
     /// Set by a screenshot scenario: the fixtures it seeds into this live
     /// workspace must never reach the profile the window was restored from.
     pub(in crate::workspace) persistence_suspended: bool,
-    /// Per-repo lock that prevents two concurrent `start_task`
-    /// invocations from racing on `git worktree add` against the same
-    /// repository. Released once git returns, before the lane is finalized.
-    pub(in crate::workspace) pending_lane_creates: HashSet<std::path::PathBuf>,
+    /// Repositories with a worktree being made; only
+    /// `lane_ops::create` reads or writes it.
+    pub(in crate::workspace) pending_lane_creates: lane_ops::RepoLocks,
     /// Run directories the Flows panel's Continue is still reading in the
     /// background. A second Continue for one of them is the same click, not
     /// a second resume to refuse as already running.

@@ -7,7 +7,6 @@
 
 use daruda_github::{PrCheckout, PrListItem, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::project::ProjectId;
 use gpui::{Context, Window};
 
@@ -15,7 +14,9 @@ use super::list::{self, PrKey};
 use crate::lane::git::{GitError, GitRepo, LaneStart, LocalBranch};
 use crate::surface::strings::{error, pull_requests as s};
 use crate::workspace::Workspace;
-use crate::workspace::lane_ops::{CreateWorktreePlan, LaneReveal, lane_checkout_path};
+use crate::workspace::lane_ops::{
+    CreateWorktreePlan, LaneReveal, WorktreeCreate, lane_checkout_path,
+};
 
 /// Where the worktree's branch was left.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,7 +145,7 @@ impl Workspace {
             self.report_pr_lane_failure(format!("project {project} is not a git repository"), cx);
             return;
         };
-        if !self.acquire_repo_lock(&repo_root) {
+        let Some(lock) = self.lock_repo(&repo_root) else {
             let report = ErrorReport::new(error::lane_create_busy())
                 .severity(ErrorSeverity::Warning)
                 .at(file!(), line!())
@@ -152,7 +153,7 @@ impl Workspace {
                 .build();
             self.report_error(report, cx);
             return;
-        }
+        };
         let key: PrKey = (item.repo.clone(), item.pr.number);
         self.pages.pull_requests.creating.insert(key.clone());
         cx.notify();
@@ -167,39 +168,25 @@ impl Workspace {
             description: description(&item),
             session_host: None,
         };
-        let repo = crate::git_host::GitHost::global(cx).open(&plan.repo_root);
-        cx.spawn_in(window, async move |ws, cx| {
-            let made = cx
-                .background_executor()
-                .spawn({
-                    let new_path = plan.new_path.clone();
-                    async move { check_out(&*repo, &checkout, &new_path) }
-                })
-                .await;
-            let created = made.is_ok().then(|| plan.new_path.clone());
-            let finished = ws.update_in(cx, |ws, window, cx| {
-                ws.finish_pr_lane(key, project, plan, made, window, cx)
-            });
-            // A window that closed while git ran took its lock and its
-            // in-flight row with it. A checkout git made stays on disk,
-            // registered nowhere, so the log is the only place it is named.
-            if let (Err(e), Some(path)) = (finished, created) {
-                LogWriter::log(
-                    ErrorReport::new("PR worktree was made but its workspace closed first")
-                        .severity(ErrorSeverity::Warning)
-                        .with_context("path", path.display().to_string())
-                        .with_context("error", e.to_string())
-                        .at(file!(), line!())
-                        .dedup("pull_requests.lane_unregistered")
-                        .build(),
-                );
-            }
-        })
+        let create = WorktreeCreate {
+            lock,
+            new_path: plan.new_path.clone(),
+            dedup: "pull_requests.lane_unregistered",
+        };
+        // A window that closes while git runs takes its in-flight row with
+        // it; the pipeline logs a checkout left behind.
+        self.spawn_worktree_create(
+            create,
+            move |repo, new_path| check_out(repo, &checkout, new_path),
+            move |ws, made, window, cx| ws.finish_pr_lane(key, project, plan, made, window, cx),
+            window,
+            cx,
+        )
         .detach();
     }
 
-    /// Release what [`Self::create_lane_from_pr`] held, then register the
-    /// worktree git made or report why it did not.
+    /// Clear [`Self::create_lane_from_pr`]'s in-flight row, then register
+    /// the worktree git made or report why it did not.
     fn finish_pr_lane(
         &mut self,
         key: PrKey,
@@ -209,7 +196,6 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.release_repo_lock(&plan.repo_root);
         self.pages.pull_requests.creating.remove(&key);
         cx.notify();
         match made {

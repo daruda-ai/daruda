@@ -103,11 +103,9 @@ fn error_titles(f: &GitFixture, cx: &mut TestAppContext) -> Vec<String> {
 /// Whether the repository's lock is free, leaving it free.
 fn lock_free(f: &GitFixture, cx: &mut TestAppContext) -> bool {
     f.ws.update(cx, |ws, _| {
-        let free = ws.acquire_repo_lock(&f.root);
-        if free {
-            ws.release_repo_lock(&f.root);
-        }
-        free
+        ws.lock_repo(&f.root)
+            .map(|lock| ws.release_repo_lock(lock))
+            .is_some()
     })
 }
 
@@ -320,7 +318,9 @@ fn a_linked_worktree_is_gone_to_without_git(cx: &mut TestAppContext) {
 #[gpui::test]
 fn nothing_is_made_while_the_repository_is_locked(cx: &mut TestAppContext) {
     let (f, _gh) = window(cx, |repo| repo);
-    assert!(f.ws.update(cx, |ws, _| ws.acquire_repo_lock(&f.root)));
+    // Held for the rest of the test: the click must find it taken.
+    let held = f.ws.update(cx, |ws, _| ws.lock_repo(&f.root));
+    assert!(held.is_some());
     click(&f, &item(8, "fix/scroll", false), cx);
     cx.run_until_parked();
     assert!(calls(&f).is_empty(), "{:?}", calls(&f));
