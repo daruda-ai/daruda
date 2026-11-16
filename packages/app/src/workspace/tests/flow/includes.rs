@@ -124,3 +124,41 @@ async fn the_graph_draws_an_include_as_one_card(cx: &mut TestAppContext) {
         Some("build".into())
     );
 }
+
+/// A save is checked against the includes of the worktree the graph was
+/// opened for, which is where its runs look — not the one the page has since
+/// been pointed at, where the included flow may not exist.
+#[gpui::test]
+async fn an_edit_looks_up_includes_where_the_graph_was_opened(cx: &mut TestAppContext) {
+    let (_lane, ws, flow_path, wh) = workspace_with_a_flow(cx, INCLUDING);
+    with_steps(&flow_path);
+    let (_other, other) = add_lane_with_a_flow(&ws, wh, cx, "other.yaml", STEPS);
+    let mut vcx = gpui::VisualTestContext::from_window(wh.into(), cx);
+    ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.open_flow_graph(ws.active, &flow_path, window, cx);
+        ws.set_flow_scope(
+            crate::workspace::flow_browser::FlowScope::Worktree(other),
+            cx,
+        );
+    });
+    vcx.run_until_parked();
+    ws.read_with(&vcx, |ws, _| {
+        assert_eq!(ws.flow_browser_lane(), other);
+        assert!(
+            ws.flow_sources_for(other)
+                .is_some_and(|sources| sources.locate("steps").is_none()),
+            "the browsed worktree has no `steps`, so looking there would refuse"
+        );
+    });
+
+    let wrote = ws.update_in(&mut vcx, |ws, window, cx| {
+        ws.edit_flow(
+            &flow_path,
+            INCLUDING,
+            |file| file.nodes[0].timeout = Some(std::time::Duration::from_secs(5)),
+            window,
+            cx,
+        )
+    });
+    assert_eq!(wrote, Ok(()));
+}
