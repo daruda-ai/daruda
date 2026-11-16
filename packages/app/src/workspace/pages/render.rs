@@ -1,11 +1,12 @@
 //! Page navigation and the central page shell reuse the staged dock data.
 
-use gpui::{AnyElement, App, IntoElement, div, prelude::*, px};
+use gpui::{AnyElement, App, Context, IntoElement, Window, div, prelude::*, px};
 
 use super::{Page, PageState};
 use crate::surface::strings;
 use crate::ui::{ButtonVariants as _, button_icon, button_with_icon_sized, icons, theme};
-use crate::workspace::layout::{LeftDockSnapshot, RightDockSnapshot};
+use crate::workspace::Workspace;
+use crate::workspace::layout::{DockSnapshot, LeftDockSnapshot, RightDockSnapshot};
 use crate::workspace::right_dock;
 
 pub(in crate::workspace) fn navigation(snap: &LeftDockSnapshot, cx: &App) -> AnyElement {
@@ -21,10 +22,7 @@ pub(in crate::workspace) fn navigation(snap: &LeftDockSnapshot, cx: &App) -> Any
         .border_color(t.border)
         .children(Page::ALL.into_iter().map(|page| {
             let workspace = snap.workspace.clone();
-            let count = match page {
-                Page::PullRequests => snap.open_lane_prs,
-                Page::Tasks | Page::Flows => 0,
-            };
+            let count = page.nav_count(snap);
             button_with_icon_sized(page.icon(), page.label(), page.icon(), snap.metrics)
                 .ghost()
                 .w_full()
@@ -50,6 +48,53 @@ pub(in crate::workspace) fn navigation(snap: &LeftDockSnapshot, cx: &App) -> Any
                 })
         }))
         .into_any_element()
+}
+
+/// What the shown page draws in the center: its detail when it holds one,
+/// its list otherwise. `None` until the list is first staged, so the caller
+/// draws what it would without a page. The detail is read off the
+/// workspace, not a dock's snapshot.
+pub(in crate::workspace) fn body(
+    ws: &Workspace,
+    state: &PageState,
+    window: &Window,
+    cx: &mut Context<Workspace>,
+) -> Option<AnyElement> {
+    match state.page {
+        Page::Tasks => {
+            if let Some(detail) = &ws.pages.tasks.detail {
+                return Some(super::tasks::editor::render_detail(
+                    detail.id,
+                    &detail.editor,
+                    cx,
+                ));
+            }
+            let DockSnapshot::Right(snap) = &ws.docks.right.read(cx).snap else {
+                return None;
+            };
+            Some(content(state, snap, cx))
+        }
+        Page::Flows => {
+            if let Some(detail) = &ws.pages.flows.detail {
+                return Some(super::flows::detail_render::render(
+                    detail,
+                    state,
+                    ws.flow_session_problem(detail.id),
+                    ws.execution_layout(window, cx),
+                    cx,
+                ));
+            }
+            let snap = ws.flows.browser.page_snapshot.as_ref()?;
+            Some(flow_content(state, snap, cx))
+        }
+        Page::PullRequests => {
+            let pages = &ws.pages.pull_requests;
+            if let Some(detail) = &pages.detail_snapshot {
+                return Some(super::pull_requests::detail::render::render(detail, cx));
+            }
+            Some(pr_content(state, pages.snapshot.as_ref()?, cx))
+        }
+    }
 }
 
 pub(in crate::workspace) fn content(

@@ -312,7 +312,7 @@ impl Workspace {
         if let Some(detail) = &self.pages.tasks.detail
             && detail.editor.task_id.as_deref() == Some(task_id)
         {
-            let id = crate::workspace::pages::detail::PageDetailId::TaskEditor(detail.id);
+            let id = crate::workspace::pages::detail::PageDetailId::from(detail.id);
             self.drop_gone_detail(id, window, cx);
         }
         cx.notify();

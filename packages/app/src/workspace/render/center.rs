@@ -32,53 +32,10 @@ pub(super) fn render_center_content(
     window: &gpui::Window,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
-    // Each page shows its detail when it holds one, its list otherwise. The
-    // detail is read off the workspace, not a dock's snapshot.
     if let Some(page) = ws.workspace_page.state()
-        && page.page == crate::workspace::pages::Page::Flows
-        && let Some(detail) = &ws.pages.flows.detail
+        && let Some(body) = crate::workspace::pages::render::body(ws, page, window, cx)
     {
-        return crate::workspace::pages::flows::detail_render::render(
-            detail,
-            page,
-            ws.flow_session_problem(detail.id),
-            ws.execution_layout(window, cx),
-            cx,
-        );
-    }
-    if let Some(page) = ws.workspace_page.state()
-        && page.page == crate::workspace::pages::Page::Flows
-        && let Some(snap) = &ws.flows.browser.page_snapshot
-    {
-        return crate::workspace::pages::render::flow_content(page, snap, cx);
-    }
-    if let Some(page) = ws.workspace_page.state()
-        && page.page == crate::workspace::pages::Page::Tasks
-        && let Some(detail) = &ws.pages.tasks.detail
-    {
-        return crate::workspace::pages::tasks::editor::render_detail(
-            detail.id,
-            &detail.editor,
-            cx,
-        );
-    }
-    if let Some(page) = ws.workspace_page.state()
-        && page.page == crate::workspace::pages::Page::Tasks
-        && let crate::workspace::layout::DockSnapshot::Right(snap) = &ws.docks.right.read(cx).snap
-    {
-        return crate::workspace::pages::render::content(page, snap, cx);
-    }
-    if let Some(page) = ws.workspace_page.state()
-        && page.page == crate::workspace::pages::Page::PullRequests
-        && let Some(detail) = &ws.pages.pull_requests.detail_snapshot
-    {
-        return crate::workspace::pages::pull_requests::detail::render::render(detail, cx);
-    }
-    if let Some(page) = ws.workspace_page.state()
-        && page.page == crate::workspace::pages::Page::PullRequests
-        && let Some(snap) = &ws.pages.pull_requests.snapshot
-    {
-        return crate::workspace::pages::render::pr_content(page, snap, cx);
+        return body;
     }
     // Which divider is being held, so its cursor can reach past itself.
     let dragged_divider = ws.main_area.drag_state.map(|drag| drag.left_first_leaf);

@@ -151,7 +151,7 @@ impl Workspace {
         if self.lane_for(detail.lane).is_some() {
             return;
         }
-        let id = crate::workspace::pages::detail::PageDetailId::Flow(detail.id);
+        let id = crate::workspace::pages::detail::PageDetailId::from(detail.id);
         self.drop_gone_detail(id, window, cx);
         self.respawn_flow_watcher(cx);
     }

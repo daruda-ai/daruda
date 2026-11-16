@@ -855,7 +855,7 @@ async fn a_flow_event_that_changed_nothing_costs_no_frame(cx: &mut TestAppContex
     ws.update(&mut vcx, |ws, cx| {
         let graph = ws.flow_detail_id().expect("the graph is the page's detail");
         ws.close_page_detail_now(
-            crate::workspace::pages::detail::PageDetailId::Flow(graph),
+            crate::workspace::pages::detail::PageDetailId::from(graph),
             cx,
         );
         ws.show_page(crate::workspace::pages::Page::Flows, cx)

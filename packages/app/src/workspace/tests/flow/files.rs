@@ -260,7 +260,7 @@ async fn a_created_flow_is_listed_and_loads(cx: &mut TestAppContext) {
             .open_graph()
             .map(|(_, _, view)| view.read(cx).path().to_path_buf());
         ws.close_page_detail_now(
-            crate::workspace::pages::detail::PageDetailId::Flow(ws.flow_detail_id().unwrap()),
+            crate::workspace::pages::detail::PageDetailId::from(ws.flow_detail_id().unwrap()),
             cx,
         );
         ws.flow_list_for_panel(cx);

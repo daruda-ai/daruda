@@ -6,7 +6,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use crate::workspace::close_guard_ops::prompt_stop_running;
 use crate::workspace::dirty_items::{DirtyItem, DirtyTarget, dirty_listing};
 use crate::workspace::main_area::file_save_ops::FileSaveOutcome;
-use crate::workspace::pages::detail::PageDetailId;
+use crate::workspace::pages::detail::EditableDetailId;
 use crate::workspace::{CloseWindow, Workspace};
 
 impl Workspace {
@@ -293,11 +293,11 @@ impl Workspace {
             DirtyTarget::Pane(pane_id) => gpui::Task::ready(
                 self.write_file_pane(pane_id, false, cx) == FileSaveOutcome::Saved,
             ),
-            DirtyTarget::Detail(PageDetailId::TaskEditor(id)) => self
+            DirtyTarget::Detail(EditableDetailId::TaskEditor(id)) => self
                 .commit_task_editor(id, window, cx)
                 .map(|(_, saved)| saved)
                 .unwrap_or_else(|| gpui::Task::ready(false)),
-            DirtyTarget::Detail(PageDetailId::Flow(id)) => {
+            DirtyTarget::Detail(EditableDetailId::Flow(id)) => {
                 gpui::Task::ready(match self.flow_graph(id) {
                     Some((_, view)) => {
                         let path = view.read(cx).path().to_path_buf();
@@ -306,8 +306,6 @@ impl Workspace {
                     None => false,
                 })
             }
-            // Never a dirty target: a pull request's detail holds no edits.
-            DirtyTarget::Detail(PageDetailId::PullRequest(_)) => gpui::Task::ready(true),
         }
     }
 

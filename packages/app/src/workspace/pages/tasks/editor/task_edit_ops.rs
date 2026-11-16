@@ -504,7 +504,7 @@ impl Workspace {
             .project(cx)
             .filter(|uuid| self.project_by_uuid(*uuid).is_some());
         if kept.is_none() && te.task_id.is_some() {
-            let id = crate::workspace::pages::detail::PageDetailId::TaskEditor(editor_id);
+            let id = crate::workspace::pages::detail::PageDetailId::from(editor_id);
             self.drop_gone_detail(id, window, cx);
             return;
         }

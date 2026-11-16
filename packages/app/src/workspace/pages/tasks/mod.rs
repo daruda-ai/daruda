@@ -55,7 +55,7 @@ impl crate::workspace::Workspace {
         id: TaskEditorId,
         cx: &mut gpui::Context<Self>,
     ) {
-        self.close_page_detail_now(super::detail::PageDetailId::TaskEditor(id), cx);
+        self.close_page_detail_now(super::detail::PageDetailId::from(id), cx);
     }
 }
 

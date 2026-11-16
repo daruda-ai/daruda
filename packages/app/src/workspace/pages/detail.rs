@@ -25,18 +25,44 @@ pub(in crate::workspace) struct PageDetails {
 /// arrives after its detail was replaced finds nothing to act on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::workspace) enum PageDetailId {
+    /// A detail that can hold unsaved edits, which leaving it asks about.
+    Editable(EditableDetailId),
+    PullRequest(PrDetailId),
+}
+
+/// The details that can hold unsaved edits. Only these are dirty-checked
+/// and saved, so a read-only detail needs no arm there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum EditableDetailId {
     TaskEditor(TaskEditorId),
     Flow(FlowDetailId),
-    PullRequest(PrDetailId),
 }
 
 impl PageDetailId {
     fn page(self) -> Page {
         match self {
-            Self::TaskEditor(_) => Page::Tasks,
-            Self::Flow(_) => Page::Flows,
+            Self::Editable(EditableDetailId::TaskEditor(_)) => Page::Tasks,
+            Self::Editable(EditableDetailId::Flow(_)) => Page::Flows,
             Self::PullRequest(_) => Page::PullRequests,
         }
+    }
+}
+
+impl From<TaskEditorId> for PageDetailId {
+    fn from(id: TaskEditorId) -> Self {
+        Self::Editable(EditableDetailId::TaskEditor(id))
+    }
+}
+
+impl From<FlowDetailId> for PageDetailId {
+    fn from(id: FlowDetailId) -> Self {
+        Self::Editable(EditableDetailId::Flow(id))
+    }
+}
+
+impl From<PrDetailId> for PageDetailId {
+    fn from(id: PrDetailId) -> Self {
+        Self::PullRequest(id)
     }
 }
 
@@ -44,24 +70,25 @@ impl Workspace {
     /// The detail `page` shows over its list, if any.
     pub(in crate::workspace) fn page_detail_id(&self, page: Page) -> Option<PageDetailId> {
         match page {
-            Page::Tasks => self.task_detail_id().map(PageDetailId::TaskEditor),
-            Page::Flows => self.flow_detail_id().map(PageDetailId::Flow),
-            Page::PullRequests => self.pr_detail_id().map(PageDetailId::PullRequest),
+            Page::Tasks => self.task_detail_id().map(PageDetailId::from),
+            Page::Flows => self.flow_detail_id().map(PageDetailId::from),
+            Page::PullRequests => self.pr_detail_id().map(PageDetailId::from),
         }
     }
 
     /// Detail `id` as unsaved work, or `None` when it holds none.
     fn page_detail_dirty(&self, id: PageDetailId, cx: &App) -> Option<DirtyItem> {
+        let PageDetailId::Editable(id) = id else {
+            return None;
+        };
         match id {
-            PageDetailId::TaskEditor(editor) => {
+            EditableDetailId::TaskEditor(editor) => {
                 DirtyItem::of_task_editor(editor, self.task_editor(editor)?, cx)
             }
-            PageDetailId::Flow(detail) => {
+            EditableDetailId::Flow(detail) => {
                 let (_, view) = self.flow_graph(detail)?;
                 DirtyItem::of_flow_graph(detail, &view, cx)
             }
-            // A pull request's detail only shows what GitHub said.
-            PageDetailId::PullRequest(_) => None,
         }
     }
 
@@ -210,11 +237,30 @@ impl Workspace {
         if self.page_detail_id(id.page()) != Some(id) {
             return;
         }
-        self.mutate_durable(cx, |ws, _| match id {
-            PageDetailId::TaskEditor(_) => ws.pages.tasks.detail = None,
-            PageDetailId::Flow(_) => ws.pages.flows.detail = None,
-            PageDetailId::PullRequest(_) => ws.pages.pull_requests.detail = None,
+        self.mutate_durable(cx, |ws, _| match id.page() {
+            Page::Tasks => ws.pages.tasks.detail = None,
+            Page::Flows => ws.pages.flows.detail = None,
+            Page::PullRequests => ws.pages.pull_requests.detail = None,
         });
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_detail_id_names_its_page_and_only_edits_are_editable() {
+        // (detail, its page, editable)
+        let cases = [
+            (PageDetailId::from(TaskEditorId(1)), Page::Tasks, true),
+            (PageDetailId::from(FlowDetailId(1)), Page::Flows, true),
+            (PageDetailId::from(PrDetailId(1)), Page::PullRequests, false),
+        ];
+        for (id, page, editable) in cases {
+            assert_eq!(id.page(), page, "{id:?}");
+            assert_eq!(matches!(id, PageDetailId::Editable(_)), editable, "{id:?}");
+        }
     }
 }
