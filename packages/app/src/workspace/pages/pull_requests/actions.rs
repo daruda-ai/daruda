@@ -10,6 +10,7 @@ use daruda_github::{
     RepoId,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
 use gpui::{Context, Window};
 
 use super::detail::{Load, PrDetailId};
@@ -18,7 +19,6 @@ use crate::github::PrPoller;
 use crate::surface::strings::{error, pull_requests as s};
 use crate::ui::dialog::{ButtonVariant, confirm_destructive, open_confirm_dialog};
 use crate::workspace::Workspace;
-use crate::workspace::spawn_helpers::spawn_bg_work_and_mutate;
 
 /// An action the detail runs on its pull request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +128,42 @@ pub(in crate::workspace) fn failed_runs(checks: &[CheckEntry]) -> Vec<u64> {
         .filter_map(|entry| entry.job.map(|job| job.run))
         .collect();
     runs.into_iter().collect()
+}
+
+/// What a failed `action` on pull request `number` is called, wherever it
+/// is told.
+fn failure_title(action: PrAction, number: u64, e: &GhError) -> String {
+    match (e, action) {
+        (GhError::HeadMoved, _) => error::github_pr_head_moved(number),
+        (_, PrAction::Merging) => error::github_pr_merge_failed(number),
+        (_, PrAction::Closing) => error::github_pr_close_failed(number),
+        (_, PrAction::MarkingReady) => error::github_pr_ready_failed(number),
+        (_, PrAction::Rerunning) => error::github_pr_rerun_failed(number),
+    }
+}
+
+/// What the log keeps of an action whose window closed while `gh` ran:
+/// with no workspace to show it, the log is the only place the person can
+/// learn it failed. `None` when it did not fail.
+fn unshown_failure(
+    action: PrAction,
+    repo: &RepoId,
+    number: u64,
+    result: &Result<(), GhError>,
+) -> Option<ErrorReport> {
+    let e = result.as_ref().err()?;
+    Some(
+        ErrorReport::new(failure_title(action, number, e))
+            .severity(ErrorSeverity::Error)
+            .from_error(e)
+            .with_context(
+                "repo",
+                format!("{}/{}/{}", repo.host(), repo.owner(), repo.name()),
+            )
+            .at(file!(), line!())
+            .dedup("github.pr_action.closed")
+            .build(),
+    )
 }
 
 /// One request to GitHub, with what it needs.
@@ -293,23 +329,34 @@ impl Workspace {
         let (repo, number) = (target.repo, target.number);
         let gh = GhHost::global(cx);
         let bg_repo = repo.clone();
-        spawn_bg_work_and_mutate(
-            cx,
-            move || match request {
-                Request::Merge { method, head_sha } => {
-                    gh.merge_pr(&bg_repo, number, method, &head_sha)
-                }
-                Request::Close => gh.close_pr(&bg_repo, number),
-                Request::Ready => gh.set_ready(&bg_repo, number),
-                // Every run is asked even after one fails; the first failure
-                // is what is reported.
-                Request::Rerun(runs) => runs
-                    .into_iter()
-                    .map(|run| gh.rerun_failed(&bg_repo, run))
-                    .fold(Ok(()), Result::and),
-            },
-            move |ws, result, cx| ws.land_pr_action(id, action, repo, number, result, cx),
-        )
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    match request {
+                        Request::Merge { method, head_sha } => {
+                            gh.merge_pr(&bg_repo, number, method, &head_sha)
+                        }
+                        Request::Close => gh.close_pr(&bg_repo, number),
+                        Request::Ready => gh.set_ready(&bg_repo, number),
+                        // Every run is asked even after one fails; the first
+                        // failure is what is reported.
+                        Request::Rerun(runs) => runs
+                            .into_iter()
+                            .map(|run| gh.rerun_failed(&bg_repo, run))
+                            .fold(Ok(()), Result::and),
+                    }
+                })
+                .await;
+            // Built before the result moves into the update, which may not run.
+            let unshown = unshown_failure(action, &repo, number, &result);
+            let landed = this.update(cx, |ws, cx| {
+                ws.land_pr_action(id, action, repo, number, result, cx)
+            });
+            if let (Err(_), Some(report)) = (landed, unshown) {
+                LogWriter::log(report);
+            }
+        })
         .detach();
         cx.notify();
     }
@@ -343,8 +390,8 @@ impl Workspace {
                 PrPoller::nudge(repo, cx);
                 None
             }
-            Err(GhError::HeadMoved) => {
-                let title = error::github_pr_head_moved(number);
+            Err(e @ GhError::HeadMoved) => {
+                let title = failure_title(action, number, e);
                 let report = ErrorReport::new(title.clone())
                     .severity(ErrorSeverity::Warning)
                     .at(file!(), line!())
@@ -354,12 +401,7 @@ impl Workspace {
                 Some(title)
             }
             Err(e) => {
-                let title = match action {
-                    PrAction::Merging => error::github_pr_merge_failed(number),
-                    PrAction::Closing => error::github_pr_close_failed(number),
-                    PrAction::MarkingReady => error::github_pr_ready_failed(number),
-                    PrAction::Rerunning => error::github_pr_rerun_failed(number),
-                };
+                let title = failure_title(action, number, e);
                 let line = s::action_failed(&title, e);
                 let report = ErrorReport::new(title)
                     .severity(ErrorSeverity::Error)
@@ -563,6 +605,23 @@ mod tests {
             job,
             duration: None,
         }
+    }
+
+    #[test]
+    fn a_failure_no_window_can_show_goes_to_the_log() {
+        let repo = RepoId::new("github.com", "o", "r");
+        assert!(
+            unshown_failure(PrAction::Merging, &repo, 7, &Ok(())).is_none(),
+            "a success has nothing to tell"
+        );
+        let timeout = Err(GhError::Timeout(std::time::Duration::from_secs(30)));
+        let report =
+            unshown_failure(PrAction::Merging, &repo, 7, &timeout).expect("a failure is logged");
+        assert_eq!(report.title, error::github_pr_merge_failed(7));
+        assert_eq!(report.dedup_key.as_deref(), Some("github.pr_action.closed"));
+        let moved = unshown_failure(PrAction::Merging, &repo, 7, &Err(GhError::HeadMoved))
+            .expect("a moved head is logged");
+        assert_eq!(moved.title, error::github_pr_head_moved(7));
     }
 
     #[test]
