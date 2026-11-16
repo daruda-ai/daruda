@@ -72,12 +72,14 @@ pub(crate) fn added_lane(fake: &crate::lane::git::FakeGit) -> AddedLane {
         crate::lane::git::GitCall::AddLane {
             repo,
             new_path,
-            new_branch,
-            ..
+            start,
         } => Some(AddedLane {
             repo: repo.clone(),
             new_path: new_path.clone(),
-            new_branch: new_branch.clone(),
+            new_branch: match start {
+                crate::lane::git::LaneStart::NewBranch { name, .. } => Some(name.clone()),
+                crate::lane::git::LaneStart::ExistingBranch(_) => None,
+            },
         }),
         _ => None,
     });

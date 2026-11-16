@@ -2,6 +2,7 @@
 
 use daruda_project::lane::Lane;
 use daruda_project::lane::availability::LaneAvailability;
+use daruda_project::lane::git::LaneStart;
 
 use crate::fixture::{git, has_git, init, open, system_git};
 use daruda_store::project::{LaneKind, LaneStatus};
@@ -87,7 +88,9 @@ fn bootstrap_git_repo_multi_worktree_sorts_main_first() {
     git(&dir, &["commit", "--allow-empty", "-m", "initial"]);
 
     let extra = dir.join("wt-side");
-    open(&dir).add_lane(&extra, Some("side"), None).unwrap();
+    open(&dir)
+        .add_lane(&extra, LaneStart::new_branch("side", None))
+        .unwrap();
 
     let wts = Lane::bootstrap_from_project(&dir, &system_git());
     assert_eq!(wts.len(), 2);

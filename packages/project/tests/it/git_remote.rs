@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::fixture::{git, has_git, init, open};
+use daruda_project::lane::git::{GitError, LaneStart};
 
 /// A repository with one commit pushed to a bare `origin.git` beside it,
 /// tracking `origin/main`. Returns `(origin, work)`.
@@ -70,7 +71,9 @@ fn a_fetch_moves_the_shared_remote_ref_and_every_lanes_tracking() {
         ],
     );
     let linked = temp.path().join("side-wt");
-    open(&clone).add_lane(&linked, Some("side"), None).unwrap();
+    open(&clone)
+        .add_lane(&linked, LaneStart::new_branch("side", None))
+        .unwrap();
     git(&clone, &["branch", "--set-upstream-to=origin/main", "side"]);
     // A commit the clone cannot see until it fetches.
     std::fs::write(seed.join("f.txt"), "two\n").unwrap();
@@ -106,7 +109,9 @@ fn a_commit_in_a_linked_lane_rewrites_its_own_index() {
     init(&root);
     git(&root, &["commit", "-q", "--allow-empty", "-m", "initial"]);
     let linked = temp.path().join("side-wt");
-    open(&root).add_lane(&linked, Some("side"), None).unwrap();
+    open(&root)
+        .add_lane(&linked, LaneStart::new_branch("side", None))
+        .unwrap();
     std::fs::write(linked.join("side.txt"), "staged\n").unwrap();
     open(&linked).add(Path::new("side.txt")).unwrap();
     assert_eq!(open(&linked).worktree_status().unwrap().staged.len(), 1);
@@ -150,17 +155,70 @@ fn a_fetched_ref_starts_a_lane_and_an_existing_branch_is_checked_out() {
         .unwrap();
     assert!(!repo.has_local_branch("pr-7").unwrap());
     let review = temp.path().join("review-wt");
-    repo.add_lane(&review, Some("pr-7"), Some("refs/daruda/pr/7"))
-        .unwrap();
+    repo.add_lane(
+        &review,
+        LaneStart::new_branch("pr-7", Some("refs/daruda/pr/7")),
+    )
+    .unwrap();
     assert_eq!(git(&review, &["rev-parse", "HEAD"]), head);
     assert!(repo.has_local_branch("pr-7").unwrap());
 
     git(&clone, &["branch", "kept", "main"]);
     let kept = temp.path().join("kept-wt");
-    repo.add_lane(&kept, None, Some("kept")).unwrap();
+    repo.add_lane(&kept, LaneStart::existing_branch("kept"))
+        .unwrap();
     assert_eq!(
         git(&kept, &["symbolic-ref", "--short", "HEAD"]),
         "kept",
         "on the branch, not detached"
+    );
+}
+
+/// Git itself would accept each of these and do something else: track a
+/// remote branch under a new local name, or detach HEAD at a commit.
+#[test]
+fn only_a_local_branch_is_checked_out_as_an_existing_one() {
+    if !has_git() {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let (origin, seed) = pushed_repo(temp.path());
+    git(&seed, &["push", "-q", "origin", "HEAD:refs/heads/theirs"]);
+    let clone = temp.path().join("clone");
+    git(
+        temp.path(),
+        &[
+            "clone",
+            "-q",
+            origin.to_str().unwrap(),
+            clone.to_str().unwrap(),
+        ],
+    );
+    let head = git(&clone, &["rev-parse", "HEAD"]);
+    git(
+        &clone,
+        &["rev-parse", "--verify", "refs/remotes/origin/theirs"],
+    );
+    let repo = open(&clone);
+
+    // (label, what was asked for as an existing branch)
+    let cases = [
+        ("known only as a remote's branch", "theirs"),
+        ("a remote-tracking name", "origin/theirs"),
+        ("a commit", head.as_str()),
+        ("a full ref name", "refs/heads/main"),
+        ("no such name", "absent"),
+    ];
+    for (index, (label, name)) in cases.into_iter().enumerate() {
+        let lane = temp.path().join(format!("lane-{index}"));
+        match repo.add_lane(&lane, LaneStart::existing_branch(name)) {
+            Err(GitError::NoLocalBranch(refused)) => assert_eq!(refused, name, "{label}"),
+            other => panic!("{label}: expected a refusal, got {other:?}"),
+        }
+        assert!(!lane.exists(), "{label}: no worktree was made");
+    }
+    assert!(
+        !repo.has_local_branch("theirs").unwrap(),
+        "no tracking branch was created"
     );
 }

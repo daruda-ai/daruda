@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use super::base::{self, AgainstBase, BaseProblem, BaseTips};
 use super::{
-    GitDirs, GitError, GitTracking, GitWorktreeStatus, MergeOutcome, PushTarget, RepoProbe,
-    discard, remote, status,
+    GitDirs, GitError, GitTracking, GitWorktreeStatus, LaneStart, MergeOutcome, PushTarget,
+    RepoProbe, discard, remote, status,
 };
 
 /// Factory for repository handles plus the operations that precede one.
@@ -79,12 +79,7 @@ pub trait GitRepo: Send + Sync {
     /// `new_path` must be absolute: the follow-up config step runs git in it,
     /// where a relative path would resolve against the process cwd and be
     /// skipped silently.
-    fn add_lane(
-        &self,
-        new_path: &Path,
-        new_branch: Option<&str>,
-        base: Option<&str>,
-    ) -> Result<(), GitError>;
+    fn add_lane(&self, new_path: &Path, start: LaneStart) -> Result<(), GitError>;
     /// `path` is the lane's absolute worktree directory: an already-removed
     /// lane is recognized by checking it on the filesystem.
     fn remove_lane(&self, path: &Path, force: bool) -> Result<(), GitError>;
@@ -219,13 +214,8 @@ impl GitRepo for SystemRepo {
         remote::has_local_branch(&self.path, branch)
     }
 
-    fn add_lane(
-        &self,
-        new_path: &Path,
-        new_branch: Option<&str>,
-        base: Option<&str>,
-    ) -> Result<(), GitError> {
-        super::add_lane(&self.path, new_path, new_branch, base)
+    fn add_lane(&self, new_path: &Path, start: LaneStart) -> Result<(), GitError> {
+        super::add_lane(&self.path, new_path, &start)
     }
     fn remove_lane(&self, path: &Path, force: bool) -> Result<(), GitError> {
         super::remove_lane(&self.path, path, force)

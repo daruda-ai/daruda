@@ -126,8 +126,11 @@ fn writes_are_logged_in_order_and_never_applied() {
     let repo = git.open(Path::new(ROOT));
     repo.add(Path::new("a.txt")).unwrap();
     repo.commit("first").unwrap();
-    repo.add_lane(Path::new("/fake/lane"), Some("feat"), Some("main"))
-        .unwrap();
+    repo.add_lane(
+        Path::new("/fake/lane"),
+        LaneStart::new_branch("feat", Some("main")),
+    )
+    .unwrap();
     git.init(Path::new("/fake/new")).unwrap();
     let root = PathBuf::from(ROOT);
     assert_eq!(
@@ -144,8 +147,7 @@ fn writes_are_logged_in_order_and_never_applied() {
             GitCall::AddLane {
                 repo: root,
                 new_path: "/fake/lane".into(),
-                new_branch: Some("feat".into()),
-                base: Some("main".into()),
+                start: LaneStart::new_branch("feat", Some("main")),
             },
             GitCall::Init {
                 path: "/fake/new".into()

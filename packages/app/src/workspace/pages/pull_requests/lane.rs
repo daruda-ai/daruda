@@ -9,7 +9,7 @@ use daruda_store::project::{LaneKind, LaneRef, ProjectId};
 use gpui::{Context, Window};
 
 use super::list::{self, PrKey, review_branch};
-use crate::lane::git::{GitError, GitRepo};
+use crate::lane::git::{GitError, GitRepo, LaneStart};
 use crate::surface::strings::{error, pull_requests as s};
 use crate::workspace::Workspace;
 use crate::workspace::lane_ops::{CreateWorktreePlan, LaneReveal, lane_checkout_path};
@@ -67,11 +67,12 @@ fn check_out(
     new_path: &std::path::Path,
 ) -> Result<(), GitError> {
     repo.fetch_ref(&checkout.remote, &checkout.refspec)?;
-    if repo.has_local_branch(&checkout.branch)? {
-        repo.add_lane(new_path, None, Some(&checkout.branch))
+    let start = if repo.has_local_branch(&checkout.branch)? {
+        LaneStart::existing_branch(&checkout.branch)
     } else {
-        repo.add_lane(new_path, Some(&checkout.branch), Some(&checkout.start))
-    }
+        LaneStart::new_branch(&checkout.branch, Some(&checkout.start))
+    };
+    repo.add_lane(new_path, start)
 }
 
 /// The lane description of a worktree made for `item`; `None` for one on

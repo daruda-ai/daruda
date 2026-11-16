@@ -1,7 +1,7 @@
 //! Recovery must preserve live repositories and delete only confirmed leftovers.
 
 use crate::fixture::{git, init, open};
-use daruda_project::lane::git::LaneRemovalState;
+use daruda_project::lane::git::{LaneRemovalState, LaneStart};
 
 fn repository(root: &std::path::Path) {
     init(root);
@@ -15,7 +15,8 @@ fn removal_inspection_distinguishes_registration_and_disk_state() {
     repository(&root);
     let repo = open(&root);
     let lane = temp.path().join("worktree");
-    repo.add_lane(&lane, Some("feature"), None).unwrap();
+    repo.add_lane(&lane, LaneStart::new_branch("feature", None))
+        .unwrap();
     assert_eq!(
         repo.lane_removal_state(&lane).unwrap(),
         LaneRemovalState::Registered
@@ -92,7 +93,8 @@ fn orphan_cleanup_refuses_repositories_nested_repositories_and_registered_paths(
             }
             "registered" => {
                 std::fs::remove_dir(&lane).unwrap();
-                repo.add_lane(&lane, Some("feature"), None).unwrap();
+                repo.add_lane(&lane, LaneStart::new_branch("feature", None))
+                    .unwrap();
                 lane.clone()
             }
             "replaced" => {
@@ -121,7 +123,8 @@ fn orphan_cleanup_allows_a_dangling_link_to_this_repository_only() {
     repository(&root);
     let repo = open(&root);
     let lane = temp.path().join("leftover 한글 ' $ `");
-    repo.add_lane(&lane, Some("feature"), None).unwrap();
+    repo.add_lane(&lane, LaneStart::new_branch("feature", None))
+        .unwrap();
     let dirs = open(&lane).dirs().unwrap();
     std::fs::remove_dir_all(&dirs.git_dir).unwrap();
     assert_eq!(
@@ -147,7 +150,9 @@ fn orphan_cleanup_preserves_mixed_case_gitfiles_at_any_depth() {
         } else {
             leftover.clone()
         };
-        open(&other).add_lane(&lane, Some("feature"), None).unwrap();
+        open(&other)
+            .add_lane(&lane, LaneStart::new_branch("feature", None))
+            .unwrap();
         // Rename through a distinct name so case-insensitive filesystems
         // also change the directory entry's spelling.
         std::fs::rename(lane.join(".git"), lane.join("git-link")).unwrap();
@@ -174,7 +179,8 @@ fn orphan_cleanup_allows_an_owned_worktree_inside_the_main_checkout() {
     repository(&root);
     let lane = root.join(".worktrees").join("feature");
     let repo = open(&root);
-    repo.add_lane(&lane, Some("feature"), None).unwrap();
+    repo.add_lane(&lane, LaneStart::new_branch("feature", None))
+        .unwrap();
     let dirs = open(&lane).dirs().unwrap();
     std::fs::remove_dir_all(&dirs.git_dir).unwrap();
     assert_eq!(
@@ -196,7 +202,8 @@ fn orphan_cleanup_does_not_allow_an_owned_link_to_bypass_another_repository() {
     repository(&other);
     let lane = other.join(".worktrees").join("feature");
     let repo = open(&root);
-    repo.add_lane(&lane, Some("feature"), None).unwrap();
+    repo.add_lane(&lane, LaneStart::new_branch("feature", None))
+        .unwrap();
     let dirs = open(&lane).dirs().unwrap();
     std::fs::remove_dir_all(&dirs.git_dir).unwrap();
     assert!(repo.remove_orphaned_lane(&lane).is_err());
@@ -268,7 +275,8 @@ fn assert_worktree_path_roundtrip(name: &str) {
     repository(&root);
     let lane = temp.path().join(name);
     let repo = open(&root);
-    repo.add_lane(&lane, Some("feature"), None).unwrap();
+    repo.add_lane(&lane, LaneStart::new_branch("feature", None))
+        .unwrap();
     assert_eq!(
         repo.lane_removal_state(&lane).unwrap(),
         LaneRemovalState::Registered,

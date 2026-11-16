@@ -413,7 +413,7 @@ fn git_merge_fast_forward() {
 
     // Create feature branch with one commit ahead of main.
     let feat = dir.join("wt-feat");
-    add_lane(&dir, &feat, Some("feat/add"), None).unwrap();
+    add_lane(&dir, &feat, &LaneStart::new_branch("feat/add", None)).unwrap();
     run_git(&dir, ["config", "user.email", "daruda@test"]).unwrap();
     run_git(&dir, ["config", "user.name", "daruda"]).unwrap();
     std::fs::write(feat.join("feature.txt"), "new").unwrap();
@@ -467,7 +467,7 @@ fn git_merge_abort_restores_clean_state() {
 
     // Create a branch that also modifies the same file.
     let feat = dir.join("wt-conflict");
-    add_lane(&dir, &feat, Some("feat/conflict"), None).unwrap();
+    add_lane(&dir, &feat, &LaneStart::new_branch("feat/conflict", None)).unwrap();
     run_git(&feat, ["config", "user.email", "daruda@test"]).unwrap();
     run_git(&feat, ["config", "user.name", "daruda"]).unwrap();
     std::fs::write(feat.join("conflict.txt"), "feature content").unwrap();
@@ -617,7 +617,7 @@ fn a_positional_that_looks_like_an_option_is_refused_before_git_runs() {
         ),
         (
             "existing branch",
-            add_lane(nowhere, &lane, None, Some("--detach")),
+            add_lane(nowhere, &lane, &LaneStart::existing_branch("--detach")),
             "branch",
             "--detach",
         ),

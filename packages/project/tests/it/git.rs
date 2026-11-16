@@ -154,7 +154,7 @@ fn add_and_list_worktrees_round_trip() {
 
     let wt_path = dir.join("wt-feature");
     open(&dir)
-        .add_lane(&wt_path, Some("feat/xyz"), None)
+        .add_lane(&wt_path, LaneStart::new_branch("feat/xyz", None))
         .unwrap();
 
     let listed = lanes(&dir);
@@ -175,7 +175,7 @@ fn remove_worktree_deletes_entry() {
 
     let wt_path = dir.join("wt-remove");
     open(&dir)
-        .add_lane(&wt_path, Some("scratch"), None)
+        .add_lane(&wt_path, LaneStart::new_branch("scratch", None))
         .unwrap();
     assert_eq!(lanes(&dir).len(), 2);
 
@@ -205,7 +205,7 @@ fn remove_lane_succeeds_when_the_worktree_was_already_removed_elsewhere() {
 
     let wt_path = dir.join("wt-extfull");
     open(&dir)
-        .add_lane(&wt_path, Some("scratch/extfull"), None)
+        .add_lane(&wt_path, LaneStart::new_branch("scratch/extfull", None))
         .unwrap();
     open(&dir).remove_lane(&wt_path, false).unwrap(); // the "external" removal
 
@@ -233,14 +233,14 @@ fn add_worktree_with_existing_branch_fails_cleanly() {
 
     let first = dir.join("wt-first");
     open(&dir)
-        .add_lane(&first, Some("dup-branch"), None)
+        .add_lane(&first, LaneStart::new_branch("dup-branch", None))
         .unwrap();
 
     // Re-using `-b dup-branch` must fail — ensures GitError::Exit
     // carries a useful message.
     let second = dir.join("wt-second");
     let err = open(&dir)
-        .add_lane(&second, Some("dup-branch"), None)
+        .add_lane(&second, LaneStart::new_branch("dup-branch", None))
         .unwrap_err();
     match err {
         GitError::Exit { stderr, .. } => {
@@ -264,7 +264,9 @@ fn delete_branch_after_worktree_removal() {
     // then remove the lane so the branch is no longer checked
     // out anywhere — the modal flow does this same sequence.
     let wt = dir.join("wt-temp");
-    open(&dir).add_lane(&wt, Some("temp/work"), None).unwrap();
+    open(&dir)
+        .add_lane(&wt, LaneStart::new_branch("temp/work", None))
+        .unwrap();
     open(&dir).remove_lane(&wt, false).unwrap();
 
     // Branch still exists post-remove (git keeps it).
@@ -388,7 +390,10 @@ fn add_worktree_with_explicit_base_ref() {
     // branch must point at "side"'s commit, not the current HEAD.
     let wt_path = dir.join("wt-from-side");
     open(&dir)
-        .add_lane(&wt_path, Some("feat/from-side"), Some("side"))
+        .add_lane(
+            &wt_path,
+            LaneStart::new_branch("feat/from-side", Some("side")),
+        )
         .unwrap();
 
     let side_sha = git_output(&dir, &["rev-parse", "side"]).stdout;
@@ -409,7 +414,9 @@ fn git_dirs_separate_a_linked_worktree_from_the_shared_repository() {
     init(&dir);
     commit_initial(&dir);
     let linked = dir.join("side-wt");
-    open(&dir).add_lane(&linked, Some("side"), None).unwrap();
+    open(&dir)
+        .add_lane(&linked, LaneStart::new_branch("side", None))
+        .unwrap();
 
     let main = open(&dir).dirs().unwrap();
     assert!(

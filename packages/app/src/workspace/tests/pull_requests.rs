@@ -6,7 +6,7 @@ use daruda_github::{CheckRollup, PrFilter, PrListItem, PrState, PrSummary, RepoI
 use daruda_store::project::{LaneKind, LaneRef};
 use gpui::{TestAppContext, VisualTestContext};
 
-use crate::lane::git::{FakeFailure, FakeRepo, GitCall, GitOp, PushTarget};
+use crate::lane::git::{FakeFailure, FakeRepo, GitCall, GitOp, LaneStart, PushTarget};
 use crate::surface::strings::error;
 use crate::workspace::pages::Page;
 use crate::workspace::pages::pull_requests::list::{GroupBody, PageBody, RowLaneSlot};
@@ -134,8 +134,7 @@ fn a_pull_request_opens_on_a_branch_started_from_its_fetched_head(cx: &mut TestA
                 GitCall::AddLane {
                     repo: f.root.clone(),
                     new_path: new_path.clone(),
-                    new_branch: Some(branch.into()),
-                    base: Some(start.into()),
+                    start: LaneStart::new_branch(branch, Some(start)),
                 },
             ],
             "{label}"
@@ -172,8 +171,7 @@ fn an_existing_local_branch_is_checked_out_rather_than_created(cx: &mut TestAppC
         Some(&GitCall::AddLane {
             repo: f.root.clone(),
             new_path,
-            new_branch: None,
-            base: Some("fix/scroll".into()),
+            start: LaneStart::existing_branch("fix/scroll"),
         })
     );
     assert_eq!(f.fake.reads(GitOp::HasLocalBranch, &f.root), 1);

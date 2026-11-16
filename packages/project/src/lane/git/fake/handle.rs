@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use super::super::base::{self, AgainstBase, BaseProblem, BaseTips, ResolvedBase};
 use super::super::{
-    GitDirs, GitError, GitRepo, GitTracking, GitWorktreeStatus, MergeOutcome, PushTarget,
+    GitDirs, GitError, GitRepo, GitTracking, GitWorktreeStatus, LaneStart, MergeOutcome, PushTarget,
 };
 use super::{FakeRepo, FakeState, GitCall, GitOp, lock, not_a_repo};
 
@@ -209,17 +209,11 @@ impl GitRepo for FakeHandle {
         })
     }
 
-    fn add_lane(
-        &self,
-        new_path: &Path,
-        new_branch: Option<&str>,
-        base: Option<&str>,
-    ) -> Result<(), GitError> {
+    fn add_lane(&self, new_path: &Path, start: LaneStart) -> Result<(), GitError> {
         let call = GitCall::AddLane {
             repo: self.repo(),
             new_path: new_path.to_path_buf(),
-            new_branch: new_branch.map(str::to_owned),
-            base: base.map(str::to_owned),
+            start,
         };
         self.write(GitOp::AddLane, call, |_| ())
     }

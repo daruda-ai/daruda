@@ -208,8 +208,14 @@ impl Workspace {
                 .spawn({
                     let plan = plan.clone();
                     async move {
-                        repo.add_lane(&plan.new_path, Some(&plan.branch), plan.base_ref.as_deref())
-                            .map_err(|e| e.to_string())
+                        repo.add_lane(
+                            &plan.new_path,
+                            crate::lane::git::LaneStart::new_branch(
+                                &plan.branch,
+                                plan.base_ref.as_deref(),
+                            ),
+                        )
+                        .map_err(|e| e.to_string())
                     }
                 })
                 .await;

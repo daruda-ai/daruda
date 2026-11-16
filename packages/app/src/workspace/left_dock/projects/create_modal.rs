@@ -299,8 +299,12 @@ impl CreateWorktreeModal {
                 let result: Result<(), String> = async_cx
                     .background_executor()
                     .spawn(async move {
+                        let start = crate::lane::git::LaneStart::new_branch(
+                            &git_branch,
+                            git_base.as_deref(),
+                        );
                         git_repo
-                            .add_lane(&git_path, Some(&git_branch), git_base.as_deref())
+                            .add_lane(&git_path, start)
                             .map_err(|e| e.to_string())
                     })
                     .await;

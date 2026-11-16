@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use super::{Git, GitError, GitRepo, GitTracking, GitWorktreeInfo, GitWorktreeStatus, RepoProbe};
+use super::{
+    Git, GitError, GitRepo, GitTracking, GitWorktreeInfo, GitWorktreeStatus, LaneStart, RepoProbe,
+};
 
 /// A write the code under test asked for. `repo` is the path of the handle
 /// the call was made on.
@@ -78,8 +80,7 @@ pub enum GitCall {
     AddLane {
         repo: PathBuf,
         new_path: PathBuf,
-        new_branch: Option<String>,
-        base: Option<String>,
+        start: LaneStart,
     },
     RemoveLane {
         repo: PathBuf,

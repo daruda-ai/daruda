@@ -3,7 +3,9 @@
 
 use std::path::Path;
 
-use daruda_project::lane::git::{Git, GitWorktreeInfo, SystemGit, isolate_git_config_for_tests};
+use daruda_project::lane::git::{
+    Git, GitWorktreeInfo, LaneStart, SystemGit, isolate_git_config_for_tests,
+};
 
 /// The real git backend, with the developer's own config swapped out first.
 fn system_git() -> SystemGit {
@@ -50,7 +52,8 @@ fn a_lane_worktree_is_created_listed_and_removed() {
     );
 
     let main = system_git().open(&repo);
-    main.add_lane(&lane, Some("feature"), None).unwrap();
+    main.add_lane(&lane, LaneStart::new_branch("feature", None))
+        .unwrap();
     assert_eq!(git(&lane, &["symbolic-ref", "--short", "HEAD"]), "feature");
     let listed = lanes(&repo);
     assert!(

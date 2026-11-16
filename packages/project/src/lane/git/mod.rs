@@ -73,6 +73,8 @@ pub enum GitError {
     /// A value bound for a positional argument starts with `-`, where git
     /// would read it as an option. Refused before git runs.
     OptionLike { what: &'static str, value: String },
+    /// A worktree was asked for on an existing local branch that is not one.
+    NoLocalBranch(String),
 }
 
 impl std::fmt::Display for GitError {
@@ -93,6 +95,7 @@ impl std::fmt::Display for GitError {
             GitError::OptionLike { what, value } => {
                 write!(f, "refusing {what} that starts with '-': {value}")
             }
+            GitError::NoLocalBranch(branch) => write!(f, "no local branch named {branch}"),
         }
     }
 }
@@ -256,43 +259,64 @@ pub(crate) fn default_branch(repo_root: &Path) -> Option<String> {
     current_branch(repo_root).ok().flatten()
 }
 
-/// `git worktree add <new_path> [-b <new_branch>] [<base>]`.
-///
-/// * `new_branch = Some(_)` → create a new branch (`-b`) starting at
-///   `base` (e.g. `"main"`, `"origin/main"`, a SHA), or at HEAD for `None`.
-/// * `new_branch = None`, `base = Some(branch)` → check out that existing
-///   local branch.
-/// * Both `None` → git's default: the branch named after `new_path`'s
-///   basename.
+/// What a new worktree is checked out on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaneStart {
+    /// A branch created for the worktree (`-b <name>`), starting at `base`
+    /// (e.g. `"main"`, `"origin/main"`, a SHA) or at HEAD for `None`.
+    NewBranch { name: String, base: Option<String> },
+    /// A local branch that already exists. Anything else is refused: git
+    /// would turn a name known only as `<remote>/<name>` into a new tracking
+    /// branch and detach HEAD at a SHA.
+    ExistingBranch(String),
+}
+
+impl LaneStart {
+    pub fn new_branch(name: &str, base: Option<&str>) -> Self {
+        Self::NewBranch {
+            name: name.to_owned(),
+            base: base.map(str::to_owned),
+        }
+    }
+
+    pub fn existing_branch(name: &str) -> Self {
+        Self::ExistingBranch(name.to_owned())
+    }
+}
+
+/// `git worktree add [-b <name>] <new_path> [<base> | <branch>]`, as
+/// [`LaneStart`] describes.
 ///
 /// `repo_root` must be the main repository (any existing lane
 /// path works; git resolves the shared gitdir).
 pub(crate) fn add_lane(
     repo_root: &Path,
     new_path: &Path,
-    new_branch: Option<&str>,
-    base: Option<&str>,
+    start: &LaneStart,
 ) -> Result<(), GitError> {
-    if let (None, Some(branch)) = (new_branch, base) {
-        reject_option_like("branch", branch)?;
-    }
     let mut args: Vec<String> = vec!["worktree".into(), "add".into()];
-    if let Some(b) = new_branch {
-        args.push("-b".into());
-        args.push(b.to_string());
-    }
-    args.push(new_path.to_string_lossy().into_owned());
-    match (new_branch, base) {
-        // Force commit resolution so `origin/<base>`-style refs do
-        // not become the new branch's upstream — without `^{commit}`
-        // git auto-tracks the remote ref, which then triggers
-        // unintended `push` collisions when daruda later finalizes
-        // the lane. Mirrors superset-desktop git.ts:457-519.
-        (Some(_), Some(b)) => args.push(format!("{b}^{{commit}}")),
-        // Bare, or git would detach HEAD at the commit instead of checking
-        // the branch out.
-        (None, Some(b)) => args.push(b.to_owned()),
-        (_, None) => {}
+    let path = new_path.to_string_lossy().into_owned();
+    match start {
+        LaneStart::NewBranch { name, base } => {
+            args.extend(["-b".into(), name.clone(), path]);
+            // Force commit resolution so `origin/<base>`-style refs do
+            // not become the new branch's upstream — without `^{commit}`
+            // git auto-tracks the remote ref, which then triggers
+            // unintended `push` collisions when daruda later finalizes
+            // the lane. Mirrors superset-desktop git.ts:457-519.
+            if let Some(base) = base {
+                args.push(format!("{base}^{{commit}}"));
+            }
+        }
+        LaneStart::ExistingBranch(branch) => {
+            reject_option_like("branch", branch)?;
+            if !remote::has_local_branch(repo_root, branch)? {
+                return Err(GitError::NoLocalBranch(branch.clone()));
+            }
+            // Bare, or git would detach HEAD at the commit instead of
+            // checking the branch out.
+            args.extend([path, branch.clone()]);
+        }
     }
     run_git(repo_root, args)?;
 
