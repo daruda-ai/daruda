@@ -63,6 +63,11 @@ pub(crate) fn parse_pr_detail(json: &str) -> Result<PrDetail, GhError> {
         .iter()
         .filter(|thread| !thread.is_resolved)
         .count() as u32;
+    let checks_truncated = pr
+        .pr
+        .status_check_rollup
+        .as_ref()
+        .is_some_and(|rollup| rollup.contexts.page_info.has_next_page);
     let (summary, runs) = pr.pr.into_parts()?;
     Ok(PrDetail {
         summary,
@@ -75,6 +80,7 @@ pub(crate) fn parse_pr_detail(json: &str) -> Result<PrDetail, GhError> {
         default_method,
         reviewers,
         checks: entries(&runs),
+        checks_truncated,
         open_threads,
     })
 }

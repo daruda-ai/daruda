@@ -324,6 +324,9 @@ pub struct PrDetail {
     /// Failing, then running, then passing, then skipped; GitHub's order
     /// within each. With more than 100 checks, those of the first page.
     pub checks: Vec<CheckEntry>,
+    /// GitHub returned only part of the check list; `summary.checks` still
+    /// carries its verdict over the entire list.
+    pub checks_truncated: bool,
     /// Unresolved review threads among the first 100.
     pub open_threads: u32,
 }

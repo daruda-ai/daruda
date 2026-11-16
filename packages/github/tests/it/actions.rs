@@ -26,6 +26,7 @@ fn detail(state: PrState, mergeability: Mergeability, methods: Vec<MergeMethod>)
         default_method: None,
         reviewers: Vec::new(),
         checks: Vec::new(),
+        checks_truncated: false,
         open_threads: 0,
     }
 }

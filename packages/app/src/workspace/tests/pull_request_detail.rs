@@ -81,6 +81,7 @@ fn detail(number: u64, head: &str) -> PrDetail {
             job: Some(JOB),
             duration: None,
         }],
+        checks_truncated: false,
         open_threads: 0,
     }
 }

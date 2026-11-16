@@ -59,7 +59,7 @@ fn pr(number: u64, head: &str, title: &str, state: PrState, checks: CheckRollup)
 /// What a capture of the pull request detail shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::workspace) enum PrDetailShot {
-    /// The first failing check's log open.
+    /// The first failing check's log open, with only part of the check list read.
     FailedLog,
     /// A mergeable pull request, its squash-merge confirmation up.
     MergeConfirm,
@@ -394,6 +394,9 @@ impl Workspace {
             failed("clippy", clippy),
         ];
         let merge_ready = shot == PrDetailShot::MergeConfirm;
+        if !merge_ready {
+            summary.checks = CheckRollup::Failing { failed: None };
+        }
         let detail = PrDetail {
             summary,
             body: "Narrow docks clipped the worktree names.\n\n- Measure the label once per frame\n- Keep the badge column fixed".into(),
@@ -420,6 +423,7 @@ impl Workspace {
                 check("build (macos-14)", CheckStatus::Success, None, Some(400)),
                 check("docs preview", CheckStatus::Ignored, None, None),
             ],
+            checks_truncated: !merge_ready,
             open_threads: 3,
         };
         gh.set_pr_detail(&row.repo, row.pr.number, detail.clone());

@@ -893,6 +893,7 @@ pull_requests:
   checks_passed: "%{count}개 통과"
   checks_skipped: "%{count}개 건너뜀"
   checks_none: "체크 없음"
+  checks_truncated: "%{verdict} · 체크 목록의 일부만 표시됩니다"
   send_to_agent: "에이전트에 보내기"
   send_no_lane: "에이전트에 보내려면 이 pull request의 worktree를 여세요"
   send_nothing_checks: "보낼 실패한 체크가 없습니다"

@@ -1176,6 +1176,7 @@ pull_requests:
   checks_passed: "%{count} passed"
   checks_skipped: "%{count} skipped"
   checks_none: "No checks"
+  checks_truncated: "%{verdict} · Only part of the check list is shown"
   # Puts the failing checks or open threads into the linked worktree's agent input, unsent.
   send_to_agent: "Send to agent"
   send_no_lane: "Open a worktree for this pull request to send it to an agent"

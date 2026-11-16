@@ -89,6 +89,7 @@ fn detail(failed: bool, open_threads: u32, cross_repo: bool) -> PrDetail {
                 duration: None,
             },
         ],
+        checks_truncated: false,
         open_threads,
     }
 }
@@ -220,6 +221,31 @@ fn only_a_failed_actions_check_opens_its_log() {
         open.checks[0].log,
         LogSlot::Open(JOB, Load::Ready("boom".into()))
     );
+}
+
+#[test]
+fn a_partial_check_list_shows_the_overall_verdict_and_says_it_is_partial() {
+    let cases = [
+        (CheckRollup::Failing { failed: None }, "Checks failing"),
+        (CheckRollup::Pending, "Checks running"),
+        (CheckRollup::Passing, "Checks passed"),
+    ];
+    for (rollup, verdict) in cases {
+        let mut loaded = detail(false, 0, false);
+        loaded
+            .checks
+            .retain(|entry| entry.run.status == CheckStatus::Success);
+        loaded.summary.checks = rollup;
+        loaded.checks_truncated = true;
+        let state = state(Load::Ready(loaded), false);
+        let view = ready(view(&state, &inputs(None)));
+        assert_eq!(
+            view.checks_summary,
+            format!("{verdict} · Only part of the check list is shown"),
+            "{rollup:?}"
+        );
+        assert!(view.rerun.is_none(), "no unseen job is offered for rerun");
+    }
 }
 
 #[test]

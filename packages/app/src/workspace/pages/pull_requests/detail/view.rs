@@ -285,7 +285,7 @@ fn ready(
         (Some(_), false, false) => SendSlot::Ready,
     };
     ReadyView {
-        checks_summary: checks_summary(&loaded.checks),
+        checks_summary: checks_summary(loaded),
         checks: loaded
             .checks
             .iter()
@@ -382,7 +382,14 @@ fn tab_label(tab: PrTab, loaded: Option<&PrDetail>) -> String {
 }
 
 /// `2 failing · 5 passed · 1 skipped`, leaving out what there is none of.
-fn checks_summary(checks: &[CheckEntry]) -> String {
+fn checks_summary(loaded: &PrDetail) -> String {
+    if loaded.checks_truncated {
+        let verdict =
+            crate::workspace::left_dock::git_changes::pr_strip::checks_label(loaded.summary.checks)
+                .unwrap_or_else(s::checks_none);
+        return s::checks_truncated(verdict);
+    }
+    let checks = &loaded.checks;
     let count = |status| checks.iter().filter(|e| e.run.status == status).count();
     let mut parts = Vec::new();
     let failing = count(CheckStatus::Failure);

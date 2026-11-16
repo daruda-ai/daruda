@@ -25,6 +25,7 @@ fn a_real_detail_answer_parses() {
     assert_eq!(detail.summary.number, 15003);
     assert!(detail.summary.cross_repo);
     assert_eq!(detail.summary.checks, CheckRollup::Passing);
+    assert!(!detail.checks_truncated);
     assert_eq!(
         detail.body,
         "### Description\n\nTrimmed from the recorded answer.\n"
@@ -87,6 +88,26 @@ fn detail_answer(edit: impl FnOnce(&mut Value)) -> String {
     let mut answer: Value = serde_json::from_str(&fixture("pr_detail_15003.json")).unwrap();
     edit(&mut answer["data"]["repository"]);
     answer.to_string()
+}
+
+#[test]
+fn a_partial_check_list_keeps_githubs_overall_verdict() {
+    let cases = [
+        ("FAILURE", CheckRollup::Failing { failed: None }),
+        ("PENDING", CheckRollup::Pending),
+        ("SUCCESS", CheckRollup::Passing),
+    ];
+    for (state, expected) in cases {
+        let answer = detail_answer(|repo| {
+            let rollup = &mut repo["pullRequest"]["statusCheckRollup"];
+            rollup["state"] = json!(state);
+            rollup["contexts"]["pageInfo"]["hasNextPage"] = json!(true);
+        });
+        let loaded = parse_pr_detail(&answer).unwrap();
+        assert!(loaded.checks_truncated, "{state}");
+        assert_eq!(loaded.summary.checks, expected, "{state}");
+        assert!(loaded.summary.failed.is_empty(), "the listed checks passed");
+    }
 }
 
 #[test]
