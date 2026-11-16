@@ -57,6 +57,15 @@ fn job_key(job: ActionsJob) -> JobKey {
     (job.run, job.job)
 }
 
+/// An open log, and which read of it may land: a log closed (or cleared
+/// by a refresh) and opened again while its first read is out waits for
+/// its own read, not that one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct JobLog {
+    read: u64,
+    pub(super) load: Load<String>,
+}
+
 /// The description's link opener. The text is any author's, so a link
 /// reaches the system opener only when it is a web page or an e-mail
 /// address; any other is swallowed rather than left to the default opener.
@@ -77,13 +86,15 @@ pub(in crate::workspace) struct PrDetailState {
     /// The unresolved threads, read when their tab is first shown.
     pub threads: Option<Load<ReviewThreads>>,
     /// The failed Actions jobs whose log is open.
-    pub(super) logs: BTreeMap<JobKey, Load<String>>,
+    pub(super) logs: BTreeMap<JobKey, JobLog>,
     /// What it is doing to the pull request on GitHub, or what failed.
     pub(super) action: ActionState,
     /// Which read of the detail may land; a refresh outdates the one before.
     read: u64,
     /// The same for the threads, which are read on their own.
     threads_read: u64,
+    /// The same for the logs: numbers every log read of this detail.
+    logs_read: u64,
 }
 
 impl PrDetailState {
@@ -99,11 +110,12 @@ impl PrDetailState {
             action: ActionState::Idle,
             read: 0,
             threads_read: 0,
+            logs_read: 0,
         }
     }
 
     pub(in crate::workspace) fn log(&self, job: ActionsJob) -> Option<&Load<String>> {
-        self.logs.get(&job_key(job))
+        self.logs.get(&job_key(job)).map(|log| &log.load)
     }
 }
 
@@ -297,7 +309,15 @@ impl Workspace {
             cx.notify();
             return;
         }
-        detail.logs.insert(job_key(job), Load::Loading);
+        detail.logs_read += 1;
+        let read = detail.logs_read;
+        detail.logs.insert(
+            job_key(job),
+            JobLog {
+                read,
+                load: Load::Loading,
+            },
+        );
         let repo = detail.item.repo.clone();
         let gh = GhHost::global(cx);
         spawn_bg_work_and_mutate(
@@ -306,27 +326,30 @@ impl Workspace {
                 gh.failed_log(&repo, job)
                     .map(|raw| daruda_github::prompt::clean_log(&raw))
             },
-            move |ws, result, cx| ws.land_pr_check_log(id, job, result, cx),
+            move |ws, result, cx| ws.land_pr_check_log(id, job, read, result, cx),
         )
         .detach();
         cx.notify();
     }
 
-    fn land_pr_check_log(
+    /// Only the read the open log waits for lands; an earlier read of the
+    /// same job, from before a close or a refresh, is dropped.
+    pub(in crate::workspace) fn land_pr_check_log(
         &mut self,
         id: PrDetailId,
         job: ActionsJob,
+        read: u64,
         result: Result<String, GhError>,
         cx: &mut Context<Self>,
     ) {
         let Some(slot) = self
             .pr_detail_mut(id)
             .and_then(|detail| detail.logs.get_mut(&job_key(job)))
-            .filter(|slot| **slot == Load::Loading)
+            .filter(|slot| slot.read == read && slot.load == Load::Loading)
         else {
             return;
         };
-        *slot = match &result {
+        slot.load = match &result {
             Ok(log) => Load::Ready(log.clone()),
             Err(e) => Load::Failed(e.to_string()),
         };

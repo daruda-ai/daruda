@@ -197,7 +197,13 @@ fn only_a_failed_actions_check_opens_its_log() {
     assert_eq!(closed.checks[0].duration.as_deref(), Some("1m 23s"));
     assert_eq!(closed.checks_summary, "2 failing · 1 passed · 1 skipped");
 
-    state.logs.insert((11, 22), Load::Ready("boom".into()));
+    state.logs.insert(
+        (11, 22),
+        super::super::JobLog {
+            read: 1,
+            load: Load::Ready("boom".into()),
+        },
+    );
     let open = ready(view(&state, None, false, false, Utc::now()));
     assert_eq!(
         open.checks[0].log,

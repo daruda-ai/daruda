@@ -845,3 +845,39 @@ fn a_failed_merge_reloads_the_detail_and_keeps_the_failure(cx: &mut TestAppConte
         "the failure outlives the reload"
     );
 }
+
+/// A log closed (or cleared by a refresh) and opened again while its first
+/// read is out waits for its own read: the first one, answering late, is
+/// dropped rather than filling the new slot.
+#[gpui::test]
+fn a_reopened_log_does_not_take_an_earlier_reads_answer(cx: &mut TestAppContext) {
+    let (f, _, _) = window(cx);
+    let id = read_detail(&f, cx);
+    let log = |f: &GitFixture, cx: &mut TestAppContext| {
+        let DetailBody::Ready(ready) = view(f, cx).body else {
+            panic!("not read");
+        };
+        ready.checks[0].log.clone()
+    };
+    // (how it reopens, the first read's number: each open is a read)
+    for (reopen, first) in [("closed and opened", 1), ("refreshed and opened", 3)] {
+        f.ws.update(cx, |ws, cx| {
+            ws.toggle_pr_check_log(id, JOB, cx);
+            match reopen {
+                "closed and opened" => ws.toggle_pr_check_log(id, JOB, cx),
+                _ => ws.refresh_pr_detail(id, cx),
+            }
+            ws.toggle_pr_check_log(id, JOB, cx);
+            // The first read's answer, from before the reopen.
+            ws.land_pr_check_log(id, JOB, first, Ok("stale".into()), cx);
+        });
+        assert_eq!(log(&f, cx), LogSlot::Open(JOB, Load::Loading), "{reopen}");
+        cx.run_until_parked();
+        let LogSlot::Open(_, Load::Ready(text)) = log(&f, cx) else {
+            panic!("{reopen}: {:?}", log(&f, cx));
+        };
+        assert!(text.contains("test parse ... FAILED"), "{reopen}: {text}");
+        // Closed for the next round.
+        f.ws.update(cx, |ws, cx| ws.toggle_pr_check_log(id, JOB, cx));
+    }
+}
