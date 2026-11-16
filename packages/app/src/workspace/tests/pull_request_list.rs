@@ -140,28 +140,25 @@ fn a_late_window_loads_what_the_cached_answer_did_not_cover(cx: &mut TestAppCont
 }
 
 #[gpui::test]
-fn an_answer_in_flight_does_not_speak_for_a_window_that_joined(cx: &mut TestAppContext) {
+fn a_window_that_joined_a_search_in_flight_is_searched_for_when_it_answers(
+    cx: &mut TestAppContext,
+) {
     let gh = gh(cx);
     let first = window("r", cx);
     let joined = window("s", cx);
     tick(cx);
+    // The first window's search is sent before the second shows its page.
     show_unanswered(&first, cx);
     show_unanswered(&joined, cx);
     cx.run_until_parked();
-    assert_eq!(searched(&gh), vec![vec![repo("r")]], "one search running");
-    assert_eq!(group(&first, "r", cx), Some(vec![7]));
-    assert_eq!(
-        group(&joined, "s", cx),
-        None,
-        "the search was sent before o/s was wanted"
-    );
-
-    tick(cx);
-    assert_eq!(group(&joined, "s", cx), Some(vec![8]));
     assert_eq!(
         searched(&gh),
-        vec![vec![repo("r")], vec![repo("r"), repo("s")]]
+        vec![vec![repo("r")], vec![repo("r"), repo("s")]],
+        "the answer that never asked about o/s is followed by the union at \
+         once, with no tick in between"
     );
+    assert_eq!(group(&first, "r", cx), Some(vec![7]));
+    assert_eq!(group(&joined, "s", cx), Some(vec![8]));
 }
 
 #[gpui::test]

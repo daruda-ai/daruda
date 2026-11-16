@@ -312,7 +312,7 @@ fn slot(f: &GitFixture, cx: &mut TestAppContext) -> Slot {
     match &rows[0].lane {
         RowLaneSlot::Linked(_) => Slot::Linked,
         RowLaneSlot::Creating => Slot::Creating,
-        RowLaneSlot::Absent(_) => Slot::Absent,
+        RowLaneSlot::Absent => Slot::Absent,
     }
 }
 

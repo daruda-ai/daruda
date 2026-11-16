@@ -155,7 +155,7 @@ impl PrPoller {
     pub(super) fn host_answered(host: &str, cx: &mut App) {
         let now = cx.background_executor().now();
         let schedule = &mut cx.default_global::<Self>().schedule;
-        schedule.host_answered(host);
+        schedule.host_answered(host, now);
         if schedule.recovered(host, now) {
             Self::set_host_availability(host, GhAvailability::Ready, cx);
         }

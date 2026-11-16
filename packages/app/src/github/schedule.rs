@@ -73,6 +73,11 @@ impl HostState {
         }
     }
 
+    /// Whether a backoff still holds the host at `now`.
+    fn is_paused(&self, now: Instant) -> bool {
+        matches!(self.availability, GhAvailability::Backoff { until, .. } if now < until)
+    }
+
     fn takes_requests(&self, now: Instant) -> bool {
         match self.availability {
             GhAvailability::Ready => true,
@@ -349,7 +354,7 @@ impl Schedule {
         }
         let result = match result {
             Ok(prs) => {
-                self.host_answered(repo.host());
+                self.host_answered(repo.host(), now);
                 Ok(prs)
             }
             Err(kind) => Err(self.host_failed(repo.host(), kind, now)),
@@ -373,10 +378,15 @@ impl Schedule {
         }
     }
 
-    /// A request about `host` succeeded: the rate-limit pause starts over.
-    pub(super) fn host_answered(&mut self, host: &str) {
-        if let Some(host) = self.hosts.get_mut(host) {
-            host.rate_limit_failures = 0;
+    /// A request about `host` succeeded at `now`: the rate-limit pause
+    /// starts over. Not inside a pause still running, the rule
+    /// [`Self::recovered`] follows: that answer is to a request sent before
+    /// the limit was heard, and the next limit must still grow the pause.
+    pub(super) fn host_answered(&mut self, host: &str, now: Instant) {
+        if let Some(state) = self.hosts.get_mut(host)
+            && !state.is_paused(now)
+        {
+            state.rate_limit_failures = 0;
         }
     }
 

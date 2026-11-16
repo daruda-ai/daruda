@@ -13,7 +13,6 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
 
 use super::detail::{Load, PrDetailId};
-use super::detail_view::merge_action_label;
 use crate::gh_host::GhHost;
 use crate::github::PrPoller;
 use crate::surface::strings::{error, pull_requests as s};
@@ -108,6 +107,16 @@ pub(in crate::workspace) fn merge_menu(
         .collect();
     menu.dedup();
     menu
+}
+
+/// What merging with `method` is called on its button, menu item and
+/// confirmation.
+pub(in crate::workspace) fn merge_action_label(method: MergeMethod) -> String {
+    match method {
+        MergeMethod::Squash => s::merge_squash(),
+        MergeMethod::Merge => s::merge_commit(),
+        MergeMethod::Rebase => s::merge_rebase(),
+    }
 }
 
 /// Each Actions run with a failed job, once: `gh run rerun --failed` reruns
@@ -319,7 +328,8 @@ impl Workspace {
         result: Result<(), GhError>,
         cx: &mut Context<Self>,
     ) {
-        let shown = match self.pr_detail_mut(id) {
+        // The detail that asked is still there, waiting on this action.
+        let asker_waiting = match self.pr_detail_mut(id) {
             Some(detail) if detail.action == ActionState::Running(action) => {
                 detail.action = ActionState::Idle;
                 true
@@ -361,13 +371,13 @@ impl Workspace {
         };
         // A failure other than a moved head leaves the pull request as shown.
         let reload = result.is_ok() || matches!(result, Err(GhError::HeadMoved));
-        if shown && reload {
+        if asker_waiting && reload {
             self.refresh_pr_detail(id, cx);
         } else if result.is_ok() {
             self.refresh_pr_list(cx);
         }
         // After the reload, which clears an earlier failure.
-        if let (true, Some(line)) = (shown, failure)
+        if let (true, Some(line)) = (asker_waiting, failure)
             && let Some(detail) = self.pr_detail_mut(id)
         {
             detail.action = ActionState::Failed(line);

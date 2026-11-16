@@ -41,20 +41,7 @@ impl PrList {
     /// One round, run by [`PrPoller::tick`] while the feature is on: gather
     /// what every window shows, then send each search that is due.
     pub(super) fn tick(cx: &mut App) {
-        let mut wanted: ListWanted = HashMap::new();
-        WindowRegistry::for_each_workspace(cx, |ws, _, _| {
-            let Some((filter, repos)) = ws.pr_list_demand() else {
-                return;
-            };
-            for repo in repos {
-                let key = ListKey {
-                    host: repo.host().to_owned(),
-                    filter,
-                };
-                wanted.entry(key).or_default().insert(repo);
-            }
-        });
-
+        let wanted = Self::wanted_now(cx);
         Self::apply_cached(&wanted, cx);
         let now = cx.background_executor().now();
         let open: BTreeSet<String> = wanted
@@ -68,6 +55,25 @@ impl PrList {
         for (key, repos) in due {
             Self::search(key, repos, cx);
         }
+    }
+
+    /// The repositories each search covers now: the union over every window
+    /// showing its filter.
+    fn wanted_now(cx: &mut App) -> ListWanted {
+        let mut wanted: ListWanted = HashMap::new();
+        WindowRegistry::for_each_workspace(cx, |ws, _, _| {
+            let Some((filter, repos)) = ws.pr_list_demand() else {
+                return;
+            };
+            for repo in repos {
+                let key = ListKey {
+                    host: repo.host().to_owned(),
+                    filter,
+                };
+                wanted.entry(key).or_default().insert(repo);
+            }
+        });
+        wanted
     }
 
     /// The feature was switched off: forget every answer and every list.
@@ -129,8 +135,14 @@ impl PrList {
             .schedule
             .finish(&key, result, enabled, now);
         let (host, filter) = (key.host.as_str(), key.filter);
+        // A window that joined while this search ran wants repositories it
+        // did not ask about, and waits on them.
+        let mut uncovered = false;
         match outcome {
             ListOutcome::Answer(answer) => {
+                uncovered = Self::wanted_now(cx)
+                    .get(&key)
+                    .is_some_and(|repos| !repos.is_subset(&answer.covered));
                 PrPoller::host_answered(host, cx);
                 let update = PrListUpdate::Answer {
                     host,
@@ -147,9 +159,10 @@ impl PrList {
             }
             ListOutcome::Dropped => {}
         }
-        // A refresh asked for while this search ran is sent now rather
-        // than at the next tick: the user is waiting on it.
-        if cx.default_global::<Self>().schedule.is_requested(&key) {
+        // A refresh asked for while this search ran, or the search for what
+        // this answer left out, is sent now rather than at the next tick:
+        // the user is waiting on it.
+        if uncovered || cx.default_global::<Self>().schedule.is_requested(&key) {
             cx.defer(PrPoller::tick);
         }
     }

@@ -131,8 +131,8 @@ pub(in crate::workspace) enum RowLaneSlot {
     Linked(RowLane),
     /// One is being made for it.
     Creating,
-    /// None yet; the row offers to make one from `item`.
-    Absent(Box<PrListItem>),
+    /// None yet; the row offers to make one from its [`PrRow::item`].
+    Absent,
 }
 
 /// One pull request, ready to draw.
@@ -153,7 +153,7 @@ pub(in crate::workspace) struct PrRow {
     pub lane: RowLaneSlot,
     /// Only a URL a browser may be handed.
     pub url: Option<String>,
-    /// What clicking the row opens.
+    /// What clicking the row opens, and what its worktree is made from.
     pub item: Box<PrListItem>,
 }
 
@@ -339,7 +339,7 @@ fn lane_slot(item: &PrListItem, inputs: &PageInputs<'_>) -> RowLaneSlot {
     {
         RowLaneSlot::Creating
     } else {
-        RowLaneSlot::Absent(Box::new(item.clone()))
+        RowLaneSlot::Absent
     }
 }
 

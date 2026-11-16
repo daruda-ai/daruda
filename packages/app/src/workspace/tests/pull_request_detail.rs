@@ -12,7 +12,7 @@ use gpui::{AppContext as _, TestAppContext, VisualTestContext};
 
 use crate::lane::git::{FakeRepo, PushTarget};
 use crate::workspace::pages::Page;
-use crate::workspace::pages::pull_requests::detail::{Load, PrDetailId};
+use crate::workspace::pages::pull_requests::detail::{Load, PrDetailId, PrTab};
 use crate::workspace::pages::pull_requests::detail_view::{
     ActionSlot, DetailBody, LogSlot, SendSlot,
 };
@@ -215,6 +215,43 @@ fn a_read_landing_after_its_detail_was_replaced_or_closed_is_dropped(cx: &mut Te
     vcx.update(|window, cx| f.ws.update(cx, |ws, cx| ws.back_to_pr_list(window, cx)));
     cx.run_until_parked();
     assert_eq!(shown(&f, cx).map(|(_, number, _)| number), None);
+}
+
+#[gpui::test]
+fn a_threads_read_outdated_by_a_refresh_does_not_land(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    let id = read_detail(&f, cx);
+    let thread = |path: &str| daruda_github::ReviewThreads {
+        threads: vec![daruda_github::ReviewThread {
+            path: path.into(),
+            lines: None,
+            outdated: false,
+            comments: Vec::new(),
+            more_comments: false,
+        }],
+        truncated: false,
+    };
+    gh.set_review_threads(7, thread("new.rs"));
+    let threads = |f: &GitFixture, cx: &mut TestAppContext| {
+        f.ws.read_with(cx, |ws, _| {
+            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            detail.threads.clone()
+        })
+    };
+    // The tab's first read, then a refresh's second, neither answered yet.
+    f.ws.update(cx, |ws, cx| {
+        ws.select_pr_detail_tab(id, PrTab::Threads, cx);
+        ws.refresh_pr_detail(id, cx);
+        // The first read answers late, into the slot the second waits in.
+        ws.land_pr_threads(id, 1, Ok(thread("old.rs")), cx);
+    });
+    assert_eq!(
+        threads(&f, cx),
+        Some(Load::Loading),
+        "the old answer is dropped"
+    );
+    cx.run_until_parked();
+    assert_eq!(threads(&f, cx), Some(Load::Ready(thread("new.rs"))));
 }
 
 #[gpui::test]

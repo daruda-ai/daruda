@@ -222,15 +222,15 @@ fn blocked_note(group: &PrGroup, blocked: Blocked, snap: &PrPageSnapshot, cx: &A
         Blocked::UnconfirmedHost => s::gh_unconfirmed_host(&host),
     };
     let workspace = snap.workspace.clone();
-    let recheck = button_compact(
-        SharedString::from(format!("pr-recheck-{}", group.label)),
-        git_s::pr_recheck(),
-    )
-    .on_click(move |_, _, cx| {
-        if let Some(ws) = workspace.upgrade() {
-            ws.update(cx, |ws, cx| ws.recheck_gh(&host, cx));
-        }
-    });
+    // The qualified name: two hosts can hold the same `owner/name`.
+    let selector = format!("pr-recheck-{}", group.repo.qualified());
+    let recheck = button_compact(SharedString::from(selector.clone()), git_s::pr_recheck())
+        .debug_selector(move || selector.clone())
+        .on_click(move |_, _, cx| {
+            if let Some(ws) = workspace.upgrade() {
+                ws.update(cx, |ws, cx| ws.recheck_gh(&host, cx));
+            }
+        });
     note(message, cx)
         .flex()
         .flex_wrap()
@@ -333,7 +333,7 @@ fn lane_cell(row: &PrRow, snap: &PrPageSnapshot) -> AnyElement {
     let item = match &row.lane {
         RowLaneSlot::Linked(lane) => return linked_lane(row, lane, snap),
         RowLaneSlot::Creating => None,
-        RowLaneSlot::Absent(item) => Some(item.as_ref().clone()),
+        RowLaneSlot::Absent => Some(row.item.as_ref().clone()),
     };
     let label = if row.fork {
         s::create_review_lane()

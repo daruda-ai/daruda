@@ -500,7 +500,7 @@ fn searches(gh: &FakeGh) -> Vec<PrFilter> {
 fn linked(slot: &RowLaneSlot) -> Option<LaneRef> {
     match slot {
         RowLaneSlot::Linked(lane) => Some(lane.lane),
-        RowLaneSlot::Creating | RowLaneSlot::Absent(_) => None,
+        RowLaneSlot::Creating | RowLaneSlot::Absent => None,
     }
 }
 

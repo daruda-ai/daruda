@@ -325,7 +325,7 @@ fn header_actions(loaded: &PrDetail, running: &ActionState) -> Option<HeaderActi
     let methods: Vec<(MergeMethod, String)> =
         actions::merge_menu(&loaded.methods, loaded.default_method)
             .into_iter()
-            .map(|method| (method, merge_action_label(method)))
+            .map(|method| (method, actions::merge_action_label(method)))
             .collect();
     let blocked = actions::merge_block(loaded).map(|block| match block {
         MergeBlock::NoMethods => s::merge_no_methods(),
@@ -343,16 +343,6 @@ fn header_actions(loaded: &PrDetail, running: &ActionState) -> Option<HeaderActi
         close: ActionSlot::of(running, PrAction::Closing, None),
         ready: draft.then(|| ActionSlot::of(running, PrAction::MarkingReady, None)),
     })
-}
-
-/// What merging with `method` is called on its button, menu item and
-/// confirmation.
-pub(in crate::workspace) fn merge_action_label(method: MergeMethod) -> String {
-    match method {
-        MergeMethod::Squash => s::merge_squash(),
-        MergeMethod::Merge => s::merge_commit(),
-        MergeMethod::Rebase => s::merge_rebase(),
-    }
 }
 
 fn state_label(state: PrState) -> (String, Mood) {

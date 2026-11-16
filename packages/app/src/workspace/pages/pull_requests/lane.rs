@@ -5,6 +5,7 @@
 
 use daruda_github::{PrListItem, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
+use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::project::{LaneKind, LaneRef, ProjectId};
 use gpui::{Context, Window};
 
@@ -154,12 +155,24 @@ impl Workspace {
                     async move { check_out(&*repo, &checkout, &new_path).map_err(|e| e.to_string()) }
                 })
                 .await;
-            // A window that closed while git ran took its lock and its
-            // in-flight row with it; a checkout git made stays on disk.
-            // SILENT-OK: nothing is left in a closed window to release or report
-            let _ = ws.update_in(cx, |ws, window, cx| {
+            let created = made.is_ok().then(|| plan.new_path.clone());
+            let finished = ws.update_in(cx, |ws, window, cx| {
                 ws.finish_pr_lane(key, project, plan, made, window, cx)
             });
+            // A window that closed while git ran took its lock and its
+            // in-flight row with it. A checkout git made stays on disk,
+            // registered nowhere, so the log is the only place it is named.
+            if let (Err(e), Some(path)) = (finished, created) {
+                LogWriter::log(
+                    ErrorReport::new("PR worktree was made but its workspace closed first")
+                        .severity(ErrorSeverity::Warning)
+                        .with_context("path", path.display().to_string())
+                        .with_context("error", e.to_string())
+                        .at(file!(), line!())
+                        .dedup("pull_requests.lane_unregistered")
+                        .build(),
+                );
+            }
         })
         .detach();
     }

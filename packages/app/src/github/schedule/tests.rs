@@ -290,6 +290,12 @@ fn an_answer_after_a_pause_resets_the_counts() {
         !schedule.recovered(HOST, until - Duration::from_secs(1)),
         "an answer inside the pause is to a request sent before it"
     );
+    let inside = until - Duration::from_secs(1);
+    schedule.host_answered(HOST, inside);
+    assert_eq!(
+        schedule.hosts[HOST].rate_limit_failures, 1,
+        "nor does it start the pause over: the next limit still grows it"
+    );
     let later = until;
     schedule.begin_polls(wanted(&[(&r, demand(&["a"], true))]), FOCUSED, later);
     let outcome = schedule.finish_poll(&r, Ok(answer(&["a"])), true, later);

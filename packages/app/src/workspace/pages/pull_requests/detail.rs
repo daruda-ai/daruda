@@ -68,6 +68,8 @@ pub(in crate::workspace) struct PrDetailState {
     pub(super) action: ActionState,
     /// Which read of the detail may land; a refresh outdates the one before.
     read: u64,
+    /// The same for the threads, which are read on their own.
+    threads_read: u64,
 }
 
 impl PrDetailState {
@@ -82,6 +84,7 @@ impl PrDetailState {
             logs: BTreeMap::new(),
             action: ActionState::Idle,
             read: 0,
+            threads_read: 0,
         }
     }
 
@@ -227,26 +230,31 @@ impl Workspace {
             return;
         };
         detail.threads = Some(Load::Loading);
+        detail.threads_read += 1;
+        let read = detail.threads_read;
         let (repo, number) = (detail.item.repo.clone(), detail.item.pr.number);
         let gh = GhHost::global(cx);
         spawn_bg_work_and_mutate(
             cx,
             move || gh.review_threads(&repo, number),
-            move |ws, result, cx| ws.land_pr_threads(id, result, cx),
+            move |ws, result, cx| ws.land_pr_threads(id, read, result, cx),
         )
         .detach();
     }
 
-    fn land_pr_threads(
+    /// Only the newest read lands: after a refresh an older answer would
+    /// otherwise fill the slot the newer read is waiting in.
+    pub(in crate::workspace) fn land_pr_threads(
         &mut self,
         id: PrDetailId,
+        read: u64,
         result: Result<ReviewThreads, GhError>,
         cx: &mut Context<Self>,
     ) {
-        let Some(detail) = self.pr_detail_mut(id) else {
+        let Some(detail) = self.pr_detail_mut(id).filter(|d| d.threads_read == read) else {
             return;
         };
-        // A refresh dropped the read this answers.
+        // A refresh away from the tab dropped the read without another.
         if detail.threads != Some(Load::Loading) {
             return;
         }
