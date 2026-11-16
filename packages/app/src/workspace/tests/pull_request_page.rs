@@ -12,7 +12,7 @@ use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use crate::github::PrPoller;
 use crate::lane::git::{FakeRepo, PushTarget};
 use crate::workspace::pages::Page;
-use crate::workspace::pages::pull_requests::list::{GroupBody, PageBody, RowLaneSlot, Trouble};
+use crate::workspace::pages::pull_requests::list::{GroupBody, LaneSlot, PageBody, Trouble};
 use crate::workspace::tests::GitFixture;
 
 fn repo() -> RepoId {
@@ -91,10 +91,10 @@ fn searches(gh: &FakeGh) -> Vec<PrFilter> {
         .collect()
 }
 
-fn linked(slot: &RowLaneSlot) -> Option<LaneRef> {
+fn linked(slot: &LaneSlot) -> Option<LaneRef> {
     match slot {
-        RowLaneSlot::Linked(lane) => Some(lane.lane),
-        RowLaneSlot::Creating | RowLaneSlot::Absent => None,
+        LaneSlot::Linked(lane) => Some(lane.lane),
+        LaneSlot::Creating | LaneSlot::Absent { .. } => None,
     }
 }
 

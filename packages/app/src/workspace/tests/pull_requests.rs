@@ -9,7 +9,7 @@ use gpui::{TestAppContext, VisualTestContext};
 use crate::lane::git::{FakeFailure, FakeRepo, GitCall, GitOp, LaneStart, PushTarget};
 use crate::surface::strings::error;
 use crate::workspace::pages::Page;
-use crate::workspace::pages::pull_requests::list::{GroupBody, PageBody, RowLaneSlot};
+use crate::workspace::pages::pull_requests::list::{GroupBody, LaneSlot, PageBody};
 use crate::workspace::tests::{GitFixture, fake_lane};
 
 fn item(number: u64, head: &str, cross_repo: bool) -> PrListItem {
@@ -388,17 +388,14 @@ fn slot(f: &GitFixture, cx: &mut TestAppContext) -> Slot {
         panic!("{:?}", groups[0].body);
     };
     match &rows[0].lane {
-        RowLaneSlot::Linked(_) => Slot::Linked,
-        RowLaneSlot::Creating => Slot::Creating,
-        RowLaneSlot::Absent => Slot::Absent,
+        LaneSlot::Linked(_) => Slot::Linked,
+        LaneSlot::Creating => Slot::Creating,
+        LaneSlot::Absent { .. } => Slot::Absent,
     }
 }
 
 /// The detail's worktree slot, staged as the page draws it.
-fn detail_slot(
-    f: &GitFixture,
-    cx: &mut TestAppContext,
-) -> crate::workspace::pages::pull_requests::detail::view::LaneSlot {
+fn detail_slot(f: &GitFixture, cx: &mut TestAppContext) -> LaneSlot {
     f.ws.update(cx, |ws, cx| {
         ws.stage_pr_page(cx);
         ws.pages.pull_requests.detail_snapshot.clone()
@@ -409,7 +406,6 @@ fn detail_slot(
 
 #[gpui::test]
 fn the_details_button_makes_the_worktree_its_row_would(cx: &mut TestAppContext) {
-    use crate::workspace::pages::pull_requests::detail::view::LaneSlot;
     let (f, gh) = window(cx, |repo| repo);
     // Failing, so the in-flight state can be read before it settles.
     f.fake.fail(

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use daruda_github::{
@@ -110,6 +111,19 @@ fn lane() -> LaneFacts {
     }
 }
 
+static NOTHING_CREATING: BTreeSet<PrKey> = BTreeSet::new();
+
+/// What the detail reads beside its state: worked on in `lane`, nothing
+/// being sent or made.
+fn inputs(lane: Option<&LaneFacts>) -> DetailInputs<'_> {
+    DetailInputs {
+        lane,
+        sending: false,
+        creating: &NOTHING_CREATING,
+        now: Utc::now(),
+    }
+}
+
 fn ready(view: PrDetailView) -> ReadyView {
     match view.body {
         DetailBody::Ready(ready) => *ready,
@@ -161,13 +175,11 @@ fn send_to_agent_needs_a_linked_worktree_and_something_to_send() {
     for (label, linked, sending, failed, threads, checks_send, threads_send) in cases {
         let lane = lane();
         let state = state(Load::Ready(detail(failed, threads, false)), false);
-        let view = ready(view(
-            &state,
-            linked.then_some(&lane),
+        let read = DetailInputs {
             sending,
-            false,
-            Utc::now(),
-        ));
+            ..inputs(linked.then_some(&lane))
+        };
+        let view = ready(view(&state, &read));
         assert_eq!(view.checks_send, checks_send, "{label}: checks");
         assert_eq!(view.threads_send, threads_send, "{label}: threads");
         assert_eq!(view.checks_send.enabled(), checks_send == SendSlot::Ready);
@@ -177,7 +189,7 @@ fn send_to_agent_needs_a_linked_worktree_and_something_to_send() {
 #[test]
 fn only_a_failed_actions_check_opens_its_log() {
     let mut state = state(Load::Ready(detail(true, 0, false)), false);
-    let closed = ready(view(&state, None, false, false, Utc::now()));
+    let closed = ready(view(&state, &inputs(None)));
     let logs: Vec<_> = closed.checks.iter().map(|row| row.log.clone()).collect();
     assert_eq!(
         logs,
@@ -203,7 +215,7 @@ fn only_a_failed_actions_check_opens_its_log() {
             load: Load::Ready("boom".into()),
         },
     );
-    let open = ready(view(&state, None, false, false, Utc::now()));
+    let open = ready(view(&state, &inputs(None)));
     assert_eq!(
         open.checks[0].log,
         LogSlot::Open(JOB, Load::Ready("boom".into()))
@@ -212,7 +224,7 @@ fn only_a_failed_actions_check_opens_its_log() {
 
 #[test]
 fn the_header_says_what_the_detail_knows_once_read() {
-    let loading = view(&state(Load::Loading, false), None, false, false, Utc::now());
+    let loading = view(&state(Load::Loading, false), &inputs(None));
     assert_eq!(loading.body, DetailBody::Loading);
     assert_eq!(loading.crumb, "Pull requests / o/r");
     assert_eq!(loading.title, "#7 Fix it");
@@ -226,10 +238,7 @@ fn the_header_says_what_the_detail_knows_once_read() {
 
     let read = view(
         &state(Load::Ready(detail(true, 3, false)), false),
-        None,
-        false,
-        false,
-        Utc::now(),
+        &inputs(None),
     );
     let labels: Vec<_> = read.tabs.iter().map(|(_, label)| label.as_str()).collect();
     assert_eq!(labels, ["Checks 4", "Review threads 3", "Description"]);
@@ -359,7 +368,7 @@ fn the_header_offers_what_github_allows_on_an_open_pull_request() {
         loaded.methods = allowed;
         let mut state = state(Load::Ready(loaded), false);
         state.action = running.clone();
-        let view = view(&state, None, false, false, Utc::now());
+        let view = view(&state, &inputs(None));
         let draft = if ready.is_some() { "Draft" } else { "Open" };
         assert_eq!(view.state, draft, "{label}: state");
         let actions = view.actions.expect(label);
@@ -379,13 +388,9 @@ fn the_header_offers_what_github_allows_on_an_open_pull_request() {
         let mut loaded = detail(false, 0, false);
         loaded.summary.state = done;
         let state = state(Load::Ready(loaded), false);
-        assert_eq!(
-            view(&state, None, false, false, Utc::now()).actions,
-            None,
-            "{done:?}"
-        );
+        assert_eq!(view(&state, &inputs(None)).actions, None, "{done:?}");
     }
-    let unread = view(&state(Load::Loading, false), None, false, false, Utc::now());
+    let unread = view(&state(Load::Loading, false), &inputs(None));
     assert_eq!(unread.actions, None, "nothing to act on before it is read");
 }
 
@@ -394,12 +399,12 @@ fn the_linked_worktree_says_whether_its_pushes_reach_the_pull_request() {
     let lane = lane();
     for (cross_repo, note) in [(true, LaneNote::ReviewOnly), (false, LaneNote::UpdatesPr)] {
         let state = state(Load::Ready(detail(false, 0, cross_repo)), cross_repo);
-        let side = ready(view(&state, Some(&lane), false, false, Utc::now())).side;
+        let side = ready(view(&state, &inputs(Some(&lane)))).side;
         assert_eq!(side.lane_note, Some(note), "cross_repo {cross_repo}");
         assert_eq!(side.lane.map(|lane| lane.name), Some("fix".to_owned()));
     }
     let state = state(Load::Ready(detail(false, 0, false)), false);
-    let side = ready(view(&state, None, false, false, Utc::now())).side;
+    let side = ready(view(&state, &inputs(None))).side;
     assert_eq!(side.lane_note, None, "nothing to say without a worktree");
 }
 
@@ -431,7 +436,15 @@ fn without_a_worktree_the_header_offers_to_make_one() {
     ];
     for (label, cross_repo, linked, creating, slot) in cases {
         let state = state(Load::Loading, cross_repo);
-        let view = view(&state, linked.then_some(&lane), false, creating, Utc::now());
+        let made: BTreeSet<PrKey> = creating
+            .then(|| (state.item.repo.clone(), state.item.pr.number))
+            .into_iter()
+            .collect();
+        let read = DetailInputs {
+            creating: &made,
+            ..inputs(linked.then_some(&lane))
+        };
+        let view = view(&state, &read);
         assert_eq!(view.lane, slot, "{label}");
     }
 }
@@ -439,9 +452,9 @@ fn without_a_worktree_the_header_offers_to_make_one() {
 #[test]
 fn a_failed_action_is_said_under_the_header_and_frees_the_buttons() {
     let mut state = state(Load::Ready(detail(true, 0, false)), false);
-    assert_eq!(view(&state, None, false, false, Utc::now()).error, None);
+    assert_eq!(view(&state, &inputs(None)).error, None);
     state.action = ActionState::Failed("Merging #7 failed: nope".into());
-    let failed = view(&state, None, false, false, Utc::now());
+    let failed = view(&state, &inputs(None));
     assert_eq!(failed.error.as_deref(), Some("Merging #7 failed: nope"));
     let actions = failed.actions.clone().expect("open");
     assert_eq!(actions.close, ActionSlot::Ready);

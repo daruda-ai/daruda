@@ -6,9 +6,7 @@ use gpui::{
 };
 
 use super::PrPageSnapshot;
-use super::list::{
-    self, Blocked, GroupBody, PageBody, PrGroup, PrRow, RowLane, RowLaneSlot, Trouble,
-};
+use super::list::{self, Blocked, GroupBody, LaneSlot, PageBody, PrGroup, PrRow, RowLane, Trouble};
 use crate::surface::strings::{common, git as git_s, pull_requests as s};
 use crate::ui::list_table::{self, Column, ListTable};
 use crate::ui::theme::list_metrics as metrics;
@@ -331,9 +329,9 @@ fn render_row(
 /// it is being made.
 fn lane_cell(row: &PrRow, snap: &PrPageSnapshot) -> AnyElement {
     let item = match &row.lane {
-        RowLaneSlot::Linked(lane) => return linked_lane(row, lane, snap),
-        RowLaneSlot::Creating => None,
-        RowLaneSlot::Absent => Some(row.item.as_ref().clone()),
+        LaneSlot::Linked(lane) => return linked_lane(row, lane, snap),
+        LaneSlot::Creating => None,
+        LaneSlot::Absent { .. } => Some(row.item.as_ref().clone()),
     };
     let label = if row.fork {
         s::create_review_lane()

@@ -2,6 +2,8 @@
 //! without a window: the header, each tab's content, the summary column, and
 //! whether Send to agent can go anywhere.
 
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Utc};
 use daruda_github::{
     ActionsJob, BlockReason, CheckEntry, CheckStatus, MergeBlock, MergeMethod, Mergeability,
@@ -9,7 +11,7 @@ use daruda_github::{
 };
 
 use super::super::actions::{self, ActionState, PrAction};
-use super::super::list::{self, LaneFacts, RowLane};
+use super::super::list::{self, LaneFacts, LaneSlot, PrKey, RowLane};
 use super::{Load, PrDetailId, PrDetailState, PrTab};
 use crate::surface::strings::{git as git_s, notification, pull_requests as s};
 
@@ -90,17 +92,6 @@ pub(in crate::workspace) struct HeaderActions {
     pub close: ActionSlot,
     /// Only on a draft.
     pub ready: Option<ActionSlot>,
-}
-
-/// The header's worktree button.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workspace) enum LaneSlot {
-    /// Go to the worktree working on it.
-    Linked(RowLane),
-    /// One is being made for it, from here or from its list row.
-    Creating,
-    /// None yet: offer to make one; `review` for a fork's review worktree.
-    Absent { review: bool },
 }
 
 /// What the summary column says under the linked worktree.
@@ -213,23 +204,26 @@ pub(in crate::workspace) struct PrDetailView {
     pub body: DetailBody,
 }
 
-/// The detail for `state`, worked on in `lane` (if any), whose sends are
-/// under way when `sending`, and whose worktree is being made when
-/// `creating`.
-pub(in crate::workspace) fn view(
-    state: &PrDetailState,
-    lane: Option<&LaneFacts>,
-    sending: bool,
-    creating: bool,
-    now: DateTime<Utc>,
-) -> PrDetailView {
+/// What the detail reads beside its own state.
+pub(in crate::workspace) struct DetailInputs<'a> {
+    /// The worktree working on the pull request, if any.
+    pub lane: Option<&'a LaneFacts>,
+    /// Whether a send to that worktree's chat is under way.
+    pub sending: bool,
+    /// Pull requests a worktree is being made for.
+    pub creating: &'a BTreeSet<PrKey>,
+    pub now: DateTime<Utc>,
+}
+
+/// The detail for `state`.
+pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_>) -> PrDetailView {
     let item = &state.item;
     let loaded = match &state.load {
         Load::Ready(loaded) => Some(loaded),
         Load::Loading | Load::Failed(_) => None,
     };
     let pr = loaded.map_or(&item.pr, |loaded| &loaded.summary);
-    let row_lane = lane.map(|lane| RowLane {
+    let row_lane = inputs.lane.map(|lane| RowLane {
         lane: lane.lane,
         name: lane.name.clone(),
     });
@@ -250,15 +244,9 @@ pub(in crate::workspace) fn view(
         state: state_label,
         state_mood,
         title: format!("{} {}", git_s::pr_number(pr.number), pr.title),
-        meta: meta(item, loaded, now),
+        meta: meta(item, loaded, inputs.now),
         url: pr.web_url().map(str::to_owned),
-        lane: match (&row_lane, creating) {
-            (Some(lane), _) => LaneSlot::Linked(lane.clone()),
-            (None, true) => LaneSlot::Creating,
-            (None, false) => LaneSlot::Absent {
-                review: item.pr.cross_repo,
-            },
-        },
+        lane: LaneSlot::of(item, inputs.lane, inputs.creating),
         actions: loaded.and_then(|loaded| header_actions(loaded, &state.action)),
         error: match &state.action {
             ActionState::Failed(line) => Some(line.clone()),
@@ -272,9 +260,13 @@ pub(in crate::workspace) fn view(
         body: match &state.load {
             Load::Loading => DetailBody::Loading,
             Load::Failed(reason) => DetailBody::Failed(reason.clone()),
-            Load::Ready(loaded) => {
-                DetailBody::Ready(Box::new(ready(state, item, loaded, row_lane, sending)))
-            }
+            Load::Ready(loaded) => DetailBody::Ready(Box::new(ready(
+                state,
+                item,
+                loaded,
+                row_lane,
+                inputs.sending,
+            ))),
         },
     }
 }

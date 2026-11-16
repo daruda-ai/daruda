@@ -4,9 +4,10 @@
 use daruda_github::CheckStatus;
 use gpui::{AnyElement, Context, Div, FontWeight, Hsla, SharedString, div, prelude::*, px};
 
+use super::super::list::LaneSlot;
 use super::view::{
-    ActionSlot, CheckRowView, DetailBody, Fact, HeaderActions, LaneNote, LaneSlot, LogSlot,
-    MergeView, Mood, PrDetailView, ReadyView, SendSlot, SideView, ThreadRowView, ThreadsView,
+    ActionSlot, CheckRowView, DetailBody, Fact, HeaderActions, LaneNote, LogSlot, MergeView, Mood,
+    PrDetailView, ReadyView, SendSlot, SideView, ThreadRowView, ThreadsView,
 };
 use super::{Load, PrDetailId, PrTab};
 use crate::surface::strings::{common, pull_requests as s};

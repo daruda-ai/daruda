@@ -93,15 +93,15 @@ impl Workspace {
             .filter(|_| shown)
             .map(|state| {
                 let lane = self.pr_detail_lane(&state.item);
-                let sending = lane
-                    .as_ref()
-                    .is_some_and(|lane| self.is_sending_pr(lane.lane));
-                let creating = self
-                    .pages
-                    .pull_requests
-                    .creating
-                    .contains(&(state.item.repo.clone(), state.item.pr.number));
-                detail::view::view(state, lane.as_ref(), sending, creating, chrono::Utc::now())
+                let inputs = detail::view::DetailInputs {
+                    lane: lane.as_ref(),
+                    sending: lane
+                        .as_ref()
+                        .is_some_and(|lane| self.is_sending_pr(lane.lane)),
+                    creating: &self.pages.pull_requests.creating,
+                    now: chrono::Utc::now(),
+                };
+                detail::view::view(state, &inputs)
             });
         let list = shown && detail.is_none();
         self.pages.pull_requests.detail_snapshot = detail;

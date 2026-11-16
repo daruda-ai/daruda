@@ -116,15 +116,39 @@ pub(in crate::workspace) struct RowLane {
 /// A pull request, as the page keys the work it does for one.
 pub(in crate::workspace) type PrKey = (RepoId, u64);
 
-/// What a row's worktree column holds.
+/// A pull request's worktree, as its row and its detail offer it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workspace) enum RowLaneSlot {
+pub(in crate::workspace) enum LaneSlot {
     /// The worktree working on it, to go to.
     Linked(RowLane),
-    /// One is being made for it.
+    /// One is being made for it, from its row or its detail.
     Creating,
-    /// None yet; the row offers to make one from its [`PrRow::item`].
-    Absent,
+    /// None yet: offer to make one; `review` for a fork's review worktree.
+    Absent { review: bool },
+}
+
+impl LaneSlot {
+    /// `item`'s slot, worked on in `linked` if any, and with a worktree
+    /// being made for it when `creating` holds it.
+    pub(in crate::workspace) fn of(
+        item: &PrListItem,
+        linked: Option<&LaneFacts>,
+        creating: &BTreeSet<PrKey>,
+    ) -> Self {
+        if let Some(lane) = linked {
+            return Self::Linked(RowLane {
+                lane: lane.lane,
+                name: lane.name.clone(),
+            });
+        }
+        if creating.contains(&(item.repo.clone(), item.pr.number)) {
+            Self::Creating
+        } else {
+            Self::Absent {
+                review: item.pr.cross_repo,
+            }
+        }
+    }
 }
 
 /// One pull request, ready to draw.
@@ -142,7 +166,7 @@ pub(in crate::workspace) struct PrRow {
     pub checks: CheckRollup,
     pub review: Option<ReviewDecision>,
     pub comments: u32,
-    pub lane: RowLaneSlot,
+    pub lane: LaneSlot,
     /// Only a URL a browser may be handed.
     pub url: Option<String>,
     /// What clicking the row opens, and what its worktree is made from.
@@ -312,26 +336,9 @@ fn row(item: &PrListItem, inputs: &PageInputs<'_>) -> PrRow {
         checks: pr.checks,
         review: pr.review,
         comments: item.comments,
-        lane: lane_slot(item, inputs),
+        lane: LaneSlot::of(item, linked_lane(item, inputs.lanes), inputs.creating),
         url: pr.web_url().map(str::to_owned),
         item: Box::new(item.clone()),
-    }
-}
-
-fn lane_slot(item: &PrListItem, inputs: &PageInputs<'_>) -> RowLaneSlot {
-    if let Some(lane) = linked_lane(item, inputs.lanes) {
-        return RowLaneSlot::Linked(RowLane {
-            lane: lane.lane,
-            name: lane.name.clone(),
-        });
-    }
-    if inputs
-        .creating
-        .contains(&(item.repo.clone(), item.pr.number))
-    {
-        RowLaneSlot::Creating
-    } else {
-        RowLaneSlot::Absent
     }
 }
 
