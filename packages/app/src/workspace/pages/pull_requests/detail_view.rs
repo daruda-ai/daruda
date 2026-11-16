@@ -233,7 +233,12 @@ pub(in crate::workspace) fn view(
         lane: lane.lane,
         name: lane.name.clone(),
     });
-    let (state_label, state_mood) = state_label(pr.state);
+    let state_shown = if loaded.is_some_and(actions::is_draft) {
+        PrState::Draft
+    } else {
+        pr.state
+    };
+    let (state_label, state_mood) = state_label(state_shown);
     PrDetailView {
         id: state.id,
         crumb: format!(
@@ -313,11 +318,10 @@ fn ready(
 /// Merge is offered unless it cannot go at all (see [`MergeBlock`]); then
 /// its tooltip says why, in the words the summary column uses.
 fn header_actions(loaded: &PrDetail, running: &ActionState) -> Option<HeaderActions> {
-    let draft = match loaded.summary.state {
-        PrState::Open => false,
-        PrState::Draft => true,
-        PrState::Merged | PrState::Closed => return None,
-    };
+    if !loaded.summary.state.is_active() {
+        return None;
+    }
+    let draft = actions::is_draft(loaded);
     let methods: Vec<(MergeMethod, String)> =
         actions::merge_menu(&loaded.methods, loaded.default_method)
             .into_iter()
@@ -912,6 +916,17 @@ mod tests {
                 Some(ActionSlot::Ready),
             ),
             (
+                "a draft only by why it cannot merge is one all the same",
+                PrState::Open,
+                Mergeability::Blocked(BlockReason::Draft),
+                vec![MergeMethod::Squash],
+                Idle,
+                "Squash and merge",
+                vec!["Squash and merge"],
+                ActionSlot::Blocked("Can’t merge: Draft".into()),
+                Some(ActionSlot::Ready),
+            ),
+            (
                 "no method",
                 PrState::Open,
                 Mergeability::Ready,
@@ -941,9 +956,10 @@ mod tests {
             loaded.methods = allowed;
             let mut state = state(Load::Ready(loaded), false);
             state.action = running.clone();
-            let actions = view(&state, None, false, false, Utc::now())
-                .actions
-                .expect(label);
+            let view = view(&state, None, false, false, Utc::now());
+            let draft = if ready.is_some() { "Draft" } else { "Open" };
+            assert_eq!(view.state, draft, "{label}: state");
+            let actions = view.actions.expect(label);
             assert_eq!(actions.merge.label, button, "{label}: button");
             let labels: Vec<_> = actions
                 .merge

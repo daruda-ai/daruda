@@ -6,7 +6,8 @@
 use std::collections::BTreeSet;
 
 use daruda_github::{
-    CheckEntry, CheckStatus, GhError, MergeMethod, Mergeability, PrDetail, PrState, RepoId,
+    BlockReason, CheckEntry, CheckStatus, GhError, MergeMethod, Mergeability, PrDetail, PrState,
+    RepoId,
 };
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
@@ -62,10 +63,22 @@ pub(in crate::workspace) enum MergeBlock {
     Conflicting,
 }
 
+/// Whether `loaded` is a draft. GitHub says so twice, as the pull request's
+/// own flag and as why it cannot merge, and the two can disagree for a
+/// moment; either one makes it a draft, so the merge button, Ready for
+/// review and the state shown never decide differently.
+pub(in crate::workspace) fn is_draft(loaded: &PrDetail) -> bool {
+    match loaded.summary.state {
+        PrState::Draft => true,
+        PrState::Open => loaded.mergeability == Mergeability::Blocked(BlockReason::Draft),
+        PrState::Merged | PrState::Closed => false,
+    }
+}
+
 pub(in crate::workspace) fn merge_block(loaded: &PrDetail) -> Option<MergeBlock> {
     if loaded.methods.is_empty() {
         Some(MergeBlock::NoMethods)
-    } else if loaded.summary.state == PrState::Draft {
+    } else if is_draft(loaded) {
         Some(MergeBlock::Draft)
     } else if loaded.mergeability == Mergeability::Conflicting {
         Some(MergeBlock::Conflicting)
@@ -258,7 +271,7 @@ impl Workspace {
         let applies = match &request {
             Request::Merge { method, .. } => can_merge(&target.loaded, *method),
             Request::Close => true,
-            Request::Ready => target.loaded.summary.state == PrState::Draft,
+            Request::Ready => is_draft(&target.loaded),
             Request::Rerun(runs) => !runs.is_empty(),
         };
         if !applies {
@@ -421,7 +434,7 @@ mod tests {
 
     #[test]
     fn merge_is_off_only_for_a_draft_a_conflict_or_no_method() {
-        use daruda_github::{BlockReason, CheckRollup, PrSummary};
+        use daruda_github::{CheckRollup, PrSummary};
         let detail = |state, mergeability, methods: Vec<MergeMethod>| PrDetail {
             summary: PrSummary {
                 number: 1,
@@ -448,6 +461,7 @@ mod tests {
         };
         let squash = || vec![MergeMethod::Squash];
         let blocked = Mergeability::Blocked(BlockReason::Requirements);
+        let draft = Mergeability::Blocked(BlockReason::Draft);
         // (label, state, mergeability, methods, block)
         let cases = [
             ("ready", PrState::Open, Mergeability::Ready, squash(), None),
@@ -480,6 +494,20 @@ mod tests {
                 Some(MergeBlock::Draft),
             ),
             (
+                "a draft only by why it cannot merge",
+                PrState::Open,
+                draft,
+                squash(),
+                Some(MergeBlock::Draft),
+            ),
+            (
+                "a draft only by its own flag",
+                PrState::Draft,
+                Mergeability::Unknown,
+                squash(),
+                Some(MergeBlock::Draft),
+            ),
+            (
                 "no method",
                 PrState::Open,
                 Mergeability::Ready,
@@ -491,11 +519,18 @@ mod tests {
             let loaded = detail(state, mergeability, methods);
             assert_eq!(merge_block(&loaded), block, "{label}");
             assert_eq!(
+                is_draft(&loaded),
+                block == Some(MergeBlock::Draft),
+                "{label}"
+            );
+            assert_eq!(
                 can_merge(&loaded, MergeMethod::Squash),
                 block.is_none(),
                 "{label}"
             );
         }
+        let merged = detail(PrState::Merged, draft, squash());
+        assert!(!is_draft(&merged), "a merged pull request is no draft");
         let ready = detail(PrState::Open, Mergeability::Ready, squash());
         assert!(
             !can_merge(&ready, MergeMethod::Rebase),
