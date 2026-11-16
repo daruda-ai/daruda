@@ -139,6 +139,7 @@ fn shown(host_list: Option<HostList>) -> PrListState {
         hosts: host_list
             .map(|list| HashMap::from([(HOST.to_owned(), list)]))
             .unwrap_or_default(),
+        _aging: gpui::Task::ready(()),
     }
 }
 
@@ -398,6 +399,7 @@ fn the_header_says_how_old_the_newest_answer_is() {
                     (host.to_owned(), list)
                 })
                 .collect(),
+            _aging: gpui::Task::ready(()),
         };
         let inputs = PageInputs {
             enabled: true,

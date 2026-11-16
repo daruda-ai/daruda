@@ -45,9 +45,14 @@ fn answer(items: Vec<PrListItem>, covered: &[&str], at: Instant) -> PrListAnswer
     }
 }
 
+/// No repaint task: these states are never drawn.
+fn idle() -> Task<()> {
+    Task::ready(())
+}
+
 fn shown(filter: PrFilter, host: Option<HostList>) -> PrListState {
     let mut state = PrListState::default();
-    state.show(filter);
+    state.show(filter, idle);
     if let (PrListState::Shown { hosts, .. }, Some(list)) = (&mut state, host) {
         hosts.insert(HOST.to_owned(), list);
     }
@@ -267,21 +272,21 @@ fn each_hosts_answer_time_follows_its_answers() {
     state.apply(PrListUpdate::HostBlocked { host: HOST });
     assert_eq!(state.answered_at(HOST), None, "a blocked host drops it");
     state.apply(at(&late));
-    assert!(state.show(PrFilter::AllOpen));
+    assert!(state.show(PrFilter::AllOpen, idle));
     assert_eq!(state.answered_at(HOST), None, "another filter starts over");
 }
 
 #[test]
 fn show_and_hide_report_changes() {
     let mut state = PrListState::default();
-    assert!(state.show(PrFilter::Mine));
-    assert!(!state.show(PrFilter::Mine), "already shown");
+    assert!(state.show(PrFilter::Mine, idle));
+    assert!(!state.show(PrFilter::Mine, idle), "already shown");
     state.apply(PrListUpdate::Answer {
         host: HOST,
         filter: PrFilter::Mine,
         answer: &answer(vec![item("r", 1)], &["r"], Instant::now()),
     });
-    assert!(state.show(PrFilter::AllOpen));
+    assert!(state.show(PrFilter::AllOpen, idle));
     assert_eq!(
         state.host(HOST),
         &HostList::Loading,
@@ -290,4 +295,39 @@ fn show_and_hide_report_changes() {
     assert!(state.hide());
     assert!(!state.hide(), "already hidden");
     assert_eq!(state.filter(), None);
+}
+
+#[gpui::test]
+fn a_shown_page_repaints_as_its_answer_ages(cx: &mut gpui::TestAppContext) {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let f =
+        crate::workspace::tests::GitFixture::open(cx, &daruda_config::Config::default(), |repo| {
+            repo
+        });
+    let repaints = Rc::new(Cell::new(0));
+    cx.update(|cx| {
+        let repaints = repaints.clone();
+        cx.observe(&f.ws, move |_, _| repaints.set(repaints.get() + 1))
+            .detach();
+    });
+    // No answer arrives in an outage, so nothing else repaints the label.
+    let aged = |cx: &mut gpui::TestAppContext| {
+        cx.run_until_parked();
+        repaints.set(0);
+        cx.executor().advance_clock(AGE_REPAINT * 2);
+        cx.run_until_parked();
+        repaints.get()
+    };
+    // What the window's other timers repaint over the same span, once
+    // the work its opening started has settled.
+    aged(cx);
+    let hidden = aged(cx);
+
+    f.ws.update(cx, |ws, cx| ws.show_pr_list(PrFilter::Mine, cx));
+    assert_eq!(aged(cx), hidden + 2, "once per interval while shown");
+
+    f.ws.update(cx, |ws, cx| ws.hide_pr_list(cx));
+    assert_eq!(aged(cx), hidden, "hiding the page ends it");
 }

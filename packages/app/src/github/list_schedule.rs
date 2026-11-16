@@ -6,10 +6,10 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use daruda_github::availability::{BackoffReason, backoff_delay};
 use daruda_github::{FailureKind, PrFilter, PrSearch, RepoId};
 
 use super::PrListAnswer;
+use super::schedule::TransientBackoff;
 
 /// How long a list answer stands before it is asked again.
 pub(super) const LIST_INTERVAL: Duration = Duration::from_secs(60);
@@ -43,18 +43,11 @@ enum Ask {
     },
 }
 
-/// A search paused after consecutive transient failures.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ListBackoff {
-    failures: u32,
-    until: Instant,
-}
-
 #[derive(Debug, Default)]
 struct ListState {
     answer: Option<PrListAnswer>,
     ask: Ask,
-    backoff: Option<ListBackoff>,
+    backoff: TransientBackoff,
 }
 
 impl ListState {
@@ -67,7 +60,7 @@ impl ListState {
             Ask::Requested => return true,
             Ask::Idle => {}
         }
-        if self.backoff.is_some_and(|b| now < b.until) {
+        if self.backoff.holds(now) {
             return false;
         }
         let Some(answer) = &self.answer else {
@@ -215,18 +208,14 @@ impl ListSchedule {
                     at: now,
                 };
                 state.answer = Some(answer.clone());
-                state.backoff = None;
+                state.backoff = TransientBackoff::Clear;
                 ListOutcome::Answer(answer)
             }
             Err(kind) => {
                 // A host-wide failure pauses the host through its own state;
                 // only a failure of this search alone pauses the search.
                 if kind == FailureKind::Transient {
-                    let failures = state.backoff.map_or(0, |b| b.failures) + 1;
-                    state.backoff = Some(ListBackoff {
-                        failures,
-                        until: now + backoff_delay(failures, BackoffReason::Transient),
-                    });
+                    state.backoff.failed(now);
                 }
                 ListOutcome::Failed(kind)
             }

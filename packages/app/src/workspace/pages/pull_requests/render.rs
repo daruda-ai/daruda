@@ -196,12 +196,13 @@ fn trouble_note(group: &PrGroup, trouble: Trouble, snap: &PrPageSnapshot, cx: &A
         return line.into_any_element();
     }
     let workspace = snap.workspace.clone();
+    let host = group.repo.host().to_owned();
     let selector = format!("pr-retry-{}", group.repo.qualified());
     let retry = button_compact(SharedString::from(selector.clone()), s::retry())
         .debug_selector(move || selector.clone())
         .on_click(move |_, _, cx| {
             if let Some(ws) = workspace.upgrade() {
-                ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
+                ws.update(cx, |ws, cx| ws.refresh_pr_host(&host, cx));
             }
         });
     line.flex()

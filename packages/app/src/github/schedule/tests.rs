@@ -283,12 +283,19 @@ fn an_answer_after_a_pause_resets_the_counts() {
         panic!("rate limit");
     };
     schedule.set_availability(HOST, paused);
-    let later = now + UNFOCUSED_INTERVAL;
+    let GhAvailability::Backoff { until, .. } = paused else {
+        panic!("a pause: {paused:?}");
+    };
+    assert!(
+        !schedule.recovered(HOST, until - Duration::from_secs(1)),
+        "an answer inside the pause is to a request sent before it"
+    );
+    let later = until;
     schedule.begin_polls(wanted(&[(&r, demand(&["a"], true))]), FOCUSED, later);
     let outcome = schedule.finish_poll(&r, Ok(answer(&["a"])), true, later);
     assert!(matches!(outcome, PollOutcome::Answer(_)));
     assert!(
-        schedule.recovered(HOST),
+        schedule.recovered(HOST, later),
         "the poller sets the host ready again"
     );
     assert_eq!(schedule.hosts[HOST].rate_limit_failures, 0);
@@ -351,7 +358,7 @@ fn forgetting_drops_answers_but_keeps_backoff() {
 
     schedule.forget_unwanted(&wanted(&[(&kept, demand(&["a"], true))]));
     assert_eq!(schedule.repos[&r].answer, None, "no lane wants it");
-    assert!(schedule.repos[&r].backoff.is_some(), "its backoff stays");
+    assert!(schedule.repos[&r].backoff.holds(now), "its backoff stays");
     assert!(schedule.repos[&kept].answer.is_some());
 
     schedule.repos.entry(elsewhere.clone()).or_default().answer =

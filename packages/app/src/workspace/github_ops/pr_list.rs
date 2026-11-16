@@ -4,10 +4,10 @@
 //! refresh. Not persisted: a window starts with the page hidden.
 
 use std::collections::{BTreeSet, HashMap};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use daruda_github::{PrFilter, RepoId};
-use gpui::Context;
+use gpui::{Context, Task};
 
 use crate::github::{PrList, PrListAnswer, PrListUpdate};
 use crate::workspace::Workspace;
@@ -49,6 +49,10 @@ impl HostList {
 
 static LOADING: HostList = HostList::Loading;
 
+/// How often a shown page repaints so "Updated 2m ago" keeps counting
+/// while no answer arrives to repaint it. The label steps in minutes.
+const AGE_REPAINT: Duration = Duration::from_secs(30);
+
 /// Whether the page is on screen, and what it has for each host.
 #[derive(Debug, Default)]
 pub(crate) enum PrListState {
@@ -57,6 +61,8 @@ pub(crate) enum PrListState {
     Shown {
         filter: PrFilter,
         hosts: HashMap<String, HostList>,
+        /// Repaints the page every [`AGE_REPAINT`]; ends with this state.
+        _aging: Task<()>,
     },
 }
 
@@ -82,14 +88,16 @@ impl PrListState {
         self.host(host).answer().map(|answer| answer.at)
     }
 
-    /// Show `filter`; another filter starts over. Returns whether it changed.
-    fn show(&mut self, filter: PrFilter) -> bool {
+    /// Show `filter`; another filter starts over, with a new task from
+    /// `aging`. Returns whether it changed.
+    fn show(&mut self, filter: PrFilter, aging: impl FnOnce() -> Task<()>) -> bool {
         if self.filter() == Some(filter) {
             return false;
         }
         *self = Self::Shown {
             filter,
             hosts: HashMap::new(),
+            _aging: aging(),
         };
         true
     }
@@ -104,6 +112,7 @@ impl PrListState {
         let Self::Shown {
             filter: shown,
             hosts,
+            ..
         } = self
         else {
             return false;
@@ -176,7 +185,17 @@ impl Workspace {
 
     /// The page is on screen with `filter`, or switched to it.
     pub(crate) fn show_pr_list(&mut self, filter: PrFilter, cx: &mut Context<Self>) {
-        if self.pr_list.show(filter) {
+        let aging = || {
+            cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(AGE_REPAINT).await;
+                    if this.update(cx, |_, cx| cx.notify()).is_err() {
+                        break;
+                    }
+                }
+            })
+        };
+        if self.pr_list.show(filter, aging) {
             PrList::wanted(cx);
             cx.notify();
         }
@@ -191,15 +210,28 @@ impl Workspace {
 
     /// Search this window's hosts again now, for the filter shown.
     pub(crate) fn refresh_pr_list(&mut self, cx: &mut Context<Self>) {
-        let Some(filter) = self.pr_list.filter() else {
-            return;
-        };
         let hosts: BTreeSet<String> = self
             .github_repos()
             .iter()
             .map(|repo| repo.host().to_owned())
             .collect();
-        PrList::refresh(hosts, filter, cx);
+        self.refresh_pr_hosts(hosts, cx);
+    }
+
+    /// Search `host` alone again now: its group's Try again, which must
+    /// not spend a request on hosts that did not fail.
+    pub(crate) fn refresh_pr_host(&mut self, host: &str, cx: &mut Context<Self>) {
+        self.refresh_pr_hosts([host.to_owned()], cx);
+    }
+
+    fn refresh_pr_hosts(
+        &mut self,
+        hosts: impl IntoIterator<Item = String>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(filter) = self.pr_list.filter() {
+            PrList::refresh(hosts, filter, cx);
+        }
     }
 
     /// The one write of the list the page shows.

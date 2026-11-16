@@ -153,9 +153,10 @@ impl PrPoller {
     /// Another request about `host` succeeded, with the same effect on the
     /// host as a poll answer.
     pub(super) fn host_answered(host: &str, cx: &mut App) {
+        let now = cx.background_executor().now();
         let schedule = &mut cx.default_global::<Self>().schedule;
         schedule.host_answered(host);
-        if schedule.recovered(host) {
+        if schedule.recovered(host, now) {
             Self::set_host_availability(host, GhAvailability::Ready, cx);
         }
     }
@@ -250,7 +251,7 @@ impl PrPoller {
             PollOutcome::Answer(prs) => {
                 poller.linked = true;
                 // A pause that has run out ends with this answer.
-                if poller.schedule.recovered(repo.host()) {
+                if poller.schedule.recovered(repo.host(), now) {
                     Self::set_host_availability(repo.host(), GhAvailability::Ready, cx);
                 }
                 Self::broadcast(

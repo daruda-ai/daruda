@@ -217,3 +217,20 @@ fn a_refresh_during_a_search_is_asked_again_after_it(cx: &mut TestAppContext) {
     assert_eq!(searched(&gh).len(), 2, "and no more");
     assert_eq!(group(&f, "r", cx), Some(vec![7]));
 }
+
+#[gpui::test]
+fn a_groups_retry_searches_its_host_alone(cx: &mut TestAppContext) {
+    let gh = gh(cx);
+    let f = window("r", cx);
+    tick(cx);
+    show_unanswered(&f, cx);
+    cx.run_until_parked();
+    assert_eq!(searched(&gh).len(), 1);
+
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_host("ghe.corp", cx));
+    cx.run_until_parked();
+    assert_eq!(searched(&gh).len(), 1, "github.com did not ask for it");
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_host("github.com", cx));
+    cx.run_until_parked();
+    assert_eq!(searched(&gh).len(), 2);
+}

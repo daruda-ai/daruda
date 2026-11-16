@@ -100,11 +100,38 @@ impl HostState {
     }
 }
 
-/// A repository paused after consecutive transient failures.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RepoBackoff {
-    failures: u32,
-    until: Instant,
+/// The pause one kind of request keeps after its own consecutive transient
+/// failures, growing with each. A host-wide failure pauses the host instead.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum TransientBackoff {
+    #[default]
+    Clear,
+    Paused {
+        failures: u32,
+        until: Instant,
+    },
+}
+
+impl TransientBackoff {
+    /// Whether the pause still holds the request back at `now`.
+    pub(super) fn holds(self, now: Instant) -> bool {
+        match self {
+            Self::Clear => false,
+            Self::Paused { until, .. } => now < until,
+        }
+    }
+
+    /// One more transient failure at `now`: pause, longer than the last.
+    pub(super) fn failed(&mut self, now: Instant) {
+        let failures = match *self {
+            Self::Clear => 1,
+            Self::Paused { failures, .. } => failures + 1,
+        };
+        *self = Self::Paused {
+            failures,
+            until: now + backoff_delay(failures, BackoffReason::Transient),
+        };
+    }
 }
 
 #[derive(Debug, Default)]
@@ -115,12 +142,12 @@ struct RepoState {
     in_flight: bool,
     /// Ask at the next round whatever the cadence says.
     nudged: bool,
-    backoff: Option<RepoBackoff>,
+    backoff: TransientBackoff,
 }
 
 impl RepoState {
     fn is_due(&self, demand: &RepoDemand, focused_interval: Duration, now: Instant) -> bool {
-        if self.in_flight || self.backoff.is_some_and(|b| now < b.until) {
+        if self.in_flight || self.backoff.holds(now) {
             return false;
         }
         let Some((last, at)) = &self.answer else {
@@ -137,14 +164,6 @@ impl RepoState {
             UNFOCUSED_INTERVAL
         };
         self.nudged || uncovered || now.saturating_duration_since(*at) >= interval
-    }
-
-    fn failed_transiently(&mut self, now: Instant) {
-        let failures = self.backoff.map_or(0, |b| b.failures) + 1;
-        self.backoff = Some(RepoBackoff {
-            failures,
-            until: now + backoff_delay(failures, BackoffReason::Transient),
-        });
     }
 }
 
@@ -340,7 +359,7 @@ impl Schedule {
             Ok(prs) => {
                 let prs = Arc::new(prs);
                 state.answer = Some((prs.clone(), now));
-                state.backoff = None;
+                state.backoff = TransientBackoff::Clear;
                 PollOutcome::Answer(prs)
             }
             Err(HostVerdict::Changed(availability)) => PollOutcome::Host(availability),
@@ -348,7 +367,7 @@ impl Schedule {
             // One repository failing (gone, no access, a network blip)
             // pauses that repository alone.
             Err(HostVerdict::NotHostWide) => {
-                state.failed_transiently(now);
+                state.backoff.failed(now);
                 PollOutcome::Paused
             }
         }
@@ -420,10 +439,14 @@ impl Schedule {
         true
     }
 
-    /// After a successful answer: a host paused by a backoff that has run
-    /// out is usable again.
-    pub(super) fn recovered(&self, host: &str) -> bool {
-        matches!(self.availability(host), GhAvailability::Backoff { .. })
+    /// After a successful answer at `now`: a host paused by a backoff that
+    /// has run out is usable again. An answer inside the pause is to a
+    /// request sent before it and says nothing about the limit since.
+    pub(super) fn recovered(&self, host: &str, now: Instant) -> bool {
+        matches!(
+            self.availability(host),
+            GhAvailability::Backoff { until, .. } if until <= now
+        )
     }
 }
 
