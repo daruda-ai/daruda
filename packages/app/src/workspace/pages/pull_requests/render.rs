@@ -219,6 +219,7 @@ fn blocked_note(group: &PrGroup, blocked: Blocked, snap: &PrPageSnapshot, cx: &A
     let message = match blocked {
         Blocked::Missing => s::gh_missing(),
         Blocked::LoggedOut => s::gh_logged_out(&host),
+        Blocked::UnconfirmedHost => s::gh_unconfirmed_host(&host),
     };
     let workspace = snap.workspace.clone();
     let recheck = button_compact(

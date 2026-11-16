@@ -34,6 +34,13 @@ impl RepoId {
         &self.name
     }
 
+    /// Whether this is on the public GitHub host, the only one known to be
+    /// GitHub without asking `gh`. Any other host may be a GitHub Enterprise
+    /// Server or another forge altogether; a URL cannot tell which.
+    pub fn on_github(&self) -> bool {
+        self.host == GITHUB_HOST
+    }
+
     /// `host/owner/name`, the form `gh --repo` accepts for any host.
     pub fn qualified(&self) -> String {
         format!("{}/{}/{}", self.host, self.owner, self.name)

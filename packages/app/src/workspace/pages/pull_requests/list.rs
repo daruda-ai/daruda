@@ -65,6 +65,10 @@ pub(in crate::workspace) fn linked_lane<'a>(
 pub(in crate::workspace) enum Blocked {
     Missing,
     LoggedOut,
+    /// `gh` is missing or has no login for a host other than github.com.
+    /// That reads the same for a GitHub Enterprise Server nobody logged in
+    /// to and for a forge that is not GitHub, so the group says both.
+    UnconfirmedHost,
 }
 
 /// Why what a group shows may be out of date; it heals on its own. Rows
@@ -242,7 +246,8 @@ fn refreshed(inputs: &PageInputs<'_>) -> Option<String> {
 
 /// What `repo`'s group shows. A `gh` problem is said on any host: unlike
 /// the Git panel's strip, which stays quiet off github.com, the page was
-/// opened to see these repositories' pull requests.
+/// opened to see these repositories' pull requests. Off github.com it is
+/// said as a possibility, since the host may not be GitHub.
 fn group_body(
     repo: &RepoId,
     availability: GhAvailability,
@@ -250,6 +255,9 @@ fn group_body(
     inputs: &PageInputs<'_>,
 ) -> GroupBody {
     let trouble = match availability {
+        GhAvailability::Missing | GhAvailability::LoggedOut if !repo.on_github() => {
+            return GroupBody::Blocked(Blocked::UnconfirmedHost);
+        }
         GhAvailability::Missing => return GroupBody::Blocked(Blocked::Missing),
         GhAvailability::LoggedOut => return GroupBody::Blocked(Blocked::LoggedOut),
         GhAvailability::Backoff {

@@ -1,7 +1,7 @@
 //! What the Git Changes panel's pull-request strip says for the active lane.
 
+use daruda_github::RepoId;
 use daruda_github::availability::GhAvailability;
-use daruda_github::{GITHUB_HOST, RepoId};
 use gpui::App;
 
 use crate::github::{PrLink, PrLookup, PrPoller};
@@ -36,7 +36,9 @@ pub(crate) fn strip_for(
     let Some(repo) = repo.filter(|_| enabled) else {
         return PrStrip::Hidden;
     };
-    let on_github = repo.host() == GITHUB_HOST;
+    // Off github.com the strip stays quiet: the host may not be GitHub at
+    // all, and nobody asked. The Pull requests page says so instead.
+    let on_github = repo.on_github();
     match availability {
         GhAvailability::Unknown => PrStrip::Hidden,
         GhAvailability::Missing if on_github => PrStrip::Missing {
@@ -93,7 +95,7 @@ mod tests {
     use std::time::Instant;
 
     use daruda_github::availability::BackoffReason;
-    use daruda_github::{CheckRollup, PrState, PrSummary};
+    use daruda_github::{CheckRollup, GITHUB_HOST, PrState, PrSummary};
 
     use super::*;
 

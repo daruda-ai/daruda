@@ -869,6 +869,7 @@ pull_requests:
   truncated: "여기 표시된 것보다 pull request가 더 있습니다."
   gh_missing: "이 저장소의 pull request를 보려면 GitHub CLI(gh)를 설치하세요."
   gh_logged_out: "이 저장소의 pull request를 보려면 터미널에서 “gh auth login --hostname %{host}”을 실행하세요."
+  gh_unconfirmed_host: "GitHub CLI(gh)에 %{host} 로그인 정보가 없습니다. GitHub Enterprise Server라면 gh가 없을 경우 설치한 뒤 터미널에서 “gh auth login --hostname %{host}”을 실행하세요."
   rate_limited: "GitHub 요청 한도에 도달했습니다. 잠시 후 다시 불러옵니다."
   unreachable: "GitHub에 연결하지 못했습니다. 곧 다시 불러옵니다."
   refreshed_now: "방금 갱신"
