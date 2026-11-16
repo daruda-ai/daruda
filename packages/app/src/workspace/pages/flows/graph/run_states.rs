@@ -79,11 +79,8 @@ fn node_state(
     colouring: &RunColouring,
     node: &super::model::GraphNode,
 ) -> crate::runs::NodeRunState {
-    let of = |id: &daruda_flow::NodeId| colouring.states.get(id).copied().unwrap_or_default();
     match &node.kind {
-        super::model::GraphNodeKind::Include { members, .. } => {
-            crate::runs::fold_states(members.iter().map(of))
-        }
-        _ => of(&node.id),
+        super::model::GraphNodeKind::Include { members, .. } => colouring.folded(members),
+        _ => colouring.state(&node.id),
     }
 }

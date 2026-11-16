@@ -724,6 +724,7 @@ nodes:
                 .iter()
                 .map(|s| daruda_flow::NodeId::from(*s))
                 .collect(),
+            ended: false,
         }
     }
 

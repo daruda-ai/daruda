@@ -38,15 +38,17 @@ pub(crate) struct RunColouring {
     pub states: NodeRunStates,
     /// The flow's node ids as they were when the run was submitted.
     pub of_nodes: Vec<NodeId>,
+    /// The run has ended, so a node it never got to will not start.
+    pub ended: bool,
 }
 
 /// One state for several nodes drawn as one card: an include's members.
 ///
 /// A failure is the news, then a repair, then work in flight. All passed is
-/// passed; some passed with the rest not yet started is the included flow
-/// part way through, which reads as running — pending would say it has not
-/// begun.
-pub(crate) fn fold_states(members: impl IntoIterator<Item = NodeRunState>) -> NodeRunState {
+/// passed. Some passed with the rest not yet started is the included flow
+/// part way through while the run lasts; once it has ended, that part will
+/// never finish, so it reads as pending — what a stopped node reads as.
+fn fold_states(members: impl IntoIterator<Item = NodeRunState>, ended: bool) -> NodeRunState {
     let (mut failed, mut fixing, mut running, mut passed, mut pending) =
         (false, false, None::<u32>, false, false);
     for state in members {
@@ -65,6 +67,7 @@ pub(crate) fn fold_states(members: impl IntoIterator<Item = NodeRunState>) -> No
         (_, true, ..) => NodeRunState::Fixing,
         (_, _, Some(attempt), ..) => NodeRunState::Running { attempt },
         (_, _, None, true, false) => NodeRunState::Passed,
+        (_, _, None, true, true) if ended => NodeRunState::Pending,
         (_, _, None, true, true) => NodeRunState::Running { attempt: 1 },
         (_, _, None, false, _) => NodeRunState::Pending,
     }
@@ -76,6 +79,17 @@ impl RunColouring {
     /// uncoloured rather than coloured wrongly.
     pub(crate) fn is_about(&self, nodes: impl Iterator<Item = NodeId>) -> bool {
         self.of_nodes.iter().cloned().eq(nodes)
+    }
+
+    /// What the run says about one node.
+    pub(crate) fn state(&self, node: &NodeId) -> NodeRunState {
+        self.states.get(node).copied().unwrap_or_default()
+    }
+
+    /// The one state several nodes drawn as one card show: an include's
+    /// members.
+    pub(crate) fn folded(&self, members: &[NodeId]) -> NodeRunState {
+        fold_states(members.iter().map(|id| self.state(id)), self.ended)
     }
 }
 
