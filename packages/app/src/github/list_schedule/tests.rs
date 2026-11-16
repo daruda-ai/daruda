@@ -127,23 +127,64 @@ fn a_search_is_due_by_its_state() {
 }
 
 #[test]
-fn no_duplicate_while_in_flight_even_on_refresh() {
+fn a_refresh_while_in_flight_follows_the_answer_once() {
     let now = Instant::now();
-    let mut schedule = ListSchedule::default();
-    assert_eq!(sent(&mut schedule, wanted(PrFilter::Mine, &["r"]), now), 1);
-    schedule.refresh(key(PrFilter::Mine));
-    let later = now + Duration::from_secs(120);
-    assert_eq!(
-        sent(&mut schedule, wanted(PrFilter::Mine, &["r"]), later),
-        0,
-        "the running search answers the refresh"
-    );
-    schedule.finish(&key(PrFilter::Mine), Ok(PrSearch::default()), true, later);
-    assert_eq!(
-        sent(&mut schedule, wanted(PrFilter::Mine, &["r"]), later),
-        0,
-        "and the refresh does not outlive it"
-    );
+    let w = || wanted(PrFilter::Mine, &["r"]);
+    /// (label, how the running search ends, follow-ups sent after it)
+    type Row = (&'static str, Result<PrSearch, FailureKind>, usize);
+    let cases: Vec<Row> = vec![
+        ("answered", Ok(PrSearch::default()), 1),
+        // The pause after a failure spaces the cadence, not a person.
+        ("failed", Err(FailureKind::Transient), 1),
+    ];
+    for (label, result, expected) in cases {
+        let mut schedule = ListSchedule::default();
+        assert_eq!(sent(&mut schedule, w(), now), 1, "{label}");
+        schedule.refresh(key(PrFilter::Mine));
+        schedule.refresh(key(PrFilter::Mine));
+        assert_eq!(
+            sent(&mut schedule, w(), now + Duration::from_secs(120)),
+            0,
+            "{label}: no second search beside the running one"
+        );
+        assert!(!schedule.is_requested(&key(PrFilter::Mine)), "{label}");
+
+        // The running search was sent before the refresh: it may not have
+        // seen what the user just changed.
+        schedule.finish(&key(PrFilter::Mine), result, true, now);
+        assert!(schedule.is_requested(&key(PrFilter::Mine)), "{label}");
+        assert_eq!(sent(&mut schedule, w(), now), expected, "{label}");
+        schedule.finish(&key(PrFilter::Mine), Ok(PrSearch::default()), true, now);
+        assert_eq!(
+            sent(&mut schedule, w(), now),
+            0,
+            "{label}: one follow-up, however often refresh was pressed"
+        );
+    }
+}
+
+#[test]
+fn a_refresh_in_flight_is_dropped_with_its_reason() {
+    let now = Instant::now();
+    let w = || wanted(PrFilter::Mine, &["r"]);
+    /// (label, what happens while the search runs, feature still on)
+    type Row = (&'static str, fn(&mut ListSchedule), bool);
+    let cases: Vec<Row> = vec![
+        (
+            "the page was hidden",
+            |s| s.forget_unwanted(&ListWanted::new()),
+            true,
+        ),
+        ("the feature was turned off", |_| {}, false),
+    ];
+    for (label, meanwhile, enabled) in cases {
+        let mut schedule = ListSchedule::default();
+        sent(&mut schedule, w(), now);
+        schedule.refresh(key(PrFilter::Mine));
+        meanwhile(&mut schedule);
+        schedule.finish(&key(PrFilter::Mine), Ok(PrSearch::default()), enabled, now);
+        assert!(!schedule.is_requested(&key(PrFilter::Mine)), "{label}");
+    }
 }
 
 #[test]

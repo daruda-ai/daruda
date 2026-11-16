@@ -34,7 +34,13 @@ enum Ask {
     /// The user asked to refresh: due at the next round.
     Requested,
     /// A request for these repositories is running.
-    InFlight(BTreeSet<RepoId>),
+    InFlight {
+        repos: BTreeSet<RepoId>,
+        /// The user asked to refresh after it was sent. It may have read
+        /// GitHub before what they just did there, so it is asked again
+        /// once it answers.
+        again: bool,
+    },
 }
 
 /// A search paused after consecutive transient failures.
@@ -54,7 +60,7 @@ struct ListState {
 impl ListState {
     fn is_due(&self, repos: &BTreeSet<RepoId>, now: Instant) -> bool {
         match self.ask {
-            Ask::InFlight(_) => return false,
+            Ask::InFlight { .. } => return false,
             // A person asked: one request, which the pause after this
             // search's own failures exists to space out, not to refuse.
             // A paused host is still held off by `takes_requests`.
@@ -90,13 +96,23 @@ pub(super) struct ListSchedule {
 }
 
 impl ListSchedule {
-    /// The user asked to refresh `key`. A search already running answers
-    /// that, so a second one is not started beside it.
+    /// The user asked to refresh `key`. A search already running is not
+    /// joined by a second one, but it was sent before they asked, so one
+    /// more follows its answer.
     pub(super) fn refresh(&mut self, key: ListKey) {
         let state = self.lists.entry(key).or_default();
-        if state.ask == Ask::Idle {
-            state.ask = Ask::Requested;
+        match &mut state.ask {
+            Ask::Idle => state.ask = Ask::Requested,
+            Ask::Requested => {}
+            Ask::InFlight { again, .. } => *again = true,
         }
+    }
+
+    /// Whether `key` waits for a refresh the next round sends.
+    pub(super) fn is_requested(&self, key: &ListKey) -> bool {
+        self.lists
+            .get(key)
+            .is_some_and(|state| state.ask == Ask::Requested)
     }
 
     /// The feature was turned off: answers from before must not be shown
@@ -123,8 +139,11 @@ impl ListSchedule {
         for (key, state) in &mut self.lists {
             if !wanted.contains_key(key) {
                 state.answer = None;
-                if state.ask == Ask::Requested {
-                    state.ask = Ask::Idle;
+                // Nobody is left to show what a refresh would bring.
+                match &mut state.ask {
+                    Ask::Requested => state.ask = Ask::Idle,
+                    Ask::InFlight { again, .. } => *again = false,
+                    Ask::Idle => {}
                 }
             }
         }
@@ -159,7 +178,10 @@ impl ListSchedule {
                 continue;
             }
             let asked = repos.iter().cloned().collect();
-            state.ask = Ask::InFlight(repos);
+            state.ask = Ask::InFlight {
+                repos,
+                again: false,
+            };
             due.push((key, asked));
         }
         due
@@ -175,12 +197,15 @@ impl ListSchedule {
         now: Instant,
     ) -> ListOutcome {
         let state = self.lists.entry(key.clone()).or_default();
-        let repos = match std::mem::take(&mut state.ask) {
-            Ask::InFlight(repos) => repos,
-            Ask::Idle | Ask::Requested => BTreeSet::new(),
+        let (repos, again) = match std::mem::take(&mut state.ask) {
+            Ask::InFlight { repos, again } => (repos, again),
+            Ask::Idle | Ask::Requested => (BTreeSet::new(), false),
         };
         if !enabled {
             return ListOutcome::Dropped;
+        }
+        if again {
+            state.ask = Ask::Requested;
         }
         match result {
             Ok(search) => {

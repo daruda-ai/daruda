@@ -147,6 +147,11 @@ impl PrList {
             }
             ListOutcome::Dropped => {}
         }
+        // A refresh asked for while this search ran is sent now rather
+        // than at the next tick: the user is waiting on it.
+        if cx.default_global::<Self>().schedule.is_requested(&key) {
+            cx.defer(PrPoller::tick);
+        }
     }
 
     fn broadcast(update: PrListUpdate<'_>, cx: &mut App) {

@@ -197,3 +197,23 @@ fn a_repository_gained_later_is_read_from_the_answer_already_held(cx: &mut TestA
     cx.run_until_parked();
     assert_eq!(searched(&gh), before, "the cache covers it");
 }
+
+#[gpui::test]
+fn a_refresh_during_a_search_is_asked_again_after_it(cx: &mut TestAppContext) {
+    let gh = gh(cx);
+    let f = window("r", cx);
+    tick(cx);
+    show_unanswered(&f, cx);
+    // The search is running: what it reads may predate the refresh.
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
+    cx.run_until_parked();
+    assert_eq!(
+        searched(&gh).len(),
+        2,
+        "one follow-up, sent as soon as the first answered"
+    );
+    tick(cx);
+    assert_eq!(searched(&gh).len(), 2, "and no more");
+    assert_eq!(group(&f, "r", cx), Some(vec![7]));
+}
