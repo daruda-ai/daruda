@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::{GitError, run_git};
+use super::{GitError, reject_option_like, run_git};
 
 /// The remote and remote-side branch the current branch pushes to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +71,8 @@ pub(crate) fn push_head(
 /// what was fetched has a name the caller can use afterwards; `FETCH_HEAD`
 /// would be rewritten by any other fetch in between.
 pub(crate) fn fetch_ref(wt: &Path, remote: &str, refspec: &str) -> Result<(), GitError> {
+    reject_option_like("remote", remote)?;
+    reject_option_like("refspec", refspec)?;
     run_git(wt, ["fetch", remote, refspec]).map(|_| ())
 }
 

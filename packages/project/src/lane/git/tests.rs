@@ -588,3 +588,54 @@ fn a_tree_path_is_slash_separated() {
     let path: PathBuf = ["src", "a b", "c.rs"].iter().collect();
     assert_eq!(tree_path(&path), "src/a b/c.rs");
 }
+
+/// The guard answers before git is looked up, so no repository is needed:
+/// a missing guard would surface as some other error from the absent path.
+#[test]
+fn a_positional_that_looks_like_an_option_is_refused_before_git_runs() {
+    let nowhere = Path::new("/nonexistent/daruda-option-guard");
+    let lane = nowhere.join("lane");
+    // (label, call, refused `what`, refused value)
+    let cases: [(&str, Result<(), GitError>, &str, &str); 4] = [
+        (
+            "remote",
+            remote::fetch_ref(nowhere, "--upload-pack=x", "refs/pull/1/head:refs/x"),
+            "remote",
+            "--upload-pack=x",
+        ),
+        (
+            "refspec",
+            remote::fetch_ref(nowhere, "origin", "--all"),
+            "refspec",
+            "--all",
+        ),
+        (
+            "short option as refspec",
+            remote::fetch_ref(nowhere, "origin", "-f"),
+            "refspec",
+            "-f",
+        ),
+        (
+            "existing branch",
+            add_lane(nowhere, &lane, None, Some("--detach")),
+            "branch",
+            "--detach",
+        ),
+    ];
+    for (label, result, what, value) in cases {
+        match result {
+            Err(GitError::OptionLike { what: w, value: v }) => {
+                assert_eq!((w, v.as_str()), (what, value), "{label}");
+            }
+            other => panic!("{label}: expected a refusal, got {other:?}"),
+        }
+    }
+    assert_eq!(
+        GitError::OptionLike {
+            what: "refspec",
+            value: "--all".into()
+        }
+        .to_string(),
+        "refusing refspec that starts with '-': --all"
+    );
+}

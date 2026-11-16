@@ -70,6 +70,9 @@ pub enum GitError {
     /// stalled connection. Surfaces in the status bar so the user knows
     /// the lane isn't actually frozen.
     Timeout(Duration),
+    /// A value bound for a positional argument starts with `-`, where git
+    /// would read it as an option. Refused before git runs.
+    OptionLike { what: &'static str, value: String },
 }
 
 impl std::fmt::Display for GitError {
@@ -87,6 +90,9 @@ impl std::fmt::Display for GitError {
             GitError::Utf8 => write!(f, "git output not valid UTF-8"),
             GitError::Parse(s) => write!(f, "unexpected git porcelain output: {s}"),
             GitError::Timeout(d) => write!(f, "git timed out after {}s", d.as_secs()),
+            GitError::OptionLike { what, value } => {
+                write!(f, "refusing {what} that starts with '-': {value}")
+            }
         }
     }
 }
@@ -148,6 +154,19 @@ where
         });
     }
     String::from_utf8(out.stdout).map_err(|_| GitError::Utf8)
+}
+
+/// Refuse a positional that git would parse as an option. Remote names,
+/// refspecs and branch names reach these wrappers from outside (a pull
+/// request's head is named by its author), and none may begin with `-`.
+pub(super) fn reject_option_like(what: &'static str, value: &str) -> Result<(), GitError> {
+    if value.starts_with('-') {
+        return Err(GitError::OptionLike {
+            what,
+            value: value.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 /// `git init` in `path`. Used by the Git Changes view's "Initialize
@@ -254,6 +273,9 @@ pub(crate) fn add_lane(
     new_branch: Option<&str>,
     base: Option<&str>,
 ) -> Result<(), GitError> {
+    if let (None, Some(branch)) = (new_branch, base) {
+        reject_option_like("branch", branch)?;
+    }
     let mut args: Vec<String> = vec!["worktree".into(), "add".into()];
     if let Some(b) = new_branch {
         args.push("-b".into());
