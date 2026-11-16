@@ -240,10 +240,20 @@ fn search_nodes_parse_into_list_items() {
             None,
             CheckRollup::None,
         ),
+        (
+            "entries that are not pull requests are skipped",
+            search_answer(r#""o/r""#, r#"{"login":"a"}"#, "null")
+                .replace(r#""nodes":["#, r#""nodes":[null,{},"#),
+            "github.com",
+            RepoId::new("github.com", "o", "r"),
+            Some("a"),
+            CheckRollup::None,
+        ),
     ];
     for (label, json, host, repo, author, checks) in cases {
         let search = parse_search_prs(&json, host).unwrap_or_else(|e| panic!("{label}: {e}"));
         assert!(!search.truncated, "{label}");
+        assert_eq!(search.items.len(), 1, "{label}");
         let item = &search.items[0];
         assert_eq!(item.repo, repo, "{label}");
         assert_eq!(item.author.as_deref(), author, "{label}");

@@ -143,7 +143,9 @@ pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<PrSearch, GhErr
     let items = search
         .nodes
         .into_iter()
+        .filter(|node| !is_not_a_pull_request(node))
         .map(|node| {
+            let node: SearchNode = serde_json::from_value(node).map_err(parse_error)?;
             let (owner, name) =
                 node.repository
                     .name_with_owner
@@ -165,6 +167,17 @@ pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<PrSearch, GhErr
         })
         .collect::<Result<Vec<_>, GhError>>()?;
     Ok(PrSearch { items, truncated })
+}
+
+/// A search node that carries no pull request: `null`, or the empty object
+/// `... on PullRequest` leaves for a match of another type. One such entry
+/// must not fail the whole list; a node with fields still has to parse.
+fn is_not_a_pull_request(node: &serde_json::Value) -> bool {
+    match node {
+        serde_json::Value::Null => true,
+        serde_json::Value::Object(fields) => fields.is_empty(),
+        _ => false,
+    }
 }
 
 /// Order list items most recently updated first. `updated_at` is RFC 3339
@@ -321,7 +334,8 @@ struct SearchData {
 #[serde(rename_all = "camelCase")]
 struct SearchConnection {
     issue_count: u32,
-    nodes: Vec<SearchNode>,
+    /// Parsed one by one, so an entry that is not a pull request is skipped.
+    nodes: Vec<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
