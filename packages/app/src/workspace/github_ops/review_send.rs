@@ -64,6 +64,12 @@ impl Workspace {
         best_target(chats, runtime.focused_pane_id, runtime.active_tab_index)
     }
 
+    /// Whether `lane` is what the main area shows: the active lane, with no
+    /// workspace page over it.
+    fn shows_lane(&self, lane: LaneRef) -> bool {
+        self.active == lane && self.workspace_page.is_none()
+    }
+
     /// The active lane and its linked pull request, which the Git panel's
     /// buttons send about.
     fn active_pr_target(&self) -> Option<PrSendTarget> {
@@ -157,9 +163,9 @@ impl Workspace {
         );
     }
 
-    /// The one path every button takes: find a target first, build the
-    /// prompt off the UI thread with `build` (`Ok(None)`: nothing to send),
-    /// then deliver it if the lane is still the one shown.
+    /// The one path every button takes: show the lane, find a target in it,
+    /// build the prompt off the UI thread with `build` (`Ok(None)`: nothing
+    /// to send), then deliver it if the lane is still the one shown.
     fn send_pr_prompt(
         &mut self,
         target: PrSendTarget,
@@ -172,14 +178,17 @@ impl Workspace {
         if self.is_sending_pr(lane) {
             return;
         }
+        // The prompt lands in the lane's chat input unsent, for the user to
+        // read first, so that lane is shown before anything is read: over a
+        // page, the Git panel's as much as the Pull requests page's. It comes
+        // before looking for a chat, so a lane without one is where the user
+        // is told to open it, not the page they pressed the button on.
+        if !self.shows_lane(lane) {
+            self.activate_lane(lane, window, cx);
+        }
         if self.pr_send_target(lane, cx).is_none() {
             self.report_pr_send(s::github_no_agent_pane(), ErrorSeverity::Warning, cx);
             return;
-        }
-        // The prompt lands in the lane's chat input unsent, for the user to
-        // read first, so that lane is shown before anything is read.
-        if self.active != lane || self.workspace_page.is_some() {
-            self.activate_lane(lane, window, cx);
         }
         self.lane_scoped_mut(lane).pr.begin_send();
         cx.notify();
@@ -236,7 +245,8 @@ impl Workspace {
                 return;
             }
         };
-        if self.active != lane {
+        // Another lane, or a page over this one: its input is out of sight.
+        if !self.shows_lane(lane) {
             self.report_pr_send(s::github_lane_changed(), ErrorSeverity::Warning, cx);
             return;
         }

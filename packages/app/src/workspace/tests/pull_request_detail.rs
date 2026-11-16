@@ -316,6 +316,103 @@ fn without_a_linked_worktree_send_to_agent_is_off(cx: &mut TestAppContext) {
     );
 }
 
+/// What sending said to the user, by title.
+fn send_reports(f: &GitFixture, cx: &mut TestAppContext) -> Vec<String> {
+    f.ws.read_with(cx, |ws, _| {
+        ws.error_history()
+            .iter()
+            .filter(|r| r.dedup_key.as_deref() == Some("github.send"))
+            .map(|r| r.title.clone())
+            .collect()
+    })
+}
+
+/// The detail of #7, read, on the page.
+fn read_detail(f: &GitFixture, cx: &mut TestAppContext) -> PrDetailId {
+    open(f, item(7, "feat"), cx);
+    cx.run_until_parked();
+    id(f, cx)
+}
+
+#[gpui::test]
+fn a_worktree_without_a_chat_is_shown_before_the_user_is_told_to_open_one(cx: &mut TestAppContext) {
+    let (f, gh, linked) = window(cx);
+    let id = read_detail(&f, cx);
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| ws.send_pr_detail_checks(id, window, cx));
+    });
+    cx.run_until_parked();
+
+    assert_eq!(gh.count(GhOp::FailedLog), 0, "nothing is read for nowhere");
+    assert_eq!(
+        send_reports(&f, cx),
+        [crate::surface::strings::error::github_no_agent_pane()]
+    );
+    f.ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_ref(), linked);
+        assert_eq!(
+            ws.active_page(),
+            None,
+            "the worktree to open a chat in is the one in view"
+        );
+    });
+}
+
+#[gpui::test]
+fn a_prompt_is_not_put_behind_a_page_opened_while_it_was_read(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let id = read_detail(&f, cx);
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.send_pr_detail_checks(id, window, cx);
+            // Back to the page before the logs arrive.
+            ws.show_page(Page::PullRequests, cx);
+        });
+    });
+    cx.run_until_parked();
+
+    assert_eq!(gh.count(GhOp::FailedLog), 1);
+    assert_eq!(input(&f, cx), "", "the input is out of sight");
+    assert_eq!(
+        send_reports(&f, cx),
+        [crate::surface::strings::error::github_lane_changed()]
+    );
+    assert!(
+        !f.ws
+            .read_with(cx, |ws, _| ws.is_sending_pr(ws.active_ref())),
+        "the buttons are free again"
+    );
+}
+
+/// The Git panel stays in the left dock while a page fills the main area,
+/// so its buttons can be pressed there. The prompt is put into the active
+/// lane's input unsent, to be read first: the page gives way to the lane
+/// rather than hide what was just asked for.
+#[gpui::test]
+fn the_git_panels_send_closes_a_page_to_show_the_prompt(cx: &mut TestAppContext) {
+    let (f, gh, linked) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::Tasks, cx));
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| ws.send_failed_checks(window, cx));
+    });
+    cx.run_until_parked();
+
+    assert_eq!(gh.count(GhOp::FailedLog), 1);
+    f.ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_ref(), linked);
+        assert_eq!(ws.active_page(), None, "the page gave way to the worktree");
+    });
+    let input = input(&f, cx);
+    assert!(input.contains("Pull request #7"), "{input}");
+    assert_eq!(send_reports(&f, cx), Vec::<String>::new());
+}
+
 /// A detail GitHub lets merge with a merge commit or a squash, whose failed
 /// checks are two jobs of run 11 and one of run 12.
 fn mergeable(number: u64, head: &str) -> PrDetail {
