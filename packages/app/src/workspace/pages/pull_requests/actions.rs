@@ -317,8 +317,10 @@ impl Workspace {
     /// GitHub changed (or may have) whichever detail is shown now, so the
     /// list and the lane badges are asked again either way; only the detail
     /// that asked is reloaded or freed. A failure is reported even if that
-    /// detail is gone: the person asked for the action and it did not happen.
-    /// The detail that asked keeps what failed, under its header.
+    /// detail is gone: the person asked for the action and it may not have
+    /// happened. The detail that asked keeps what failed, under its header,
+    /// and is reloaded either way: a failure does not prove GitHub did
+    /// nothing (a merge can land after `gh` timed out).
     fn land_pr_action(
         &mut self,
         id: PrDetailId,
@@ -369,9 +371,7 @@ impl Workspace {
                 Some(line)
             }
         };
-        // A failure other than a moved head leaves the pull request as shown.
-        let reload = result.is_ok() || matches!(result, Err(GhError::HeadMoved));
-        if asker_waiting && reload {
+        if asker_waiting {
             self.refresh_pr_detail(id, cx);
         } else if result.is_ok() {
             self.refresh_pr_list(cx);

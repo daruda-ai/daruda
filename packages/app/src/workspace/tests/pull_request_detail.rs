@@ -683,7 +683,11 @@ fn a_failed_action_reports_what_gh_said(cx: &mut TestAppContext) {
         "{}",
         report.message
     );
-    assert_eq!(gh.count(GhOp::PrDetail), reads, "the detail stays as shown");
+    assert_eq!(
+        gh.count(GhOp::PrDetail),
+        reads + 1,
+        "a failure leaves GitHub's state unknown, so the detail is read again"
+    );
     let shown = view(&f, cx);
     let error = shown.error.clone().expect("the detail keeps what gh said");
     assert!(error.contains("run 11 cannot be rerun"), "{error}");
@@ -801,4 +805,43 @@ fn a_description_link_opens_only_a_web_page_or_an_address(cx: &mut TestAppContex
         assert!(open(url, cx), "{url}");
         assert_eq!(cx.opened_url().as_deref(), Some(url));
     }
+}
+
+/// `gh` can fail after GitHub acted: a merge that lands while the request
+/// times out. The detail is read again, and keeps what failed under its
+/// header after that read lands.
+#[gpui::test]
+fn a_failed_merge_reloads_the_detail_and_keeps_the_failure(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    let mut merged = mergeable(7, "feat");
+    merged.summary.state = PrState::Merged;
+    gh.set_pr_detail(&repo(), 7, merged);
+    gh.fail(
+        GhOp::MergePr,
+        GhFailure::Exit {
+            code: None,
+            stderr: "timed out".into(),
+        },
+    );
+    let reads = gh.count(GhOp::PrDetail);
+
+    assert!(asks(&f, cx, |ws, window, cx| {
+        ws.ask_pr_merge(id, MergeMethod::Merge, window, cx)
+    }));
+    confirm(&f, cx);
+    assert_eq!(gh.count(GhOp::MergePr), 1);
+    assert_eq!(
+        gh.count(GhOp::PrDetail),
+        reads + 1,
+        "the detail is reloaded"
+    );
+    assert_eq!(loaded_state(&f, cx), Some(PrState::Merged));
+    assert_eq!(
+        error_titles(&f, cx),
+        [crate::surface::strings::error::github_pr_merge_failed(7)]
+    );
+    assert!(
+        view(&f, cx).error.is_some(),
+        "the failure outlives the reload"
+    );
 }
