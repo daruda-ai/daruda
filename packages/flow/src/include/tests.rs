@@ -35,8 +35,8 @@ impl Flows {
 }
 
 impl IncludeSource for Flows {
-    fn find(&self, flow: &str) -> Option<IncludedFlow> {
-        self.0.get(flow).cloned()
+    fn find(&self, flow: &str) -> std::io::Result<Option<IncludedFlow>> {
+        Ok(self.0.get(flow).cloned())
     }
 }
 
@@ -343,6 +343,30 @@ fn an_include_that_cannot_be_spliced_is_refused() {
         }
         assert_eq!(refused(&text, &flows), want, "{label}");
     }
+}
+
+/// A flow found but not read is not a flow missing: the person fixing it
+/// looks at the file, not for one.
+#[test]
+fn an_include_that_cannot_be_read_says_so() {
+    struct Unreadable;
+    impl IncludeSource for Unreadable {
+        fn find(&self, _: &str) -> std::io::Result<Option<IncludedFlow>> {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        }
+    }
+    assert_eq!(
+        match crate::load_with(OUTER, None, &Unreadable) {
+            Err(crate::FlowError::Validate(issues)) =>
+                issues.into_iter().map(|i| i.kind).collect::<Vec<_>>(),
+            other => panic!("expected a refusal, got {other:?}"),
+        },
+        [ValidationKind::IncludeUnreadable {
+            flow: "review".to_string(),
+            reason: std::io::Error::from(std::io::ErrorKind::PermissionDenied).to_string(),
+        }],
+        "the read's own reason is kept"
+    );
 }
 
 #[test]

@@ -134,6 +134,9 @@ pub enum ValidationKind {
     IncludeUnavailable,
     /// The host has no flow by the name an `include` gives.
     UnknownInclude { flow: String },
+    /// The host has a flow by that name and could not read it; `reason` is
+    /// the read's own error.
+    IncludeUnreadable { flow: String, reason: String },
     /// A flow includes itself, directly or through another.
     IncludeCycle { flow: String },
     /// Includes nested deeper than `crate::include::MAX_DEPTH`.

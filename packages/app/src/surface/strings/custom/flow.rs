@@ -209,6 +209,9 @@ pub(crate) fn issue(kind: &daruda_flow::error::ValidationKind) -> String {
         K::UnknownInclude { flow } => {
             std::borrow::Cow::<str>::Owned(s::flow::issue_unknown_include(flow))
         }
+        K::IncludeUnreadable { flow, reason } => {
+            std::borrow::Cow::<str>::Owned(s::flow::issue_include_unreadable(flow, reason))
+        }
         K::IncludeCycle { flow } => {
             std::borrow::Cow::<str>::Owned(s::flow::issue_include_cycle(flow))
         }

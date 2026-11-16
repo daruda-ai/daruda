@@ -509,11 +509,11 @@ mod tests {
     struct Steps;
 
     impl daruda_flow::IncludeSource for Steps {
-        fn find(&self, flow: &str) -> Option<daruda_flow::IncludedFlow> {
-            (flow == "steps").then(|| daruda_flow::IncludedFlow {
+        fn find(&self, flow: &str) -> std::io::Result<Option<daruda_flow::IncludedFlow>> {
+            Ok((flow == "steps").then(|| daruda_flow::IncludedFlow {
                 text: "version: 1\nnodes:\n  - id: a\n    kind: command\n    run: \"true\"\n  - id: b\n    kind: command\n    deps: [a]\n    run: \"true\"\n  - id: c\n    kind: command\n    deps: [a]\n    run: \"true\"\n".to_string(),
                 dir: PathBuf::from("/flows"),
-            })
+            }))
         }
     }
 

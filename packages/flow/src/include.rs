@@ -26,7 +26,10 @@ const ID_SEPARATOR: &str = "--";
 
 /// Where a host finds a flow by the name an `include` gives.
 pub trait IncludeSource {
-    fn find(&self, flow: &str) -> Option<IncludedFlow>;
+    /// The flow named `flow`: `Ok(None)` when there is none, and the read's
+    /// error when there is one that cannot be read — which is not the same
+    /// news, and a person fixing it looks in a different place.
+    fn find(&self, flow: &str) -> std::io::Result<Option<IncludedFlow>>;
 }
 
 /// A flow a host found: its text, and the directory its `prompt_file`s
@@ -247,14 +250,26 @@ fn expand_one(
     let inner = chain
         .enter(flow_name)
         .map_err(|kind| refuse(kind, format!("cannot include `{flow_name}` here")))?;
-    let found = source.find(flow_name).ok_or_else(|| {
-        refuse(
-            ValidationKind::UnknownInclude {
-                flow: flow_name.to_string(),
-            },
-            format!("no flow named `{flow_name}`"),
-        )
-    })?;
+    let found = match source.find(flow_name) {
+        Ok(Some(found)) => found,
+        Ok(None) => {
+            return Err(refuse(
+                ValidationKind::UnknownInclude {
+                    flow: flow_name.to_string(),
+                },
+                format!("no flow named `{flow_name}`"),
+            ));
+        }
+        Err(e) => {
+            return Err(refuse(
+                ValidationKind::IncludeUnreadable {
+                    flow: flow_name.to_string(),
+                    reason: e.to_string(),
+                },
+                format!("`{flow_name}` cannot be read: {e}"),
+            ));
+        }
+    };
     let invalid = |detail: String| {
         refuse(
             ValidationKind::IncludeInvalid {

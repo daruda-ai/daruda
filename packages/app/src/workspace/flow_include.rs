@@ -5,13 +5,27 @@ use super::flow_paths::FlowSources;
 use daruda_flow::{FlowError, IncludeSource, IncludedFlow, Inspected, LoadedFlow};
 
 impl IncludeSource for FlowSources {
-    fn find(&self, flow: &str) -> Option<IncludedFlow> {
-        let (path, _) = self.locate(flow)?;
-        Some(IncludedFlow {
-            text: std::fs::read_to_string(&path).ok()?,
-            dir: path.parent()?.to_path_buf(),
-        })
+    fn find(&self, flow: &str) -> std::io::Result<Option<IncludedFlow>> {
+        let Some((path, _)) = self.locate(flow) else {
+            return Ok(None);
+        };
+        included(&path, std::fs::read(&path)?).map(Some)
     }
+}
+
+/// The flow at `path` from the bytes read there. Text that is not UTF-8 is
+/// refused as unreadable, the way a run reads its own flow file, rather than
+/// patched with replacement characters into a flow nobody wrote.
+fn included(path: &std::path::Path, bytes: Vec<u8>) -> std::io::Result<IncludedFlow> {
+    let text = String::from_utf8(bytes)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    Ok(IncludedFlow {
+        text,
+        dir: path
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_default(),
+    })
 }
 
 /// One lookup an expansion made: the name, and the file it found then with a
@@ -44,23 +58,23 @@ impl<'a> RecordingSources<'a> {
 }
 
 impl IncludeSource for RecordingSources<'_> {
-    fn find(&self, flow: &str) -> Option<IncludedFlow> {
+    fn find(&self, flow: &str) -> std::io::Result<Option<IncludedFlow>> {
         use sha2::{Digest as _, Sha256};
-        let found = self.sources.locate(flow).and_then(|(path, _)| {
-            let bytes = std::fs::read(&path).ok()?;
-            Some((path, bytes))
-        });
+        let found = self
+            .sources
+            .locate(flow)
+            .map(|(path, _)| (std::fs::read(&path), path));
         self.seen.borrow_mut().push(IncludeSeen {
             name: flow.to_string(),
-            file: found
-                .as_ref()
-                .map(|(path, bytes)| (path.clone(), Sha256::digest(bytes).into())),
+            file: found.as_ref().and_then(|(bytes, path)| {
+                let bytes = bytes.as_ref().ok()?;
+                Some((path.clone(), Sha256::digest(bytes).into()))
+            }),
         });
-        let (path, bytes) = found?;
-        Some(IncludedFlow {
-            text: String::from_utf8_lossy(&bytes).into_owned(),
-            dir: path.parent()?.to_path_buf(),
-        })
+        let Some((bytes, path)) = found else {
+            return Ok(None);
+        };
+        included(&path, bytes?).map(Some)
     }
 }
 
@@ -147,9 +161,50 @@ mod tests {
             .map(|found| found.path);
         assert_eq!(sources.locate("audit").map(|(path, _)| path), listed);
 
-        let found = IncludeSource::find(&sources, "lint").expect("found");
+        let found = IncludeSource::find(&sources, "lint")
+            .expect("read")
+            .expect("found");
         assert_eq!(found.text, "project lint");
         assert_eq!(found.dir, sources.project.clone().unwrap());
+    }
+
+    /// A flow found that is not UTF-8 is unreadable, as a run finds it —
+    /// not missing, and not patched into text nobody wrote — and the card's
+    /// recording read sees it the same way.
+    #[test]
+    fn an_include_that_is_not_text_is_unreadable_not_missing() {
+        let root = tempfile::tempdir().unwrap();
+        let sources = FlowSources {
+            lane: root.path().join("lane"),
+            project: None,
+            global: root.path().join("global"),
+        };
+        std::fs::create_dir_all(&sources.global).unwrap();
+        std::fs::write(sources.global.join("steps.yaml"), [0xff, 0xfe, b'\n']).unwrap();
+        let text = "version: 1\nnodes:\n  - id: s\n    kind: include\n    flow: steps\n";
+        let unreadable = |result: Result<LoadedFlow, FlowError>| match result {
+            Err(FlowError::Validate(issues)) => issues.iter().any(|issue| {
+                matches!(
+                    &issue.kind,
+                    daruda_flow::error::ValidationKind::IncludeUnreadable { flow, .. }
+                        if flow == "steps"
+                )
+            }),
+            _ => false,
+        };
+        assert!(
+            unreadable(load_flow(text, None, Some(&sources))),
+            "the run's read"
+        );
+        let recording = RecordingSources::new(&sources);
+        assert!(
+            unreadable(daruda_flow::load_with(text, None, &recording)),
+            "the card's read"
+        );
+        assert!(
+            recording.into_seen()[0].file.is_some(),
+            "the bytes it read are still what the card saw"
+        );
     }
 
     #[test]

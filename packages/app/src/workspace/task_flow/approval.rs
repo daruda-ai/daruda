@@ -36,24 +36,26 @@ pub(crate) struct FlowFileSeen {
 
 impl FlowFileSeen {
     /// Read `path`, and expand it under `profile` from `sources`, once: what
-    /// was seen, and the permission modes that same read names. `None` when
-    /// the file cannot be read.
+    /// was seen, and what that same read says of the flow's agents. `None`
+    /// when the file cannot be read.
     fn read(
         path: &Path,
         profile: Option<&str>,
         sources: Option<&crate::workspace::flow_paths::FlowSources>,
-    ) -> Option<(Self, Vec<Option<String>>)> {
+    ) -> Option<(Self, FlowAgents)> {
         use sha2::{Digest as _, Sha256};
         let bytes = std::fs::read(path).ok()?;
-        let text = String::from_utf8_lossy(&bytes);
-        let (modes, included) = match sources {
-            Some(sources) => {
+        // A run reads its flow as UTF-8 and refuses anything else; decoded
+        // leniently here, a card would name the modes of a flow never started.
+        let (modes, included) = match (std::str::from_utf8(&bytes), sources) {
+            (Err(_), _) => (FlowAgents::DoesNotLoad, Vec::new()),
+            (Ok(text), Some(sources)) => {
                 let recording = crate::workspace::flow_include::RecordingSources::new(sources);
-                let modes = permission_modes(daruda_flow::load_with(&text, profile, &recording));
+                let modes = permission_modes(daruda_flow::load_with(text, profile, &recording));
                 (modes, recording.into_seen())
             }
-            None => (
-                permission_modes(daruda_flow::load(&text, profile)),
+            (Ok(text), None) => (
+                permission_modes(daruda_flow::load(text, profile)),
                 Vec::new(),
             ),
         };
@@ -87,14 +89,14 @@ impl Workspace {
             };
         };
         let read = self.read_task_flow(project, run_in, base, &target);
-        let modes = read
-            .as_ref()
-            .map_or_else(Vec::new, |(_, modes)| modes.clone());
-        // A flow of commands alone has no agent to give a mode to.
-        let modes = if modes.is_empty() {
-            s::approval_flow_no_agents()
-        } else {
-            s::approval_flow_modes(modes_phrase(&modes))
+        // A file that cannot be read cannot be run either.
+        let modes = match read.as_ref().map(|(_, agents)| agents) {
+            Some(FlowAgents::Modes(modes)) if !modes.is_empty() => {
+                s::approval_flow_modes(modes_phrase(modes))
+            }
+            // A flow of commands alone has no agent to give a mode to.
+            Some(FlowAgents::Modes(_)) => s::approval_flow_no_agents(),
+            Some(FlowAgents::DoesNotLoad) | None => s::approval_flow_does_not_load(),
         };
         // The file name and profile are the flow's own text, quoted like
         // any other a card names.
@@ -134,7 +136,7 @@ impl Workspace {
         run_in: &TaskRunIn,
         base: Option<&Path>,
         target: &super::TaskFlowTarget,
-    ) -> Option<(FlowFileSeen, Vec<Option<String>>)> {
+    ) -> Option<(FlowFileSeen, FlowAgents)> {
         let sources = self.task_flow_sources(project, run_in, base);
         FlowFileSeen::read(&target.path, target.profile.as_deref(), sources.as_ref())
     }
@@ -145,15 +147,24 @@ impl Workspace {
 /// one phone message, while a count says there is more to read.
 const FLOW_MODES_QUOTED: usize = 4;
 
+/// What one read of a flow says of its agents.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum FlowAgents {
+    /// The flow loads: the modes its agents run under, empty for a flow of
+    /// commands alone.
+    Modes(Vec<Option<String>>),
+    /// The flow does not load, so a start of it is refused. Saying "no
+    /// agents" instead would describe a run that will never happen.
+    DoesNotLoad,
+}
+
 /// The permission modes the agents of a loaded flow run under, each once,
 /// in node order; `None` for a node that names none and so runs in the
 /// agent's own default. A new flow defaults to `bypassPermissions`, so an
 /// approval says it rather than leave it to be found out.
-fn permission_modes(
-    loaded: Result<daruda_flow::LoadedFlow, daruda_flow::FlowError>,
-) -> Vec<Option<String>> {
+fn permission_modes(loaded: Result<daruda_flow::LoadedFlow, daruda_flow::FlowError>) -> FlowAgents {
     let Ok(loaded) = loaded else {
-        return Vec::new();
+        return FlowAgents::DoesNotLoad;
     };
     let mut modes: Vec<Option<String>> = Vec::new();
     for node in &loaded.flow().nodes {
@@ -163,7 +174,7 @@ fn permission_modes(
             modes.push(body.agent.mode.clone());
         }
     }
-    modes
+    FlowAgents::Modes(modes)
 }
 
 /// `modes` as a card lists them. Each is the flow file's text, which an
@@ -198,7 +209,10 @@ mod tests {
             format!("version: 1\ndefaults:\n  agent:\n    id: claude\nnodes:\n{nodes}"),
         )
         .unwrap();
-        FlowFileSeen::read(&path, None, None).unwrap().1
+        match FlowFileSeen::read(&path, None, None).unwrap().1 {
+            FlowAgents::Modes(modes) => modes,
+            FlowAgents::DoesNotLoad => panic!("the flow loads"),
+        }
     }
 
     /// A card names the modes of the agents a run will actually open, and
@@ -227,10 +241,11 @@ mod tests {
         .unwrap();
 
         let (seen, modes) = FlowFileSeen::read(&outer, None, Some(&sources)).unwrap();
-        assert_eq!(modes, vec![Some("plan".to_string())]);
+        assert_eq!(modes, FlowAgents::Modes(vec![Some("plan".to_string())]));
         let (_, alone) = FlowFileSeen::read(&outer, None, None).unwrap();
-        assert!(
-            alone.is_empty(),
+        assert_eq!(
+            alone,
+            FlowAgents::DoesNotLoad,
             "with nowhere to look the include does not load"
         );
 
@@ -244,6 +259,19 @@ mod tests {
             edited, seen,
             "an edit to the included flow alone is noticed"
         );
+    }
+
+    /// A run refuses a flow file that is not UTF-8, so a card does not
+    /// decode it into one that loads.
+    #[test]
+    fn a_flow_that_is_not_text_does_not_load_on_the_card() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.yaml");
+        let mut bytes = b"version: 1\nnodes:\n  - id: a\n    kind: command\n    run: \"".to_vec();
+        bytes.extend([0xff, b'"', b'\n']);
+        std::fs::write(&path, bytes).unwrap();
+        let (_, agents) = FlowFileSeen::read(&path, None, None).unwrap();
+        assert_eq!(agents, FlowAgents::DoesNotLoad);
     }
 
     fn agent_node(id: &str, mode: Option<&str>) -> String {

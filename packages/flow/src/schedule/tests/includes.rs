@@ -36,11 +36,11 @@ nodes:
 struct OneFlow(&'static str);
 
 impl IncludeSource for OneFlow {
-    fn find(&self, flow: &str) -> Option<IncludedFlow> {
-        (flow == "steps").then(|| IncludedFlow {
+    fn find(&self, flow: &str) -> std::io::Result<Option<IncludedFlow>> {
+        Ok((flow == "steps").then(|| IncludedFlow {
             text: self.0.to_string(),
             dir: std::path::PathBuf::from("/flows"),
-        })
+        }))
     }
 }
 

@@ -117,6 +117,7 @@ fn field_for(kind: &ValidationKind) -> Option<FormField> {
         // An include's body is another file; the form has no box for it.
         K::IncludeUnavailable
         | K::UnknownInclude { .. }
+        | K::IncludeUnreadable { .. }
         | K::IncludeCycle { .. }
         | K::IncludeTooDeep { .. }
         | K::IncludeInvalid { .. }

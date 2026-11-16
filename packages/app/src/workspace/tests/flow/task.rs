@@ -294,7 +294,8 @@ async fn an_invalid_flow_leaves_the_task_in_backlog(cx: &mut TestAppContext) {
 }
 
 /// An approval always says how freely the flow acts: a flow of commands has
-/// no agents to give a permission mode, and one that is not found says so.
+/// no agents to give a permission mode, one that is not found says so, and
+/// one found that does not load says its start will be refused.
 /// It quotes the prompt unless the flow was found to take none.
 #[gpui::test]
 fn a_flow_tasks_approval_names_what_it_runs(cx: &mut TestAppContext) {
@@ -303,6 +304,11 @@ fn a_flow_tasks_approval_names_what_it_runs(cx: &mut TestAppContext) {
     std::fs::write(
         path.with_file_name("plain.yaml"),
         "version: 1\nnodes:\n  - id: a\n    kind: command\n    run: \"exit 0\"\n",
+    )
+    .expect("write flow");
+    std::fs::write(
+        path.with_file_name("broken.yaml"),
+        "version: 1\nnodes:\n  - id: a\n    kind: command\n    deps: [gone]\n    run: \"exit 0\"\n",
     )
     .expect("write flow");
     ws.read_with(cx, |ws, _| {
@@ -327,6 +333,15 @@ fn a_flow_tasks_approval_names_what_it_runs(cx: &mut TestAppContext) {
             ws.task_flow_approval(project, &run_in, None, &flow("gone"))
                 .summary,
             s::approval_task_as_flow_unresolved(crate::control::exec::quoted_title("gone"))
+        );
+        assert_eq!(
+            ws.task_flow_approval(project, &run_in, None, &flow("broken"))
+                .summary,
+            s::approval_task_as_flow(
+                crate::control::exec::quoted_title("broken.yaml"),
+                s::approval_flow_does_not_load()
+            ),
+            "not \"no agents\": its start is refused"
         );
         let takes_prompt = |name| {
             ws.task_flow_approval(project, &run_in, None, &flow(name))
