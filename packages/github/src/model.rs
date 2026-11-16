@@ -333,8 +333,22 @@ impl PrSummary {
     /// answered, a `file:` or script URL must not reach the system opener.
     pub fn web_url(&self) -> Option<&str> {
         let url = self.url.as_str();
-        (url.starts_with("https://") || url.starts_with("http://")).then_some(url)
+        is_web_url(url).then_some(url)
     }
+}
+
+/// Whether `url` is a web page a browser may be handed. A URL from GitHub
+/// may name any scheme; `file:`, a script or another app's scheme must not
+/// reach the system opener.
+pub fn is_web_url(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://")
+}
+
+/// Whether a link written in text from GitHub (a description, a comment)
+/// may be opened: a web page or an e-mail address. Anyone can write that
+/// text, so nothing else it links to reaches the system opener.
+pub fn is_openable_link(url: &str) -> bool {
+    is_web_url(url) || url.starts_with("mailto:")
 }
 
 #[cfg(test)]

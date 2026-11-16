@@ -301,6 +301,7 @@ fn tab_content(
                 crate::ui::markdown(("pr-detail-description", id.0 as usize), body.clone())
                     .selectable(true)
                     .full_width(true)
+                    .link_click_handler(super::open_description_link)
                     .into_any_element()
             }
             None => note(s::description_empty(), cx).into_any_element(),

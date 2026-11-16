@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use daruda_github::{ActionsJob, GhError, PrDetail, PrListItem, ReviewThreads};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
-use gpui::{Context, Window};
+use gpui::{App, Context, Window};
 
 use super::actions::ActionState;
 use super::list::{self, LaneFacts};
@@ -55,6 +55,16 @@ type JobKey = (u64, u64);
 
 fn job_key(job: ActionsJob) -> JobKey {
     (job.run, job.job)
+}
+
+/// The description's link opener. The text is any author's, so a link
+/// reaches the system opener only when it is a web page or an e-mail
+/// address; any other is swallowed rather than left to the default opener.
+pub(in crate::workspace) fn open_description_link(url: &str, _: &mut Window, cx: &mut App) -> bool {
+    if daruda_github::model::is_openable_link(url) {
+        cx.open_url(url);
+    }
+    true
 }
 
 pub(in crate::workspace) struct PrDetailState {

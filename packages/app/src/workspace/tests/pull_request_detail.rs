@@ -773,3 +773,32 @@ fn an_answer_landing_after_its_detail_was_replaced_is_dropped(cx: &mut TestAppCo
     let actions = view(&f, cx).actions.expect("#8 is open");
     assert_eq!(actions.merge.slot, ActionSlot::Ready, "#8 runs nothing");
 }
+
+/// A description is any author's text: its links reach the system opener
+/// only as a web page or an e-mail address, and anything else is swallowed
+/// rather than handed to the Markdown view's default opener.
+#[gpui::test]
+fn a_description_link_opens_only_a_web_page_or_an_address(cx: &mut TestAppContext) {
+    use crate::workspace::pages::pull_requests::detail::open_description_link;
+    let (f, _, _) = window(cx);
+    let open = |url: &str, cx: &mut TestAppContext| {
+        cx.update_window(f.window.into(), |_, window, cx| {
+            open_description_link(url, window, cx)
+        })
+        .unwrap()
+    };
+    // The platform keeps only the last URL opened, so the swallowed links
+    // go first, while nothing has been opened.
+    for url in [
+        "file:///etc/passwd",
+        "vscode://file/etc/passwd",
+        "javascript:alert(1)",
+    ] {
+        assert!(open(url, cx), "never left to the default opener: {url}");
+        assert_eq!(cx.opened_url(), None, "{url}");
+    }
+    for url in ["https://example.com/a", "mailto:a@example.com"] {
+        assert!(open(url, cx), "{url}");
+        assert_eq!(cx.opened_url().as_deref(), Some(url));
+    }
+}
