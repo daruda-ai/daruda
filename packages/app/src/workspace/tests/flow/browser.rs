@@ -514,7 +514,9 @@ async fn starting_from_the_graph_opens_execution_and_back_keeps_the_exact_editor
     cx: &mut TestAppContext,
 ) {
     use crate::workspace::pages::flows::detail::FlowDetailBody;
-    let (_root, ws, path, wh) = workspace_with_a_flow(
+    // The real run log wakes the app from its own thread.
+    cx.executor().allow_parking();
+    let (root, ws, path, wh) = workspace_with_a_flow(
         cx,
         "version: 1\nnodes:\n  - id: done\n    kind: command\n    run: \"true\"\n",
     );
@@ -534,7 +536,10 @@ async fn starting_from_the_graph_opens_execution_and_back_keeps_the_exact_editor
         ));
         (id, view)
     });
-    vcx.run_until_parked();
+    assert!(
+        wait_for_run(&mut vcx, |cx| !run_is_held(cx, root.path())).await,
+        "the run settles before its fixture is removed"
+    );
     ws.update_in(&mut vcx, |ws, window, cx| {
         ws.close_page_detail(window, cx);
     });
