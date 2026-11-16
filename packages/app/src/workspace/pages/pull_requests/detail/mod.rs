@@ -11,6 +11,10 @@ use gpui::{Context, Window};
 
 use super::actions::ActionState;
 use super::list::{self, LaneFacts};
+
+pub(in crate::workspace) mod render;
+pub(in crate::workspace) mod view;
+
 use crate::gh_host::GhHost;
 use crate::github::PrLink;
 use crate::surface::strings::error;

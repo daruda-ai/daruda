@@ -12,8 +12,6 @@ use crate::workspace::Workspace;
 
 pub(in crate::workspace) mod actions;
 pub(in crate::workspace) mod detail;
-pub(in crate::workspace) mod detail_render;
-pub(in crate::workspace) mod detail_view;
 mod lane;
 pub(in crate::workspace) mod list;
 pub(in crate::workspace) mod render;
@@ -21,7 +19,7 @@ pub(in crate::workspace) mod render;
 use std::collections::BTreeSet;
 
 use detail::PrDetailState;
-use detail_view::PrDetailView;
+use detail::view::PrDetailView;
 use list::{LaneFacts, PageInputs, PrKey, PrPageList};
 
 /// What the page remembers while it is not on screen. Never persisted.
@@ -103,7 +101,7 @@ impl Workspace {
                     .pull_requests
                     .creating
                     .contains(&(state.item.repo.clone(), state.item.pr.number));
-                detail_view::view(state, lane.as_ref(), sending, creating, chrono::Utc::now())
+                detail::view::view(state, lane.as_ref(), sending, creating, chrono::Utc::now())
             });
         let list = shown && detail.is_none();
         self.pages.pull_requests.detail_snapshot = detail;
@@ -165,6 +163,3 @@ impl Workspace {
         prs.len()
     }
 }
-
-#[cfg(test)]
-mod tests;

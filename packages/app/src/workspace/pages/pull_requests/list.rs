@@ -380,3 +380,6 @@ pub(in crate::workspace) fn filter_label(filter: PrFilter) -> String {
         PrFilter::AllOpen => s::filter_all_open(),
     }
 }
+
+#[cfg(test)]
+mod tests;

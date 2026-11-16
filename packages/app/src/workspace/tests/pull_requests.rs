@@ -320,7 +320,7 @@ fn slot(f: &GitFixture, cx: &mut TestAppContext) -> Slot {
 fn detail_slot(
     f: &GitFixture,
     cx: &mut TestAppContext,
-) -> crate::workspace::pages::pull_requests::detail_view::LaneSlot {
+) -> crate::workspace::pages::pull_requests::detail::view::LaneSlot {
     f.ws.update(cx, |ws, cx| {
         ws.stage_pr_page(cx);
         ws.pages.pull_requests.detail_snapshot.clone()
@@ -331,7 +331,7 @@ fn detail_slot(
 
 #[gpui::test]
 fn the_details_button_makes_the_worktree_its_row_would(cx: &mut TestAppContext) {
-    use crate::workspace::pages::pull_requests::detail_view::LaneSlot;
+    use crate::workspace::pages::pull_requests::detail::view::LaneSlot;
     let (f, gh) = window(cx, |repo| repo);
     // Failing, so the in-flight state can be read before it settles.
     f.fake.fail(

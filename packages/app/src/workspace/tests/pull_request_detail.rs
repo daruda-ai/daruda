@@ -12,10 +12,10 @@ use gpui::{AppContext as _, TestAppContext, VisualTestContext};
 
 use crate::lane::git::{FakeRepo, PushTarget};
 use crate::workspace::pages::Page;
-use crate::workspace::pages::pull_requests::detail::{Load, PrDetailId, PrTab};
-use crate::workspace::pages::pull_requests::detail_view::{
+use crate::workspace::pages::pull_requests::detail::view::{
     ActionSlot, DetailBody, LogSlot, SendSlot,
 };
+use crate::workspace::pages::pull_requests::detail::{Load, PrDetailId, PrTab};
 use crate::workspace::tests::GitFixture;
 
 const JOB: ActionsJob = ActionsJob { run: 11, job: 22 };
@@ -139,7 +139,7 @@ fn id(f: &GitFixture, cx: &mut TestAppContext) -> PrDetailId {
 fn view(
     f: &GitFixture,
     cx: &mut TestAppContext,
-) -> crate::workspace::pages::pull_requests::detail_view::PrDetailView {
+) -> crate::workspace::pages::pull_requests::detail::view::PrDetailView {
     f.ws.update(cx, |ws, cx| {
         ws.stage_pr_page(cx);
         ws.pages.pull_requests.detail_snapshot.clone()

@@ -54,6 +54,7 @@ mod project_config;
 mod projects;
 mod pull_request_detail;
 mod pull_request_list;
+mod pull_request_page;
 mod pull_requests;
 mod pure_ops;
 mod regression_namespace;
