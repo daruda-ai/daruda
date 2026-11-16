@@ -46,6 +46,9 @@ pub(crate) fn check_head_sha(head_sha: &str) -> Result<(), GhError> {
 /// With a method named and no terminal, `gh pr merge` asks nothing. Never
 /// `--delete-branch` (a lane may stand on it) or `--auto` (a merge the user
 /// did not watch happen).
+// ASSUMPTION: not measured — gh's help (2.74.2) says a branch that requires
+// a merge queue gets the pull request enqueued, or auto-merge turned on,
+// without `--auto`; that may exit 0 with nothing merged yet.
 fn merge_args(
     repo: &RepoId,
     number: u64,
@@ -95,6 +98,20 @@ fn rerun_failed_args(repo: &RepoId, run: u64) -> Vec<String> {
     ]
     .map(str::to_owned)
     .to_vec()
+}
+
+/// The repositories of `repos` one search of `host` names, each once and in
+/// the order given. A `repo:` qualifier names a repository on the host
+/// asked, so one from another host would list a stranger's repository; a
+/// repeated one could land in two chunks and list its pull requests twice.
+fn searched_repos(host: &str, repos: &[RepoId]) -> Vec<RepoId> {
+    let mut seen = std::collections::HashSet::new();
+    repos
+        .iter()
+        .filter(|repo| repo.host().eq_ignore_ascii_case(host))
+        .filter(|repo| seen.insert(*repo))
+        .cloned()
+        .collect()
 }
 
 impl SystemGh {
@@ -219,13 +236,7 @@ impl Gh for SystemGh {
         repos: &[RepoId],
         filter: PrFilter,
     ) -> Result<PrSearch, GhError> {
-        // A `repo:` qualifier names a repository on the host asked, so one
-        // from another host would list a stranger's repository instead.
-        let repos: Vec<RepoId> = repos
-            .iter()
-            .filter(|repo| repo.host().eq_ignore_ascii_case(host))
-            .cloned()
-            .collect();
+        let repos = searched_repos(host, repos);
         let mut all = PrSearch::default();
         for chunk in repos.chunks(REPOS_PER_SEARCH) {
             let json = self.stdout([
@@ -372,6 +383,36 @@ mod tests {
         for (label, repos) in [("none", &[][..]), ("other host only", &other_host[..])] {
             let found = SystemGh.search_prs("github.com", repos, PrFilter::AllOpen);
             assert_eq!(found.unwrap(), PrSearch::default(), "{label}");
+        }
+    }
+
+    #[test]
+    fn a_search_names_each_repository_of_its_host_once() {
+        let repo = |host: &str, name: &str| RepoId::new(host, "o", name);
+        // (label, repositories asked for, repositories searched)
+        let cases = [
+            (
+                "a repeat is dropped, the first order kept",
+                vec![
+                    repo("github.com", "b"),
+                    repo("github.com", "a"),
+                    repo("github.com", "b"),
+                ],
+                vec![repo("github.com", "b"), repo("github.com", "a")],
+            ),
+            (
+                "a repeat spelled in another case",
+                vec![repo("github.com", "a"), repo("GitHub.com", "A")],
+                vec![repo("github.com", "a")],
+            ),
+            (
+                "another host's repository is left out",
+                vec![repo("ghe.corp", "a"), repo("github.com", "a")],
+                vec![repo("github.com", "a")],
+            ),
+        ];
+        for (label, asked, searched) in cases {
+            assert_eq!(searched_repos("github.com", &asked), searched, "{label}");
         }
     }
 

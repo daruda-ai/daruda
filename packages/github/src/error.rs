@@ -101,7 +101,14 @@ impl GhError {
             Self::Exit { stderr, .. } if stderr.to_ascii_lowercase().contains("rate limit") => {
                 FailureKind::RateLimited
             }
-            _ => FailureKind::Transient,
+            Self::Exit { .. }
+            | Self::Spawn(_)
+            | Self::Timeout(_)
+            | Self::Overflow { .. }
+            | Self::Parse(_) => FailureKind::Transient,
+            // What a mutation alone answers. No poll produces these; they
+            // are named so a new variant has to choose its kind here.
+            Self::HeadMoved | Self::BadArgument(_) => FailureKind::Transient,
         }
     }
 }

@@ -137,6 +137,26 @@ fn the_viewers_default_merge_method_is_read() {
 }
 
 #[test]
+fn a_default_method_the_repository_does_not_allow_is_dropped() {
+    use MergeMethod::*;
+    // (label, squash allowed, GitHub's default, the default kept)
+    let cases = [
+        ("allowed", true, "SQUASH", Some(Squash)),
+        ("not allowed", false, "SQUASH", None),
+        ("another one is allowed", false, "MERGE", Some(Merge)),
+    ];
+    for (label, squash, value, expected) in cases {
+        let json = detail_answer(|repo| {
+            repo["squashMergeAllowed"] = json!(squash);
+            repo["viewerDefaultMergeMethod"] = json!(value);
+        });
+        let detail = parse_pr_detail(&json).unwrap();
+        assert_eq!(detail.default_method, expected, "{label}");
+        assert_eq!(detail.methods.contains(&Squash), squash, "{label}");
+    }
+}
+
+#[test]
 fn githubs_merge_state_maps_to_whether_it_can_merge() {
     use BlockReason::*;
     use Mergeability::*;

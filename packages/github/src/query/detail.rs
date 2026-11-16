@@ -47,11 +47,14 @@ pub(crate) fn parse_pr_detail(json: &str) -> Result<PrDetail, GhError> {
     ]
     .into_iter()
     .filter_map(|(allowed, method)| allowed.then_some(method))
-    .collect();
+    .collect::<Vec<_>>();
+    // A preselection outside `methods` would offer a merge the repository
+    // refuses, so it is dropped like a value this crate does not know.
     let default_method = repository
         .viewer_default_merge_method
         .as_deref()
-        .and_then(merge_method);
+        .and_then(merge_method)
+        .filter(|method| methods.contains(method));
     let mergeability = mergeability(&pr.mergeable, &pr.merge_state_status);
     let reviewers = reviewers(pr.latest_reviews.nodes, pr.review_requests.nodes);
     let open_threads = pr
