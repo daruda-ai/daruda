@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use daruda_github::availability::{BackoffReason, GhAvailability};
 use daruda_github::fake::{FakeGh, GhCall, GhFailure, GhOp};
@@ -10,7 +11,7 @@ use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use super::list::{
     self, Blocked, GroupBody, LaneFacts, PageBody, PageInputs, PrPageList, RowLaneSlot, Trouble,
 };
-use crate::github::PrPoller;
+use crate::github::{PrListAnswer, PrPoller};
 use crate::lane::git::{FakeRepo, PushTarget};
 use crate::workspace::github_ops::pr_list::{HostList, PrListState};
 use crate::workspace::pages::Page;
@@ -138,8 +139,23 @@ fn shown(host_list: Option<HostList>) -> PrListState {
         hosts: host_list
             .map(|list| HashMap::from([(HOST.to_owned(), list)]))
             .unwrap_or_default(),
-        answered: HashMap::new(),
     }
+}
+
+/// An answer holding `items` that asked about `covered`, arrived at `at`.
+fn answer_at(items: Vec<PrListItem>, covered: &[RepoId], at: Instant) -> PrListAnswer {
+    PrListAnswer {
+        search: Arc::new(PrSearch {
+            items,
+            truncated: false,
+        }),
+        covered: Arc::new(covered.iter().cloned().collect()),
+        at,
+    }
+}
+
+fn answer(items: Vec<PrListItem>, covered: &[RepoId]) -> PrListAnswer {
+    answer_at(items, covered, Instant::now())
 }
 
 fn page_for(repo: RepoId, availability: GhAvailability, state: &PrListState) -> PrPageList {
@@ -159,16 +175,19 @@ fn page_for(repo: RepoId, availability: GhAvailability, state: &PrListState) -> 
 
 #[test]
 fn a_group_says_what_its_host_allows() {
-    let search = PrSearch {
-        items: vec![item(7, false), item(8, false)],
-        truncated: false,
-    };
+    let ghe = RepoId::new("ghe.corp", "o", "r");
+    let unasked = RepoId::new(HOST, "o", "unasked");
+    let search = answer(vec![item(7, false), item(8, false)], &[repo(), ghe.clone()]);
     let ready = || Some(HostList::Ready(search.clone()));
+    let failed = || {
+        Some(HostList::Failed {
+            last: Some(search.clone()),
+        })
+    };
     let backoff = |reason| GhAvailability::Backoff {
         until: std::time::Instant::now(),
         reason,
     };
-    let ghe = RepoId::new("ghe.corp", "o", "r");
     use GhAvailability::*;
     // (label, repository, availability, host list, expected)
     let cases: Vec<(&str, RepoId, GhAvailability, Option<HostList>, Shape)> = vec![
@@ -233,10 +252,29 @@ fn a_group_says_what_its_host_allows() {
             "a failed search keeps the last list",
             repo(),
             Ready,
-            Some(HostList::Failed {
-                last: Some(search.clone()),
-            }),
+            failed(),
             Shape::Listed(vec![7, 8], Some(Trouble::SearchFailed)),
+        ),
+        (
+            "a repository the answer did not ask about is still loading",
+            unasked.clone(),
+            Ready,
+            ready(),
+            Shape::Loading,
+        ),
+        (
+            "one not asked about on a paused host says why",
+            unasked.clone(),
+            backoff(BackoffReason::RateLimited),
+            ready(),
+            Shape::Listed(Vec::new(), Some(Trouble::RateLimited)),
+        ),
+        (
+            "a failed search has no rows for one it never asked about",
+            unasked.clone(),
+            Ready,
+            failed(),
+            Shape::Listed(Vec::new(), Some(Trouble::SearchFailed)),
         ),
         (
             "a failed first search",
@@ -273,11 +311,15 @@ fn a_group_lists_only_its_own_repository() {
     let other = RepoId::new(HOST, "o", "other");
     let mut elsewhere = item(9, false);
     elsewhere.repo = other.clone();
-    let state = shown(Some(HostList::Ready(PrSearch {
-        items: vec![item(7, false), elsewhere],
-        truncated: true,
-    })));
     let repos = BTreeSet::from([repo(), other]);
+    let state = shown(Some(HostList::Ready(PrListAnswer {
+        search: Arc::new(PrSearch {
+            items: vec![item(7, false), elsewhere],
+            truncated: true,
+        }),
+        covered: Arc::new(repos.clone()),
+        at: Instant::now(),
+    })));
     let inputs = PageInputs {
         enabled: true,
         filter: PrFilter::Mine,
@@ -349,10 +391,12 @@ fn the_header_says_how_old_the_newest_answer_is() {
     for (label, times, expected) in cases {
         let state = PrListState::Shown {
             filter: PrFilter::Mine,
-            hosts: HashMap::new(),
-            answered: times
+            hosts: times
                 .into_iter()
-                .map(|(host, at)| (host.to_owned(), at))
+                .map(|(host, at)| {
+                    let list = HostList::Ready(answer_at(Vec::new(), &[], at));
+                    (host.to_owned(), list)
+                })
                 .collect(),
         };
         let inputs = PageInputs {

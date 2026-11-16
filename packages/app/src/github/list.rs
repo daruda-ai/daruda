@@ -83,20 +83,19 @@ impl PrList {
     }
 
     /// Give a window that just started showing a filter the last answers at
-    /// once. The workspace keeps what it already has, so this repaints nothing
-    /// in a round without news.
+    /// once. A window takes only an answer it has not seen, so this repaints
+    /// nothing in a round without news.
     fn apply_cached(wanted: &ListWanted, cx: &mut App) {
         let cached = cx.default_global::<Self>().schedule.cached(wanted);
         if cached.is_empty() {
             return;
         }
         WindowRegistry::for_each_workspace(cx, |ws, _, cx| {
-            for (key, search, at) in &cached {
+            for (key, answer) in &cached {
                 let update = PrListUpdate::Cached {
                     host: &key.host,
                     filter: key.filter,
-                    search,
-                    at: *at,
+                    answer,
                 };
                 ws.apply_pr_list(update, cx);
             }
@@ -131,13 +130,12 @@ impl PrList {
             .finish(&key, result, enabled, now);
         let (host, filter) = (key.host.as_str(), key.filter);
         match outcome {
-            ListOutcome::Answer(search) => {
+            ListOutcome::Answer(answer) => {
                 PrPoller::host_answered(host, cx);
                 let update = PrListUpdate::Answer {
                     host,
                     filter,
-                    search: &search,
-                    at: now,
+                    answer: &answer,
                 };
                 Self::broadcast(update, cx);
             }

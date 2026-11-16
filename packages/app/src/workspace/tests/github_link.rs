@@ -906,8 +906,9 @@ fn host_list(
 
 fn listed(f: &GitFixture, cx: &mut TestAppContext) -> Vec<u64> {
     match host_list(f, cx) {
-        crate::workspace::github_ops::pr_list::HostList::Ready(search) => {
-            search.items.iter().map(|item| item.pr.number).collect()
+        crate::workspace::github_ops::pr_list::HostList::Ready(answer) => {
+            let items = answer.search.items.iter();
+            items.map(|item| item.pr.number).collect()
         }
         _ => Vec::new(),
     }
@@ -1037,7 +1038,7 @@ fn a_transient_search_failure_keeps_the_list_on_show(cx: &mut TestAppContext) {
     cx.executor().advance_clock(Duration::from_secs(61));
     tick(cx);
     match host_list(&f, cx) {
-        HostList::Failed { last: Some(last) } => assert_eq!(last.items.len(), 1),
+        HostList::Failed { last: Some(last) } => assert_eq!(last.search.items.len(), 1),
         other => panic!("expected a failure over the last list, got {other:?}"),
     }
     let availability = cx.update(|cx| PrPoller::availability("github.com", cx));

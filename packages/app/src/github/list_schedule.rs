@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 use daruda_github::availability::{BackoffReason, backoff_delay};
 use daruda_github::{FailureKind, PrFilter, PrSearch, RepoId};
 
+use super::PrListAnswer;
+
 /// How long a list answer stands before it is asked again.
 pub(super) const LIST_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -35,14 +37,6 @@ enum Ask {
     InFlight(BTreeSet<RepoId>),
 }
 
-#[derive(Debug)]
-struct ListAnswer {
-    search: Arc<PrSearch>,
-    /// What the request asked about; a repository outside it is not covered.
-    repos: BTreeSet<RepoId>,
-    at: Instant,
-}
-
 /// A search paused after consecutive transient failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ListBackoff {
@@ -52,7 +46,7 @@ struct ListBackoff {
 
 #[derive(Debug, Default)]
 struct ListState {
-    answer: Option<ListAnswer>,
+    answer: Option<PrListAnswer>,
     ask: Ask,
     backoff: Option<ListBackoff>,
 }
@@ -73,7 +67,8 @@ impl ListState {
         let Some(answer) = &self.answer else {
             return true;
         };
-        !repos.is_subset(&answer.repos) || now.saturating_duration_since(answer.at) >= LIST_INTERVAL
+        !repos.is_subset(&answer.covered)
+            || now.saturating_duration_since(answer.at) >= LIST_INTERVAL
     }
 }
 
@@ -81,7 +76,7 @@ impl ListState {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum ListOutcome {
     /// Show this answer to the windows showing the filter.
-    Answer(Arc<PrSearch>),
+    Answer(PrListAnswer),
     /// The search failed; a host-wide kind also changes the host's state.
     Failed(FailureKind),
     /// The feature was turned off while it ran: nothing comes back.
@@ -135,14 +130,13 @@ impl ListSchedule {
         }
     }
 
-    /// The last answers of the wanted searches that have one, and when
-    /// each arrived.
-    pub(super) fn cached(&self, wanted: &ListWanted) -> Vec<(ListKey, Arc<PrSearch>, Instant)> {
+    /// The last answers of the wanted searches that have one.
+    pub(super) fn cached(&self, wanted: &ListWanted) -> Vec<(ListKey, PrListAnswer)> {
         wanted
             .keys()
             .filter_map(|key| {
-                let answer = self.lists.get(key)?.answer.as_ref()?;
-                Some((key.clone(), answer.search.clone(), answer.at))
+                let answer = self.lists.get(key)?.answer.clone()?;
+                Some((key.clone(), answer))
             })
             .collect()
     }
@@ -190,14 +184,14 @@ impl ListSchedule {
         }
         match result {
             Ok(search) => {
-                let search = Arc::new(search);
-                state.answer = Some(ListAnswer {
-                    search: search.clone(),
-                    repos,
+                let answer = PrListAnswer {
+                    search: Arc::new(search),
+                    covered: Arc::new(repos),
                     at: now,
-                });
+                };
+                state.answer = Some(answer.clone());
                 state.backoff = None;
-                ListOutcome::Answer(search)
+                ListOutcome::Answer(answer)
             }
             Err(kind) => {
                 // A host-wide failure pauses the host through its own state;

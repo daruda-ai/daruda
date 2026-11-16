@@ -10,6 +10,10 @@ pub(crate) use list::PrList;
 pub(crate) use poller::PrPoller;
 pub(crate) use schedule::is_unusable;
 
+use std::collections::BTreeSet;
+use std::sync::Arc;
+use std::time::Instant;
+
 use daruda_github::availability::GhAvailability;
 use daruda_github::query::RepoPrs;
 use daruda_github::{PrFilter, PrSearch, PrSummary, RepoId};
@@ -81,26 +85,42 @@ pub(crate) enum PrUpdate<'a> {
     Disabled,
 }
 
+/// One list search's answer, shared by every window showing its filter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PrListAnswer {
+    /// Every asked repository's pull requests, newest first.
+    pub search: Arc<PrSearch>,
+    /// The repositories the search asked about: the union over the windows
+    /// showing the filter then. A repository outside it has no answer yet,
+    /// which is not the same as having no pull requests.
+    pub covered: Arc<BTreeSet<RepoId>>,
+    /// When it arrived, on the executor's clock.
+    pub at: Instant,
+}
+
+impl PrListAnswer {
+    /// The search, if it asked about `repo`.
+    pub(crate) fn covering(&self, repo: &RepoId) -> Option<&PrSearch> {
+        self.covered.contains(repo).then_some(&*self.search)
+    }
+}
+
 /// What the list poller tells every window; a window applies only what
 /// matches the filter its page shows.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum PrListUpdate<'a> {
-    /// A fresh answer for `host`'s repositories, the union over every window
-    /// showing `filter`.
+    /// A fresh answer for `host` under `filter`.
     Answer {
         host: &'a str,
         filter: PrFilter,
-        search: &'a PrSearch,
-        /// When it arrived, on the executor's clock.
-        at: std::time::Instant,
+        answer: &'a PrListAnswer,
     },
-    /// The last answer, for a window that has none for `host` yet.
+    /// The process's last answer, for a window that has not seen it: one
+    /// that started showing `filter` after it arrived.
     Cached {
         host: &'a str,
         filter: PrFilter,
-        search: &'a PrSearch,
-        /// When that answer arrived.
-        at: std::time::Instant,
+        answer: &'a PrListAnswer,
     },
     /// The search failed; the last answer stays on show.
     Failed { host: &'a str, filter: PrFilter },

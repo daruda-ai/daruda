@@ -6,10 +6,10 @@
 use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
-use daruda_github::{PrFilter, PrSearch, RepoId};
+use daruda_github::{PrFilter, RepoId};
 use gpui::Context;
 
-use crate::github::{PrList, PrListUpdate};
+use crate::github::{PrList, PrListAnswer, PrListUpdate};
 use crate::workspace::Workspace;
 
 /// What is known about one host's pull requests under the shown filter.
@@ -20,10 +20,31 @@ pub(crate) enum HostList {
     /// Not answered yet for this filter.
     #[default]
     Loading,
-    /// This window's repositories on the host, newest first.
-    Ready(PrSearch),
+    /// The process's answer as it arrived, shared with every window showing
+    /// the filter. It is not cut down to this window's repositories: the
+    /// page reads each of its repositories out of it, and one the answer
+    /// did not cover is still loading.
+    Ready(PrListAnswer),
     /// The last search failed; `last` is what was shown before it.
-    Failed { last: Option<PrSearch> },
+    Failed { last: Option<PrListAnswer> },
+}
+
+impl HostList {
+    /// The answer on show, which stays through a failed search.
+    pub(crate) fn answer(&self) -> Option<&PrListAnswer> {
+        match self {
+            Self::Loading => None,
+            Self::Ready(answer) => Some(answer),
+            Self::Failed { last } => last.as_ref(),
+        }
+    }
+
+    /// Whether the process's last answer has news for a window holding this:
+    /// it is newer, or it covers a repository this one does not.
+    fn lacks(&self, cached: &PrListAnswer) -> bool {
+        self.answer()
+            .is_none_or(|held| cached.at > held.at || !cached.covered.is_subset(&held.covered))
+    }
 }
 
 static LOADING: HostList = HostList::Loading;
@@ -36,9 +57,6 @@ pub(crate) enum PrListState {
     Shown {
         filter: PrFilter,
         hosts: HashMap<String, HostList>,
-        /// When each host's last answer under `filter` arrived; it stays
-        /// through a failed search, as the answer's rows do.
-        answered: HashMap<String, Instant>,
     },
 }
 
@@ -58,12 +76,10 @@ impl PrListState {
         }
     }
 
-    /// When `host`'s last answer under the shown filter arrived.
+    /// When `host`'s last answer under the shown filter arrived. It stays
+    /// through a failed search, as the answer's rows do.
     pub(crate) fn answered_at(&self, host: &str) -> Option<Instant> {
-        match self {
-            Self::Hidden => None,
-            Self::Shown { answered, .. } => answered.get(host).copied(),
-        }
+        self.host(host).answer().map(|answer| answer.at)
     }
 
     /// Show `filter`; another filter starts over. Returns whether it changed.
@@ -74,7 +90,6 @@ impl PrListState {
         *self = Self::Shown {
             filter,
             hosts: HashMap::new(),
-            answered: HashMap::new(),
         };
         true
     }
@@ -83,79 +98,60 @@ impl PrListState {
         !matches!(std::mem::take(self), Self::Hidden)
     }
 
-    /// Apply what the poller says. `repos` are this window's repositories:
-    /// an answer covers every window's, so it is narrowed to these.
-    /// Returns whether anything changed.
-    fn apply(&mut self, update: PrListUpdate<'_>, repos: &BTreeSet<RepoId>) -> bool {
+    /// Apply what the poller says. Returns whether anything changed; a new
+    /// arrival time alone does, since the header says how old the list is.
+    fn apply(&mut self, update: PrListUpdate<'_>) -> bool {
         let Self::Shown {
             filter: shown,
             hosts,
-            answered,
         } = self
         else {
             return false;
         };
-        let (host, list, at) = match update {
+        let (host, list) = match update {
             PrListUpdate::Answer {
                 host,
                 filter,
-                search,
-                at,
-            } if filter == *shown => (host, HostList::Ready(narrow(search, repos)), Some(at)),
+                answer,
+            } if filter == *shown => (host, HostList::Ready(answer.clone())),
             PrListUpdate::Cached {
                 host,
                 filter,
-                search,
-                at,
-            } if filter == *shown
-                && hosts
-                    .get(host)
-                    .is_none_or(|list| *list == HostList::Loading) =>
-            {
-                (host, HostList::Ready(narrow(search, repos)), Some(at))
+                answer,
+            } if filter == *shown => {
+                let held = hosts.get(host).unwrap_or(&LOADING);
+                if !held.lacks(answer) {
+                    return false;
+                }
+                // The failure came after this answer: it stays said, over
+                // rows that now cover what the window shows.
+                let list = match held {
+                    HostList::Failed { .. } => HostList::Failed {
+                        last: Some(answer.clone()),
+                    },
+                    HostList::Loading | HostList::Ready(_) => HostList::Ready(answer.clone()),
+                };
+                (host, list)
             }
             PrListUpdate::Failed { host, filter } if filter == *shown => {
-                let last = match hosts.get(host) {
-                    Some(HostList::Ready(search)) => Some(search.clone()),
-                    Some(HostList::Failed { last }) => last.clone(),
-                    Some(HostList::Loading) | None => None,
-                };
-                (host, HostList::Failed { last }, None)
+                let last = hosts.get(host).and_then(HostList::answer).cloned();
+                (host, HostList::Failed { last })
             }
-            PrListUpdate::HostBlocked { host } => {
-                answered.remove(host);
-                return hosts.remove(host).is_some();
-            }
+            PrListUpdate::HostBlocked { host } => return hosts.remove(host).is_some(),
             PrListUpdate::Disabled => {
                 let had = !hosts.is_empty();
                 hosts.clear();
-                answered.clear();
                 return had;
             }
             PrListUpdate::Answer { .. }
             | PrListUpdate::Cached { .. }
             | PrListUpdate::Failed { .. } => return false,
         };
-        // A new time alone repaints: the header says how old the list is.
-        let moved = at.is_some_and(|at| answered.insert(host.to_owned(), at) != Some(at));
         if hosts.get(host) == Some(&list) {
-            return moved;
+            return false;
         }
         hosts.insert(host.to_owned(), list);
         true
-    }
-}
-
-/// The part of `search` in `repos`.
-fn narrow(search: &PrSearch, repos: &BTreeSet<RepoId>) -> PrSearch {
-    PrSearch {
-        items: search
-            .items
-            .iter()
-            .filter(|item| repos.contains(&item.repo))
-            .cloned()
-            .collect(),
-        truncated: search.truncated,
     }
 }
 
@@ -208,11 +204,7 @@ impl Workspace {
 
     /// The one write of the list the page shows.
     pub(crate) fn apply_pr_list(&mut self, update: PrListUpdate<'_>, cx: &mut Context<Self>) {
-        if self.pr_list.filter().is_none() {
-            return;
-        }
-        let repos = self.github_repos();
-        if self.pr_list.apply(update, &repos) {
+        if self.pr_list.apply(update) {
             cx.notify();
         }
     }

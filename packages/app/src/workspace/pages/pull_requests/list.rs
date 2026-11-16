@@ -267,12 +267,17 @@ fn group_body(
         truncated: search.is_some_and(|search| search.truncated),
         trouble,
     };
-    match list {
+    // An answer that did not ask about `repo` says nothing of it: the group
+    // waits for one that did rather than claim it has no pull requests.
+    let search = list.answer().and_then(|answer| answer.covering(repo));
+    match (list, search) {
+        (HostList::Failed { .. }, search) => {
+            listed(search, trouble.or(Some(Trouble::SearchFailed)))
+        }
+        (HostList::Ready(_), Some(search)) => listed(Some(search), trouble),
         // A paused host is not searched; say why rather than wait forever.
-        HostList::Loading if trouble.is_some() => listed(None, trouble),
-        HostList::Loading => GroupBody::Loading,
-        HostList::Ready(search) => listed(Some(search), trouble),
-        HostList::Failed { last } => listed(last.as_ref(), trouble.or(Some(Trouble::SearchFailed))),
+        (HostList::Loading | HostList::Ready(_), _) if trouble.is_some() => listed(None, trouble),
+        (HostList::Loading | HostList::Ready(_), _) => GroupBody::Loading,
     }
 }
 
