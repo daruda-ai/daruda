@@ -29,7 +29,9 @@ fn included(path: &std::path::Path, bytes: Vec<u8>) -> std::io::Result<IncludedF
 }
 
 /// One lookup an expansion made: the name, and the file it found then with a
-/// SHA-256 of its bytes — `None` when nothing answered to it.
+/// SHA-256 of its bytes — `None` when nothing answered to it or its bytes
+/// could not be read. Either way the flow does not load, and a start that
+/// finds bytes there later no longer matches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) struct IncludeSeen {
     name: String,

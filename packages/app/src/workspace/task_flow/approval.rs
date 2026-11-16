@@ -153,8 +153,9 @@ enum FlowAgents {
     /// The flow loads: the modes its agents run under, empty for a flow of
     /// commands alone.
     Modes(Vec<Option<String>>),
-    /// The flow does not load, so a start of it is refused. Saying "no
-    /// agents" instead would describe a run that will never happen.
+    /// The flow does not load as read for the card. Saying "no agents"
+    /// instead would describe a run that will not happen. Not "refused":
+    /// a task in a new worktree loads that worktree's copy, which can differ.
     DoesNotLoad,
 }
 

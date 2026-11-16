@@ -141,8 +141,6 @@ pub(crate) struct RunView {
     /// Running and fixing nodes are the run's set of nodes under way.
     nodes: NodeRunStates,
     lull: Lull,
-    /// The engine said the run is over: nothing not yet started will start.
-    ended: bool,
     /// Every open question by its log-assigned id: a set, not one slot.
     questions: BTreeMap<u64, ParkedAsk>,
     /// Ids answered in this run, so a late answer can be told apart from one
@@ -159,7 +157,6 @@ impl RunView {
             nodes_at_start,
             nodes: NodeRunStates::new(),
             lull: Lull::Starting,
-            ended: false,
             questions: BTreeMap::new(),
             answered: BTreeSet::new(),
         }
@@ -218,7 +215,6 @@ impl RunView {
     /// engine has already closed.
     pub(crate) fn advance(&mut self, event: &FlowEvent) -> Advanced {
         let nodes_moved = apply_run_event(&mut self.nodes, event);
-        self.ended |= matches!(event, FlowEvent::RunEnded { .. });
         let lull = match event {
             FlowEvent::Settling { .. } => Some(Lull::Settling),
             FlowEvent::NodeStarted { node, attempt } => Some(Lull::After {
@@ -293,7 +289,8 @@ impl RunView {
         self.questions.clear();
     }
 
-    /// What this run makes of the flow it is of, when it can name one.
+    /// What this run makes of the flow it is of, when it can name one, while
+    /// it lasts; the host settles it with [`RunColouring::ended`] at the end.
     pub(crate) fn colouring(&self) -> Option<(PathBuf, RunColouring)> {
         let FlowSource::File(path) = &self.source else {
             return None;
@@ -303,7 +300,7 @@ impl RunView {
             RunColouring {
                 states: self.nodes.clone(),
                 of_nodes: self.nodes_at_start.clone(),
-                ended: self.ended,
+                ended: false,
             },
         ))
     }

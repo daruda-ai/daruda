@@ -281,29 +281,3 @@ fn waiting_level_lasts_until_all_questions_close() {
     view.withdraw_questions();
     assert_eq!(view.waiting_on(), None);
 }
-
-/// Once the engine says the run is over, its colouring says so: an include
-/// stopped part way is not drawn as still running.
-#[test]
-fn a_colouring_knows_once_its_run_has_ended() {
-    let members: Vec<NodeId> = vec!["s--a".into(), "s--b".into()];
-    let mut view = RunView::new(
-        PathBuf::from("/run"),
-        FlowSource::File(PathBuf::from("/flows/f.yaml")),
-        members.clone(),
-    );
-    view.advance(&started("s--a"));
-    view.advance(&FlowEvent::NodePassed {
-        node: "s--a".into(),
-        attempt: 1,
-    });
-    let (_, live) = view.colouring().expect("a run of a file names it");
-    assert_eq!(live.folded(&members), NodeRunState::Running { attempt: 1 });
-
-    view.advance(&FlowEvent::RunEnded {
-        end: daruda_flow::event::RunEnd::Canceled { node: None },
-    });
-    let (_, stopped) = view.colouring().expect("a run of a file names it");
-    assert!(stopped.ended);
-    assert_eq!(stopped.folded(&members), NodeRunState::Pending);
-}

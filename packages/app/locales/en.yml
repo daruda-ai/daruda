@@ -2442,7 +2442,7 @@ flow:
   issue_cycle: "the nodes depend on one another in a circle, so none can run first"
   issue_include_unavailable: "includes another flow, which cannot be found from here"
   issue_unknown_include: "includes the flow `%{flow}`, which does not exist"
-  # `reason` is the operating system's own error, untranslated.
+  # `reason` is the read's own error, untranslated.
   issue_include_unreadable: "includes the flow `%{flow}`, which cannot be read: %{reason}"
   issue_include_cycle: "includes `%{flow}`, which already includes this flow"
   issue_include_too_deep: "includes `%{flow}` too many levels deep"
@@ -2749,7 +2749,7 @@ control:
   # Follows the quoted modes: how many more the flow names.
   approval_flow_modes_more: "%{n} more"
   approval_flow_no_agents: "commands only, no agents"
-  approval_flow_does_not_load: "it does not load, so starting it is refused"
+  approval_flow_does_not_load: "it does not load as it stands"
   # `location` is one of the approval_task_in_* phrases, naming the branch
   # the first prompt's header gives the agent; `agent` is approval_agent;
   # `prompt` a one-line excerpt of the task's.

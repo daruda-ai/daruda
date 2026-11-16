@@ -81,6 +81,22 @@ impl RunColouring {
         self.of_nodes.iter().cloned().eq(nodes)
     }
 
+    /// The colouring a run leaves once it has ended. Nothing is under way
+    /// any more: a node last seen running was stopped with it — a run cut
+    /// off without a record says no more than that — and a gate last seen
+    /// fixing keeps the failure its repair never finished.
+    pub(crate) fn ended(mut self) -> Self {
+        for state in self.states.values_mut() {
+            *state = match *state {
+                NodeRunState::Running { .. } => NodeRunState::Pending,
+                NodeRunState::Fixing => NodeRunState::Failed,
+                settled => settled,
+            };
+        }
+        self.ended = true;
+        self
+    }
+
     /// What the run says about one node.
     pub(crate) fn state(&self, node: &NodeId) -> NodeRunState {
         self.states.get(node).copied().unwrap_or_default()

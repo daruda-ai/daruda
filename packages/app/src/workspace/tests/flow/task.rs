@@ -295,7 +295,7 @@ async fn an_invalid_flow_leaves_the_task_in_backlog(cx: &mut TestAppContext) {
 
 /// An approval always says how freely the flow acts: a flow of commands has
 /// no agents to give a permission mode, one that is not found says so, and
-/// one found that does not load says its start will be refused.
+/// one found that does not load says so.
 /// It quotes the prompt unless the flow was found to take none.
 #[gpui::test]
 fn a_flow_tasks_approval_names_what_it_runs(cx: &mut TestAppContext) {
@@ -341,7 +341,7 @@ fn a_flow_tasks_approval_names_what_it_runs(cx: &mut TestAppContext) {
                 crate::control::exec::quoted_title("broken.yaml"),
                 s::approval_flow_does_not_load()
             ),
-            "not \"no agents\": its start is refused"
+            "not \"no agents\": it does not load"
         );
         let takes_prompt = |name| {
             ws.task_flow_approval(project, &run_in, None, &flow(name))

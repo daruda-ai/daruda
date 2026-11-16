@@ -156,3 +156,40 @@ fn an_includes_card_folds_its_members_states() {
         assert_eq!(fold_states(members, ended), want, "{label}");
     }
 }
+
+/// An ended run leaves nothing under way: what was running stopped with it,
+/// a gate mid-repair keeps its failure, and an include stopped part way
+/// reads as pending rather than still running.
+#[test]
+fn an_ended_run_leaves_nothing_under_way() {
+    use NodeRunState::*;
+    let live = RunColouring {
+        states: [
+            ("cut", Running { attempt: 2 }),
+            ("gate", Fixing),
+            ("done", Passed),
+            ("broke", Failed),
+            ("s--a", Passed),
+        ]
+        .into_iter()
+        .map(|(id, state)| (NodeId::from(id), state))
+        .collect(),
+        of_nodes: Vec::new(),
+        ended: false,
+    };
+    let members: Vec<NodeId> = vec!["s--a".into(), "s--b".into()];
+    assert_eq!(live.folded(&members), Running { attempt: 1 });
+
+    let ended = live.ended();
+    assert!(ended.ended);
+    for (id, want) in [
+        ("cut", Pending),
+        ("gate", Failed),
+        ("done", Passed),
+        ("broke", Failed),
+        ("never", Pending),
+    ] {
+        assert_eq!(ended.state(&NodeId::from(id)), want, "{id}");
+    }
+    assert_eq!(ended.folded(&members), Pending);
+}

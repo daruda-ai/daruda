@@ -361,7 +361,10 @@ impl RunsHost {
                     run_dir: run_dir.to_path_buf(),
                     overage: run.overage.tripped().cloned(),
                     owes_remote_answer: run.submitter.owes_remote_answer(),
-                    colouring: run.view.colouring(),
+                    colouring: run
+                        .view
+                        .colouring()
+                        .map(|(path, colouring)| (path, colouring.ended())),
                 }));
                 return Some((key, closed, Some(ended)));
             }
