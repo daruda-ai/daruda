@@ -108,6 +108,13 @@ impl ListSchedule {
             .is_some_and(|state| state.ask == Ask::Requested)
     }
 
+    /// A queued or running search, including a refresh over retained rows.
+    pub(super) fn is_refreshing(&self, key: &ListKey) -> bool {
+        self.lists
+            .get(key)
+            .is_some_and(|state| state.ask != Ask::Idle)
+    }
+
     /// The feature was turned off: answers from before must not be shown
     /// after it is turned back on.
     pub(super) fn forget_answers(&mut self) {

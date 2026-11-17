@@ -14,6 +14,8 @@ use crate::workspace::main_area::bottom_dock::{InputHistory, QueuedInputCache};
 
 #[derive(Default)]
 pub(in crate::workspace) struct LaneScoped {
+    /// The placeholder lane's initial worktree discovery, gone on teardown.
+    pub project_discovery: RefreshSlot,
     pub git: GitLaneState,
     pub files: FileTreeLaneState,
     pub flows: FlowLaneState,

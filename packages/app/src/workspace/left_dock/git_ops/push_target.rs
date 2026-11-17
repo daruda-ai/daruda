@@ -38,7 +38,10 @@ impl Workspace {
             |git| &mut git.push_target_refresh,
             move || repo.push_target(),
             move |ws, result, cx| match result {
-                Ok(found) => ws.set_push_target(target, found, cx),
+                Ok(found) => {
+                    let changed = ws.set_push_target(target, found, cx);
+                    changed || ws.pr_list().is_shown()
+                }
                 Err(e) => {
                     let report =
                         ErrorReport::new(crate::surface::strings::error::git_push_target_failed())
@@ -51,7 +54,7 @@ impl Workspace {
                     ws.report_error(report, cx);
                     // A failed read says nothing about where the branch
                     // pushes; the last known target and its link stay.
-                    false
+                    ws.pr_list().is_shown()
                 }
             },
             Self::refresh_push_target,

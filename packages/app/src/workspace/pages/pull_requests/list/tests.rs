@@ -157,6 +157,8 @@ fn page_for(repo: RepoId, availability: GhAvailability, state: &PrListCache) -> 
     let repos = BTreeSet::from([repo]);
     let inputs = PageInputs {
         enabled: true,
+        discovering: false,
+        refreshing: false,
         filter: PrFilter::Mine,
         repos: &repos,
         list: state,
@@ -324,6 +326,8 @@ fn a_group_lists_only_its_own_repository() {
     })));
     let inputs = PageInputs {
         enabled: true,
+        discovering: false,
+        refreshing: false,
         filter: PrFilter::Mine,
         repos: &repos,
         list: &state,
@@ -402,6 +406,8 @@ fn the_header_says_how_old_the_newest_answer_is() {
         );
         let inputs = PageInputs {
             enabled: true,
+            discovering: false,
+            refreshing: false,
             filter: PrFilter::Mine,
             repos: &repos,
             list: &state,
@@ -426,6 +432,8 @@ fn a_page_with_nothing_to_search_says_why() {
     ] {
         let inputs = PageInputs {
             enabled,
+            discovering: false,
+            refreshing: false,
             filter: PrFilter::Mine,
             repos,
             list: &state,

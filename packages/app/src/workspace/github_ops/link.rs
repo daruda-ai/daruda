@@ -151,9 +151,10 @@ impl Workspace {
         }
     }
 
-    /// Re-read every git lane's push target: the feature was switched on,
-    /// and push targets are not kept current while it is off.
-    fn refresh_push_targets(&mut self, cx: &mut Context<Self>) {
+    /// Re-read every git lane's push target: the feature was switched on
+    /// (they are not kept current while it is off), or the Pull requests
+    /// page needs every worktree's pull request, panes opened or not.
+    pub(in crate::workspace) fn refresh_push_targets(&mut self, cx: &mut Context<Self>) {
         let lanes: Vec<LaneRef> = self.projects.lanes().map(|(lane, _, _)| lane).collect();
         for lane in lanes {
             self.refresh_push_target(lane, cx);

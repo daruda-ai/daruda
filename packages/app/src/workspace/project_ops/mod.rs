@@ -10,6 +10,7 @@ use daruda_store::project::{LaneKind, LaneRef, ProjectId, ProjectUuid, WindowOpe
 use gpui::{Context, Window};
 
 use super::Workspace;
+use crate::workspace::lane_scoped::RefreshSlot;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 use crate::workspace::main_area::pane_tree::PaneId;
 
@@ -353,19 +354,41 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn reconcile_bootstrapped_lanes(&mut self, cx: &mut Context<Self>) {
-        let targets: Vec<(ProjectId, PathBuf)> = self
+        let targets: Vec<(LaneRef, PathBuf)> = self
             .projects
             .iter()
             .filter(|p| has_placeholder_lanes(p))
-            .map(|p| (p.id, p.root.clone()))
+            .map(|p| {
+                (
+                    LaneRef {
+                        project: p.id,
+                        lane: p.lanes[0].id,
+                    },
+                    p.root.clone(),
+                )
+            })
             .collect();
         let git = crate::git_host::GitHost::global(cx);
-        for (project_id, root) in targets {
+        for (target, root) in targets {
+            if matches!(
+                self.lane_scoped_mut(target).project_discovery,
+                RefreshSlot::Running { .. }
+            ) {
+                continue;
+            }
+            self.lane_scoped_mut(target).project_discovery.claim();
+            cx.notify();
             let git = git.clone();
             crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
                 cx,
                 move || crate::lane::Lane::bootstrap_from_project(&root, git.as_ref()),
-                move |ws, lanes, cx| ws.apply_discovered_lanes(project_id, lanes, cx),
+                move |ws, lanes, cx| {
+                    if let Some(state) = ws.lane_scoped.get_mut(&target) {
+                        state.project_discovery.release();
+                    }
+                    ws.apply_discovered_lanes(target.project, lanes, cx);
+                    cx.notify();
+                },
             )
             .detach();
         }

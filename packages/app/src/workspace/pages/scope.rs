@@ -181,8 +181,9 @@ impl Workspace {
         if self.active_page() == Some(Page::Flows) {
             self.respawn_flow_watcher(cx);
         }
+        // Every project's worktrees were read when the page came on screen;
+        // a new scope only searches its repositories.
         if self.active_page() == Some(Page::PullRequests) {
-            self.refresh_pr_repositories(cx);
             crate::github::PrList::wanted(cx);
         }
         cx.notify();

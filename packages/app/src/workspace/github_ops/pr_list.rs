@@ -176,25 +176,21 @@ impl PrListCache {
 }
 
 impl Workspace {
-    /// Discover the shown scope's push targets even for worktrees whose
-    /// panes have never populated a lane-scoped Git cache.
+    /// Discover every worktree's push target, even one whose panes never
+    /// populated a lane-scoped Git cache. Every project, not the browsed
+    /// one: a pull request is matched to its worktree in any project, and a
+    /// worktree not read here would be offered to be made again.
     pub(in crate::workspace) fn refresh_pr_repositories(&mut self, cx: &mut Context<Self>) {
-        let projects: Vec<_> = self.projects.iter().map(|project| project.id).collect();
-        for project in projects {
-            self.refresh_pr_project_repositories(project, cx);
-        }
+        self.refresh_push_targets(cx);
     }
 
-    /// A project's worktrees were discovered: read just that project when
-    /// it belongs to the shown scope, leaving earlier discoveries alone.
+    /// A project's worktrees were discovered: read just that project,
+    /// leaving earlier discoveries alone.
     pub(in crate::workspace) fn refresh_pr_project_repositories(
         &mut self,
         project: ProjectId,
         cx: &mut Context<Self>,
     ) {
-        if !self.page_scope_matches(project) {
-            return;
-        }
         let lanes: Vec<_> = self
             .project_for(project)
             .into_iter()

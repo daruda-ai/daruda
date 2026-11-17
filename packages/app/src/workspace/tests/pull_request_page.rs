@@ -171,6 +171,11 @@ fn pull_request_rows_scroll_vertically_at_narrow_and_wide_sizes(cx: &mut TestApp
         });
         vcx.run_until_parked();
         let viewport = scroll.bounds();
+        let controls = vcx.debug_bounds("pr-list-controls").unwrap();
+        assert!(
+            controls.bottom() <= viewport.top(),
+            "{width}: controls stay above rows"
+        );
         assert_eq!(
             vcx.debug_bounds("workspace-page-scrollbar").unwrap(),
             viewport,
@@ -194,6 +199,11 @@ fn pull_request_rows_scroll_vertically_at_narrow_and_wide_sizes(cx: &mut TestApp
         });
         vcx.run_until_parked();
         assert!(scroll.offset().y < px(0.), "{width}: wheel moves the rows");
+        assert_eq!(
+            vcx.debug_bounds("pr-list-controls").unwrap(),
+            controls,
+            "{width}: filters and search stay fixed"
+        );
         let shifted = vcx.debug_bounds("pr-row-github.com/o/r#7").unwrap();
         assert!(shifted.top() < row.top(), "{width}: rows move on screen");
         assert_eq!(
@@ -315,6 +325,50 @@ fn a_failed_search_keeps_its_rows_and_try_again_searches_now(cx: &mut TestAppCon
 }
 
 #[gpui::test]
+fn reopening_after_a_failed_search_keeps_manual_refresh_available(cx: &mut TestAppContext) {
+    let (f, gh, _) = linked_window(cx);
+    gh.fail(
+        GhOp::SearchPrs,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "HTTP 502".into(),
+        },
+    );
+    show_page(&f, cx);
+    assert_eq!(trouble(&f, cx), Some(Trouble::SearchFailed));
+    let attempted = search_totals(&gh);
+    assert_eq!(attempted, [1, 1, 1]);
+
+    f.ws.update(cx, |ws, cx| ws.close_page(cx));
+    tick(cx);
+    gh.clear_failure(GhOp::SearchPrs);
+    show_page(&f, cx);
+    assert_eq!(
+        search_totals(&gh),
+        attempted,
+        "the search backoff is still active"
+    );
+    f.ws.read_with(cx, |ws, cx| {
+        let PageBody::Groups(groups) = ws.pr_page_list(cx).body else {
+            panic!("expected repository groups");
+        };
+        assert!(matches!(groups[0].body, GroupBody::Loading));
+    });
+
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.run_until_parked();
+    let refresh = vcx.debug_bounds("pr-refresh").expect("refresh is visible");
+    vcx.simulate_click(refresh.center(), Modifiers::default());
+    vcx.run_until_parked();
+    assert_eq!(
+        search_totals(&gh),
+        attempted.map(|n| n + 1),
+        "a user refresh bypasses the search backoff"
+    );
+    assert_eq!(rows(&f, &mut vcx).len(), 2);
+}
+
+#[gpui::test]
 fn switching_the_filter_reuses_answers_and_counts_share_the_cadence(cx: &mut TestAppContext) {
     let (f, gh, _) = linked_window(cx);
     show_page(&f, cx);
@@ -367,6 +421,87 @@ fn refreshing_searches_every_tab_so_counts_do_not_lag(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(search_totals(&gh), [2, 2, 2]);
     assert_eq!(counts(&f, cx), ["1", "0", "0"]);
+}
+
+#[gpui::test]
+fn a_worktree_in_a_project_outside_the_scope_still_works_on_its_pull_request(
+    cx: &mut TestAppContext,
+) {
+    use crate::workspace::pages::scope::ProjectScope;
+    let (f, _gh, linked) = linked_window(cx);
+    // A second copy of o/r, browsed alone: its lanes work on nothing.
+    let second = f.ws.update(cx, |ws, _| {
+        let push = ws.lane_scoped.get(&linked).unwrap().git.push_target.clone();
+        let project = ws.next_project_id;
+        ws.next_project_id += 1;
+        let other = crate::project::Project::bootstrap_placeholder(
+            project,
+            std::env::temp_dir().join("daruda-pr-outside-scope"),
+        );
+        let uuid = other.uuid;
+        let lane = LaneRef {
+            project,
+            lane: other.lanes[0].id,
+        };
+        ws.projects.push(other);
+        ws.lane_scoped_mut(lane).git.push_target = push.map(|mut push| {
+            push.branch = "main".into();
+            push
+        });
+        uuid
+    });
+    f.ws.update(cx, |ws, cx| {
+        ws.set_page_scope(ProjectScope::Project(second), cx)
+    });
+    show_page(&f, cx);
+    assert_eq!(
+        rows(&f, cx),
+        vec![
+            ("github.com/o/r#7".to_owned(), Some(linked)),
+            ("github.com/o/r#8".to_owned(), None),
+        ],
+        "the row goes to the worktree working on it, wherever it is"
+    );
+    let name = f.ws.read_with(cx, |ws, _| {
+        ws.pr_detail_lane(&item(7)).map(|lane| lane.name)
+    });
+    let project = f.ws.read_with(cx, |ws, _| {
+        ws.project_for(linked.project).unwrap().name.clone()
+    });
+    assert!(
+        name.as_deref()
+            .is_some_and(|name| name.starts_with(&format!("{project} / "))),
+        "a lane outside the scope names its project: {name:?}"
+    );
+}
+
+#[gpui::test]
+fn search_ignores_worded_ages_and_blank_input(cx: &mut TestAppContext) {
+    let (f, _gh, _) = linked_window(cx);
+    show_page(&f, cx);
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    // (typed, rows shown, search kept)
+    for (typed, visible, query) in [("ago", 0, "ago"), ("   ", 2, ""), ("HEAD-7", 1, "HEAD-7")] {
+        f.ws.update_in(&mut vcx, |ws, window, cx| {
+            ws.stage_pr_page(cx);
+            let snap = ws.pages.pull_requests.snapshot.as_ref().unwrap();
+            let search = snap.search.clone();
+            search.update(cx, |input, cx| {
+                input.set_value(typed, window, cx);
+            });
+        });
+        vcx.run_until_parked();
+        f.ws.read_with(&vcx, |ws, _| {
+            let snap = ws.pages.pull_requests.snapshot.as_ref().unwrap();
+            assert_eq!(snap.visible, visible, "{typed:?}: rows");
+            assert_eq!(snap.query, query, "{typed:?}: search");
+        });
+        assert_eq!(
+            vcx.debug_bounds("pr-clear-filters").is_some(),
+            !query.is_empty(),
+            "{typed:?}: a reset is offered only for a search"
+        );
+    }
 }
 
 #[gpui::test]
@@ -424,6 +559,21 @@ fn the_saved_state_never_holds_the_page(cx: &mut TestAppContext) {
 fn the_dock_counts_the_open_pull_requests_lanes_are_on(cx: &mut TestAppContext) {
     let (f, _gh, _) = linked_window(cx);
     assert_eq!(f.ws.read_with(cx, |ws, _| ws.open_lane_pr_count()), 1);
+    let vcx = &mut VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, _| window.refresh());
+    vcx.run_until_parked();
+    let dock = f.ws.read_with(vcx, |ws, _| ws.docks.left.clone());
+    let count = dock.read_with(vcx, |d, _| {
+        let crate::workspace::layout::DockSnapshot::Left(snap) = &d.snap else {
+            panic!("the left dock is staged");
+        };
+        Page::PullRequests.nav_count(snap)
+    });
+    assert_eq!(
+        count,
+        Some((1, crate::surface::strings::pull_requests::nav_count(1))),
+        "the badge says what it counts, which is not a tab's count"
+    );
 }
 
 #[gpui::test]

@@ -32,8 +32,8 @@ pub(in crate::workspace) fn navigation(snap: &LeftDockSnapshot, cx: &App) -> Any
                 .when(snap.workspace_page == Some(page), |button| {
                     button.bg(t.lane_card_active_bg).text_color(t.text_primary)
                 })
-                .when(count > 0, |button| {
-                    button.child(
+                .when_some(count, |button, (count, means)| {
+                    button.tooltip(means).child(
                         div()
                             .ml_auto()
                             .text_size(px(snap.metrics.text(theme::FONT_SIZE_XS)))

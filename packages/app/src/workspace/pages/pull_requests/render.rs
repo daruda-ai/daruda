@@ -42,23 +42,36 @@ fn layout() -> ListTable<PrColumn> {
     ])
 }
 
-pub(in crate::workspace) use super::controls::header;
-
-pub(in crate::workspace) fn render(snap: &PrPageSnapshot, cx: &App) -> AnyElement {
+pub(in crate::workspace) fn header(
+    snap: &PrPageSnapshot,
+    close: AnyElement,
+    cx: &App,
+) -> AnyElement {
     div()
         .flex()
         .flex_col()
-        .gap(px(theme::RIGHT_PANEL_SECTION_GAP))
-        .child(super::controls::filters(snap))
-        .child(super::controls::search(snap, cx))
-        .child(super::controls::results(snap, cx))
-        .child(body(snap, cx))
+        .min_w_0()
+        .child(super::controls::header(snap, close, cx))
+        .child(
+            div()
+                .debug_selector(|| "pr-list-controls".into())
+                .flex()
+                .flex_col()
+                .min_w_0()
+                .px(px(theme::DOCK_PAGE_PAD))
+                .pb(px(theme::PAD_LG))
+                .gap(px(theme::GAP_LG))
+                .child(super::controls::filters(snap))
+                .child(super::controls::search(snap, cx))
+                .child(super::controls::results(snap, cx)),
+        )
         .into_any_element()
 }
 
-fn body(snap: &PrPageSnapshot, cx: &App) -> AnyElement {
+pub(in crate::workspace) fn render(snap: &PrPageSnapshot, cx: &App) -> AnyElement {
     let groups = match &snap.list.body {
         PageBody::Off => return list_page::empty(s::empty_disabled(), cx).into_any_element(),
+        PageBody::Discovering => return list_page::empty(s::discovering(), cx).into_any_element(),
         PageBody::NoRepos => return list_page::empty(s::empty_no_repos(), cx).into_any_element(),
         PageBody::Groups(groups) => groups,
     };
@@ -112,7 +125,13 @@ fn render_group(
                 .text_size(px(theme::FONT_SIZE_SM))
                 .text_color(t.text_subtle)
                 .child(group.meta.clone()),
-        );
+        )
+        .children(group.refreshed.clone().map(|age| {
+            div()
+                .text_size(px(theme::FONT_SIZE_SM))
+                .text_color(t.text_subtle)
+                .child(age)
+        }));
     let body: Vec<AnyElement> = match &group.body {
         GroupBody::Loading => vec![note(common::loading(), cx).into_any_element()],
         GroupBody::Blocked(blocked) => vec![blocked_note(group, *blocked, snap, cx)],
@@ -133,7 +152,7 @@ fn render_group(
             if rows.is_empty() && trouble.is_none() {
                 body.push(
                     note(
-                        if snap.query.trim().is_empty() {
+                        if snap.query.is_empty() {
                             s::empty_repo()
                         } else {
                             s::empty_search()
@@ -333,7 +352,7 @@ fn lane_cell(row: &PrRow, snap: &PrPageSnapshot) -> AnyElement {
     .disabled(item.is_none())
     .on_click(move |_, window, cx| {
         if let (Some(item), Some(ws)) = (item.clone(), workspace.upgrade()) {
-            ws.update(cx, |ws, cx| ws.create_lane_from_pr(item, window, cx));
+            ws.update(cx, |ws, cx| ws.create_lane_from_pr(item, None, window, cx));
         }
     })
     .into_any_element()
@@ -374,8 +393,10 @@ fn title(row: &PrRow, stale: bool, cell: Div, cx: &App) -> AnyElement {
                 .min_w_0()
                 .child(
                     div()
+                        .id(SharedString::from(format!("pr-title-{}", row.key)))
                         .min_w_0()
                         .truncate()
+                        .tooltip(tooltip::text(row.title.clone()))
                         .text_color(ink(t.text_body))
                         .child(row.title.clone()),
                 )

@@ -139,23 +139,25 @@ fn description(item: &PrListItem) -> Option<String> {
 
 impl Workspace {
     /// Go to the worktree working on `item`, making one first if there is
-    /// none. Git runs in the background under the repository's lock; a
-    /// failure is reported and leaves nothing registered.
+    /// none, in `home` when the person chose the project. Git runs in the
+    /// background under the repository's lock; a failure is reported and
+    /// leaves nothing registered.
     pub(in crate::workspace) fn create_lane_from_pr(
         &mut self,
         item: PrListItem,
+        home: Option<ProjectId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let lanes = self.pr_page_lanes();
+        let lanes = self.pr_lanes();
         if let Some(lane) = list::linked_lane(&item, &lanes) {
             self.activate_lane(lane.lane, window, cx);
             return;
         }
-        if self.choose_pr_lane_project(&item, window, cx) {
+        if home.is_none() && self.choose_pr_lane_project(&item, window, cx) {
             return;
         }
-        let Some((project, push)) = self.pr_lane_home(&item.repo) else {
+        let Some((project, push)) = self.pr_lane_home(&item.repo, home) else {
             self.report_pr_lane_failure(
                 format!("no worktree pushes to {}", item.repo.qualified()),
                 cx,
@@ -248,7 +250,8 @@ impl Workspace {
     }
 
     /// A repo opened as several projects needs an explicit physical checkout
-    /// target before the aggregate page can create a worktree.
+    /// target before the aggregate page can create a worktree. The answer is
+    /// passed on as the worktree's home; the browsed scope stays as it is.
     fn choose_pr_lane_project(
         &mut self,
         item: &PrListItem,
@@ -275,7 +278,7 @@ impl Workspace {
             // choice also names the directory the worktree would branch from.
             .map(|project| {
                 (
-                    project.uuid,
+                    project.id,
                     s::project_choice(&project.name, project.root.display()),
                 )
             })
@@ -304,9 +307,8 @@ impl Workspace {
             let project = *project;
             // SILENT-OK: the window can close while choosing the project.
             let _ = this.update_in(cx, |ws, window, cx| {
-                if ws.project_by_uuid(project).is_some() {
-                    ws.set_page_scope(super::super::scope::ProjectScope::Project(project), cx);
-                    ws.create_lane_from_pr(item, window, cx);
+                if ws.project_for(project).is_some() {
+                    ws.create_lane_from_pr(item, Some(project), window, cx);
                 }
             });
         })
@@ -314,8 +316,15 @@ impl Workspace {
         true
     }
 
-    fn pr_lane_home(&self, repo: &RepoId) -> Option<(ProjectId, PushTarget)> {
-        let selected = self.page_project();
+    /// The project a worktree for `repo` is made in, and its push target:
+    /// `home` when chosen, else the browsed project's, else the active
+    /// project's, else the first that pushes to `repo`.
+    fn pr_lane_home(
+        &self,
+        repo: &RepoId,
+        home: Option<ProjectId>,
+    ) -> Option<(ProjectId, PushTarget)> {
+        let selected = home.or_else(|| self.page_project());
         let mut homes = self
             .projects
             .lanes()
@@ -325,7 +334,7 @@ impl Workspace {
                 (pushed == *repo).then(|| (lane.project, push.clone()))
             });
         let first = homes.next()?;
-        let active = self.page_project().unwrap_or(self.active.project);
+        let active = selected.unwrap_or(self.active.project);
         if first.0 == active {
             return Some(first);
         }

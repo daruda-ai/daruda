@@ -32,19 +32,20 @@ pub(in crate::workspace) fn render(
         .flex()
         .flex_col()
         .gap(px(theme::GAP_LG))
-        .child(title_block(view, cx))
         .children(view.error.clone().map(|error| action_error(error, cx)))
-        .child(tabs(view, cx))
         .child(match &view.body {
             DetailBody::Loading => note(common::loading(), cx).into_any_element(),
             DetailBody::Failed(reason) => note(s::detail_failed(reason), cx).into_any_element(),
             DetailBody::Ready(ready) => div()
                 .flex()
+                .flex_wrap()
                 .items_start()
                 .gap(px(theme::DOCK_PAGE_PAD))
                 .child(
                     div()
+                        .debug_selector(|| "pr-detail-tab-content".into())
                         .flex_1()
+                        .flex_basis(px(theme::PR_DETAIL_CONTENT_BASIS))
                         .min_w_0()
                         .child(tab_content(view.id, view.tab, ready, cx)),
                 )
@@ -52,7 +53,6 @@ pub(in crate::workspace) fn render(
                 .into_any_element(),
         });
     div()
-        .relative()
         .size_full()
         .min_h_0()
         .flex()
@@ -60,22 +60,44 @@ pub(in crate::workspace) fn render(
         .bg(t.dock_bg)
         .child(
             div()
-                .id(("pr-detail-scroll", view.id.0 as usize))
-                .track_scroll(scroll)
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .child(body),
+                .debug_selector(|| "pr-detail-controls".into())
+                .flex()
+                .flex_col()
+                .flex_none()
+                .min_w_0()
+                .p(px(theme::DOCK_PAGE_PAD))
+                .gap(px(theme::GAP_LG))
+                .border_b_1()
+                .border_color(t.border)
+                .child(title_block(view, cx))
+                .child(tabs(view, cx)),
         )
         .child(
             div()
-                .absolute()
-                .inset_0()
-                .debug_selector(|| "pr-detail-scrollbar".into())
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
                 .child(
-                    Scrollbar::vertical(scroll)
-                        .id(("pr-detail-scrollbar", view.id.0 as usize))
-                        .mode(ScrollbarMode::Always),
+                    div()
+                        .id(("pr-detail-scroll", view.id.0 as usize))
+                        .track_scroll(scroll)
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .child(body),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .debug_selector(|| "pr-detail-scrollbar".into())
+                        .child(
+                            Scrollbar::vertical(scroll)
+                                .id(("pr-detail-scrollbar", view.id.0 as usize))
+                                .mode(ScrollbarMode::Always),
+                        ),
                 ),
         )
         .into_any_element()
@@ -93,11 +115,13 @@ fn title_block(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
     });
     div()
         .flex()
+        .flex_col()
+        .w_full()
         .items_start()
         .gap(px(theme::GAP_LG))
         .child(
             div()
-                .flex_1()
+                .w_full()
                 .min_w_0()
                 .flex()
                 .flex_col()
@@ -114,8 +138,11 @@ fn title_block(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
                         )
                         .child(
                             div()
+                                .id(("pr-detail-title", view.id.0 as usize))
+                                .debug_selector(|| "pr-detail-title".into())
                                 .min_w_0()
                                 .truncate()
+                                .tooltip(crate::ui::tooltip::text(view.title.clone()))
                                 .text_size(px(theme::FONT_SIZE_LG))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(t.text_primary)
@@ -124,6 +151,10 @@ fn title_block(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
                 )
                 .child(
                     div()
+                        .id(("pr-detail-meta", view.id.0 as usize))
+                        .w_full()
+                        .truncate()
+                        .tooltip(crate::ui::tooltip::text(view.meta.clone()))
                         .font_family(theme::FONT_FAMILY_MONOSPACE)
                         .text_size(px(theme::FONT_SIZE_SM))
                         .text_color(t.text_subtle)
@@ -133,6 +164,8 @@ fn title_block(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
         .child(
             div()
                 .flex()
+                .flex_wrap()
+                .w_full()
                 .flex_none()
                 .gap(px(theme::GAP_SM))
                 .child(lane)
@@ -157,6 +190,7 @@ fn lane_button(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
                 s::open_in_lane(&lane.name),
                 icons::FOLDER_OPEN,
             )
+            .max_w_full()
             .debug_selector(|| "pr-detail-lane".into())
             .on_click(cx.listener(move |ws, _, window, cx| ws.open_pr_detail_lane(id, window, cx)))
             .into_any_element();
@@ -201,6 +235,7 @@ fn header_actions(id: PrDetailId, actions: &HeaderActions, cx: &Context<Workspac
     });
     div()
         .flex()
+        .flex_none()
         .gap(px(theme::GAP_SM))
         .children(ready)
         .child(
@@ -568,8 +603,10 @@ fn side(view: &SideView, cx: &Context<Workspace>) -> AnyElement {
         None => fact_value(s::lane_none(), t.text_subtle),
     };
     div()
+        .debug_selector(|| "pr-detail-side".into())
         .flex_none()
         .w(px(theme::PR_DETAIL_SIDE_W))
+        .max_w_full()
         .flex()
         .flex_col()
         .gap(px(theme::PAD_XL))

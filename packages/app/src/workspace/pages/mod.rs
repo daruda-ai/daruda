@@ -38,7 +38,15 @@ struct PageSpec {
     /// one it does not know would fail to restore the whole window.
     stored: Option<WorkspacePage>,
     /// The count beside the page's navigation entry, for a page that has one.
-    count: Option<fn(&LeftDockSnapshot) -> usize>,
+    count: Option<NavCount>,
+}
+
+/// A navigation entry's count and what it counts, which its tooltip says:
+/// the number can differ from the page's own tabs, which count otherwise.
+#[derive(Clone, Copy)]
+struct NavCount {
+    of: fn(&LeftDockSnapshot) -> usize,
+    means: fn(usize) -> String,
 }
 
 impl Page {
@@ -70,7 +78,10 @@ impl Page {
                 label: strings::pull_requests::title,
                 icon: icons::PULL_REQUESTS,
                 stored: None,
-                count: Some(|snap| snap.open_lane_prs),
+                count: Some(NavCount {
+                    of: |snap| snap.open_lane_prs,
+                    means: |count| strings::pull_requests::nav_count(count),
+                }),
             },
         }
     }
@@ -94,9 +105,12 @@ impl Page {
         self.spec().icon
     }
 
-    /// The count beside the navigation entry; nothing is shown for 0.
-    pub fn nav_count(self, snap: &LeftDockSnapshot) -> usize {
-        self.spec().count.map_or(0, |count| count(snap))
+    /// The count beside the navigation entry and its tooltip; nothing is
+    /// shown for 0.
+    pub fn nav_count(self, snap: &LeftDockSnapshot) -> Option<(usize, String)> {
+        let count = self.spec().count?;
+        let n = (count.of)(snap);
+        (n > 0).then(|| (n, (count.means)(n)))
     }
 }
 

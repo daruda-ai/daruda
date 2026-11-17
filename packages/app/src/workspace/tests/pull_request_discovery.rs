@@ -90,7 +90,10 @@ fn listed(f: &GitFixture, cx: &mut TestAppContext) -> BTreeMap<RepoId, Vec<u64>>
 fn pull_request_page_discovers_repositories_without_a_pane_visit(cx: &mut TestAppContext) {
     let (f, gh) = cold_window(cx);
     let active = f.ws.read_with(cx, |ws, _| ws.active_ref());
-    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    f.ws.update(cx, |ws, cx| {
+        ws.show_page(Page::PullRequests, cx);
+        assert_eq!(ws.pr_page_list(cx).body, PageBody::Discovering);
+    });
     cx.run_until_parked();
     for filter in [PrFilter::Mine, PrFilter::ReviewRequested, PrFilter::AllOpen] {
         f.ws.update(cx, |ws, cx| ws.set_pr_page_filter(filter, cx));
@@ -206,7 +209,10 @@ fn pull_request_page_follows_late_worktree_discovery(cx: &mut TestAppContext) {
         0,
         "still a placeholder"
     );
-    workspace.update(cx, |ws, cx| ws.reconcile_bootstrapped_lanes(cx));
+    workspace.update(cx, |ws, cx| {
+        ws.reconcile_bootstrapped_lanes(cx);
+        assert_eq!(ws.pr_page_list(cx).body, PageBody::Discovering);
+    });
     cx.run_until_parked();
     workspace.read_with(cx, |ws, cx| {
         assert_eq!(ws.github_repos(), [repo("r")].into());
@@ -216,6 +222,34 @@ fn pull_request_page_follows_late_worktree_discovery(cx: &mut TestAppContext) {
         assert!(matches!(&groups[0].body, GroupBody::Listed { rows, .. } if rows.len() == 1));
         assert_eq!(ws.active_ref(), active);
     });
+}
+
+#[gpui::test]
+fn a_non_git_project_finishes_discovery_without_requesting_github(cx: &mut TestAppContext) {
+    let temp = tempfile::tempdir().unwrap();
+    let fake = crate::test_support::fake_git(cx);
+    let gh = crate::test_support::fake_gh(cx);
+    let (_, workspace) = build_workspace_with(
+        cx,
+        &daruda_config::Config::default(),
+        Some(daruda_store::project::Project::from_path(temp.path())),
+    );
+    workspace.update(cx, |ws, cx| {
+        ws.show_page(Page::PullRequests, cx);
+        ws.reconcile_bootstrapped_lanes(cx);
+        ws.reconcile_bootstrapped_lanes(cx);
+        assert_eq!(ws.pr_page_list(cx).body, PageBody::Discovering);
+    });
+    cx.run_until_parked();
+    workspace.read_with(cx, |ws, cx| {
+        assert_eq!(ws.pr_page_list(cx).body, PageBody::NoRepos);
+    });
+    assert_eq!(
+        fake.reads(GitOp::Probe, temp.path()),
+        1,
+        "coalesced discovery"
+    );
+    assert_eq!(gh.count(GhOp::SearchPrs), 0);
 }
 
 #[gpui::test]
@@ -254,15 +288,71 @@ fn late_pull_request_projects_do_not_reread_existing_repositories(cx: &mut TestA
         });
         cx.run_until_parked();
         for (index, root) in roots.iter().enumerate() {
-            let expected = reads_before[index] + usize::from(in_scope && index == roots.len() - 1);
+            // In scope or not: a worktree outside the browsed project can
+            // still be the one working on a listed pull request.
+            let expected = reads_before[index] + usize::from(index == roots.len() - 1);
             assert_eq!(
                 f.fake.reads(GitOp::PushTarget, root),
                 expected,
-                "{name}: only the discovered in-scope project is read: {}",
+                "{name} (in scope: {in_scope}): only the discovered project is read: {}",
                 root.display()
             );
         }
     }
     assert_eq!(f.ws.read_with(cx, |ws, _| ws.active_ref()), active);
     assert_eq!(listed(&f, cx), BTreeMap::from([(repo("r"), vec![7])]));
+}
+
+/// A worktree in another project, never opened, is still found as the one
+/// working on its pull request while the page browses a different project:
+/// which lanes are read must match which lanes are matched.
+#[gpui::test]
+fn an_unvisited_worktree_outside_the_scope_is_found_for_its_pull_request(cx: &mut TestAppContext) {
+    use crate::workspace::pages::pull_requests::list::LaneSlot;
+    let (f, gh) = cold_window(cx);
+    gh.set_prs(&repo("r"), vec![item("r", 7).pr]);
+    let other_dir = tempfile::tempdir().unwrap();
+    let root = fake_repo_with(&f.fake, other_dir.path(), |git| {
+        git.branch("feat-7").push_target(PushTarget {
+            remote: "origin".into(),
+            url: "git@github.com:o/r.git".into(),
+            branch: "feat-7".into(),
+            published: true,
+            has_upstream: false,
+            review: None,
+        })
+    });
+    let other = f.ws.update(cx, |ws, _| {
+        let id = ws.next_project_id;
+        ws.next_project_id += 1;
+        ws.projects.push(crate::project::Project::new_with_uuid(
+            id,
+            ProjectUuid::new(),
+            root,
+            &f.fake,
+        ));
+        id
+    });
+    let browsed =
+        f.ws.read_with(cx, |ws, _| ws.active_project().unwrap().uuid);
+    f.ws.update(cx, |ws, cx| {
+        ws.set_page_scope(ProjectScope::Project(browsed), cx);
+        ws.show_page(Page::PullRequests, cx);
+    });
+    cx.run_until_parked();
+    cx.update(crate::github::PrPoller::tick);
+    cx.run_until_parked();
+    let page = f.ws.read_with(cx, |ws, cx| ws.pr_page_list(cx));
+    let PageBody::Groups(groups) = page.body else {
+        panic!("expected repository groups, got {:?}", page.body);
+    };
+    let GroupBody::Listed { rows, .. } = &groups[0].body else {
+        panic!("{:?}", groups[0].body);
+    };
+    let row = rows.iter().find(|row| row.item.pr.number == 7).unwrap();
+    assert!(
+        matches!(&row.lane, LaneSlot::Linked(lane) if lane.lane.project == other),
+        "#7 goes to the other project's worktree, not a new one: {:?}",
+        row.lane
+    );
 }

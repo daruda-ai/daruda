@@ -498,7 +498,7 @@ impl Workspace {
 
     /// The worktree working on the shown pull request.
     pub(in crate::workspace) fn pr_detail_lane(&self, item: &PrListItem) -> Option<LaneFacts> {
-        list::linked_lane(item, &self.pr_page_lanes()).cloned()
+        list::linked_lane(item, &self.pr_lanes()).cloned()
     }
 
     /// Where the detail's Send to agent goes: the linked worktree's chat,
@@ -560,7 +560,7 @@ impl Workspace {
             .filter(|d| d.id == id)
             .map(|d| d.item.clone());
         if let Some(item) = item {
-            self.create_lane_from_pr(item, window, cx);
+            self.create_lane_from_pr(item, None, window, cx);
         }
     }
 

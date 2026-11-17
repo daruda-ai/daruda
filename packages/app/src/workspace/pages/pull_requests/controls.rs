@@ -14,7 +14,12 @@ pub(in crate::workspace) fn header(
     let workspace = snap.workspace.clone();
     let refresh = button_icon("pr-refresh", icons::REFRESH, cx)
         .debug_selector(|| "pr-refresh".into())
-        .tooltip(common::refresh())
+        .tooltip(if snap.list.activity.busy() {
+            snap.list.activity.label().unwrap_or_else(common::refresh)
+        } else {
+            common::refresh()
+        })
+        .loading(snap.list.activity.busy())
         .on_click(move |_, _, cx| {
             if let Some(ws) = workspace.upgrade() {
                 ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
@@ -22,14 +27,23 @@ pub(in crate::workspace) fn header(
         });
     let action = div()
         .flex()
+        .min_w_0()
         .items_center()
         .gap(px(theme::GAP_LG))
-        .children(snap.list.refreshed.clone().map(|refreshed| {
-            div()
-                .text_size(px(theme::FONT_SIZE_SM))
-                .text_color(theme::current(cx).text_subtle)
-                .child(refreshed)
-        }))
+        .children(
+            snap.list
+                .activity
+                .label()
+                .or_else(|| snap.list.refreshed.clone())
+                .map(|refreshed| {
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(px(theme::FONT_SIZE_SM))
+                        .text_color(theme::current(cx).text_subtle)
+                        .child(refreshed)
+                }),
+        )
         .child(refresh);
     list_page::header(
         s::title(),
@@ -90,7 +104,7 @@ pub(super) fn search(snap: &PrPageSnapshot, cx: &App) -> impl IntoElement {
 
 pub(super) fn results(snap: &PrPageSnapshot, cx: &App) -> impl IntoElement {
     let workspace = snap.workspace.clone();
-    let clear = (!snap.query.trim().is_empty()).then(|| {
+    let clear = (!snap.query.is_empty()).then(|| {
         button("pr-clear-filters", common::clear_filters())
             .ghost()
             .tab_stop(true)
@@ -102,7 +116,22 @@ pub(super) fn results(snap: &PrPageSnapshot, cx: &App) -> impl IntoElement {
             })
             .into_any_element()
     });
-    list_page::results(s::result_count(snap.visible, snap.total), clear, cx)
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(theme::GAP_SM))
+        .child(list_page::results(
+            s::result_count(snap.visible, snap.total),
+            clear,
+            cx,
+        ))
+        .children(snap.list.sources.label().map(|label| {
+            div()
+                .debug_selector(|| "pr-source-summary".into())
+                .text_size(px(theme::FONT_SIZE_SM))
+                .text_color(theme::current(cx).text_subtle)
+                .child(label)
+        }))
 }
 
 #[cfg(test)]

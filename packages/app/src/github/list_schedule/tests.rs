@@ -142,6 +142,7 @@ fn a_refresh_while_in_flight_follows_the_answer_once() {
     for (label, result, expected) in cases {
         let mut schedule = ListSchedule::default();
         assert_eq!(sent(&mut schedule, w(), now), 1, "{label}");
+        assert!(schedule.is_refreshing(&key(PrFilter::Mine)), "{label}");
         schedule.refresh(key(PrFilter::Mine));
         schedule.refresh(key(PrFilter::Mine));
         assert_eq!(
@@ -155,8 +156,10 @@ fn a_refresh_while_in_flight_follows_the_answer_once() {
         // seen what the user just changed.
         schedule.finish(&key(PrFilter::Mine), result, true, now);
         assert!(schedule.is_requested(&key(PrFilter::Mine)), "{label}");
+        assert!(schedule.is_refreshing(&key(PrFilter::Mine)), "{label}");
         assert_eq!(sent(&mut schedule, w(), now), expected, "{label}");
         schedule.finish(&key(PrFilter::Mine), Ok(PrSearch::default()), true, now);
+        assert!(!schedule.is_refreshing(&key(PrFilter::Mine)), "{label}");
         assert_eq!(
             sent(&mut schedule, w(), now),
             0,

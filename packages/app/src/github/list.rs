@@ -21,6 +21,21 @@ pub(crate) struct PrList {
 impl Global for PrList {}
 
 impl PrList {
+    /// Read the shared scheduler rather than maintaining a UI refresh flag.
+    pub(crate) fn is_refreshing(filter: PrFilter, repos: &BTreeSet<RepoId>, cx: &App) -> bool {
+        let Some(list) = cx.try_global::<Self>() else {
+            return false;
+        };
+        let now = cx.background_executor().now();
+        repos.iter().any(|repo| {
+            PrPoller::takes_requests(repo.host(), now, cx)
+                && list.schedule.is_refreshing(&ListKey {
+                    host: repo.host().to_owned(),
+                    filter,
+                })
+        })
+    }
+
     /// A page started showing a list or changed its filter: run a round now
     /// rather than at the next tick. Deferred: the caller is inside a
     /// workspace update the round would re-enter.
@@ -62,6 +77,9 @@ impl PrList {
         let schedule = &mut cx.default_global::<Self>().schedule;
         schedule.forget_unwanted(&wanted);
         let due = schedule.begin(wanted, |host| open.contains(host), now);
+        if !due.is_empty() {
+            Self::notify_activity(cx);
+        }
         for (key, repos) in due {
             Self::search(key, repos, cx);
         }
@@ -176,6 +194,7 @@ impl PrList {
             }
             ListOutcome::Dropped => {}
         }
+        Self::notify_activity(cx);
         // A refresh asked for while this search ran, or the search for what
         // this answer left out, is sent now rather than at the next tick:
         // the user is waiting on it.
@@ -186,6 +205,14 @@ impl PrList {
 
     fn broadcast(update: PrListUpdate<'_>, cx: &mut App) {
         WindowRegistry::for_each_workspace(cx, |ws, _, cx| ws.apply_pr_list(update, cx));
+    }
+
+    fn notify_activity(cx: &mut App) {
+        WindowRegistry::for_each_workspace(cx, |ws, _, cx| {
+            if ws.pr_list().is_shown() {
+                cx.notify();
+            }
+        });
     }
 }
 

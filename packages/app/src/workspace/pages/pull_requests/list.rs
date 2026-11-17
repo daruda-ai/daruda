@@ -12,6 +12,7 @@ use daruda_github::availability::{BackoffReason, GhAvailability};
 use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, RepoId, ReviewDecision};
 use daruda_store::project::{LaneRef, ProjectId};
 
+use super::progress::{Activity, Sources};
 use crate::surface::strings::{git as git_s, pull_requests as s};
 use crate::workspace::github_ops::pr_list::{HostList, PrListCache};
 use crate::workspace::github_ops::tone::PrTone;
@@ -103,6 +104,8 @@ pub(in crate::workspace) struct PrGroup {
     pub label: String,
     /// The host, and how many rows once there are any to count.
     pub meta: String,
+    /// Age of the last answer that actually covered this repository.
+    pub refreshed: Option<String>,
     pub body: GroupBody,
 }
 
@@ -179,6 +182,8 @@ pub(in crate::workspace) struct PrRow {
     pub lane: LaneSlot,
     /// Only a URL a browser may be handed.
     pub url: Option<String>,
+    /// What the page's search matches, lowercased: see [`haystack`].
+    pub haystack: String,
     /// What clicking the row opens, and what its worktree is made from.
     pub item: Box<PrListItem>,
 }
@@ -188,6 +193,8 @@ pub(in crate::workspace) struct PrRow {
 pub(in crate::workspace) enum PageBody {
     /// `[github] enabled` is off.
     Off,
+    /// Local project discovery has not found a repository yet.
+    Discovering,
     /// No lane in the window pushes to a GitHub repository.
     NoRepos,
     Groups(Vec<PrGroup>),
@@ -199,12 +206,16 @@ pub(in crate::workspace) struct PrPageView {
     /// How old the newest answer under the filter is; `None` until one
     /// arrives.
     pub refreshed: Option<String>,
+    pub activity: Activity,
+    pub sources: Sources,
     pub body: PageBody,
 }
 
 /// Everything the page needs from the workspace, as plain values.
 pub(in crate::workspace) struct PageInputs<'a> {
     pub enabled: bool,
+    pub discovering: bool,
+    pub refreshing: bool,
     pub filter: PrFilter,
     pub repos: &'a BTreeSet<RepoId>,
     pub list: &'a PrListCache,
@@ -224,7 +235,11 @@ pub(in crate::workspace) fn page(
     let body = if !inputs.enabled {
         PageBody::Off
     } else if inputs.repos.is_empty() {
-        PageBody::NoRepos
+        if inputs.discovering {
+            PageBody::Discovering
+        } else {
+            PageBody::NoRepos
+        }
     } else {
         PageBody::Groups(
             inputs
@@ -238,6 +253,15 @@ pub(in crate::workspace) fn page(
                         inputs.list.host(inputs.filter, host),
                     );
                     let body = group_body(repo, status, inputs);
+                    let refreshed = match status {
+                        RepoStatus::Listed {
+                            search: Some(_), ..
+                        } => inputs
+                            .list
+                            .answered_at(inputs.filter, host)
+                            .map(|at| answer_age(inputs.clock, at)),
+                        _ => None,
+                    };
                     let meta = match &body {
                         GroupBody::Listed { rows, .. } => s::group_count(host, rows.len()),
                         GroupBody::Loading | GroupBody::Blocked(_) => host.to_owned(),
@@ -246,6 +270,7 @@ pub(in crate::workspace) fn page(
                         repo: repo.clone(),
                         label: format!("{}/{}", repo.owner(), repo.name()),
                         meta,
+                        refreshed,
                         body,
                     }
                 })
@@ -255,6 +280,8 @@ pub(in crate::workspace) fn page(
     PrPageView {
         filter: inputs.filter,
         refreshed: refreshed(inputs),
+        activity: Activity::of(inputs, &body),
+        sources: Sources::of(&body),
         body,
     }
 }
@@ -266,13 +293,17 @@ fn refreshed(inputs: &PageInputs<'_>) -> Option<String> {
         .iter()
         .filter_map(|repo| inputs.list.answered_at(inputs.filter, repo.host()))
         .max()?;
-    let seconds = inputs.clock.saturating_duration_since(newest).as_secs();
-    Some(match age::bucket(seconds) {
+    Some(answer_age(inputs.clock, newest))
+}
+
+fn answer_age(now: Instant, at: Instant) -> String {
+    let seconds = now.saturating_duration_since(at).as_secs();
+    match age::bucket(seconds) {
         AgeBucket::JustNow => s::refreshed_now(),
         AgeBucket::Minutes(n) => s::refreshed_minutes(n),
         AgeBucket::Hours(n) => s::refreshed_hours(n),
         AgeBucket::Days(n) => s::refreshed_days(n),
-    })
+    }
 }
 
 /// What is known of one repository's pull requests under one filter. The
@@ -360,6 +391,7 @@ fn rows(repo: &RepoId, search: &PrSearch, inputs: &PageInputs<'_>) -> Vec<PrRow>
 
 fn row(item: &PrListItem, inputs: &PageInputs<'_>) -> PrRow {
     let pr = &item.pr;
+    let lane = linked_lane(item, inputs.lanes);
     let author = item.author.clone().unwrap_or_else(s::author_deleted);
     let meta = match age_seconds(&pr.updated_at, inputs.now) {
         Some(seconds) => s::row_meta(
@@ -380,10 +412,29 @@ fn row(item: &PrListItem, inputs: &PageInputs<'_>) -> PrRow {
         checks: pr.checks,
         review: pr.review,
         comments: item.comments,
-        lane: LaneSlot::of(item, linked_lane(item, inputs.lanes), inputs.creating),
+        lane: LaneSlot::of(item, lane, inputs.creating),
         url: pr.web_url().map(str::to_owned),
+        haystack: haystack(item, lane),
         item: Box::new(item.clone()),
     }
+}
+
+/// The fields a search finds a pull request by, lowercased: its number,
+/// title, branches, author, repository and worktree. Text the page words for
+/// it (ages, labels) is left out, so a search means the same in any language.
+pub(super) fn haystack(item: &PrListItem, lane: Option<&LaneFacts>) -> String {
+    let pr = &item.pr;
+    [
+        format!("#{}", pr.number),
+        pr.title.clone(),
+        pr.head_branch.clone(),
+        item.base_branch.clone(),
+        item.author.clone().unwrap_or_default(),
+        format!("{}/{}", item.repo.owner(), item.repo.name()),
+        lane.map(|lane| lane.name.clone()).unwrap_or_default(),
+    ]
+    .join("\n")
+    .to_lowercase()
 }
 
 /// Whole seconds since `updated_at` (RFC 3339), or `None` if GitHub's

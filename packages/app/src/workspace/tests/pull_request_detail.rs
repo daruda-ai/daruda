@@ -199,6 +199,10 @@ fn pull_request_detail_scrolls_long_checks_and_description(cx: &mut TestAppConte
 
     let (f, gh, _) = window(cx);
     let mut long = detail(7, "feat");
+    f.ws.update(cx, |ws, _| {
+        let target = ws.active_ref();
+        ws.lane_for_mut(target).unwrap().name = Some("worktree-with-a-long-review-branch".into());
+    });
     long.checks = (0..60)
         .map(|ix| {
             let mut check = long.checks[0].clone();
@@ -221,53 +225,84 @@ fn pull_request_detail_scrolls_long_checks_and_description(cx: &mut TestAppConte
             .clone()
     });
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
-    vcx.simulate_resize(size(px(1280.), px(500.)));
-    for tab in [PrTab::Checks, PrTab::Description] {
-        f.ws.update(&mut vcx, |ws, cx| {
-            scroll.set_offset(point(px(0.), px(0.)));
-            ws.select_pr_detail_tab(id, tab, cx);
-        });
-        vcx.run_until_parked();
-        let viewport = scroll.bounds();
-        assert_eq!(
-            vcx.debug_bounds("pr-detail-scrollbar").unwrap(),
-            viewport,
-            "{tab:?}: scrollbar stays within the detail viewport"
-        );
-        assert!(
-            viewport.bottom() <= px(500.),
-            "{tab:?}: viewport={viewport:?}"
-        );
-        assert!(
-            scroll.max_offset().y > px(0.),
-            "{tab:?}: content overflows: {viewport:?}"
-        );
-        let before = scroll.offset().y;
-        vcx.simulate_event(ScrollEvent {
-            source: ScrollSource::Pointer,
-            position: viewport.center(),
-            delta: ScrollDelta::Pixels(point(px(0.), px(-200.))),
-            touch_phase: TouchPhase::Started,
-            modifiers: Default::default(),
-        });
-        vcx.run_until_parked();
-        assert!(
-            scroll.offset().y < before,
-            "{tab:?}: wheel moves the detail"
-        );
-        let before_click = scroll.offset().y;
-        vcx.simulate_click(
-            point(
-                viewport.right() - px(crate::ui::theme::SCROLLBAR_MARGIN_R),
-                viewport.bottom() - px(crate::ui::theme::CONTROL_TARGET_SIZE),
-            ),
-            Default::default(),
-        );
-        vcx.run_until_parked();
-        assert!(
-            scroll.offset().y < before_click,
-            "{tab:?}: scrollbar track moves the detail"
-        );
+    for width in [800., 1280.] {
+        vcx.simulate_resize(size(px(width), px(500.)));
+        for tab in [PrTab::Checks, PrTab::Description] {
+            f.ws.update(&mut vcx, |ws, cx| {
+                scroll.set_offset(point(px(0.), px(0.)));
+                ws.select_pr_detail_tab(id, tab, cx);
+            });
+            vcx.run_until_parked();
+            let viewport = scroll.bounds();
+            let controls = vcx.debug_bounds("pr-detail-controls").unwrap();
+            assert!(
+                viewport.size.height > px(crate::ui::theme::CONTROL_TARGET_SIZE),
+                "{tab:?}: fixed controls leave room for content"
+            );
+            assert!(
+                vcx.debug_bounds("pr-detail-title").unwrap().size.width
+                    > px(crate::ui::theme::CONTROL_TARGET_SIZE),
+                "{tab:?}: actions do not squeeze the title away"
+            );
+            assert!(
+                vcx.debug_bounds("pr-detail-merge").unwrap().right() <= controls.right(),
+                "{tab:?}: merge remains reachable"
+            );
+            let content = vcx.debug_bounds("pr-detail-tab-content").unwrap();
+            let side = vcx.debug_bounds("pr-detail-side").unwrap();
+            assert!(
+                content.right() <= viewport.right() && side.right() <= viewport.right(),
+                "{tab:?}: detail columns fit the viewport"
+            );
+            assert!(
+                controls.bottom() <= viewport.top(),
+                "{tab:?}: controls stay above content"
+            );
+            assert_eq!(
+                vcx.debug_bounds("pr-detail-scrollbar").unwrap(),
+                viewport,
+                "{tab:?}: scrollbar stays within the detail viewport"
+            );
+            assert!(
+                viewport.bottom() <= px(500.),
+                "{tab:?}: viewport={viewport:?}"
+            );
+            assert!(
+                scroll.max_offset().y > px(0.),
+                "{tab:?}: content overflows: {viewport:?}"
+            );
+            let before = scroll.offset().y;
+            vcx.simulate_event(ScrollEvent {
+                source: ScrollSource::Pointer,
+                position: viewport.center(),
+                delta: ScrollDelta::Pixels(point(px(0.), px(-200.))),
+                touch_phase: TouchPhase::Started,
+                modifiers: Default::default(),
+            });
+            vcx.run_until_parked();
+            assert!(
+                scroll.offset().y < before,
+                "{tab:?}: wheel moves the detail"
+            );
+            assert_eq!(
+                vcx.debug_bounds("pr-detail-controls").unwrap(),
+                controls,
+                "{tab:?}: title, actions and tabs stay fixed"
+            );
+            let before_click = scroll.offset().y;
+            vcx.simulate_click(
+                point(
+                    viewport.right() - px(crate::ui::theme::SCROLLBAR_MARGIN_R),
+                    viewport.bottom() - px(crate::ui::theme::CONTROL_TARGET_SIZE),
+                ),
+                Default::default(),
+            );
+            vcx.run_until_parked();
+            assert!(
+                scroll.offset().y < before_click,
+                "{tab:?}: scrollbar track moves the detail"
+            );
+        }
     }
 }
 

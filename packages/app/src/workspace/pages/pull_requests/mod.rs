@@ -10,7 +10,7 @@ use daruda_store::project::LaneKind;
 use gpui::{App, AppContext as _, Context, Entity, WeakEntity, Window};
 
 use super::Page;
-use crate::github::PrPoller;
+use crate::github::{PrList, PrPoller};
 use crate::workspace::Workspace;
 use crate::workspace::github_ops::pr_list::PrListCache;
 use crate::workspace::lane_scoped::LaneScoped;
@@ -21,6 +21,7 @@ mod counts;
 pub(in crate::workspace) mod detail;
 mod lane;
 pub(in crate::workspace) mod list;
+mod progress;
 pub(in crate::workspace) mod render;
 mod search;
 
@@ -72,6 +73,7 @@ pub(in crate::workspace) struct PrPageSnapshot {
     pub list: PrPageView,
     pub scope: super::scope::ScopeSnapshot,
     pub search: Entity<InputState>,
+    /// The search as typed, trimmed: empty means no search.
     pub query: String,
     pub visible: usize,
     pub total: usize,
@@ -106,34 +108,46 @@ impl Workspace {
 
     /// Stage what the page draws this frame: its detail when it holds one,
     /// its list otherwise. Only while it is on screen: the rows cost a pass
-    /// over every lane and pull request.
+    /// over every lane and pull request, so the lanes and repositories are
+    /// read once here for everything the frame draws.
     pub(in crate::workspace) fn stage_pr_page(&mut self, cx: &Context<Self>) {
-        let shown = self.active_page() == Some(Page::PullRequests);
+        if self.active_page() != Some(Page::PullRequests) {
+            self.pages.pull_requests.detail_snapshot = None;
+            self.pages.pull_requests.snapshot = None;
+            return;
+        }
+        let lanes = self.pr_lanes();
         let detail = self
             .pages
             .pull_requests
             .detail
             .as_ref()
-            .filter(|_| shown && self.shown_page_detail_id().is_some())
+            .filter(|_| self.shown_page_detail_id().is_some())
             .map(|state| {
-                let lane = self.pr_detail_lane(state.item());
+                let lane = list::linked_lane(state.item(), &lanes);
                 let inputs = detail::view::DetailInputs {
-                    lane: lane.as_ref(),
-                    sending: lane
-                        .as_ref()
-                        .is_some_and(|lane| self.is_sending_pr(lane.lane)),
+                    lane,
+                    sending: lane.is_some_and(|lane| self.is_sending_pr(lane.lane)),
                     creating: &self.pages.pull_requests.creating,
                     now: chrono::Utc::now(),
                 };
                 detail::view::view(state, &inputs)
             });
-        let list = shown && detail.is_none();
+        let shows_list = detail.is_none();
         self.pages.pull_requests.detail_snapshot = detail;
-        self.pages.pull_requests.snapshot = list.then(|| {
+        self.pages.pull_requests.snapshot = shows_list.then(|| {
+            let repos = self.github_repos();
             let search = self.pages.pull_requests.search.clone();
-            let query = search.read(cx).value().to_string();
-            let mut list = self.pr_page_list(cx);
+            let query = search.read(cx).value().trim().to_owned();
+            let mut list = self.pr_page_view(&repos, &lanes, cx);
             let (visible, total) = search::narrow(&mut list, &query);
+            let counts = if repos.is_empty() && list.activity.busy() {
+                std::array::from_fn(|_| crate::surface::strings::pull_requests::count_pending())
+            } else {
+                counts::labels(self.pr_list(), &repos, |host| {
+                    PrPoller::availability(host, cx)
+                })
+            };
             PrPageSnapshot {
                 workspace: cx.weak_entity(),
                 scope: self.scope_snapshot(),
@@ -142,9 +156,7 @@ impl Workspace {
                 query,
                 visible,
                 total,
-                counts: counts::labels(self.pr_list(), &self.github_repos(), |host| {
-                    PrPoller::availability(host, cx)
-                }),
+                counts,
             }
         });
     }
@@ -171,15 +183,33 @@ impl Workspace {
             .set_offset(gpui::point(gpui::Pixels::ZERO, gpui::Pixels::ZERO));
     }
 
+    /// The page's list as it stands, for a test outside a frame.
+    #[cfg(test)]
     pub(in crate::workspace) fn pr_page_list(&self, cx: &App) -> PrPageView {
-        let repos = self.github_repos();
-        let lanes = self.pr_page_lanes();
+        self.pr_page_view(&self.github_repos(), &self.pr_lanes(), cx)
+    }
+
+    fn pr_page_view(
+        &self,
+        repos: &BTreeSet<daruda_github::RepoId>,
+        lanes: &[LaneFacts],
+        cx: &App,
+    ) -> PrPageView {
         let inputs = PageInputs {
             enabled: crate::github::enabled(cx),
+            discovering: lanes.iter().any(|lane| {
+                self.page_scope_matches(lane.lane.project)
+                    && self.lane_scoped.get(&lane.lane).is_some_and(|state| {
+                        use crate::workspace::lane_scoped::RefreshSlot;
+                        matches!(state.project_discovery, RefreshSlot::Running { .. })
+                            || matches!(state.git.push_target_refresh, RefreshSlot::Running { .. })
+                    })
+            }),
+            refreshing: PrList::is_refreshing(self.pr_page_filter(), repos, cx),
             filter: self.pr_page_filter(),
-            repos: &repos,
+            repos,
             list: self.pr_list(),
-            lanes: &lanes,
+            lanes,
             creating: &self.pages.pull_requests.creating,
             now: chrono::Utc::now(),
             clock: cx.background_executor().now(),
@@ -187,14 +217,17 @@ impl Workspace {
         list::page(&inputs, |host| PrPoller::availability(host, cx))
     }
 
-    /// Every lane, with what matching it to a pull request reads.
-    fn pr_page_lanes(&self) -> Vec<LaneFacts> {
+    /// Every lane in the window, with what matching it to a pull request
+    /// reads. Not narrowed to the browsed scope: which worktree works on a
+    /// pull request does not change with what the page shows. A lane the
+    /// scope does not single out names its project.
+    pub(super) fn pr_lanes(&self) -> Vec<LaneFacts> {
+        let all = self.page_scope() == super::scope::ProjectScope::All;
         self.projects
             .lanes()
-            .filter(|(lane, _, _)| self.page_scope_matches(lane.project))
             .map(|(lane, project, record)| LaneFacts {
                 lane,
-                name: if self.page_scope() == super::scope::ProjectScope::All {
+                name: if all || !self.page_scope_matches(lane.project) {
                     format!("{} / {}", project.name, record.display_name())
                 } else {
                     record.display_name()

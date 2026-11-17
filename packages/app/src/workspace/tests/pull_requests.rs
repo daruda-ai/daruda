@@ -62,7 +62,7 @@ fn click(f: &GitFixture, item: &PrListItem, cx: &mut TestAppContext) {
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     let item = item.clone();
     vcx.update(|window, cx| {
-        f.ws.update(cx, |ws, cx| ws.create_lane_from_pr(item, window, cx));
+        f.ws.update(cx, |ws, cx| ws.create_lane_from_pr(item, None, window, cx));
     });
 }
 
@@ -464,9 +464,9 @@ fn the_details_button_makes_the_worktree_its_row_would(cx: &mut TestAppContext) 
     assert_eq!(error_titles(&f, cx), vec![error::lane_create_failed()]);
 }
 
-#[gpui::test]
-fn aggregate_worktree_creation_asks_which_copy_of_a_repo_to_use(cx: &mut TestAppContext) {
-    let (f, _gh) = window(cx, |r| r);
+/// Open `f`'s repository a second time, as another project whose lane
+/// pushes to the same o/r, and browse every project.
+fn second_copy(f: &GitFixture, cx: &mut TestAppContext) {
     f.ws.update(cx, |ws, cx| {
         let push = ws
             .lane_scoped
@@ -489,6 +489,12 @@ fn aggregate_worktree_creation_asks_which_copy_of_a_repo_to_use(cx: &mut TestApp
         ws.lane_scoped_mut(lane).git.push_target = push;
         ws.set_task_scope(daruda_store::tasks::TaskScope::AllProjects, cx);
     });
+}
+
+#[gpui::test]
+fn aggregate_worktree_creation_asks_which_copy_of_a_repo_to_use(cx: &mut TestAppContext) {
+    let (f, _gh) = window(cx, |r| r);
+    second_copy(&f, cx);
     let active = f.ws.read_with(cx, |ws, _| ws.active);
     click(&f, &item(9, "feature", false), cx);
     assert!(
@@ -500,4 +506,33 @@ fn aggregate_worktree_creation_asks_which_copy_of_a_repo_to_use(cx: &mut TestApp
     cx.run_until_parked();
     assert!(calls(&f).is_empty());
     assert_eq!(f.ws.read_with(cx, |ws, _| ws.active), active);
+}
+
+#[gpui::test]
+fn choosing_the_copy_makes_the_worktree_there_and_keeps_the_browsed_scope(cx: &mut TestAppContext) {
+    use crate::workspace::pages::scope::ProjectScope;
+    let (f, _gh) = window(cx, |r| r);
+    second_copy(&f, cx);
+    let first = f.ws.read_with(cx, |ws, _| {
+        let project = ws.project_for(ws.active.project).unwrap();
+        crate::surface::strings::pull_requests::project_choice(
+            &project.name,
+            project.root.display(),
+        )
+    });
+    click(&f, &item(9, "feature", false), cx);
+    cx.simulate_prompt_answer(&first);
+    cx.run_until_parked();
+    assert!(
+        calls(&f)
+            .iter()
+            .any(|call| matches!(call, GitCall::FetchRef { repo, .. } if *repo == f.root)),
+        "git runs in the chosen copy: {:?}",
+        calls(&f)
+    );
+    assert_eq!(
+        f.ws.read_with(cx, |ws, _| ws.page_scope()),
+        ProjectScope::All,
+        "choosing where to make a worktree does not narrow the page"
+    );
 }
