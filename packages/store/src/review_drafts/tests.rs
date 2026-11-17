@@ -76,3 +76,55 @@ fn a_newer_or_damaged_file_is_not_read_as_empty() {
     std::fs::write(&path, "{ not json").unwrap();
     assert_eq!(load_review_drafts_in(dir.path()), None, "damaged");
 }
+
+#[test]
+fn a_creation_draft_is_kept_per_branch_apart_from_review_drafts() {
+    let dir = tempfile::tempdir().unwrap();
+    let owner = |head: &str| CreationOwner {
+        host: "github.com".into(),
+        account: "al".into(),
+        owner: "o".into(),
+        name: "r".into(),
+        head: head.into(),
+    };
+    let mut drafts = ReviewDrafts::default();
+    drafts.set_creation(
+        &owner("feat"),
+        Some(CreationDraft {
+            of: owner("feat"),
+            title: Some(String::new()),
+            body: Some("Why".into()),
+            base: None,
+            draft: true,
+            template: None,
+            saved_at: 1,
+        }),
+    );
+    // Touched nowhere: nothing to keep.
+    drafts.set_creation(
+        &owner("other"),
+        Some(CreationDraft {
+            of: owner("other"),
+            title: None,
+            body: None,
+            base: None,
+            draft: false,
+            template: None,
+            saved_at: 1,
+        }),
+    );
+    drafts.prune();
+    save_review_drafts_in(dir.path(), &drafts).unwrap();
+    let loaded = load_review_drafts_in(dir.path()).unwrap();
+    let kept = loaded.creation(&owner("feat")).unwrap();
+    assert_eq!(
+        kept.title.as_deref(),
+        Some(""),
+        "a cleared title stays cleared"
+    );
+    assert!(loaded.creation(&owner("other")).is_none());
+    assert!(loaded.prs.is_empty(), "no review draft came of it");
+    let mut dropped = loaded;
+    dropped.set_creation(&owner("feat"), None);
+    assert!(dropped.creations.is_empty());
+}

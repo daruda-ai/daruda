@@ -206,6 +206,7 @@ fn request(base: Option<&str>) -> crate::workspace::github_ops::create::CreatePr
         body: String::new(),
         base: base.map(str::to_owned),
         draft: false,
+        expected: crate::workspace::github_ops::create_modal::summary::Expected::Unchecked,
     }
 }
 
@@ -665,8 +666,10 @@ fn moving_the_branch_ends_the_wait_after_create(cx: &mut TestAppContext) {
     let (f, id) = lane_with(cx, true);
     tick(cx);
     // The PR is made, but the poll that would link it cannot reach GitHub.
-    gh.fail(
+    // The check before creating passes; every poll after it fails.
+    gh.fail_after(
         GhOp::PrsForBranches,
+        1,
         GhFailure::Exit {
             code: Some(1),
             stderr: "error connecting to api.github.com".into(),
@@ -1094,4 +1097,385 @@ fn turning_the_feature_off_clears_the_list(cx: &mut TestAppContext) {
     tick(cx);
     assert!(listed(&f, cx).is_empty());
     assert_eq!(gh.count(GhOp::SearchPrsPage), 3, "no search while off");
+}
+
+/// The form showed one push target; the branch pushes elsewhere by the
+/// time it is submitted: nothing is pushed or created, and the form says so.
+#[gpui::test]
+fn a_push_target_changed_since_the_form_showed_it_stops_the_push(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, id) = lane_with(cx, true);
+    let window: gpui::AnyWindowHandle = f.window.into();
+    let ws = f.ws.downgrade();
+    let root = f.root.clone();
+    let modal = cx
+        .update_window(window, |_, window, cx| {
+            let repo = crate::git_host::GitHost::global(cx).open(&root);
+            cx.new(|cx| {
+                crate::workspace::github_ops::create_modal::CreatePrModal::new_for_test(
+                    ws, id, repo, window, cx,
+                )
+            })
+        })
+        .unwrap();
+    let mut shown_request = request(None);
+    shown_request.expected = crate::workspace::github_ops::create_modal::summary::Expected::Target(
+        crate::workspace::github_ops::create_modal::summary::ShownTarget {
+            remote: "origin".into(),
+            url: "git@github.com:o/r.git".into(),
+            branch: "old-name".into(),
+        },
+    );
+    let weak = modal.downgrade();
+    f.ws.update(cx, |ws, cx| {
+        ws.create_pr(id, shown_request, weak, window, cx)
+    });
+    cx.run_until_parked();
+    assert!(pushes(&f).is_empty(), "nothing pushed");
+    assert_eq!(gh.count(GhOp::CreatePr), 0);
+    assert_eq!(
+        modal.read_with(cx, |modal, _| modal.failure().map(str::to_owned)),
+        Some(crate::surface::strings::error::github_pr_target_changed())
+    );
+}
+
+/// The target the form showed still holds: the push and create go ahead.
+#[gpui::test]
+fn the_target_the_form_showed_is_pushed_to(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, id) = lane_with(cx, true);
+    let window: gpui::AnyWindowHandle = f.window.into();
+    let ws = f.ws.downgrade();
+    let root = f.root.clone();
+    let modal = cx
+        .update_window(window, |_, window, cx| {
+            let repo = crate::git_host::GitHost::global(cx).open(&root);
+            cx.new(|cx| {
+                crate::workspace::github_ops::create_modal::CreatePrModal::new_for_test(
+                    ws, id, repo, window, cx,
+                )
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let mut held = request(None);
+    held.expected = crate::workspace::github_ops::create_modal::summary::Expected::Target(
+        crate::workspace::github_ops::create_modal::summary::ShownTarget {
+            remote: "origin".into(),
+            url: "git@github.com:o/r.git".into(),
+            branch: "feat".into(),
+        },
+    );
+    let weak = modal.downgrade();
+    f.ws.update(cx, |ws, cx| ws.create_pr(id, held, weak, window, cx));
+    cx.run_until_parked();
+    assert_eq!(pushes(&f).len(), 1);
+    assert_eq!(gh.count(GhOp::CreatePr), 1);
+}
+
+/// A form for `lane` built the way the dialog builds it, its reads landed.
+fn open_form(
+    f: &GitFixture,
+    lane: LaneRef,
+    cx: &mut TestAppContext,
+) -> gpui::Entity<crate::workspace::github_ops::create_modal::CreatePrModal> {
+    let window: gpui::AnyWindowHandle = f.window.into();
+    let ws = f.ws.downgrade();
+    let root = f.root.clone();
+    let modal = cx
+        .update_window(window, |_, window, cx| {
+            let repo = crate::git_host::GitHost::global(cx).open(&root);
+            cx.new(|cx| {
+                crate::workspace::github_ops::create_modal::CreatePrModal::new_for_test(
+                    ws, lane, repo, window, cx,
+                )
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    modal
+}
+
+/// What the form's title and description hold.
+fn fields(
+    modal: &gpui::Entity<crate::workspace::github_ops::create_modal::CreatePrModal>,
+    cx: &mut TestAppContext,
+) -> (String, String) {
+    modal.read_with(cx, |modal, cx| modal.fields_for_test(cx))
+}
+
+/// Typed into a form that is then closed: the next form for the branch
+/// brings it back, a cleared field included; creating drops it.
+#[gpui::test]
+fn what_is_typed_for_a_new_pull_request_comes_back_until_it_is_created(cx: &mut TestAppContext) {
+    use daruda_github::availability::{CredentialSource, GhAccount};
+    let dir = tempfile::tempdir().unwrap();
+    cx.update(|cx| crate::github::DraftStore::install_at(dir.path().to_owned(), cx));
+    let gh = crate::test_support::fake_gh(cx);
+    gh.set_account(
+        "github.com",
+        GhAccount {
+            login: "me".into(),
+            source: CredentialSource::Env("GH_TOKEN".into()),
+        },
+    );
+    let (f, id) = lane_with(cx, true);
+    f.ws.update(cx, |ws, cx| ws.recheck_gh("github.com", cx));
+    tick(cx);
+
+    let first = open_form(&f, id, cx);
+    let window: gpui::AnyWindowHandle = f.window.into();
+    cx.update_window(window, |_, window, cx| {
+        first.update(cx, |modal, cx| {
+            modal.type_for_test("Add it", "Why it matters", window, cx)
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    drop(first);
+
+    let second = open_form(&f, id, cx);
+    assert_eq!(
+        fields(&second, cx),
+        ("Add it".into(), "Why it matters".into())
+    );
+    assert!(second.read_with(cx, |modal, _| modal.restored_for_test()));
+
+    // Started over: nothing comes back.
+    cx.update_window(window, |_, window, cx| {
+        second.update(cx, |modal, cx| modal.discard_for_test(window, cx));
+    })
+    .unwrap();
+    let third = open_form(&f, id, cx);
+    assert!(!third.read_with(cx, |modal, _| modal.restored_for_test()));
+
+    // Typed again, then created: dropped.
+    cx.update_window(window, |_, window, cx| {
+        third.update(cx, |modal, cx| {
+            modal.type_for_test("Add it", "", window, cx)
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let owner = cx
+        .update(|cx| crate::github::DraftStore::creation_owner(&repo(), "feat", cx))
+        .expect("the account is known");
+    assert!(
+        cx.update(|cx| crate::github::DraftStore::creation(&owner, cx))
+            .is_some()
+    );
+    let weak = third.downgrade();
+    f.ws.update(cx, |ws, cx| {
+        ws.create_pr(id, request(None), weak, window, cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::CreatePr), 1);
+    assert!(
+        cx.update(|cx| crate::github::DraftStore::creation(&owner, cx))
+            .is_none()
+    );
+}
+
+/// Signed in as `me`, with the drafts kept under a temporary directory.
+fn signed_in_with_drafts(
+    cx: &mut TestAppContext,
+) -> (
+    tempfile::TempDir,
+    daruda_github::fake::FakeGh,
+    GitFixture,
+    LaneRef,
+) {
+    use daruda_github::availability::{CredentialSource, GhAccount};
+    let dir = tempfile::tempdir().unwrap();
+    cx.update(|cx| crate::github::DraftStore::install_at(dir.path().to_owned(), cx));
+    let gh = crate::test_support::fake_gh(cx);
+    gh.set_account(
+        "github.com",
+        GhAccount {
+            login: "me".into(),
+            source: CredentialSource::Env("GH_TOKEN".into()),
+        },
+    );
+    let (f, id) = lane_with(cx, true);
+    f.ws.update(cx, |ws, cx| ws.recheck_gh("github.com", cx));
+    tick(cx);
+    (dir, gh, f, id)
+}
+
+fn write_templates(f: &GitFixture) {
+    let dir = f.root.join(".github/PULL_REQUEST_TEMPLATE");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(f.root.join(".github/pull_request_template.md"), "## Why").unwrap();
+    std::fs::write(dir.join("bug.md"), "## Bug").unwrap();
+}
+
+/// Opened and closed untouched where a default template fills the
+/// description: nothing is kept, and nothing claims to be restored.
+#[gpui::test]
+fn an_untouched_form_keeps_nothing(cx: &mut TestAppContext) {
+    let (_dir, _gh, f, id) = signed_in_with_drafts(cx);
+    write_templates(&f);
+    let first = open_form(&f, id, cx);
+    assert_eq!(fields(&first, cx).1, "## Why", "the default template");
+    drop(first);
+    let owner = cx
+        .update(|cx| crate::github::DraftStore::creation_owner(&repo(), "feat", cx))
+        .unwrap();
+    assert!(
+        cx.update(|cx| crate::github::DraftStore::creation(&owner, cx))
+            .is_none()
+    );
+    let second = open_form(&f, id, cx);
+    assert!(!second.read_with(cx, |modal, _| modal.restored_for_test()));
+}
+
+/// A template chosen, a base typed and Draft ticked: all come back, the
+/// chosen template over the default, even after a reopen without typing.
+#[gpui::test]
+fn a_chosen_template_base_and_draft_come_back(cx: &mut TestAppContext) {
+    let (_dir, _gh, f, id) = signed_in_with_drafts(cx);
+    write_templates(&f);
+    let window: gpui::AnyWindowHandle = f.window.into();
+    let first = open_form(&f, id, cx);
+    cx.update_window(window, |_, window, cx| {
+        first.update(cx, |modal, cx| {
+            modal.choose_for_test(
+                ".github/PULL_REQUEST_TEMPLATE/bug.md",
+                "develop",
+                window,
+                cx,
+            );
+            modal.toggle_draft_for_test(cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    drop(first);
+    for round in ["reopened", "reopened again without typing"] {
+        let form = open_form(&f, id, cx);
+        assert_eq!(
+            fields(&form, cx).1,
+            "## Bug",
+            "{round}: the chosen template"
+        );
+        let request = form
+            .read_with(cx, |modal, cx| modal.request_for_test(cx))
+            .clone();
+        assert_eq!(request.0.as_deref(), Some("develop"), "{round}: base");
+        assert!(request.1, "{round}: draft");
+        drop(form);
+        cx.run_until_parked();
+    }
+}
+
+/// `gh` timed out after GitHub took the create: the form says it may exist,
+/// and creating again finds it instead of opening a second one.
+#[gpui::test]
+fn a_create_whose_answer_was_lost_is_found_before_a_second(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    gh.fail(GhOp::CreatePr, GhFailure::Timeout);
+    gh.set_pr_created_anyway(true);
+    let (f, id) = lane_with(cx, true);
+    let failure = create(&f, id, cx);
+    assert_eq!(
+        failure,
+        Some(crate::surface::strings::error::github_pr_create_uncertain())
+    );
+    assert_eq!((gh.count(GhOp::CreatePr), pushes(&f).len()), (1, 1));
+
+    let modal = create_with(&f, id, None, cx);
+    let existing = modal.read_with(cx, |modal, _| modal.existing().cloned());
+    assert_eq!(
+        existing.map(|created| created.number),
+        Some(Some(1)),
+        "the one GitHub made"
+    );
+    assert_eq!(
+        (gh.count(GhOp::CreatePr), pushes(&f).len()),
+        (1, 1),
+        "neither pushed nor created again"
+    );
+}
+
+/// Created, but GitHub's lists cannot be read yet: the strip opens the one
+/// created rather than offering Create PR again.
+#[gpui::test]
+fn a_created_pull_request_not_yet_listed_is_opened_not_created_again(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, id) = lane_with(cx, true);
+    tick(cx);
+    // The check before creating passes; every poll after it fails.
+    gh.fail_after(
+        GhOp::PrsForBranches,
+        1,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "error connecting to api.github.com".into(),
+        },
+    );
+    assert_eq!(create(&f, id, cx), None);
+    let strip = f.ws.read_with(cx, |ws, cx| ws.pr_strip(cx));
+    let crate::workspace::github_ops::strip::PrStrip::Created(created) = strip else {
+        panic!("{strip:?}");
+    };
+    assert_eq!(created.number, Some(1));
+}
+
+/// A fork's open pull request from a branch of the same name is not this
+/// branch's: creating goes ahead.
+#[gpui::test]
+fn a_forks_pull_request_of_the_same_name_does_not_stop_creating(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    gh.set_prs(
+        &repo(),
+        vec![daruda_github::PrSummary {
+            cross_repo: true,
+            ..pr(4, PrState::Open, "2026-01-01")
+        }],
+    );
+    let (f, id) = lane_with(cx, true);
+    assert_eq!(create(&f, id, cx), None);
+    assert_eq!(gh.count(GhOp::CreatePr), 1);
+}
+
+/// Whether the branch has one cannot be asked: nothing is pushed or made.
+#[gpui::test]
+fn a_failed_check_pushes_and_creates_nothing(cx: &mut TestAppContext) {
+    let gh = crate::test_support::fake_gh(cx);
+    let (f, id) = lane_with(cx, true);
+    gh.fail(
+        GhOp::PrsForBranches,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "error connecting to api.github.com".into(),
+        },
+    );
+    let failure = create(&f, id, cx).expect("refused");
+    assert!(failure.contains("error connecting"), "{failure}");
+    assert_eq!((gh.count(GhOp::CreatePr), pushes(&f).len()), (0, 0));
+}
+
+/// Made for one branch, it is not offered on another the lane switched to.
+#[gpui::test]
+fn a_created_pull_request_belongs_to_its_branch(cx: &mut TestAppContext) {
+    let (f, id) = lane_with(cx, true);
+    f.ws.update(cx, |ws, cx| {
+        let state = ws.lane_scoped.get_mut(&id).unwrap();
+        state.pr.created_for_test(
+            crate::workspace::github_ops::lane_pr::CreatedPr::of(
+                "https://github.com/o/r/pull/3".into(),
+                "other-branch",
+            )
+            .unwrap(),
+        );
+        cx.notify();
+    });
+    let strip = f.ws.read_with(cx, |ws, cx| ws.pr_strip(cx));
+    assert!(
+        !matches!(
+            strip,
+            crate::workspace::github_ops::strip::PrStrip::Created(_)
+        ),
+        "{strip:?}"
+    );
 }

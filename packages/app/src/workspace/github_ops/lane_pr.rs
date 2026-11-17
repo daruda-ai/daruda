@@ -15,11 +15,43 @@ pub(in crate::workspace) enum PrWork {
     AwaitingNewPr,
 }
 
+/// A pull request daruda created for the lane, kept until the poller
+/// links it: whatever the lookup says meanwhile, Create PR is not offered
+/// again for a branch that has one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CreatedPr {
+    /// A web page: nothing else is ever opened.
+    pub url: String,
+    /// From the URL; `None` when it does not end in one.
+    pub number: Option<u64>,
+    /// The branch it is for, as pushed: another branch is not offered it.
+    pub head: String,
+}
+
+impl CreatedPr {
+    /// `None` for a URL that is not a web page.
+    pub(crate) fn of(url: String, head: &str) -> Option<Self> {
+        if !daruda_github::model::is_web_url(&url) {
+            return None;
+        }
+        let number = url
+            .trim_end_matches('/')
+            .rsplit_once("/pull/")
+            .and_then(|(_, number)| number.parse().ok());
+        Some(Self {
+            url,
+            number,
+            head: head.to_owned(),
+        })
+    }
+}
+
 /// Never persisted: the next poll answers it again.
 #[derive(Debug, Default)]
 pub(in crate::workspace) struct LanePr {
     lookup: PrLookup,
     work: PrWork,
+    created: Option<CreatedPr>,
 }
 
 impl LanePr {
@@ -43,6 +75,10 @@ impl LanePr {
             && self.work == PrWork::AwaitingNewPr
         {
             self.work = PrWork::Idle;
+        }
+        // Linked, or on the default branch (which has none): done with.
+        if matches!(lookup, PrLookup::Linked(_) | PrLookup::DefaultBranch) {
+            self.created = None;
         }
         if self.lookup == lookup {
             return false;
@@ -72,11 +108,68 @@ impl LanePr {
     pub(super) fn await_new_pr(&mut self) {
         self.work = PrWork::AwaitingNewPr;
     }
+
+    /// Remember the pull request created for the lane until it is linked.
+    pub(super) fn created(&mut self, created: CreatedPr) {
+        self.created = Some(created);
+    }
+
+    /// [`Self::created`] for a window test.
+    #[cfg(test)]
+    pub(in crate::workspace) fn created_for_test(&mut self, created: CreatedPr) {
+        self.created(created);
+    }
+
+    pub(in crate::workspace) fn created_pr(&self) -> Option<&CreatedPr> {
+        self.created.as_ref()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_created_pr_is_a_web_page_numbered_from_its_url() {
+        // (label, url, number, or None if refused)
+        let cases = [
+            (
+                "a pull request",
+                "https://github.com/o/r/pull/12",
+                Some(Some(12)),
+            ),
+            (
+                "a trailing slash",
+                "https://github.com/o/r/pull/12/",
+                Some(Some(12)),
+            ),
+            (
+                "a sub-page",
+                "https://github.com/o/r/pull/12/files",
+                Some(None),
+            ),
+            ("no number", "https://x/o/r", Some(None)),
+            ("not a web page", "javascript:alert(1)", None),
+            ("a file", "file:///etc/passwd", None),
+        ];
+        for (label, url, expected) in cases {
+            assert_eq!(
+                CreatedPr::of(url.into(), "feat").map(|created| created.number),
+                expected,
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_created_pr_is_held_until_linked() {
+        let created = CreatedPr::of("https://github.com/o/r/pull/12".into(), "feat").unwrap();
+        let mut pr = LanePr::default();
+        pr.created(created.clone());
+        pr.replace(PrLookup::NoPr);
+        pr.replace(PrLookup::Unknown);
+        assert_eq!(pr.created_pr(), Some(&created), "not linked yet");
+    }
 
     #[test]
     fn a_link_or_a_forgotten_answer_ends_the_wait_after_create() {

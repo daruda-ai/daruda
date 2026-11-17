@@ -21,6 +21,9 @@ pub(crate) enum PrStrip {
     },
     /// GitHub answers, and this branch has no pull request.
     NoPr,
+    /// daruda created one that GitHub's lists do not show yet: Open it,
+    /// never Create another.
+    Created(super::lane_pr::CreatedPr),
     Linked(PrLink),
 }
 
@@ -69,7 +72,16 @@ impl Workspace {
         });
         let unknown = PrLookup::Unknown;
         let lookup = state.map_or(&unknown, |state| state.pr.lookup());
-        strip_for(enabled, repo, availability, lookup)
+        // Only for the branch it was made for: Open it at once, not a
+        // spinner over a Create PR that must not be pressed again.
+        let head = state.and_then(|state| state.github_push().map(|(_, push)| push.branch.clone()));
+        let created = state
+            .and_then(|state| state.pr.created_pr())
+            .filter(|created| Some(&created.head) == head.as_ref());
+        match (strip_for(enabled, repo, availability, lookup), created) {
+            (PrStrip::NoPr, Some(created)) => PrStrip::Created(created.clone()),
+            (strip, _) => strip,
+        }
     }
 
     /// Open the active lane's pull request on GitHub.

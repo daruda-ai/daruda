@@ -7,7 +7,7 @@
 //! | `prs_for_branches` | default branch `main`, no PRs for any branch or number |
 //! | `search_prs` | none, not truncated |
 //! | `search_prs_page` | the `set_pr_list` list of its audience, narrowed to its repositories, state and title words (not facets), paged |
-//! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL |
+//! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL; a scripted failure creates nothing unless `set_pr_created_anyway` |
 //! | `failed_log` | exit 1, as for a run that has no failed log |
 //! | `review_threads` | none |
 //! | `pr_files_page` | the `set_pr_files` list, paged as GitHub pages it |
@@ -207,9 +207,14 @@ pub enum GhOp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GhFailure {
     NotFound,
-    Exit { code: Option<i32>, stderr: String },
+    Exit {
+        code: Option<i32>,
+        stderr: String,
+    },
     Parse(String),
     HeadMoved,
+    /// `gh` did not answer in time.
+    Timeout,
 }
 
 impl GhFailure {
@@ -222,6 +227,7 @@ impl GhFailure {
             },
             Self::Parse(message) => GhError::Parse(message.clone()),
             Self::HeadMoved => GhError::HeadMoved,
+            Self::Timeout => GhError::Timeout(std::time::Duration::from_secs(30)),
         }
     }
 }
@@ -250,10 +256,13 @@ struct FakeState {
     /// A scripted `submit_review` failure still lands, as when `gh` times
     /// out after GitHub took the review.
     review_lands_anyway: bool,
+    pr_created_anyway: bool,
     details: HashMap<(RepoId, u64), PrDetail>,
     files: HashMap<(RepoId, u64), crate::PrFiles>,
     file_texts: HashMap<(RepoId, String, String), crate::FileText>,
     failures: HashMap<GhOp, GhFailure>,
+    /// Calls of an op that succeed before its scripted failure applies.
+    passes: HashMap<GhOp, usize>,
     resets: HashMap<String, i64>,
     calls: Vec<GhCall>,
 }
@@ -330,6 +339,12 @@ impl FakeGh {
         self.lock().latest_review = review;
     }
 
+    /// Whether a scripted `create_pr` failure creates the pull request
+    /// anyway, as when `gh` timed out after GitHub took the request.
+    pub fn set_pr_created_anyway(&self, created: bool) {
+        self.lock().pr_created_anyway = created;
+    }
+
     /// Whether a scripted `submit_review` failure lands the review anyway.
     pub fn set_review_lands_anyway(&self, lands: bool) {
         self.lock().review_lands_anyway = lands;
@@ -351,8 +366,17 @@ impl FakeGh {
         self.lock().failures.insert(op, failure);
     }
 
+    /// `op` succeeds `passes` more times, then fails as `failure` does.
+    pub fn fail_after(&self, op: GhOp, passes: usize, failure: GhFailure) {
+        let mut state = self.lock();
+        state.failures.insert(op, failure);
+        state.passes.insert(op, passes);
+    }
+
     pub fn clear_failure(&self, op: GhOp) {
-        self.lock().failures.remove(&op);
+        let mut state = self.lock();
+        state.failures.remove(&op);
+        state.passes.remove(&op);
     }
 
     pub fn calls(&self) -> Vec<GhCall> {
@@ -412,10 +436,21 @@ impl FakeState {
     fn record(&mut self, call: GhCall) -> Result<(), GhError> {
         let op = call.op();
         self.calls.push(call);
-        match self.failures.get(&op) {
+        match self.failure(op) {
             Some(failure) => Err(failure.to_error()),
             None => Ok(()),
         }
+    }
+
+    /// The failure scripted for this call of `op`, after its passes.
+    fn failure(&mut self, op: GhOp) -> Option<GhFailure> {
+        if let Some(passes) = self.passes.get_mut(&op)
+            && *passes > 0
+        {
+            *passes -= 1;
+            return None;
+        }
+        self.failures.get(&op).cloned()
     }
 
     /// The scripted detail of `repo` whose node id is `pr`.
@@ -445,7 +480,7 @@ impl Gh for FakeGh {
         state.calls.push(GhCall::Auth {
             host: host.to_owned(),
         });
-        if let Some(failure) = state.failures.get(&GhOp::Auth) {
+        if let Some(failure) = state.failure(GhOp::Auth) {
             return Err(failure.to_error());
         }
         let auth = state.auth.get(host).copied().unwrap_or(GhAuth::Ready);
@@ -469,7 +504,7 @@ impl Gh for FakeGh {
             branches: branches.to_vec(),
             numbers: numbers.to_vec(),
         });
-        if let Some(failure) = state.failures.get(&GhOp::PrsForBranches) {
+        if let Some(failure) = state.failure(GhOp::PrsForBranches) {
             return Err(failure.to_error());
         }
         let prs = state.prs.get(repo).cloned().unwrap_or_default();
@@ -517,7 +552,7 @@ impl Gh for FakeGh {
             repos: repos.to_vec(),
             filter,
         });
-        if let Some(failure) = state.failures.get(&GhOp::SearchPrs) {
+        if let Some(failure) = state.failure(GhOp::SearchPrs) {
             return Err(failure.to_error());
         }
         let mut items: Vec<PrListItem> = state
@@ -547,7 +582,7 @@ impl Gh for FakeGh {
             repo: repo.clone(),
             job,
         });
-        if let Some(failure) = state.failures.get(&GhOp::FailedLog) {
+        if let Some(failure) = state.failure(GhOp::FailedLog) {
             return Err(failure.to_error());
         }
         state
@@ -566,7 +601,7 @@ impl Gh for FakeGh {
             repo: repo.clone(),
             number,
         });
-        if let Some(failure) = state.failures.get(&GhOp::ReviewThreads) {
+        if let Some(failure) = state.failure(GhOp::ReviewThreads) {
             return Err(failure.to_error());
         }
         let mut threads = state.threads.get(&number).cloned().unwrap_or_default();
@@ -630,7 +665,7 @@ impl Gh for FakeGh {
             repo: repo.clone(),
             number,
         });
-        if let Some(failure) = state.failures.get(&GhOp::PrDetail) {
+        if let Some(failure) = state.failure(GhOp::PrDetail) {
             return Err(failure.to_error());
         }
         state
@@ -916,7 +951,10 @@ impl Gh for FakeGh {
             repo: repo.clone(),
             new: new.clone(),
         });
-        if let Some(failure) = state.failures.get(&GhOp::CreatePr) {
+        let failure = state.failure(GhOp::CreatePr);
+        if let Some(failure) = &failure
+            && !state.pr_created_anyway
+        {
             return Err(failure.to_error());
         }
         let prs = state.prs.entry(repo.clone()).or_default();
@@ -943,7 +981,10 @@ impl Gh for FakeGh {
             review: None,
             updated_at: String::new(),
         });
-        Ok(url)
+        match failure {
+            Some(failure) => Err(failure.to_error()),
+            None => Ok(url),
+        }
     }
 }
 

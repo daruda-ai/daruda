@@ -2,6 +2,16 @@ use super::*;
 use crate::lane::git::tests::{commit_initial, init, require_git, teardown, unique_tmpdir};
 
 #[test]
+fn remote_branches_drop_the_head_alias_and_other_remotes() {
+    let out = "refs/remotes/origin/HEAD\nrefs/remotes/origin/main\nrefs/remotes/origin/feat/x\n\
+               refs/remotes/originals/main\n";
+    assert_eq!(
+        parse_remote_branches(out, "refs/remotes/origin/"),
+        ["feat/x", "main"]
+    );
+}
+
+#[test]
 fn config_records_split_into_keys_and_values() {
     let raw = "remote.origin.url\nhttps://h/o/r\0core.bare\0branch.Main.merge\nrefs/heads/main\0";
     assert_eq!(
@@ -167,6 +177,11 @@ fn push_target_reads_a_real_repository() {
     let after = push_target(&work).unwrap().unwrap();
     assert!(after.published);
     assert!(after.has_upstream, "-u set the upstream");
+    assert_eq!(remote_branches(&work, "origin").unwrap(), ["feat"]);
+    assert_eq!(
+        remote_branches(&work, "elsewhere").unwrap(),
+        Vec::<String>::new()
+    );
     assert_eq!(
         run_git(&work, ["config", "branch.feat.merge"])
             .unwrap()

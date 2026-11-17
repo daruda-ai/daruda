@@ -20,6 +20,7 @@ pub struct FakeRepo {
     ahead_branches: Vec<String>,
     review_marks: HashMap<String, String>,
     remote_urls: HashMap<String, String>,
+    remote_branches: HashMap<String, Vec<String>>,
     default_branch: Option<String>,
     pub(super) tracking: Option<GitTracking>,
     pub(super) status: Option<GitWorktreeStatus>,
@@ -49,6 +50,7 @@ impl FakeRepo {
             ahead_branches: Vec::new(),
             review_marks: HashMap::new(),
             remote_urls: HashMap::new(),
+            remote_branches: HashMap::new(),
             default_branch: None,
             tracking: None,
             status: None,
@@ -120,6 +122,14 @@ impl FakeRepo {
     /// The fetch URL `remote_url(remote)` answers; unlisted remotes are unknown.
     pub fn remote_url(mut self, remote: impl Into<String>, url: impl Into<String>) -> Self {
         self.remote_urls.insert(remote.into(), url.into());
+        self
+    }
+    /// The branches `remote_branches(remote)` answers; none for others.
+    pub fn remote_branches(mut self, remote: impl Into<String>, branches: &[&str]) -> Self {
+        self.remote_branches.insert(
+            remote.into(),
+            branches.iter().map(|branch| (*branch).to_owned()).collect(),
+        );
         self
     }
     pub fn default_branch(mut self, branch: impl Into<String>) -> Self {
@@ -270,6 +280,12 @@ impl FakeRepo {
     }
     pub(super) fn review_mark_answer(&self, branch: &str) -> Option<String> {
         self.review_marks.get(branch).cloned()
+    }
+    pub(super) fn remote_branches_answer(&self, remote: &str) -> Vec<String> {
+        self.remote_branches
+            .get(remote)
+            .cloned()
+            .unwrap_or_default()
     }
     pub(super) fn remote_url_answer(&self, remote: &str) -> Option<String> {
         self.remote_urls.get(remote).cloned()

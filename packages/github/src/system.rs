@@ -104,6 +104,30 @@ fn auto_merge_args(repo: &RepoId, mutation: &str, fields: &[(&str, &str)]) -> Ve
     args
 }
 
+/// `gh pr create` for `new`, its description read from stdin.
+fn create_args(repo: &RepoId, new: &NewPr) -> Vec<String> {
+    let mut args = vec![
+        "pr".to_owned(),
+        "create".to_owned(),
+        "--repo".to_owned(),
+        repo.qualified(),
+        "--head".to_owned(),
+        new.head.clone(),
+        "--title".to_owned(),
+        new.title.clone(),
+        "--body-file".to_owned(),
+        "-".to_owned(),
+    ];
+    if let Some(base) = &new.base {
+        args.push("--base".to_owned());
+        args.push(base.clone());
+    }
+    if new.draft {
+        args.push("--draft".to_owned());
+    }
+    args
+}
+
 fn reopen_args(repo: &RepoId, number: u64) -> Vec<String> {
     let repo = repo.qualified();
     ["pr", "reopen", &number.to_string(), "--repo", &repo]
@@ -727,26 +751,20 @@ impl Gh for SystemGh {
     }
 
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {
-        let mut args = vec![
-            "pr".to_owned(),
-            "create".to_owned(),
-            "--repo".to_owned(),
-            repo.qualified(),
-            "--head".to_owned(),
-            new.head.clone(),
-            "--title".to_owned(),
-            new.title.clone(),
-            "--body".to_owned(),
-            new.body.clone(),
-        ];
-        if let Some(base) = &new.base {
-            args.push("--base".to_owned());
-            args.push(base.clone());
+        // The description on stdin: it can be longer than an argument may be.
+        let ran = self.run_fed(
+            Some(&new.worktree),
+            create_args(repo, new),
+            Some(new.body.clone().into_bytes()),
+        )?;
+        if !ran.status.success() {
+            return Err(GhError::Exit {
+                code: ran.status.code(),
+                stderr: String::from_utf8_lossy(&ran.stderr).into_owned(),
+            });
         }
-        if new.draft {
-            args.push("--draft".to_owned());
-        }
-        let out = self.stdout_in(Some(&new.worktree), &args)?;
+        let out = String::from_utf8(ran.stdout)
+            .map_err(|_| GhError::Parse("output is not UTF-8".into()))?;
         // gh prints the new PR's URL as its last line.
         out.lines()
             .rev()
@@ -922,7 +940,34 @@ mod tests {
         let reviewers = |add: &[&str], remove: &[&str]| {
             edit_reviewers_args(&repo, 7, &names(add), &names(remove)).unwrap()
         };
-        let cases: [(&str, Vec<String>, &[&str]); 12] = [
+        let new = NewPr {
+            head: "feat".into(),
+            base: Some("main".into()),
+            title: "Add it".into(),
+            body: "a long description".into(),
+            draft: true,
+            worktree: std::path::PathBuf::new(),
+        };
+        let cases: [(&str, Vec<String>, &[&str]); 13] = [
+            (
+                "create, its description on stdin",
+                create_args(&repo, &new),
+                &[
+                    "pr",
+                    "create",
+                    "--repo",
+                    "ghe.corp/o/r",
+                    "--head",
+                    "feat",
+                    "--title",
+                    "Add it",
+                    "--body-file",
+                    "-",
+                    "--base",
+                    "main",
+                    "--draft",
+                ],
+            ),
             (
                 "squash",
                 merge(MergeMethod::Squash),

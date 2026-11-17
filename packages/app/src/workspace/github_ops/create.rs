@@ -17,7 +17,7 @@ use gpui::{AnyWindowHandle, Context, WeakEntity, Window};
 use super::create_modal::CreatePrModal;
 use crate::gh_host::GhHost;
 use crate::git_host::GitHost;
-use crate::github::PrPoller;
+use crate::github::{DraftStore, PrPoller};
 use crate::lane::git::{GitError, PushTarget};
 use crate::surface::strings::error as s;
 use crate::ui::WindowExt as _;
@@ -33,6 +33,9 @@ pub(crate) struct CreatePrRequest {
     /// `None` lets GitHub pick the repository's default branch.
     pub base: Option<String>,
     pub draft: bool,
+    /// Where the form said the branch pushes. A different target read
+    /// under the lock stops the push.
+    pub expected: super::create_modal::summary::Expected,
 }
 
 #[derive(Debug)]
@@ -45,9 +48,18 @@ pub(crate) enum CreatePrError {
     HeadIsBase(String),
     /// The branch was made to review someone else's pull request.
     ReviewBranch,
+    /// The branch now pushes somewhere other than the form showed.
+    TargetChanged,
     Read(GitError),
     Push(GitError),
+    /// Pushed; creating the pull request then failed.
     Gh(GhError),
+    /// The branch already has an open pull request: created before (an
+    /// answer lost, a timeout) or elsewhere. Never created twice.
+    Exists(super::lane_pr::CreatedPr),
+    /// Whether it already has one could not be asked: nothing is pushed or
+    /// created on a guess.
+    CheckFailed(GhError),
 }
 
 impl std::fmt::Display for CreatePrError {
@@ -59,9 +71,12 @@ impl std::fmt::Display for CreatePrError {
                 write!(f, "the branch pushes to {branch}, the pull request's base")
             }
             Self::ReviewBranch => write!(f, "the branch reviews another pull request"),
+            Self::TargetChanged => write!(f, "the branch's push target changed"),
             Self::Read(e) => write!(f, "read where the branch pushes: {e}"),
             Self::Push(e) => write!(f, "push before creating the pull request: {e}"),
-            Self::Gh(e) => e.fmt(f),
+            Self::Gh(e) => write!(f, "pushed, then creating failed: {e}"),
+            Self::Exists(created) => write!(f, "the branch already has {}", created.url),
+            Self::CheckFailed(e) => write!(f, "could not check for an existing pull request: {e}"),
         }
     }
 }
@@ -77,8 +92,14 @@ impl CreatePrError {
             Self::NoTarget => s::github_pr_no_remote(),
             Self::HeadIsBase(branch) => s::github_pr_head_is_base(branch),
             Self::ReviewBranch => s::github_pr_review_branch(),
-            Self::Read(e) | Self::Push(e) => format!("{}: {e}", s::github_pr_create_failed()),
-            Self::Gh(e) => format!("{}: {e}", s::github_pr_create_failed()),
+            Self::TargetChanged => s::github_pr_target_changed(),
+            Self::Read(e) => format!("{}: {e}", s::github_pr_create_failed()),
+            Self::Push(e) => format!("{}: {e}", s::github_pr_push_failed()),
+            // A timeout leaves it unknown whether GitHub created it.
+            Self::Gh(GhError::Timeout(_)) => s::github_pr_create_uncertain(),
+            Self::Gh(e) => format!("{}: {e}", s::github_pr_pushed_create_failed()),
+            Self::Exists(_) => s::github_pr_exists(),
+            Self::CheckFailed(e) => format!("{}: {e}", s::github_pr_check_failed()),
         }
     }
 }
@@ -201,6 +222,12 @@ impl Workspace {
             .get(&lane)
             .and_then(LaneScoped::github_push)
             .and_then(|(repo, _)| PrPoller::default_branch(&repo, cx));
+        // The draft to drop once created, under the account signed in now.
+        let creation = self
+            .lane_scoped
+            .get(&lane)
+            .and_then(LaneScoped::github_push)
+            .and_then(|(repo, push)| DraftStore::creation_owner(&repo, &push.branch, cx));
         let repo = GitHost::global(cx).open(&path);
         let gh = GhHost::global(cx);
         let report_path = path.clone();
@@ -209,30 +236,62 @@ impl Workspace {
             lane,
             cx,
             move || {
-                let push = repo
-                    .push_target()
-                    .map_err(CreatePrError::Read)?
-                    .ok_or(CreatePrError::NoTarget)?;
+                let push = repo.push_target().map_err(CreatePrError::Read)?;
+                if !request.expected.holds(push.as_ref()) {
+                    return Err(CreatePrError::TargetChanged);
+                }
+                let push = push.ok_or(CreatePrError::NoTarget)?;
                 let remote = push.remote.clone();
                 let plan = plan_pr(push, request, default_base.as_deref(), path)?;
                 // An explicit refspec to the branch the PR names: a no-op when
                 // the remote is already at HEAD, so it never skips commits a
                 // cached ahead count missed.
+                // Before any push: a pull request this branch already has
+                // (an earlier create whose answer was lost, or one opened
+                // elsewhere) is offered instead of a second one; one that
+                // cannot be checked for stops here. The same pull requests
+                // count as the poller links: this repository's, on this
+                // head, open or draft. A second pull request from the head
+                // to another base is not offered: the answer has no base.
+                let found = gh
+                    .prs_for_branches(&plan.repo, std::slice::from_ref(&plan.new.head), &[])
+                    .map_err(CreatePrError::CheckFailed)?;
+                if let Some(open) = found.by_branch.get(&plan.new.head).and_then(|prs| {
+                    prs.iter().find(|pr| {
+                        !pr.cross_repo && pr.head_branch == plan.new.head && pr.state.is_active()
+                    })
+                }) && let Some(created) =
+                    super::lane_pr::CreatedPr::of(open.url.clone(), &plan.new.head)
+                {
+                    return Err(CreatePrError::Exists(created));
+                }
                 repo.push_head(&remote, &plan.new.head, plan.set_upstream)
                     .map_err(CreatePrError::Push)?;
-                gh.create_pr(&plan.repo, &plan.new)
+                let url = gh
+                    .create_pr(&plan.repo, &plan.new)
                     .map_err(CreatePrError::Gh)?;
-                Ok::<_, CreatePrError>(plan.repo)
+                Ok::<_, CreatePrError>((plan.repo, plan.new.head, url))
             },
             move |ws, result, cx| match result {
-                Ok(repo_id) => {
+                Ok((repo_id, head, url)) => {
+                    // Published: the fields kept for the branch are done with,
+                    // under the account that wrote them and the one now.
+                    let now = DraftStore::creation_owner(&repo_id, &head, cx);
+                    for owner in creation.iter().chain(now.iter()) {
+                        DraftStore::set_creation(owner, None, cx);
+                    }
                     // Wait for the link only when a poll can bring it soon; a
                     // host in backoff would hold the button for its pause.
                     let soon = PrPoller::availability(repo_id.host(), cx) == GhAvailability::Ready;
-                    if let Some(state) = ws.lane_scoped.get_mut(&lane)
-                        && soon
-                    {
-                        state.pr.await_new_pr();
+                    if let Some(state) = ws.lane_scoped.get_mut(&lane) {
+                        // Kept until linked: the strip opens it rather than
+                        // offering Create PR again.
+                        if let Some(created) = super::lane_pr::CreatedPr::of(url, &head) {
+                            state.pr.created(created);
+                        }
+                        if soon {
+                            state.pr.await_new_pr();
+                        }
                     }
                     PrPoller::nudge(repo_id, cx);
                     // Deferred: this runs inside the workspace's update, and
@@ -250,6 +309,13 @@ impl Workspace {
                         );
                     });
                 }
+                Err(CreatePrError::Exists(created)) => {
+                    if let Some(state) = ws.lane_scoped.get_mut(&lane) {
+                        state.pr.created(created.clone());
+                    }
+                    exists_modal(modal, created, cx);
+                    cx.notify();
+                }
                 Err(e) => {
                     let report = ErrorReport::new(s::github_pr_create_failed())
                         .severity(ErrorSeverity::Error)
@@ -264,6 +330,19 @@ impl Workspace {
             },
         );
     }
+}
+
+/// Tell the form the branch already has `created`, to open instead.
+fn exists_modal(
+    modal: WeakEntity<CreatePrModal>,
+    created: super::lane_pr::CreatedPr,
+    cx: &mut gpui::App,
+) {
+    cx.defer(move |cx| {
+        if let Some(modal) = modal.upgrade() {
+            modal.update(cx, |modal, cx| modal.found_existing(created, cx));
+        }
+    });
 }
 
 /// Tell the form why it failed. Deferred: callers run inside an update the
@@ -312,6 +391,7 @@ mod tests {
             body: "b".into(),
             base: base.map(str::to_owned),
             draft: false,
+            expected: super::super::create_modal::summary::Expected::Unchecked,
         }
     }
 

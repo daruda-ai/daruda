@@ -110,6 +110,26 @@ pub(crate) fn remote_url(wt: &Path, remote: &str) -> Result<Option<String>, GitE
     }
 }
 
+/// The branches `remote` had when git last fetched it, by name, sorted;
+/// its `HEAD` alias left out. Never fetches.
+pub(crate) fn remote_branches(wt: &Path, remote: &str) -> Result<Vec<String>, GitError> {
+    reject_option_like("remote", remote)?;
+    let prefix = format!("refs/remotes/{remote}/");
+    let out = run_git(wt, ["for-each-ref", "--format=%(refname)", &prefix])?;
+    Ok(parse_remote_branches(&out, &prefix))
+}
+
+fn parse_remote_branches(out: &str, prefix: &str) -> Vec<String> {
+    let mut names: Vec<String> = out
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(prefix))
+        .filter(|name| !name.is_empty() && *name != "HEAD")
+        .map(str::to_owned)
+        .collect();
+    names.sort();
+    names
+}
+
 pub(crate) fn has_local_branch(wt: &Path, branch: &str) -> Result<bool, GitError> {
     ref_exists(wt, &format!("refs/heads/{branch}"))
 }

@@ -1,7 +1,9 @@
-//! Unsent pull request review text, kept across restarts: a description
-//! being edited, replies being written and comments on lines of the diff
-//! for a review not yet submitted, each under the account that
-//! wrote it on its host, the repository and the pull request. Profile-scoped
+//! Unsent pull request text, kept across restarts: a description being
+//! edited, replies being written and comments on lines of the diff for a
+//! review not yet submitted, each under the account that wrote it on its
+//! host, the repository and the pull request; and, apart from those, the
+//! fields of a pull request being created, under the branch it is for.
+//! Profile-scoped
 //! through the data directory; daruda is the sole writer.
 //!
 //! ```text
@@ -18,8 +20,8 @@ use crate::observability::system_info::redact_home;
 use crate::persistence::{LoadOutcome, load_json_file, save_json_atomic};
 
 /// The file's layout version: a newer one is not loaded, so fields this
-/// build does not know are never written away. 2 added line comments and
-/// the review's text.
+/// build does not know are never written away. 2 added line comments, the
+/// review's text and creation drafts.
 pub const SCHEMA_VERSION: u32 = 2;
 
 /// Whose drafts, on which pull request.
@@ -110,12 +112,58 @@ impl PrDrafts {
     }
 }
 
+/// Whose pull request being created, for which branch.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CreationOwner {
+    pub host: String,
+    pub account: String,
+    pub owner: String,
+    pub name: String,
+    /// The branch the pull request is for, as it is pushed.
+    pub head: String,
+}
+
+/// The Create PR form's fields as the user left them. A field the user did
+/// not touch is `None`; one they cleared is `Some("")`, kept as such.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreationDraft {
+    pub of: CreationOwner,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub base: Option<String>,
+    #[serde(default)]
+    pub draft: bool,
+    /// The template the description was filled from, if it was.
+    #[serde(default)]
+    pub template: Option<String>,
+    /// When it was last changed, Unix seconds.
+    #[serde(default)]
+    pub saved_at: i64,
+}
+
+impl CreationDraft {
+    /// Nothing of the user's to keep.
+    pub fn is_empty(&self) -> bool {
+        self.title.is_none()
+            && self.body.is_none()
+            && self.base.is_none()
+            && !self.draft
+            && self.template.is_none()
+    }
+}
+
 /// Every pull request's drafts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReviewDrafts {
     pub schema_version: u32,
     #[serde(default)]
     pub prs: Vec<PrDrafts>,
+    /// Pull requests being created, one per branch.
+    #[serde(default)]
+    pub creations: Vec<CreationDraft>,
 }
 
 impl Default for ReviewDrafts {
@@ -123,6 +171,7 @@ impl Default for ReviewDrafts {
         Self {
             schema_version: SCHEMA_VERSION,
             prs: Vec::new(),
+            creations: Vec::new(),
         }
     }
 }
@@ -154,6 +203,17 @@ impl ReviewDrafts {
     /// Drop pull requests with nothing left in draft.
     pub fn prune(&mut self) {
         self.prs.retain(|held| !held.is_empty());
+        self.creations.retain(|held| !held.is_empty());
+    }
+
+    pub fn creation(&self, owner: &CreationOwner) -> Option<&CreationDraft> {
+        self.creations.iter().find(|held| held.of == *owner)
+    }
+
+    /// Keep `draft` for its branch, or with `None` drop `owner`'s.
+    pub fn set_creation(&mut self, owner: &CreationOwner, draft: Option<CreationDraft>) {
+        self.creations.retain(|held| held.of != *owner);
+        self.creations.extend(draft);
     }
 }
 

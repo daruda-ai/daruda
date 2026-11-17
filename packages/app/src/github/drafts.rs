@@ -10,8 +10,8 @@ use daruda_github::RepoId;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::review_drafts::{
-    DescriptionDraft, DraftOwner, LineCommentDraft, PrDrafts, ReplyDraft, ReviewDrafts,
-    load_review_drafts_in, review_drafts_dir, save_review_drafts_in,
+    CreationDraft, CreationOwner, DescriptionDraft, DraftOwner, LineCommentDraft, PrDrafts,
+    ReplyDraft, ReviewDrafts, load_review_drafts_in, review_drafts_dir, save_review_drafts_in,
 };
 use gpui::{App, Global, Task};
 
@@ -87,9 +87,32 @@ impl DraftStore {
         })
     }
 
+    /// Whose pull request being created for `head` of `repo`: the account
+    /// signed in on its host. `None` until that account is known.
+    pub(crate) fn creation_owner(repo: &RepoId, head: &str, cx: &App) -> Option<CreationOwner> {
+        let account = PrPoller::account(repo.host(), cx)?;
+        Some(CreationOwner {
+            host: repo.host().to_owned(),
+            account: account.login,
+            owner: repo.owner().to_owned(),
+            name: repo.name().to_owned(),
+            head: head.to_owned(),
+        })
+    }
+
+    pub(crate) fn creation(owner: &CreationOwner, cx: &App) -> Option<CreationDraft> {
+        cx.try_global::<Self>()?.drafts.creation(owner).cloned()
+    }
+
+    /// Keep, or with `None` drop, the Create PR fields for `owner`'s branch.
+    pub(crate) fn set_creation(owner: &CreationOwner, draft: Option<CreationDraft>, cx: &mut App) {
+        Self::global_mut(cx).drafts.set_creation(owner, draft);
+        Self::changed(cx);
+    }
+
     /// Whether drafts under `owner` (`None`: no account known) are kept
     /// across restarts.
-    pub(crate) fn keeping(owner: Option<&DraftOwner>, cx: &App) -> DraftKeeping {
+    pub(crate) fn keeping<T>(owner: Option<&T>, cx: &App) -> DraftKeeping {
         let Some(store) = cx.try_global::<Self>() else {
             // No store installed: tests, where nothing is promised.
             return if owner.is_some() {

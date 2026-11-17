@@ -150,6 +150,7 @@ pub enum GitOp {
     Fetch,
     FetchRef,
     RemoteUrl,
+    RemoteBranches,
     Pull,
     HasLocalBranch,
     LocalBranch,

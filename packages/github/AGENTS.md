@@ -55,8 +55,9 @@ through `GitHost`.
   user's action and are never retried on their own; a failed thread reply is
   reconciled against a fresh thread read before it can be posted again, and a
   description changed on GitHub since editing began is overwritten only when
-  asked. Reply and description text go to `gh` on stdin (`--input -`,
-  `--body-file -`), not as arguments, which every OS caps. A review is
+  asked. Reply and description text, a new pull request's included, go to `gh`
+  on stdin (`--input -`, `--body-file -`), not as arguments, which every
+  OS caps. A review is
   submitted at the head commit the user reviewed (`commitOID`); when its
   answer is lost, `viewer_latest_review` (read before and after) decides
   whether it went through, and an outcome that cannot be read is reported

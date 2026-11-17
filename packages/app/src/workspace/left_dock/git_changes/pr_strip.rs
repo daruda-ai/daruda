@@ -104,6 +104,31 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                     .into_any_element(),
             )
         }
+        PrStrip::Created(created) => {
+            // Created, not listed yet: open it, never create a second one.
+            let url = created.url.clone();
+            let label = match created.number {
+                Some(number) => s::pr_open_created(s::pr_number(number)),
+                None => s::pr_open_on_github(),
+            };
+            let open = crate::ui::button_compact_sized("pr-open-created", label, metrics).on_click(
+                cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                    cx.open_url(&url);
+                }),
+            );
+            Some(
+                row.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_ellipsis()
+                        .text_color(subtle)
+                        .child(s::pr_created_not_listed()),
+                )
+                .child(open)
+                .into_any_element(),
+            )
+        }
         PrStrip::Linked(link) => {
             let pr = &link.pr;
             let glyph = tone_glyph(PrTone::of(pr), cx);
