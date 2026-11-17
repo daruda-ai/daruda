@@ -31,10 +31,10 @@ pub use files::{
     FileChange, FileText, PR_FILES_MAX, PR_FILES_PER_PAGE, PrFile, PrFiles, PrFilesPage,
 };
 pub use model::{
-    ActionsJob, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus,
+    ActionsJob, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus, DiffSide,
     FailedCheck, GITHUB_HOST, MergeMethod, Mergeability, NewPr, PrDetail, PrFilter, PrListItem,
     PrSearch, PrState, PrSummary, RepoId, ReviewComment, ReviewDecision, ReviewThread,
-    ReviewThreads, ReviewerState,
+    ReviewThreads, ReviewerState, ThreadPermissions,
 };
 pub use query::RepoPrs;
 pub use search::{

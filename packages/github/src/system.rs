@@ -9,10 +9,10 @@ use daruda_core::process::{CaptureError, CaptureLimits, Captured, command_on_pat
 use crate::availability::{AuthStatus, GhAuth, parse_active_account};
 use crate::backend::Gh;
 use crate::query::{
-    REVIEW_THREADS_QUERY, RepoPrs, newest_first, only_numbers_not_found, paged_search_args,
-    parse_graphql_reset, parse_pr_detail, parse_prs_for_branches, parse_review_threads,
-    parse_search_page, parse_search_prs, pr_detail_query, prs_for_branches_query, search_prs_query,
-    search_string,
+    RepoPrs, newest_first, only_numbers_not_found, paged_search_args, parse_graphql_reset,
+    parse_pr_detail, parse_prs_for_branches, parse_search_page, parse_search_prs, pr_detail_query,
+    prs_for_branches_query, read_review_threads, review_replies_query, review_threads_query,
+    search_prs_query, search_string,
 };
 use crate::search::SEARCH_REPOS_MAX;
 use crate::{
@@ -303,22 +303,45 @@ impl Gh for SystemGh {
     }
 
     fn review_threads(&self, repo: &RepoId, number: u64) -> Result<ReviewThreads, GhError> {
-        let json = self.stdout([
-            "api".to_owned(),
-            "graphql".to_owned(),
-            "--hostname".to_owned(),
-            repo.host().to_owned(),
-            "-f".to_owned(),
-            format!("query={REVIEW_THREADS_QUERY}"),
-            "-f".to_owned(),
-            format!("owner={}", repo.owner()),
-            "-f".to_owned(),
-            format!("name={}", repo.name()),
-            // `-F`: the number must reach GraphQL as an Int.
-            "-F".to_owned(),
-            format!("number={number}"),
-        ])?;
-        parse_review_threads(&json)
+        let graphql = |fields: Vec<String>| {
+            let mut args = vec![
+                "api".to_owned(),
+                "graphql".to_owned(),
+                "--hostname".to_owned(),
+                repo.host().to_owned(),
+            ];
+            args.extend(fields);
+            self.stdout(args)
+        };
+        read_review_threads(
+            |after| {
+                let mut fields = vec![
+                    "-f".to_owned(),
+                    format!("query={}", review_threads_query()),
+                    "-f".to_owned(),
+                    format!("owner={}", repo.owner()),
+                    "-f".to_owned(),
+                    format!("name={}", repo.name()),
+                    // `-F`: the number must reach GraphQL as an Int.
+                    "-F".to_owned(),
+                    format!("number={number}"),
+                ];
+                if let Some(after) = after {
+                    fields.extend(["-f".to_owned(), format!("after={after}")]);
+                }
+                graphql(fields)
+            },
+            |thread, after| {
+                graphql(vec![
+                    "-f".to_owned(),
+                    format!("query={}", review_replies_query()),
+                    "-f".to_owned(),
+                    format!("id={thread}"),
+                    "-f".to_owned(),
+                    format!("after={after}"),
+                ])
+            },
+        )
     }
 
     fn pr_files_page(
@@ -425,6 +448,52 @@ impl Gh for SystemGh {
 
     fn set_ready(&self, repo: &RepoId, number: u64) -> Result<(), GhError> {
         self.stdout(ready_args(repo, number)).map(drop)
+    }
+
+    fn reply_to_thread(
+        &self,
+        repo: &RepoId,
+        thread: &str,
+        body: &str,
+    ) -> Result<crate::ReviewComment, GhError> {
+        // `-f` sends the body as it is: `-F` would read `@path` as a file.
+        let json = self.stdout([
+            "api".to_owned(),
+            "graphql".to_owned(),
+            "--hostname".to_owned(),
+            repo.host().to_owned(),
+            "-f".to_owned(),
+            format!("query={}", crate::query::REPLY_MUTATION),
+            "-f".to_owned(),
+            format!("thread={thread}"),
+            "-f".to_owned(),
+            format!("body={body}"),
+        ])?;
+        crate::query::parse_reply(&json)
+    }
+
+    fn set_thread_resolved(
+        &self,
+        repo: &RepoId,
+        thread: &str,
+        resolved: bool,
+    ) -> Result<(), GhError> {
+        let mutation = if resolved {
+            crate::query::RESOLVE_MUTATION
+        } else {
+            crate::query::UNRESOLVE_MUTATION
+        };
+        let json = self.stdout([
+            "api".to_owned(),
+            "graphql".to_owned(),
+            "--hostname".to_owned(),
+            repo.host().to_owned(),
+            "-f".to_owned(),
+            format!("query={mutation}"),
+            "-f".to_owned(),
+            format!("thread={thread}"),
+        ])?;
+        crate::query::parse_resolved(&json, resolved)
     }
 
     fn close_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError> {

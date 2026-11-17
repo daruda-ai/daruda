@@ -65,6 +65,9 @@ pub(in crate::workspace) enum PrDetailShot {
     /// The Files tab: an edit, a rename, an added file and a binary one,
     /// the edit's diff shown.
     Files,
+    /// The Threads tab: an open thread expanded with a reply and a reply
+    /// box open, an outdated one folded.
+    Threads,
 }
 
 /// What the active lane's PR looks like in a capture.
@@ -456,6 +459,7 @@ impl Workspace {
             ],
             checks_truncated: !merge_ready,
             open_threads: 3,
+            open_threads_more: false,
             changed_files: None,
         };
         gh.set_pr_detail(&row.repo, row.pr.number, detail.clone());
@@ -508,6 +512,49 @@ impl Workspace {
                 ],
             },
         );
+        gh.set_review_threads(
+            row.pr.number,
+            daruda_github::ReviewThreads {
+                threads: vec![
+                    daruda_github::ReviewThread {
+                        id: "shot-thread-1".into(),
+                        path: "packages/app/src/workspace/left_dock/rail/lanes.rs".into(),
+                        lines: Some((62, 63)),
+                        comments: vec![
+                            daruda_github::ReviewComment {
+                                id: "shot-comment-1".into(),
+                                url: Some(format!("{}#discussion_r1", row.pr.url)),
+                                author: Some("hanji".into()),
+                                body: "This hides the label whenever a page is open. \
+                                       Is that intended?\n\n```rust\nsnap.workspace_page.is_none()\n```"
+                                    .into(),
+                            },
+                            daruda_github::ReviewComment {
+                                id: "shot-comment-2".into(),
+                                author: Some("comelf".into()),
+                                body: "Yes: the rail shows **pages** then, not lanes.".into(),
+                                ..Default::default()
+                            },
+                        ],
+                        ..Default::default()
+                    },
+                    daruda_github::ReviewThread {
+                        id: "shot-thread-2".into(),
+                        path: "packages/app/src/workspace/left_dock/badge.rs".into(),
+                        lines: Some((14, 14)),
+                        outdated: true,
+                        comments: vec![daruda_github::ReviewComment {
+                            id: "shot-comment-3".into(),
+                            author: Some("woo-bot".into()),
+                            body: "Consider a named metric here.".into(),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                ],
+                truncated: false,
+            },
+        );
         gh.set_failed_log(
             test,
             "test (ubuntu-latest)\tRun tests\t2026-11-13T02:11:04.1Z ##[group]Run cargo test --locked -p daruda\n\
@@ -541,6 +588,15 @@ impl Workspace {
                         crate::workspace::pages::pull_requests::detail::PrTab::Files,
                         cx,
                     );
+                }
+                PrDetailShot::Threads => {
+                    self.select_pr_detail_tab(
+                        id,
+                        crate::workspace::pages::pull_requests::detail::PrTab::Threads,
+                        cx,
+                    );
+                    self.toggle_pr_thread(id, "shot-thread-1", cx);
+                    self.open_pr_reply(id, "shot-thread-1", window, cx);
                 }
                 PrDetailShot::MergeConfirm => {
                     // The dropdown's open state lives inside the widget, out

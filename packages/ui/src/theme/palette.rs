@@ -801,6 +801,8 @@ pub const PR_DIFF_LINE_NO_W: f32 = 48.0;
 /// One side of a side-by-side diff at its narrowest: below twice this the
 /// diff scrolls sideways; each side clips its own longer lines.
 pub const PR_SPLIT_HALF_MIN_W: f32 = 320.0;
+/// Lines a review reply box shows before it scrolls.
+pub const PR_REPLY_ROWS: usize = 4;
 /// A changed file marked viewed recedes behind those still to review.
 pub const PR_FILE_VIEWED_OPACITY: f32 = 0.6;
 /// A changed file's row in the Files tab: one line of path and origin.

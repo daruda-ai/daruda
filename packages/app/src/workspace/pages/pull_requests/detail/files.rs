@@ -187,6 +187,9 @@ pub(in crate::workspace) struct FilesState {
     restore: Option<Restore>,
     /// A file GitHub sent no patch for, being read whole or failed to.
     recovering: Option<Recovering>,
+    /// Lines to select once their file is shown at a known commit: where a
+    /// review thread sits.
+    pending_lines: Option<super::view::ThreadTarget>,
     /// The merge base a file read whole was diffed from, with the head it
     /// was found for: the same for every file of one listing.
     merge_base: Option<(String, String)>,
@@ -257,6 +260,7 @@ impl FilesState {
             selection: None,
             restore: None,
             recovering: None,
+            pending_lines: None,
             merge_base: None,
         }
     }
@@ -373,6 +377,14 @@ impl FilesState {
     /// Choose `path` and show its diff, if it is listed. The file already
     /// shown keeps its rows and how many are drawn.
     fn show(&mut self, path: &str) {
+        // Lines waited for in another file are given up.
+        if self
+            .pending_lines
+            .as_ref()
+            .is_some_and(|held| held.path != path)
+        {
+            self.pending_lines = None;
+        }
         self.chosen = Some(path.to_owned());
         if self.shown.as_ref().is_some_and(|shown| shown.path == path) {
             return;
@@ -389,7 +401,43 @@ impl FilesState {
                 revision: self.revision.clone(),
             });
             self.keep_selection_at(self.revision.clone());
+            self.select_pending();
         }
+    }
+
+    /// Show `target`'s file and select its lines once the file is shown at
+    /// a known commit.
+    pub(super) fn go_to_lines(&mut self, target: super::view::ThreadTarget) {
+        self.restore = None;
+        let path = target.path.clone();
+        self.pending_lines = Some(target);
+        self.show(&path);
+        self.select_pending();
+    }
+
+    /// Select the pending lines if their file is shown at a known commit.
+    fn select_pending(&mut self) {
+        let Some(target) = self.pending_lines.as_ref() else {
+            return;
+        };
+        let Some(shown) = self
+            .shown
+            .as_ref()
+            .filter(|shown| shown.path == target.path)
+        else {
+            return;
+        };
+        let Some(revision) = shown.revision.clone() else {
+            return;
+        };
+        let target = self.pending_lines.take().expect("checked");
+        self.selection = Some(LineRange {
+            path: target.path,
+            side: target.side,
+            start: target.start,
+            end: target.end,
+            revision,
+        });
     }
 
     /// Lines selected at another commit than `revision` no longer point at
@@ -457,6 +505,7 @@ impl FilesState {
                     shown.revision = Some(head.to_owned());
                 }
                 self.keep_selection_at(Some(head.to_owned()));
+                self.select_pending();
                 false
             }
         }
@@ -465,6 +514,7 @@ impl FilesState {
     /// Select `line` on `side` of the shown file, or stretch the selection
     /// to it. Nothing while the commit its rows were read at is unknown.
     fn select_line(&mut self, side: Side, line: u32, extend: bool) {
+        self.pending_lines = None;
         let Some((shown, Some(revision))) = self
             .shown
             .as_ref()
@@ -484,6 +534,7 @@ impl FilesState {
 
     fn clear_selection(&mut self) {
         self.selection = None;
+        self.pending_lines = None;
     }
 
     #[cfg(test)]
@@ -531,6 +582,7 @@ impl FilesState {
         } else if last && !self.files.iter().any(|file| file.path == chosen) {
             self.chosen = None;
             self.shown = None;
+            self.pending_lines = None;
             self.follow_choice(first, last);
         }
     }

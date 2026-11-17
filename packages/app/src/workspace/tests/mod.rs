@@ -62,6 +62,7 @@ mod pull_request_list;
 pub(in crate::workspace) mod pull_request_page;
 mod pull_request_rate_limit;
 mod pull_request_split;
+mod pull_request_threads;
 mod pull_requests;
 mod pure_ops;
 mod regression_namespace;

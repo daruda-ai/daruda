@@ -7,7 +7,8 @@ use super::Load;
 /// Names one read of one detail. Issued by [`Tickets`] and never reused
 /// within that detail, so a slot rebuilt after a close or a refresh still
 /// refuses an answer to a read made before it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Ordered: a later ticket names a read sent later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(in crate::workspace) struct ReadTicket(u64);
 
 /// Issues a detail's [`ReadTicket`]s.
@@ -42,6 +43,14 @@ impl<T> ReadSlot<T> {
         Self {
             waiting: None,
             load,
+        }
+    }
+
+    /// What was read, to amend in place after an action GitHub confirmed.
+    pub(super) fn ready_mut(&mut self) -> Option<&mut T> {
+        match &mut self.load {
+            Load::Ready(value) => Some(value),
+            Load::Loading | Load::Failed(_) => None,
         }
     }
 

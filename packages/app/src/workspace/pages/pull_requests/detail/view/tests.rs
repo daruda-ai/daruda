@@ -91,6 +91,7 @@ fn detail(failed: bool, open_threads: u32, cross_repo: bool) -> PrDetail {
         ],
         checks_truncated: false,
         open_threads,
+        open_threads_more: false,
         changed_files: None,
     }
 }
@@ -514,13 +515,16 @@ fn a_thread_reads_as_its_place_first_words_and_replies() {
             ReviewComment {
                 author: Some("bob".into()),
                 body: "\n  Rename this\u{7}.\nIt hides the cause.".into(),
+                ..Default::default()
             },
             ReviewComment {
                 author: None,
                 body: "ok".into(),
+                ..Default::default()
             },
         ],
         more_comments: false,
+        ..Default::default()
     };
     let row = thread_row(&thread);
     assert_eq!(row.location, "src/a.rs:L3–L5");

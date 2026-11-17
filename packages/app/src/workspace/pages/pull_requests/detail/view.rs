@@ -124,6 +124,8 @@ pub(in crate::workspace) struct CheckRowView {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct ThreadRowView {
+    /// GitHub's id for the thread, which expanding it names.
+    pub id: String,
     /// `path:L12–L20`.
     pub location: String,
     pub author: String,
@@ -131,6 +133,45 @@ pub(in crate::workspace) struct ThreadRowView {
     pub excerpt: String,
     pub replies: Option<String>,
     pub outdated: bool,
+    /// The thread's first comment on GitHub.
+    pub url: Option<String>,
+    /// Where it sits in the current diff; `None` for an outdated thread,
+    /// whose lines are where the code was, or a file-level one.
+    pub target: Option<ThreadTarget>,
+    /// Every comment in full, once the thread is expanded.
+    pub comments: Option<Vec<CommentView>>,
+    /// Resolved from this detail since the threads were read; it can be
+    /// unresolved again until they are read anew.
+    pub resolved_here: bool,
+    /// The reply being written, if a box is open.
+    pub reply: Option<gpui::Entity<crate::ui::TextareaState>>,
+    /// The thread's last action, running or failed.
+    pub op: Option<super::thread_actions::ThreadOp>,
+    /// A failed reply may have posted: the threads are being read again
+    /// before it can be posted again.
+    pub checking: bool,
+    /// What the viewer may do to it.
+    pub may: daruda_github::ThreadPermissions,
+}
+
+/// Lines of the current diff a thread is on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct ThreadTarget {
+    pub path: String,
+    pub side: super::diff_layout::Side,
+    pub start: u32,
+    pub end: u32,
+}
+
+/// One comment of an expanded thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct CommentView {
+    /// GitHub's id, which keys its drawn Markdown.
+    pub id: String,
+    pub author: String,
+    /// Markdown, drawn as such.
+    pub body: String,
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,9 +336,9 @@ fn ready(
         threads: match state.threads() {
             None | Some(Load::Loading) => ThreadsView::Loading,
             Some(Load::Failed(reason)) => ThreadsView::Failed(reason.clone()),
-            Some(Load::Ready(threads)) => threads_view(threads),
+            Some(Load::Ready(threads)) => threads_view(threads, state),
         },
-        threads_send: send(loaded.open_threads == 0),
+        threads_send: send(open_threads(state, loaded) == (0, false)),
         files: (state.tab() == PrTab::Files).then(|| {
             let marks = progress.marks(&state.key());
             super::files::files_view(state.files(), loaded.changed_files, |file| {
@@ -307,7 +348,7 @@ fn ready(
         description: Some(loaded.body.trim())
             .filter(|body| !body.is_empty())
             .map(str::to_owned),
-        side: side(item, loaded, lane),
+        side: side(item, loaded, lane, open_threads(state, loaded)),
     }
 }
 
@@ -390,7 +431,13 @@ fn tab_label(tab: PrTab, loaded: Option<&PrDetail>, state: &PrDetailState) -> St
                 _ => s::tab_files(),
             };
         }
-        PrTab::Threads => (s::tab_threads(), loaded.map(|l| l.open_threads as usize)),
+        PrTab::Threads => {
+            return match loaded.map(|loaded| open_threads(state, loaded)) {
+                Some((count, false)) => s::tab_count(s::tab_threads(), count),
+                Some((count, true)) => s::tab_count(s::tab_threads(), s::count_capped(count)),
+                None => s::tab_threads(),
+            };
+        }
         PrTab::Description => return s::tab_description(),
     };
     match count {
@@ -400,6 +447,22 @@ fn tab_label(tab: PrTab, loaded: Option<&PrDetail>, state: &PrDetailState) -> St
 }
 
 /// `2 failing · 5 passed · 1 skipped`, leaving out what there is none of.
+/// Unresolved threads, and whether there are more than that: the threads
+/// once read in full, else the detail's count of the first hundred.
+fn open_threads(state: &PrDetailState, loaded: &PrDetail) -> (usize, bool) {
+    match state.threads() {
+        Some(Load::Ready(threads)) => (
+            threads
+                .threads
+                .iter()
+                .filter(|thread| !state.thread_work().resolved_here(&thread.id))
+                .count(),
+            threads.truncated,
+        ),
+        _ => (loaded.open_threads as usize, loaded.open_threads_more),
+    }
+}
+
 fn checks_summary(loaded: &PrDetail) -> String {
     if loaded.checks_truncated {
         let verdict =
@@ -455,10 +518,36 @@ fn check_row(entry: &CheckEntry, state: &PrDetailState) -> CheckRowView {
     }
 }
 
-fn threads_view(threads: &ReviewThreads) -> ThreadsView {
+fn threads_view(threads: &ReviewThreads, state: &PrDetailState) -> ThreadsView {
     ThreadsView::Listed {
-        rows: threads.threads.iter().map(thread_row).collect(),
+        rows: threads
+            .threads
+            .iter()
+            .map(|thread| {
+                let mut row = thread_row(thread);
+                if state.thread_expanded(&thread.id) {
+                    row.comments = Some(thread.comments.iter().map(comment_view).collect());
+                }
+                let work = state.thread_work();
+                row.resolved_here = work.resolved_here(&thread.id);
+                if let Some(work) = work.get(&thread.id) {
+                    row.reply = work.reply.clone();
+                    row.op = work.op.clone();
+                    row.checking = work.checking();
+                }
+                row
+            })
+            .collect(),
         truncated: threads.truncated,
+    }
+}
+
+fn comment_view(comment: &daruda_github::ReviewComment) -> CommentView {
+    CommentView {
+        id: comment.id.clone(),
+        author: comment.author.clone().unwrap_or_else(s::author_deleted),
+        body: comment.body.clone(),
+        url: comment.web_url().map(str::to_owned),
     }
 }
 
@@ -484,6 +573,26 @@ fn thread_row(thread: &ReviewThread) -> ThreadRowView {
             (n, false) => Some(s::thread_replies(n)),
         },
         outdated: thread.outdated,
+        id: thread.id.clone(),
+        url: first.and_then(|comment| comment.web_url().map(str::to_owned)),
+        target: thread
+            .lines
+            .filter(|_| !thread.outdated)
+            .map(|(start, end)| ThreadTarget {
+                path: thread.path.clone(),
+                side: match thread.side {
+                    daruda_github::DiffSide::Left => super::diff_layout::Side::Old,
+                    daruda_github::DiffSide::Right => super::diff_layout::Side::New,
+                },
+                start,
+                end,
+            }),
+        comments: None,
+        resolved_here: false,
+        reply: None,
+        op: None,
+        checking: false,
+        may: thread.may,
     }
 }
 
@@ -499,7 +608,12 @@ fn excerpt(body: &str) -> String {
         .collect()
 }
 
-fn side(item: &PrListItem, loaded: &PrDetail, lane: Option<RowLane>) -> SideView {
+fn side(
+    item: &PrListItem,
+    loaded: &PrDetail,
+    lane: Option<RowLane>,
+    threads: (usize, bool),
+) -> SideView {
     let (merge_state, merge_mood) = match loaded.mergeability {
         Mergeability::Ready => (s::merge_ready(), Mood::Good),
         Mergeability::Blocked(reason) => (block_label(reason), Mood::Warn),
@@ -538,8 +652,11 @@ fn side(item: &PrListItem, loaded: &PrDetail, lane: Option<RowLane>) -> SideView
     }
     reviews.push(Fact {
         label: s::side_open_threads(),
-        value: loaded.open_threads.to_string(),
-        mood: if loaded.open_threads == 0 {
+        value: match threads {
+            (count, false) => count.to_string(),
+            (count, true) => s::count_capped(count),
+        },
+        mood: if threads == (0, false) {
             Mood::Quiet
         } else {
             Mood::Warn

@@ -18,6 +18,8 @@
 //! | `set_ready` | the PR, if scripted, becomes open |
 //! | `close_pr` | the PR, if scripted, becomes closed |
 //! | `rerun_failed` | done |
+//! | `reply_to_thread` | adds the reply to the scripted thread, answers it |
+//! | `set_thread_resolved` | a resolved thread leaves `review_threads` until unresolved |
 //! | `graphql_rate_limit_reset` | `None`: requests remain |
 //!
 //! A mutation changes the state of the scripted PR in both `set_prs` and
@@ -32,7 +34,7 @@ use crate::query::{RepoPrs, newest_first};
 use crate::system::check_head_sha;
 use crate::{
     ActionsJob, CheckRollup, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrListItem, PrSearch,
-    PrSearchPage, PrSearchRequest, PrState, PrSummary, RepoId, ReviewThreads,
+    PrSearchPage, PrSearchRequest, PrState, PrSummary, RepoId, ReviewComment, ReviewThreads,
 };
 
 mod search;
@@ -101,6 +103,16 @@ pub enum GhCall {
         repo: RepoId,
         number: u64,
     },
+    ReplyToThread {
+        repo: RepoId,
+        thread: String,
+        body: String,
+    },
+    SetThreadResolved {
+        repo: RepoId,
+        thread: String,
+        resolved: bool,
+    },
     RerunFailed {
         repo: RepoId,
         run: u64,
@@ -127,6 +139,8 @@ pub enum GhOp {
     MergePr,
     SetReady,
     ClosePr,
+    ReplyToThread,
+    SetThreadResolved,
     RerunFailed,
     RateLimitReset,
 }
@@ -173,6 +187,7 @@ struct FakeState {
     search_pages: HashMap<PrSearchRequest, String>,
     logs: HashMap<(u64, u64), String>,
     threads: HashMap<u64, ReviewThreads>,
+    resolved_threads: std::collections::HashSet<String>,
     details: HashMap<(RepoId, u64), PrDetail>,
     files: HashMap<(RepoId, u64), crate::PrFiles>,
     file_texts: HashMap<(RepoId, String, String), crate::FileText>,
@@ -296,6 +311,8 @@ impl GhCall {
             Self::MergePr { .. } => GhOp::MergePr,
             Self::SetReady { .. } => GhOp::SetReady,
             Self::ClosePr { .. } => GhOp::ClosePr,
+            Self::ReplyToThread { .. } => GhOp::ReplyToThread,
+            Self::SetThreadResolved { .. } => GhOp::SetThreadResolved,
             Self::RerunFailed { .. } => GhOp::RerunFailed,
             Self::RateLimitReset { .. } => GhOp::RateLimitReset,
         }
@@ -456,7 +473,11 @@ impl Gh for FakeGh {
         if let Some(failure) = state.failures.get(&GhOp::ReviewThreads) {
             return Err(failure.to_error());
         }
-        Ok(state.threads.get(&number).cloned().unwrap_or_default())
+        let mut threads = state.threads.get(&number).cloned().unwrap_or_default();
+        threads
+            .threads
+            .retain(|thread| !state.resolved_threads.contains(&thread.id));
+        Ok(threads)
     }
 
     fn pr_files_page(
@@ -559,6 +580,59 @@ impl Gh for FakeGh {
             number,
         })?;
         state.set_state(repo, number, PrState::Open);
+        Ok(())
+    }
+
+    fn reply_to_thread(
+        &self,
+        repo: &RepoId,
+        thread: &str,
+        body: &str,
+    ) -> Result<ReviewComment, GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::ReplyToThread {
+            repo: repo.clone(),
+            thread: thread.to_owned(),
+            body: body.to_owned(),
+        })?;
+        let posted = state.calls.len();
+        let comment = ReviewComment {
+            id: format!("fake-reply-{posted}"),
+            author: Some("fake-viewer".into()),
+            body: body.to_owned(),
+            ..ReviewComment::default()
+        };
+        let held = state
+            .threads
+            .values_mut()
+            .flat_map(|threads| threads.threads.iter_mut())
+            .find(|held| held.id == thread);
+        match held {
+            Some(held) => {
+                held.comments.push(comment.clone());
+                Ok(comment)
+            }
+            None => Err(GhError::Parse(format!("no thread {thread}"))),
+        }
+    }
+
+    fn set_thread_resolved(
+        &self,
+        repo: &RepoId,
+        thread: &str,
+        resolved: bool,
+    ) -> Result<(), GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::SetThreadResolved {
+            repo: repo.clone(),
+            thread: thread.to_owned(),
+            resolved,
+        })?;
+        if resolved {
+            state.resolved_threads.insert(thread.to_owned());
+        } else {
+            state.resolved_threads.remove(thread);
+        }
         Ok(())
     }
 

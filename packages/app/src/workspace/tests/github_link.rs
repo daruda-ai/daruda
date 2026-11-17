@@ -523,8 +523,10 @@ fn open_review_threads_land_in_the_agent_input(cx: &mut TestAppContext) {
                 comments: vec![daruda_github::ReviewComment {
                     author: Some("rev".into()),
                     body: "Name this better.".into(),
+                    ..Default::default()
                 }],
                 more_comments: false,
+                ..Default::default()
             }],
             truncated: false,
         },

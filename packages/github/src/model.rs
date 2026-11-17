@@ -147,31 +147,78 @@ pub struct FailedCheck {
 }
 
 /// One comment in a review thread.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReviewComment {
+    /// GitHub's node id: what a reply or a reaction names.
+    pub id: String,
+    /// The comment on GitHub's page, when GitHub gave it.
+    pub url: Option<String>,
     /// `None` for a deleted account.
     pub author: Option<String>,
     pub body: String,
 }
 
+impl ReviewComment {
+    /// The comment's page, if GitHub gave a web page for it.
+    pub fn web_url(&self) -> Option<&str> {
+        self.url.as_deref().filter(|url| is_web_url(url))
+    }
+}
+
+/// The side of a diff a review comment's lines are on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiffSide {
+    /// The base: removed or unchanged lines, numbered as before.
+    Left,
+    /// The head: added or unchanged lines, numbered as now.
+    #[default]
+    Right,
+}
+
 /// An unresolved review thread on a pull request's diff.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReviewThread {
+    /// GitHub's node id: what a reply, resolve or unresolve names.
+    pub id: String,
     pub path: String,
     /// The commented lines, first to last; `None` for a file-level comment.
     pub lines: Option<(u32, u32)>,
+    /// Which side of the diff `lines` count on.
+    pub side: DiffSide,
     /// The diff moved since; `lines` are where it was written.
     pub outdated: bool,
     pub comments: Vec<ReviewComment>,
-    /// The thread has more replies than one request reads.
+    /// The thread has more replies than are read for one thread.
     pub more_comments: bool,
+    /// What the viewer may do to it.
+    pub may: ThreadPermissions,
+}
+
+/// What the viewer may do to a review thread, as GitHub says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThreadPermissions {
+    pub reply: bool,
+    pub resolve: bool,
+    pub unresolve: bool,
+}
+
+/// Allowed until GitHub says otherwise: an answer without the fields
+/// leaves the actions to GitHub to refuse.
+impl Default for ThreadPermissions {
+    fn default() -> Self {
+        Self {
+            reply: true,
+            resolve: true,
+            unresolve: true,
+        }
+    }
 }
 
 /// The unresolved threads of a pull request.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReviewThreads {
     pub threads: Vec<ReviewThread>,
-    /// GitHub had more threads than one request reads.
+    /// GitHub had more threads than are read for one pull request.
     pub truncated: bool,
 }
 
@@ -329,6 +376,9 @@ pub struct PrDetail {
     pub checks_truncated: bool,
     /// Unresolved review threads among the first 100.
     pub open_threads: u32,
+    /// GitHub has more than 100 threads: `open_threads` counts the first
+    /// hundred's only.
+    pub open_threads_more: bool,
     /// How many files GitHub says it changes; `None` from an answer that
     /// did not say.
     pub changed_files: Option<u32>,

@@ -20,6 +20,8 @@ pub(in crate::workspace) mod progress;
 mod read_slot;
 pub(in crate::workspace) mod recover;
 pub(in crate::workspace) mod render;
+pub(in crate::workspace) mod thread_actions;
+mod threads_render;
 pub(in crate::workspace) mod view;
 
 use read_slot::Tickets;
@@ -109,6 +111,10 @@ pub(in crate::workspace) struct PrDetailState {
     action: ActionState,
     /// Every read this detail sends, whichever slot it fills.
     tickets: Tickets,
+    /// Review threads shown in full, by GitHub id.
+    expanded_threads: std::collections::HashSet<String>,
+    /// Replies being written and actions on threads.
+    thread_work: thread_actions::ThreadsWork,
 }
 
 impl PrDetailState {
@@ -126,6 +132,8 @@ impl PrDetailState {
             logs: BTreeMap::new(),
             action: ActionState::Idle,
             tickets: Tickets::default(),
+            expanded_threads: std::collections::HashSet::new(),
+            thread_work: thread_actions::ThreadsWork::default(),
         }
     }
 
@@ -177,6 +185,14 @@ impl PrDetailState {
 
     pub(in crate::workspace) fn scroll(&self) -> &gpui::ScrollHandle {
         &self.scroll
+    }
+
+    pub(in crate::workspace) fn thread_work(&self) -> &thread_actions::ThreadsWork {
+        &self.thread_work
+    }
+
+    pub(in crate::workspace) fn thread_expanded(&self, thread: &str) -> bool {
+        self.expanded_threads.contains(thread)
     }
 
     pub(in crate::workspace) fn files_scroll(&self) -> &gpui::UniformListScrollHandle {
@@ -517,6 +533,38 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Show review thread `thread` in full, or fold it back to its excerpt.
+    pub(in crate::workspace) fn toggle_pr_thread(
+        &mut self,
+        id: PrDetailId,
+        thread: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(detail) = self.pr_detail_mut(id) else {
+            return;
+        };
+        if !detail.expanded_threads.remove(thread) {
+            detail.expanded_threads.insert(thread.to_owned());
+        }
+        cx.notify();
+    }
+
+    /// Go to the lines a thread is on: the Files tab, its file, the lines
+    /// selected once the file is shown at a known commit.
+    pub(in crate::workspace) fn show_pr_thread_in_diff(
+        &mut self,
+        id: PrDetailId,
+        target: view::ThreadTarget,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_pr_detail_tab(id, PrTab::Files, cx);
+        let Some(files) = self.pr_detail_mut(id).and_then(|d| d.files.as_mut()) else {
+            return;
+        };
+        files.go_to_lines(target);
+        cx.notify();
+    }
+
     /// Show `tab`; the threads are read the first time theirs is shown, and
     /// again after a failed read.
     pub(in crate::workspace) fn select_pr_detail_tab(
@@ -566,13 +614,37 @@ impl Workspace {
         result: Result<ReviewThreads, GhError>,
         cx: &mut Context<Self>,
     ) {
-        let Some(slot) = self.pr_detail_mut(id).and_then(|d| d.threads.as_mut()) else {
+        let Some(detail) = self.pr_detail_mut(id) else {
+            return;
+        };
+        let Some(slot) = detail.threads.as_mut() else {
             return;
         };
         let (answer, error) = split(result);
         if !slot.land(ticket, answer) {
             return;
         }
+        // Threads resolved since are no longer expanded, and work on them
+        // settles against what was read.
+        let read = match slot.load() {
+            Load::Ready(threads) => Some(threads.clone()),
+            Load::Loading | Load::Failed(_) => None,
+        };
+        if let Some(threads) = &read {
+            let open: std::collections::HashSet<&str> = threads
+                .threads
+                .iter()
+                .map(|thread| thread.id.as_str())
+                .collect();
+            detail
+                .expanded_threads
+                .retain(|thread| open.contains(thread.as_str()));
+        }
+        detail
+            .thread_work
+            .threads_read(ticket, read.as_ref(), |reply| {
+                reply.read(cx).value().to_string()
+            });
         if let Some(e) = error {
             self.report_pr_read(&e, "github.pr_threads.read", cx);
         }

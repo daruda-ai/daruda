@@ -20,6 +20,7 @@ fn comment(author: Option<&str>, body: &str) -> ReviewComment {
     ReviewComment {
         author: author.map(str::to_owned),
         body: body.into(),
+        ..Default::default()
     }
 }
 
@@ -36,6 +37,7 @@ fn the_prompt_places_each_comment_and_indents_replies() {
                     comment(None, "Agreed"),
                 ],
                 more_comments: true,
+                ..Default::default()
             },
             ReviewThread {
                 path: "src/b.rs".into(),
@@ -43,6 +45,7 @@ fn the_prompt_places_each_comment_and_indents_replies() {
                 outdated: true,
                 comments: vec![comment(Some("rev"), "\u{1b}[31mstale\u{1b}[0m")],
                 more_comments: false,
+                ..Default::default()
             },
             ReviewThread {
                 path: "README.md".into(),
@@ -50,6 +53,7 @@ fn the_prompt_places_each_comment_and_indents_replies() {
                 outdated: false,
                 comments: vec![comment(Some("rev"), "Whole file")],
                 more_comments: false,
+                ..Default::default()
             },
         ],
         truncated: true,
@@ -75,6 +79,7 @@ fn huge_comments_stay_within_the_budget() {
                 outdated: false,
                 comments: vec![comment(Some("rev"), &body)],
                 more_comments: false,
+                ..Default::default()
             })
             .collect(),
         truncated: false,
@@ -100,6 +105,7 @@ fn one_thread_longer_than_the_budget_is_cut_not_dropped() {
             outdated: false,
             comments: replies,
             more_comments: false,
+            ..Default::default()
         }],
         truncated: false,
     };

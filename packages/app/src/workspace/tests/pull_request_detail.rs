@@ -83,6 +83,7 @@ fn detail(number: u64, head: &str) -> PrDetail {
         }],
         checks_truncated: false,
         open_threads: 0,
+        open_threads_more: false,
         changed_files: None,
     }
 }
@@ -344,6 +345,7 @@ fn a_threads_read_outdated_by_a_refresh_does_not_land(cx: &mut TestAppContext) {
             outdated: false,
             comments: Vec::new(),
             more_comments: false,
+            ..Default::default()
         }],
         truncated: false,
     };

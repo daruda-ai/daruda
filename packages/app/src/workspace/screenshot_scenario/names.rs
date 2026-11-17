@@ -46,6 +46,8 @@ const NAME_PULL_REQUESTS_DETAIL: &str = "pull-requests-detail";
 const NAME_PULL_REQUESTS_MERGE: &str = "pull-requests-merge";
 /// A pull request's detail on its Files tab, a diff shown.
 const NAME_PULL_REQUESTS_FILES: &str = "pull-requests-files";
+/// A pull request's detail on its Threads tab, one thread expanded.
+const NAME_PULL_REQUESTS_THREADS: &str = "pull-requests-threads";
 const NAME_SETTINGS_ERROR: &str = "settings-error";
 /// CLI token for Settings with a search query typed: the results page.
 const NAME_SETTINGS_SEARCH: &str = "settings-search";
@@ -315,6 +317,7 @@ impl ScreenshotScenario {
             NAME_PULL_REQUESTS_DETAIL => Some(Self::PullRequestsDetail),
             NAME_PULL_REQUESTS_MERGE => Some(Self::PullRequestsMerge),
             NAME_PULL_REQUESTS_FILES => Some(Self::PullRequestsFiles),
+            NAME_PULL_REQUESTS_THREADS => Some(Self::PullRequestsThreads),
             NAME_LEFT_DOCK_WORKTREES => Some(Self::LeftDockWorktrees),
             NAME_LEFT_DOCK_RAIL => Some(Self::LeftDockRail),
             NAME_LEFT_DOCK_EXPANDED => Some(Self::LeftDockExpanded),

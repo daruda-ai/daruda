@@ -18,13 +18,17 @@ mod detail;
 mod paged_search;
 mod rate_limit;
 mod search;
+mod thread_actions;
 mod threads;
 
 pub(crate) use detail::{parse_pr_detail, pr_detail_query};
 pub(crate) use paged_search::{paged_search_args, paged_search_string, parse_search_page};
 pub(crate) use rate_limit::parse_graphql_reset;
 pub(crate) use search::{newest_first, parse_search_prs, search_prs_query, search_string};
-pub(crate) use threads::{REVIEW_THREADS_QUERY, parse_review_threads};
+pub(crate) use thread_actions::{
+    REPLY_MUTATION, RESOLVE_MUTATION, UNRESOLVE_MUTATION, parse_reply, parse_resolved,
+};
+pub(crate) use threads::{read_review_threads, review_replies_query, review_threads_query};
 
 /// PRs fetched per branch: enough to find an open one among old closed ones.
 /// Fork PRs with the same head name count against it; `ref.associatedPullRequests`

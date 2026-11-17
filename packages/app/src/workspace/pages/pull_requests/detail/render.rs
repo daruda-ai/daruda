@@ -7,7 +7,7 @@ use gpui::{AnyElement, Context, Div, FontWeight, Hsla, SharedString, div, prelud
 use super::super::list::LaneSlot;
 use super::view::{
     ActionSlot, CheckRowView, DetailBody, Fact, HeaderActions, LaneNote, LogSlot, MergeView, Mood,
-    PrDetailView, ReadyView, SendSlot, SideView, ThreadRowView, ThreadsView,
+    PrDetailView, ReadyView, SendSlot, SideView,
 };
 use super::{Load, PrDetailId, PrTab};
 use crate::surface::strings::{common, pull_requests as s};
@@ -316,7 +316,7 @@ fn tab_content(
             Some(files) => super::files_render::files(id, files, files_scroll, cx),
             None => div().into_any_element(),
         },
-        PrTab::Threads => threads(id, ready, cx),
+        PrTab::Threads => super::threads_render::threads(id, ready, cx),
         PrTab::Description => match &ready.description {
             Some(body) => {
                 crate::ui::markdown(("pr-detail-description", id.0 as usize), body.clone())
@@ -331,7 +331,7 @@ fn tab_content(
 }
 
 /// A line above a tab's list: what it holds, and Send to agent.
-fn send_line(
+pub(super) fn send_line(
     summary: Option<String>,
     send: SendSlot,
     nothing: String,
@@ -509,100 +509,6 @@ fn log_block(load: &Load<String>, cx: &Context<Workspace>) -> AnyElement {
         .into_any_element()
 }
 
-fn threads(id: PrDetailId, ready: &ReadyView, cx: &Context<Workspace>) -> AnyElement {
-    let send = send_line(
-        None,
-        ready.threads_send,
-        s::send_nothing_threads(),
-        move |ws, window, cx| ws.send_pr_detail_threads(id, window, cx),
-        "pr-detail-send-threads",
-        None,
-        cx,
-    );
-    let body: Vec<AnyElement> = match &ready.threads {
-        ThreadsView::Loading => vec![note(common::loading(), cx).into_any_element()],
-        ThreadsView::Failed(reason) => {
-            vec![note(s::threads_failed(reason), cx).into_any_element()]
-        }
-        ThreadsView::Listed { rows, truncated } => {
-            let mut body: Vec<AnyElement> = rows.iter().map(|row| thread_row(row, cx)).collect();
-            if rows.is_empty() {
-                body.push(note(s::threads_empty(), cx).into_any_element());
-            }
-            if *truncated {
-                body.push(note(s::threads_truncated(), cx).into_any_element());
-            }
-            body
-        }
-    };
-    div()
-        .flex()
-        .flex_col()
-        .child(send)
-        .children(body)
-        .into_any_element()
-}
-
-fn thread_row(row: &ThreadRowView, cx: &Context<Workspace>) -> AnyElement {
-    let t = theme::current(cx);
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::GAP_XS))
-        .px(px(theme::LIST_ROW_PAD_X))
-        .py(px(theme::PAD_SM))
-        .rounded(px(theme::LIST_ROW_RADIUS))
-        .hover(|style| style.bg(t.overlay_hover))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(theme::GAP_LG))
-                .min_w_0()
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .font_family(theme::FONT_FAMILY_MONOSPACE)
-                        .text_size(px(theme::FONT_SIZE_SM))
-                        .text_color(t.text_body)
-                        .child(row.location.clone()),
-                )
-                .when(row.outdated, |line| {
-                    line.child(Badge::new(s::thread_outdated()).text_color(t.text_muted))
-                })
-                .child(div().flex_1())
-                .children(row.replies.clone().map(|replies| {
-                    div()
-                        .flex_none()
-                        .text_size(px(theme::FONT_SIZE_SM))
-                        .text_color(t.text_subtle)
-                        .child(replies)
-                })),
-        )
-        .child(
-            div()
-                .flex()
-                .gap(px(theme::GAP_SM))
-                .min_w_0()
-                .text_size(px(theme::FONT_SIZE_SM))
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(t.text_muted)
-                        .child(row.author.clone()),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_color(t.text_subtle)
-                        .child(row.excerpt.clone()),
-                ),
-        )
-        .into_any_element()
-}
-
 /// Merge, reviews and the worktree.
 fn side(view: &SideView, cx: &Context<Workspace>) -> AnyElement {
     let t = theme::current(cx);
@@ -696,7 +602,7 @@ fn fact_value(value: String, color: Hsla) -> Div {
 }
 
 /// A quiet line in place of content.
-fn note(message: impl Into<SharedString>, cx: &Context<Workspace>) -> Div {
+pub(super) fn note(message: impl Into<SharedString>, cx: &Context<Workspace>) -> Div {
     div()
         .py(px(theme::PAD_SM))
         .text_size(px(theme::FONT_SIZE_SM))

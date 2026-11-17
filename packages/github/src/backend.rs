@@ -68,6 +68,21 @@ pub trait Gh: Send + Sync {
     ) -> Result<(), GhError>;
     /// Mark draft pull request `number` ready for review.
     fn set_ready(&self, repo: &RepoId, number: u64) -> Result<(), GhError>;
+    /// Reply `body` to review thread `thread` (its node id); answers the
+    /// comment posted.
+    fn reply_to_thread(
+        &self,
+        repo: &RepoId,
+        thread: &str,
+        body: &str,
+    ) -> Result<crate::ReviewComment, GhError>;
+    /// Resolve review thread `thread`, or unresolve it.
+    fn set_thread_resolved(
+        &self,
+        repo: &RepoId,
+        thread: &str,
+        resolved: bool,
+    ) -> Result<(), GhError>;
     /// Close pull request `number` unmerged. Leaves the branch.
     fn close_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError>;
     /// Rerun the failed jobs of Actions run `run`.

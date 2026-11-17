@@ -22,7 +22,7 @@ pub(crate) fn pr_detail_query() -> String {
          reviewRequests(first: {DETAIL_PAGE}) {{ nodes {{ requestedReviewer {{ __typename \
          ... on User {{ login }} ... on Bot {{ login }} ... on Mannequin {{ login }} \
          ... on Team {{ combinedSlug }} }} }} }} \
-         reviewThreads(first: {DETAIL_PAGE}) {{ nodes {{ isResolved }} }} }} }} }} {}",
+         reviewThreads(first: {DETAIL_PAGE}) {{ pageInfo {{ hasNextPage }} nodes {{ isResolved }} }} }} }} }} {}",
         pr_fragment()
     )
 }
@@ -82,6 +82,11 @@ pub(crate) fn parse_pr_detail(json: &str) -> Result<PrDetail, GhError> {
         checks: entries(&runs),
         checks_truncated,
         open_threads,
+        open_threads_more: pr
+            .review_threads
+            .page_info
+            .as_ref()
+            .is_some_and(|page| page.has_next_page),
         changed_files: pr.changed_files,
     })
 }
@@ -189,7 +194,21 @@ struct DetailPr {
     merge_state_status: String,
     latest_reviews: Nodes<ReviewNode>,
     review_requests: Nodes<RequestNode>,
-    review_threads: Nodes<ResolvedNode>,
+    review_threads: ThreadNodes,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadNodes {
+    #[serde(default)]
+    page_info: Option<ThreadsPageInfo>,
+    nodes: Vec<ResolvedNode>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadsPageInfo {
+    has_next_page: bool,
 }
 
 #[derive(Deserialize)]
