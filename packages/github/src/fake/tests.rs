@@ -147,6 +147,10 @@ fn a_scripted_detail_answers_its_repository_and_number_only() {
         can_update: false,
         can_close: true,
         can_reopen: true,
+        auto_merge: None,
+        queue: None,
+        can_enable_auto_merge: true,
+        can_disable_auto_merge: true,
         node_id: None,
         changed_files: None,
     };
@@ -193,6 +197,10 @@ fn detail(number: u64, state: PrState, head_sha: &str) -> PrDetail {
         can_update: false,
         can_close: true,
         can_reopen: true,
+        auto_merge: None,
+        queue: None,
+        can_enable_auto_merge: true,
+        can_disable_auto_merge: true,
         node_id: None,
         changed_files: None,
     }
@@ -298,4 +306,25 @@ fn rerun_is_logged_and_a_scripted_failure_answers_each_mutation() {
     for op in ops {
         assert_eq!(gh.count(op), 1 + usize::from(op == GhOp::RerunFailed));
     }
+}
+
+#[test]
+fn auto_merge_follows_the_scripted_head() {
+    let gh = FakeGh::new();
+    let mut scripted = detail(7, PrState::Open, "abc");
+    scripted.node_id = Some("PR_7".into());
+    gh.set_pr_detail(&repo(), 7, scripted);
+    assert!(matches!(
+        gh.enable_auto_merge(&repo(), "PR_7", MergeMethod::Squash, "def"),
+        Err(GhError::Exit { .. })
+    ));
+    assert_eq!(gh.pr_detail(&repo(), 7).unwrap().auto_merge, None);
+    gh.enable_auto_merge(&repo(), "PR_7", MergeMethod::Squash, "abc")
+        .unwrap();
+    let on = gh.pr_detail(&repo(), 7).unwrap().auto_merge.unwrap();
+    assert_eq!(on.method, Some(MergeMethod::Squash));
+    gh.disable_auto_merge(&repo(), "PR_7").unwrap();
+    assert_eq!(gh.pr_detail(&repo(), 7).unwrap().auto_merge, None);
+    assert_eq!(gh.count(GhOp::EnableAutoMerge), 2);
+    assert_eq!(gh.count(GhOp::DisableAutoMerge), 1);
 }

@@ -250,6 +250,14 @@ fn header_actions(id: PrDetailId, actions: &HeaderActions, cx: &Context<Workspac
         .flex_none()
         .gap(px(theme::GAP_SM))
         .children(ready)
+        .children(actions.auto_merge_off.as_ref().map(|slot| {
+            with_slot(
+                button("pr-detail-auto-merge-off", s::auto_merge_off()),
+                slot,
+            )
+            .debug_selector(|| "pr-detail-auto-merge-off".into())
+            .on_click(cx.listener(move |ws, _, _, cx| ws.disable_pr_auto_merge(id, cx)))
+        }))
         .child(
             with_slot(button("pr-detail-close", s::action_close()), &actions.close)
                 .debug_selector(|| "pr-detail-close".into())
@@ -272,19 +280,35 @@ fn merge_button(id: PrDetailId, merge: &MergeView, cx: &Context<Workspace>) -> A
         return button.into_any_element();
     }
     let methods = merge.methods.clone();
+    let auto = merge.auto.clone();
     let workspace = cx.weak_entity();
     button
         .dropdown_menu_with_anchor(
             gpui::Anchor::TopRight,
             menu_builder(move |menu, _, _| {
-                methods
-                    .iter()
+                let menu = methods.iter().cloned().fold(menu, |menu, (method, label)| {
+                    let workspace = workspace.clone();
+                    menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                        if let Some(ws) = workspace.upgrade() {
+                            ws.update(cx, |ws, cx| ws.ask_pr_merge(id, method, window, cx));
+                        }
+                    }))
+                });
+                // Merging later, once requirements pass: apart from now.
+                let menu = if auto.is_empty() {
+                    menu
+                } else {
+                    menu.separator()
+                };
+                auto.iter()
                     .cloned()
                     .fold(menu, |menu, (method, label)| {
                         let workspace = workspace.clone();
                         menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
                             if let Some(ws) = workspace.upgrade() {
-                                ws.update(cx, |ws, cx| ws.ask_pr_merge(id, method, window, cx));
+                                ws.update(cx, |ws, cx| {
+                                    ws.ask_pr_auto_merge(id, method, window, cx)
+                                });
                             }
                         }))
                     })

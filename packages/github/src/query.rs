@@ -14,6 +14,7 @@ use serde::Deserialize;
 use crate::checks::{check_run_status, rollup_from_state, status_context_status, summarize};
 use crate::{CheckKind, CheckRollup, CheckRun, GhError, PrState, PrSummary, ReviewDecision};
 
+mod auto_merge;
 mod conversation;
 mod detail;
 mod paged_search;
@@ -23,6 +24,9 @@ mod search;
 mod thread_actions;
 mod threads;
 
+pub(crate) use auto_merge::{
+    DISABLE_AUTO_MERGE_MUTATION, ENABLE_AUTO_MERGE_MUTATION, method_name, parse_auto_merge,
+};
 pub(crate) use conversation::{CONVERSATION_QUERY, read_conversation};
 pub(crate) use detail::{parse_pr_detail, pr_detail_query};
 pub(crate) use paged_search::{paged_search_args, paged_search_string, parse_search_page};

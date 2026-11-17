@@ -1,6 +1,6 @@
 //! What a pull request, as its detail was read, lets the user do to it on
-//! GitHub: merge (and with which methods), mark ready for review, close or
-//! reopen, and rerun failed checks. Plain decisions over [`PrDetail`]; asking GitHub is
+//! GitHub: merge (and with which methods), auto-merge, mark ready for
+//! review, close or reopen, and rerun failed checks. Plain decisions over [`PrDetail`]; asking GitHub is
 //! [`crate::Gh`]'s.
 
 use std::collections::BTreeSet;
@@ -15,6 +15,8 @@ use crate::{BlockReason, CheckStatus, MergeMethod, Mergeability, PrDetail, PrSta
 pub enum MergeBlock {
     /// The repository allows no merge method to this viewer.
     NoMethods,
+    /// Already in the merge queue: accepted, not merged yet.
+    Queued,
     /// A draft is made ready for review first.
     Draft,
     Conflicting,
@@ -41,6 +43,8 @@ impl PrDetail {
     pub fn merge_block(&self) -> Option<MergeBlock> {
         if self.methods.is_empty() {
             Some(MergeBlock::NoMethods)
+        } else if self.queue.is_some() {
+            Some(MergeBlock::Queued)
         } else if self.is_draft() {
             Some(MergeBlock::Draft)
         } else if self.mergeability == Mergeability::Conflicting {
@@ -61,6 +65,39 @@ impl PrDetail {
     /// branch); that comes back as the reopen's error.
     pub fn can_reopen_now(&self) -> bool {
         self.summary.state == PrState::Closed && self.can_reopen
+    }
+
+    /// The methods auto-merge may be turned on with: open (not a draft),
+    /// waiting on something (not conflicting, not ready to merge now),
+    /// permitted, and not already on or queued. Empty otherwise; the order
+    /// is [`Self::merge_menu`]'s.
+    pub fn auto_merge_menu(&self) -> Vec<MergeMethod> {
+        // ASSUMPTION: not measured — GitHub refuses auto-merge on a pull
+        // request that could merge now ("clean status"); merge it instead.
+        let possible = self.summary.state.is_active()
+            && !self.is_draft()
+            && !matches!(
+                self.mergeability,
+                Mergeability::Conflicting | Mergeability::Ready
+            )
+            && self.can_enable_auto_merge
+            && self.auto_merge.is_none()
+            && self.queue.is_none();
+        if possible {
+            self.merge_menu()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Whether auto-merge with `method` may be asked of GitHub.
+    pub fn can_enable_auto_merge_with(&self, method: MergeMethod) -> bool {
+        self.auto_merge_menu().contains(&method)
+    }
+
+    /// Whether turning auto-merge off may be asked of GitHub.
+    pub fn can_disable_auto_merge_now(&self) -> bool {
+        self.summary.state.is_active() && self.auto_merge.is_some() && self.can_disable_auto_merge
     }
 
     /// Whether merging with `method` may be asked of GitHub.

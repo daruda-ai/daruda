@@ -118,6 +118,18 @@ pub trait Gh: Send + Sync {
     fn close_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError>;
     /// Reopen closed pull request `number`.
     fn reopen_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError>;
+    /// Turn auto-merge on for pull request `pr` (its node id) with
+    /// `method`, only while its head is `head_sha`: GitHub then merges it,
+    /// or queues it, once its requirements pass.
+    fn enable_auto_merge(
+        &self,
+        repo: &RepoId,
+        pr: &str,
+        method: MergeMethod,
+        head_sha: &str,
+    ) -> Result<(), GhError>;
+    /// Turn auto-merge off for pull request `pr` (its node id).
+    fn disable_auto_merge(&self, repo: &RepoId, pr: &str) -> Result<(), GhError>;
     /// Rerun the failed jobs of Actions run `run`.
     fn rerun_failed(&self, repo: &RepoId, run: u64) -> Result<(), GhError>;
     /// When the spent GraphQL rate limit on `host` resets (Unix seconds);

@@ -21,6 +21,8 @@ pub(in crate::workspace) enum PrAction {
     Merging,
     Closing,
     Reopening,
+    EnablingAutoMerge,
+    DisablingAutoMerge,
     MarkingReady,
     Rerunning,
 }
@@ -65,6 +67,8 @@ impl PrAction {
             (_, Self::Merging) => error::github_pr_merge_failed(number),
             (_, Self::Closing) => error::github_pr_close_failed(number),
             (_, Self::Reopening) => error::github_pr_reopen_failed(number),
+            (_, Self::EnablingAutoMerge) => error::github_pr_auto_merge_failed(number),
+            (_, Self::DisablingAutoMerge) => error::github_pr_auto_merge_off_failed(number),
             (_, Self::MarkingReady) => error::github_pr_ready_failed(number),
             (_, Self::Rerunning) => error::github_pr_rerun_failed(number),
         }
@@ -105,6 +109,15 @@ enum Request {
     },
     Close,
     Reopen,
+    /// Auto-merge on pull request `pr` (its node id), pinned to `head_sha`.
+    AutoMergeOn {
+        pr: String,
+        method: MergeMethod,
+        head_sha: String,
+    },
+    AutoMergeOff {
+        pr: String,
+    },
     Ready,
     Rerun(Vec<u64>),
 }
@@ -115,6 +128,8 @@ impl Request {
             Self::Merge { .. } => PrAction::Merging,
             Self::Close => PrAction::Closing,
             Self::Reopen => PrAction::Reopening,
+            Self::AutoMergeOn { .. } => PrAction::EnablingAutoMerge,
+            Self::AutoMergeOff { .. } => PrAction::DisablingAutoMerge,
             Self::Ready => PrAction::MarkingReady,
             Self::Rerun(_) => PrAction::Rerunning,
         }
@@ -127,6 +142,15 @@ impl Request {
             Self::Merge { method, .. } => pr.can_merge(*method),
             Self::Close => pr.can_close_now(),
             Self::Reopen => pr.can_reopen_now(),
+            Self::AutoMergeOn {
+                pr: node, method, ..
+            } => {
+                pr.node_id.as_deref() == Some(node.as_str())
+                    && pr.can_enable_auto_merge_with(*method)
+            }
+            Self::AutoMergeOff { pr: node } => {
+                pr.node_id.as_deref() == Some(node.as_str()) && pr.can_disable_auto_merge_now()
+            }
             Self::Ready => pr.is_draft(),
             Self::Rerun(runs) => !runs.is_empty(),
         }
@@ -138,6 +162,12 @@ impl Request {
             Self::Merge { method, head_sha } => gh.merge_pr(repo, number, method, &head_sha),
             Self::Close => gh.close_pr(repo, number),
             Self::Reopen => gh.reopen_pr(repo, number),
+            Self::AutoMergeOn {
+                pr,
+                method,
+                head_sha,
+            } => gh.enable_auto_merge(repo, &pr, method, &head_sha),
+            Self::AutoMergeOff { pr } => gh.disable_auto_merge(repo, &pr),
             Self::Ready => gh.set_ready(repo, number),
             // Every run is asked even after one fails; the first failure
             // is what is reported.
@@ -211,6 +241,63 @@ impl Workspace {
             window,
             cx,
         );
+    }
+
+    /// The merge menu's auto-merge item: ask, then turn auto-merge on with
+    /// `method`, pinned to the head commit shown now. GitHub merges it (or
+    /// queues it) later, once its requirements pass; never from a poll.
+    pub(in crate::workspace) fn ask_pr_auto_merge(
+        &mut self,
+        id: PrDetailId,
+        method: MergeMethod,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(target) = self.pr_action_target(id) else {
+            return;
+        };
+        let Some(pr) = target.loaded.node_id.clone() else {
+            return;
+        };
+        let request = Request::AutoMergeOn {
+            pr,
+            method,
+            head_sha: target.loaded.head_sha.clone(),
+        };
+        if !request.applies(&target.loaded) {
+            return;
+        }
+        let ws = cx.weak_entity();
+        open_confirm_dialog(
+            s::auto_merge_confirm_title(target.number),
+            s::auto_merge_confirm_body(&target.title, merge_action_label(method), &target.base),
+            s::auto_merge_confirm_ok(),
+            ButtonVariant::Primary,
+            move |_, _window, cx| {
+                let request = request.clone();
+                if let Some(ws) = ws.upgrade() {
+                    ws.update(cx, |ws, cx| ws.run_pr_action(id, request, cx));
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// The header's Turn off auto-merge; nothing merges meanwhile, so it
+    /// is not asked first.
+    pub(in crate::workspace) fn disable_pr_auto_merge(
+        &mut self,
+        id: PrDetailId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pr) = self
+            .pr_action_target(id)
+            .and_then(|target| target.loaded.node_id)
+        else {
+            return;
+        };
+        self.run_pr_action(id, Request::AutoMergeOff { pr }, cx);
     }
 
     /// The header's Close: ask, then close without merging.
@@ -394,7 +481,11 @@ mod tests {
             can_update: false,
             can_close: true,
             can_reopen: true,
-            node_id: None,
+            auto_merge: None,
+            queue: None,
+            can_enable_auto_merge: true,
+            can_disable_auto_merge: true,
+            node_id: Some("PR_7".into()),
             changed_files: None,
         }
     }
@@ -409,6 +500,10 @@ mod tests {
         let open = pr(S::Open, M::Ready);
         let draft = pr(S::Draft, M::Unknown);
         let conflicting = pr(S::Open, M::Conflicting);
+        let waiting = pr(
+            S::Open,
+            M::Blocked(daruda_github::BlockReason::Requirements),
+        );
         let closed = pr(S::Closed, M::Unknown);
         let merged = pr(S::Merged, M::Unknown);
         let not_mine = PrDetail {
@@ -438,6 +533,52 @@ mod tests {
             ),
             ("close a draft", Request::Close, &draft, true),
             ("close a closed PR", Request::Close, &closed, false),
+            (
+                "auto-merge a PR waiting on requirements",
+                Request::AutoMergeOn {
+                    pr: "PR_7".into(),
+                    method: MergeMethod::Squash,
+                    head_sha: "abc".into(),
+                },
+                &waiting,
+                true,
+            ),
+            (
+                "auto-merge another PR's node",
+                Request::AutoMergeOn {
+                    pr: "PR_8".into(),
+                    method: MergeMethod::Squash,
+                    head_sha: "abc".into(),
+                },
+                &waiting,
+                false,
+            ),
+            (
+                "auto-merge a draft",
+                Request::AutoMergeOn {
+                    pr: "PR_7".into(),
+                    method: MergeMethod::Squash,
+                    head_sha: "abc".into(),
+                },
+                &draft,
+                false,
+            ),
+            (
+                "auto-merge a PR that can merge now",
+                Request::AutoMergeOn {
+                    pr: "PR_7".into(),
+                    method: MergeMethod::Squash,
+                    head_sha: "abc".into(),
+                },
+                &open,
+                false,
+            ),
+            (
+                "turn off auto-merge that is off",
+                Request::AutoMergeOff { pr: "PR_7".into() },
+                &open,
+                false,
+            ),
             ("reopen a closed PR", Request::Reopen, &closed, true),
             ("reopen an open PR", Request::Reopen, &open, false),
             ("reopen a merged PR", Request::Reopen, &merged, false),

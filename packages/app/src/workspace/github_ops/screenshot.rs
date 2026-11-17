@@ -463,6 +463,10 @@ impl Workspace {
             can_update: false,
             can_close: true,
             can_reopen: true,
+            auto_merge: None,
+            queue: None,
+            can_enable_auto_merge: false,
+            can_disable_auto_merge: false,
             node_id: None,
             changed_files: None,
         };

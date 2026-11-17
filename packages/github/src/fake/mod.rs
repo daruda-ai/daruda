@@ -18,6 +18,8 @@
 //! | `set_ready` | the PR, if scripted, becomes open |
 //! | `close_pr` | the PR, if scripted, becomes closed |
 //! | `reopen_pr` | the PR, if scripted, becomes open |
+//! | `enable_auto_merge` | exit 1 if the scripted detail's head differs (GitHub's wording is not known, so never `HeadMoved`), else its auto-merge is on |
+//! | `disable_auto_merge` | the scripted detail's auto-merge is off |
 //! | `rerun_failed` | done |
 //! | `reply_to_thread` | adds the reply to the scripted thread, answers it |
 //! | `pr_conversation` | the `set_conversation` comments, else none |
@@ -113,6 +115,16 @@ pub enum GhCall {
         repo: RepoId,
         number: u64,
     },
+    EnableAutoMerge {
+        repo: RepoId,
+        pr: String,
+        method: MergeMethod,
+        head_sha: String,
+    },
+    DisableAutoMerge {
+        repo: RepoId,
+        pr: String,
+    },
     ReplyToThread {
         repo: RepoId,
         thread: String,
@@ -177,6 +189,8 @@ pub enum GhOp {
     SetReady,
     ClosePr,
     ReopenPr,
+    EnableAutoMerge,
+    DisableAutoMerge,
     ReplyToThread,
     SetThreadResolved,
     Conversation,
@@ -378,6 +392,8 @@ impl GhCall {
             Self::SetReady { .. } => GhOp::SetReady,
             Self::ClosePr { .. } => GhOp::ClosePr,
             Self::ReopenPr { .. } => GhOp::ReopenPr,
+            Self::EnableAutoMerge { .. } => GhOp::EnableAutoMerge,
+            Self::DisableAutoMerge { .. } => GhOp::DisableAutoMerge,
             Self::ReplyToThread { .. } => GhOp::ReplyToThread,
             Self::SetThreadResolved { .. } => GhOp::SetThreadResolved,
             Self::Conversation { .. } => GhOp::Conversation,
@@ -400,6 +416,14 @@ impl FakeState {
             Some(failure) => Err(failure.to_error()),
             None => Ok(()),
         }
+    }
+
+    /// The scripted detail of `repo` whose node id is `pr`.
+    fn detail_by_node(&mut self, repo: &RepoId, pr: &str) -> Option<&mut PrDetail> {
+        self.details
+            .iter_mut()
+            .find(|((held, _), detail)| held == repo && detail.node_id.as_deref() == Some(pr))
+            .map(|(_, detail)| detail)
     }
 
     /// Move PR `number` of `repo` to `state` wherever it is scripted.
@@ -826,6 +850,48 @@ impl Gh for FakeGh {
             number,
         })?;
         state.set_state(repo, number, PrState::Open);
+        Ok(())
+    }
+
+    fn enable_auto_merge(
+        &self,
+        repo: &RepoId,
+        pr: &str,
+        method: MergeMethod,
+        head_sha: &str,
+    ) -> Result<(), GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::EnableAutoMerge {
+            repo: repo.clone(),
+            pr: pr.to_owned(),
+            method,
+            head_sha: head_sha.to_owned(),
+        })?;
+        check_head_sha(head_sha)?;
+        if let Some(detail) = state.detail_by_node(repo, pr) {
+            if detail.head_sha != head_sha {
+                return Err(GhError::Exit {
+                    code: Some(1),
+                    stderr: "the head is not the expected commit (fake)".into(),
+                });
+            }
+            detail.auto_merge = Some(crate::AutoMergeOn {
+                method: Some(method),
+                by: None,
+            });
+        }
+        Ok(())
+    }
+
+    fn disable_auto_merge(&self, repo: &RepoId, pr: &str) -> Result<(), GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::DisableAutoMerge {
+            repo: repo.clone(),
+            pr: pr.to_owned(),
+        })?;
+        if let Some(detail) = state.detail_by_node(repo, pr) {
+            detail.auto_merge = None;
+        }
         Ok(())
     }
 

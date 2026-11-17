@@ -7,7 +7,8 @@
 //! `changedFiles` was added likewise on 2026-11-17: GitHub answered 1.
 //! `viewerCanClose` and `viewerCanReopen` likewise on 2026-11-18, read
 //! from the PR as it was then (closed) and spliced into this open snapshot:
-//! both false.
+//! both false. The auto-merge fields likewise, the same day: no auto-merge,
+//! no queue entry, neither permission.
 
 use serde_json::{Value, json};
 
@@ -304,4 +305,38 @@ fn the_viewers_close_and_reopen_permissions_are_read() {
     let loaded = parse_pr_detail(&answer).unwrap();
     assert!(loaded.can_close && loaded.can_reopen);
     assert!(pr_detail_query().contains("viewerCanClose viewerCanReopen"));
+}
+
+#[test]
+fn auto_merge_and_the_merge_queue_are_read() {
+    use crate::{AutoMergeOn, QueueEntry, QueueState};
+    let plain = parse_pr_detail(&fixture("pr_detail_15003.json")).unwrap();
+    assert_eq!((plain.auto_merge, plain.queue), (None, None));
+    let answer = detail_answer(|repo| {
+        let pr = &mut repo["pullRequest"];
+        pr["autoMergeRequest"] = json!({"mergeMethod": "SQUASH", "enabledBy": {"login": "al"}});
+        pr["mergeQueueEntry"] = json!({"position": 2, "state": "AWAITING_CHECKS"});
+        pr["viewerCanDisableAutoMerge"] = json!(true);
+    });
+    let loaded = parse_pr_detail(&answer).unwrap();
+    assert_eq!(
+        loaded.auto_merge,
+        Some(AutoMergeOn {
+            method: Some(MergeMethod::Squash),
+            by: Some("al".into()),
+        })
+    );
+    assert_eq!(
+        loaded.queue,
+        Some(QueueEntry {
+            position: Some(2),
+            state: QueueState::AwaitingChecks,
+        })
+    );
+    assert!(loaded.can_disable_auto_merge && !loaded.can_enable_auto_merge);
+    let unknown = detail_answer(|repo| {
+        repo["pullRequest"]["mergeQueueEntry"] = json!({"position": null, "state": "NEW_STATE"});
+    });
+    let queue = parse_pr_detail(&unknown).unwrap().queue.unwrap();
+    assert_eq!((queue.position, queue.state), (None, QueueState::Other));
 }

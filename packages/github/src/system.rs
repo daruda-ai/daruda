@@ -41,7 +41,7 @@ pub(crate) fn check_head_sha(head_sha: &str) -> Result<(), GhError> {
         Ok(())
     } else {
         Err(GhError::BadArgument(format!(
-            "merge pinned to {head_sha:?}, not a commit SHA"
+            "pinned to {head_sha:?}, not a commit SHA"
         )))
     }
 }
@@ -87,6 +87,21 @@ fn close_args(repo: &RepoId, number: u64) -> Vec<String> {
     ["pr", "close", &number.to_string(), "--repo", &repo]
         .map(str::to_owned)
         .to_vec()
+}
+
+/// `gh api graphql` running `mutation` with `fields` as its variables,
+/// each one `-f` argument so none is read as a file or a number.
+fn auto_merge_args(repo: &RepoId, mutation: &str, fields: &[(&str, &str)]) -> Vec<String> {
+    let mut args: Vec<String> = ["api", "graphql", "--hostname", repo.host()]
+        .map(str::to_owned)
+        .to_vec();
+    args.push("-f".to_owned());
+    args.push(format!("query={mutation}"));
+    for (name, value) in fields {
+        args.push("-f".to_owned());
+        args.push(format!("{name}={value}"));
+    }
+    args
 }
 
 fn reopen_args(repo: &RepoId, number: u64) -> Vec<String> {
@@ -672,6 +687,35 @@ impl Gh for SystemGh {
         self.stdout(reopen_args(repo, number)).map(drop)
     }
 
+    fn enable_auto_merge(
+        &self,
+        repo: &RepoId,
+        pr: &str,
+        method: MergeMethod,
+        head_sha: &str,
+    ) -> Result<(), GhError> {
+        check_head_sha(head_sha)?;
+        let json = self.stdout(auto_merge_args(
+            repo,
+            crate::query::ENABLE_AUTO_MERGE_MUTATION,
+            &[
+                ("pr", pr),
+                ("method", crate::query::method_name(method)),
+                ("head", head_sha),
+            ],
+        ))?;
+        crate::query::parse_auto_merge(&json, true)
+    }
+
+    fn disable_auto_merge(&self, repo: &RepoId, pr: &str) -> Result<(), GhError> {
+        let json = self.stdout(auto_merge_args(
+            repo,
+            crate::query::DISABLE_AUTO_MERGE_MUTATION,
+            &[("pr", pr)],
+        ))?;
+        crate::query::parse_auto_merge(&json, false)
+    }
+
     fn rerun_failed(&self, repo: &RepoId, run: u64) -> Result<(), GhError> {
         self.stdout(rerun_failed_args(repo, run)).map(drop)
     }
@@ -878,7 +922,7 @@ mod tests {
         let reviewers = |add: &[&str], remove: &[&str]| {
             edit_reviewers_args(&repo, 7, &names(add), &names(remove)).unwrap()
         };
-        let cases: [(&str, Vec<String>, &[&str]); 10] = [
+        let cases: [(&str, Vec<String>, &[&str]); 12] = [
             (
                 "squash",
                 merge(MergeMethod::Squash),
@@ -932,6 +976,36 @@ mod tests {
                 "reopen",
                 reopen_args(&repo, 7),
                 &["pr", "reopen", "7", "--repo", "ghe.corp/o/r"],
+            ),
+            (
+                "values stay strings",
+                auto_merge_args(&repo, "M", &[("pr", "@x"), ("head", "123")]),
+                &[
+                    "api",
+                    "graphql",
+                    "--hostname",
+                    "ghe.corp",
+                    "-f",
+                    "query=M",
+                    "-f",
+                    "pr=@x",
+                    "-f",
+                    "head=123",
+                ],
+            ),
+            (
+                "turn auto-merge off",
+                auto_merge_args(&repo, "M", &[("pr", "PR_1")]),
+                &[
+                    "api",
+                    "graphql",
+                    "--hostname",
+                    "ghe.corp",
+                    "-f",
+                    "query=M",
+                    "-f",
+                    "pr=PR_1",
+                ],
             ),
             (
                 "rerun failed",

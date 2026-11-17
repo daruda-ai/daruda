@@ -32,6 +32,10 @@ fn detail(state: PrState, mergeability: Mergeability, methods: Vec<MergeMethod>)
         can_update: false,
         can_close: true,
         can_reopen: true,
+        auto_merge: None,
+        queue: None,
+        can_enable_auto_merge: true,
+        can_disable_auto_merge: true,
         node_id: None,
         changed_files: None,
     }
@@ -250,4 +254,143 @@ fn close_and_reopen_follow_state_and_permission() {
         assert_eq!(pr.can_close_now(), close, "{label}: close");
         assert_eq!(pr.can_reopen_now(), reopen, "{label}: reopen");
     }
+}
+
+#[test]
+fn auto_merge_is_offered_only_where_github_would_take_it() {
+    use daruda_github::{AutoMergeOn, QueueEntry, QueueState};
+    let base = || PrDetail {
+        can_enable_auto_merge: true,
+        can_disable_auto_merge: true,
+        ..detail(
+            PrState::Open,
+            Mergeability::Blocked(BlockReason::Requirements),
+            vec![MergeMethod::Squash, MergeMethod::Merge],
+        )
+    };
+    let on = Some(AutoMergeOn {
+        method: Some(MergeMethod::Squash),
+        by: None,
+    });
+    let queued = Some(QueueEntry {
+        position: Some(1),
+        state: QueueState::Queued,
+    });
+    // (label, pull request, offered on, can turn off)
+    let cases = [
+        ("waiting on requirements", base(), true, false),
+        (
+            "not permitted",
+            PrDetail {
+                can_enable_auto_merge: false,
+                ..base()
+            },
+            false,
+            false,
+        ),
+        (
+            "a draft",
+            PrDetail {
+                summary: PrSummary {
+                    state: PrState::Draft,
+                    ..base().summary
+                },
+                ..base()
+            },
+            false,
+            false,
+        ),
+        (
+            "conflicting",
+            PrDetail {
+                mergeability: Mergeability::Conflicting,
+                ..base()
+            },
+            false,
+            false,
+        ),
+        (
+            "ready to merge now",
+            PrDetail {
+                mergeability: Mergeability::Ready,
+                ..base()
+            },
+            false,
+            false,
+        ),
+        (
+            "behind its base",
+            PrDetail {
+                mergeability: Mergeability::Blocked(BlockReason::Behind),
+                ..base()
+            },
+            true,
+            false,
+        ),
+        (
+            "already on",
+            PrDetail {
+                auto_merge: on.clone(),
+                ..base()
+            },
+            false,
+            true,
+        ),
+        (
+            "on, not the viewer's to turn off",
+            PrDetail {
+                auto_merge: on.clone(),
+                can_disable_auto_merge: false,
+                ..base()
+            },
+            false,
+            false,
+        ),
+        (
+            "queued",
+            PrDetail {
+                queue: queued,
+                ..base()
+            },
+            false,
+            false,
+        ),
+    ];
+    for (label, pr, offered, off) in cases {
+        assert_eq!(
+            !pr.auto_merge_menu().is_empty(),
+            offered,
+            "{label}: offered"
+        );
+        assert_eq!(
+            pr.can_enable_auto_merge_with(MergeMethod::Squash),
+            offered,
+            "{label}: squash"
+        );
+        assert!(
+            !pr.can_enable_auto_merge_with(MergeMethod::Rebase),
+            "{label}: not allowed"
+        );
+        assert_eq!(pr.can_disable_auto_merge_now(), off, "{label}: off");
+    }
+    let queued = PrDetail {
+        queue: queued,
+        mergeability: Mergeability::Ready,
+        ..base()
+    };
+    assert_eq!(
+        queued.merge_block(),
+        Some(MergeBlock::Queued),
+        "no second merge"
+    );
+    let on_and_ready = PrDetail {
+        auto_merge: on,
+        mergeability: Mergeability::Ready,
+        ..base()
+    };
+    assert_eq!(
+        on_and_ready.merge_block(),
+        None,
+        "merging now stays possible"
+    );
 }

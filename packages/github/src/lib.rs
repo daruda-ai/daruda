@@ -31,11 +31,12 @@ pub use files::{
     FileChange, FileText, PR_FILES_MAX, PR_FILES_PER_PAGE, PrFile, PrFiles, PrFilesPage,
 };
 pub use model::{
-    ActionsJob, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus,
-    Conversation, DiffSide, FailedCheck, GITHUB_HOST, LatestReview, LatestReviewState, MergeMethod,
-    Mergeability, NewPr, PrDetail, PrFilter, PrListItem, PrSearch, PrState, PrSummary, RepoId,
-    ReviewComment, ReviewDecision, ReviewEvent, ReviewThread, ReviewThreadDraft, ReviewThreads,
-    ReviewerState, SubmittedReview, ThreadPermissions, reviewer_name_ok,
+    ActionsJob, AutoMergeOn, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun,
+    CheckStatus, Conversation, DiffSide, FailedCheck, GITHUB_HOST, LatestReview, LatestReviewState,
+    MergeMethod, Mergeability, NewPr, PrDetail, PrFilter, PrListItem, PrSearch, PrState, PrSummary,
+    QueueEntry, QueueState, RepoId, ReviewComment, ReviewDecision, ReviewEvent, ReviewThread,
+    ReviewThreadDraft, ReviewThreads, ReviewerState, SubmittedReview, ThreadPermissions,
+    reviewer_name_ok,
 };
 pub use query::RepoPrs;
 pub use search::{

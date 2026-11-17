@@ -377,6 +377,36 @@ pub enum MergeMethod {
     Rebase,
 }
 
+/// Auto-merge turned on for a pull request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoMergeOn {
+    /// `None` for a method this crate does not know.
+    pub method: Option<MergeMethod>,
+    /// Who turned it on; `None` for a deleted account.
+    pub by: Option<String>,
+}
+
+/// A pull request in its base branch's merge queue: accepted to merge,
+/// not merged yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueueEntry {
+    /// 1 is next; `None` when GitHub does not say.
+    pub position: Option<u32>,
+    pub state: QueueState,
+}
+
+/// GitHub's `MergeQueueEntryState`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueState {
+    Queued,
+    AwaitingChecks,
+    Mergeable,
+    Unmergeable,
+    Locked,
+    /// A state this crate does not know.
+    Other,
+}
+
 /// Whether a pull request can be merged now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mergeability {
@@ -466,6 +496,14 @@ pub struct PrDetail {
     pub can_close: bool,
     /// The viewer may reopen it once closed (GitHub's `viewerCanReopen`).
     pub can_reopen: bool,
+    /// Set to merge on its own once its requirements pass.
+    pub auto_merge: Option<AutoMergeOn>,
+    /// Its place in the base branch's merge queue.
+    pub queue: Option<QueueEntry>,
+    /// The viewer may turn auto-merge on (`viewerCanEnableAutoMerge`).
+    pub can_enable_auto_merge: bool,
+    /// The viewer may turn it off (`viewerCanDisableAutoMerge`).
+    pub can_disable_auto_merge: bool,
     /// GitHub's node id of the pull request, which a review names.
     pub node_id: Option<String>,
     /// How many files GitHub says it changes; `None` from an answer that

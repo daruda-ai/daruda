@@ -4,12 +4,18 @@ use serde::Deserialize;
 
 use super::{ApiError, Author, PrNode, api_messages, parse_error, pr_fragment};
 use crate::checks::entries;
-use crate::{BlockReason, GhError, MergeMethod, Mergeability, PrDetail, ReviewerState};
+use crate::{
+    AutoMergeOn, BlockReason, GhError, MergeMethod, Mergeability, PrDetail, QueueEntry, QueueState,
+    ReviewerState,
+};
 
 /// Reviews, review requests and review threads one detail request reads.
 const DETAIL_PAGE: u32 = 100;
 
 /// One pull request's detail, bound to `$owner`, `$name` and `$number`.
+// ASSUMPTION: not measured — every field here exists on the GitHub
+// Enterprise Server versions in use; a server without one (the auto-merge
+// and merge-queue fields are the newest) fails the whole read.
 /// A user's latest review stands for them; a request made after it means
 /// they are asked again.
 pub(crate) fn pr_detail_query() -> String {
@@ -17,6 +23,8 @@ pub(crate) fn pr_detail_query() -> String {
         "query($owner: String!, $name: String!, $number: Int!) {{ \
          repository(owner: $owner, name: $name) {{ mergeCommitAllowed squashMergeAllowed \
          rebaseMergeAllowed viewerDefaultMergeMethod pullRequest(number: $number) {{ ...pr id body headRefOid baseRefName changedFiles viewerCanUpdate viewerCanClose viewerCanReopen \
+         viewerCanEnableAutoMerge viewerCanDisableAutoMerge \
+         autoMergeRequest {{ mergeMethod enabledBy {{ login }} }} mergeQueueEntry {{ position state }} \
          author {{ login }} mergeable mergeStateStatus \
          latestReviews(first: {DETAIL_PAGE}) {{ nodes {{ author {{ login }} state }} }} \
          reviewRequests(first: {DETAIL_PAGE}) {{ nodes {{ requestedReviewer {{ __typename \
@@ -91,6 +99,16 @@ pub(crate) fn parse_pr_detail(json: &str) -> Result<PrDetail, GhError> {
         can_update: pr.viewer_can_update,
         can_close: pr.viewer_can_close,
         can_reopen: pr.viewer_can_reopen,
+        auto_merge: pr.auto_merge_request.map(|request| AutoMergeOn {
+            method: request.merge_method.as_deref().and_then(merge_method),
+            by: request.enabled_by.map(|actor| actor.login),
+        }),
+        queue: pr.merge_queue_entry.map(|entry| QueueEntry {
+            position: entry.position,
+            state: queue_state(&entry.state),
+        }),
+        can_enable_auto_merge: pr.viewer_can_enable_auto_merge,
+        can_disable_auto_merge: pr.viewer_can_disable_auto_merge,
         node_id: pr.id,
     })
 }
@@ -120,6 +138,18 @@ fn merge_method(value: &str) -> Option<MergeMethod> {
         "SQUASH" => Some(MergeMethod::Squash),
         "REBASE" => Some(MergeMethod::Rebase),
         _ => None,
+    }
+}
+
+/// GitHub's `MergeQueueEntryState`.
+fn queue_state(value: &str) -> QueueState {
+    match value {
+        "QUEUED" => QueueState::Queued,
+        "AWAITING_CHECKS" => QueueState::AwaitingChecks,
+        "MERGEABLE" => QueueState::Mergeable,
+        "UNMERGEABLE" => QueueState::Unmergeable,
+        "LOCKED" => QueueState::Locked,
+        _ => QueueState::Other,
     }
 }
 
@@ -198,6 +228,10 @@ struct DetailPr {
     // Required: a missing answer must not read as "not allowed".
     viewer_can_close: bool,
     viewer_can_reopen: bool,
+    viewer_can_enable_auto_merge: bool,
+    viewer_can_disable_auto_merge: bool,
+    auto_merge_request: Option<AutoMergeNode>,
+    merge_queue_entry: Option<QueueNode>,
     #[serde(default)]
     id: Option<String>,
     author: Option<Author>,
@@ -206,6 +240,19 @@ struct DetailPr {
     latest_reviews: Nodes<ReviewNode>,
     review_requests: Nodes<RequestNode>,
     review_threads: ThreadNodes,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AutoMergeNode {
+    merge_method: Option<String>,
+    enabled_by: Option<Author>,
+}
+
+#[derive(Deserialize)]
+struct QueueNode {
+    position: Option<u32>,
+    state: String,
 }
 
 #[derive(Deserialize)]

@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use chrono::{DateTime, Utc};
 use daruda_github::{
     ActionsJob, BlockReason, CheckEntry, CheckStatus, MergeBlock, MergeMethod, Mergeability,
-    PrDetail, PrListItem, PrState, ReviewThread, ReviewThreads, ReviewerState,
+    PrDetail, PrListItem, PrState, QueueState, ReviewThread, ReviewThreads, ReviewerState,
 };
 
 use super::super::actions::{self, ActionState, PrAction};
@@ -82,6 +82,8 @@ pub(in crate::workspace) struct MergeView {
     pub label: String,
     /// The allowed methods, preferred first, and their labels.
     pub methods: Vec<(MergeMethod, String)>,
+    /// The methods auto-merge can be turned on with, and their labels.
+    pub auto: Vec<(MergeMethod, String)>,
     pub slot: ActionSlot,
 }
 
@@ -120,6 +122,8 @@ pub(in crate::workspace) struct HeaderActions {
     pub close: ActionSlot,
     /// Only on a draft.
     pub ready: Option<ActionSlot>,
+    /// Only while auto-merge is on and the viewer may turn it off.
+    pub auto_merge_off: Option<ActionSlot>,
 }
 
 /// What the summary column says under the linked worktree.
@@ -595,6 +599,7 @@ fn header_actions(loaded: &PrDetail, running: &ActionState) -> HeaderActions {
         .collect();
     let blocked = loaded.merge_block().map(|block| match block {
         MergeBlock::NoMethods => s::merge_no_methods(),
+        MergeBlock::Queued => s::merge_blocked(s::merge_in_queue()),
         MergeBlock::Draft => s::merge_blocked(s::blocked_draft()),
         MergeBlock::Conflicting => s::merge_blocked(s::merge_conflicting()),
     });
@@ -604,8 +609,21 @@ fn header_actions(loaded: &PrDetail, running: &ActionState) -> HeaderActions {
                 .first()
                 .map_or_else(s::merge_button, |(_, label)| label.clone()),
             methods,
+            auto: loaded
+                .auto_merge_menu()
+                .into_iter()
+                .map(|method| {
+                    (
+                        method,
+                        s::auto_merge_item(actions::merge_action_label(method)),
+                    )
+                })
+                .collect(),
             slot: ActionSlot::of(running, PrAction::Merging, blocked),
         },
+        auto_merge_off: loaded
+            .can_disable_auto_merge_now()
+            .then(|| ActionSlot::of(running, PrAction::DisablingAutoMerge, None)),
         close: ActionSlot::of(
             running,
             PrAction::Closing,
@@ -1031,7 +1049,11 @@ fn side(
                 value: conflicts,
                 mood: conflicts_mood,
             },
-        ],
+        ]
+        .into_iter()
+        .chain(auto_merge_fact(loaded))
+        .chain(queue_fact(loaded))
+        .collect(),
         reviews,
         lane,
         lane_note,
@@ -1044,6 +1066,42 @@ fn side(
             }
         }),
     }
+}
+
+/// Auto-merge, while on: with which method and who turned it on. Not a
+/// merge: GitHub merges (or queues) it once its requirements pass.
+fn auto_merge_fact(loaded: &PrDetail) -> Option<Fact> {
+    let on = loaded.auto_merge.as_ref()?;
+    let method = on.method.map_or_else(s::method_unknown, method_label);
+    Some(Fact {
+        label: s::side_auto_merge(),
+        value: match &on.by {
+            Some(by) => s::auto_merge_on_by(method, by),
+            None => s::auto_merge_on(method),
+        },
+        mood: Mood::Good,
+    })
+}
+
+/// Its place in the merge queue: accepted, not merged yet.
+fn queue_fact(loaded: &PrDetail) -> Option<Fact> {
+    let entry = loaded.queue?;
+    let (state, mood) = match entry.state {
+        QueueState::Queued => (s::queue_queued(), Mood::Quiet),
+        QueueState::AwaitingChecks => (s::queue_awaiting_checks(), Mood::Quiet),
+        QueueState::Mergeable => (s::queue_mergeable(), Mood::Good),
+        QueueState::Unmergeable => (s::queue_unmergeable(), Mood::Bad),
+        QueueState::Locked => (s::queue_locked(), Mood::Warn),
+        QueueState::Other => (s::queue_in_queue(), Mood::Quiet),
+    };
+    Some(Fact {
+        label: s::side_merge_queue(),
+        value: match entry.position {
+            Some(position) => s::queue_position(position, state),
+            None => state,
+        },
+        mood,
+    })
 }
 
 fn block_label(reason: BlockReason) -> String {

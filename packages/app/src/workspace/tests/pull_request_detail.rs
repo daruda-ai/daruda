@@ -88,6 +88,10 @@ fn detail(number: u64, head: &str) -> PrDetail {
         can_update: false,
         can_close: true,
         can_reopen: true,
+        auto_merge: None,
+        queue: None,
+        can_enable_auto_merge: false,
+        can_disable_auto_merge: false,
         node_id: None,
         changed_files: None,
     }
@@ -1488,4 +1492,139 @@ fn returning_to_a_pull_request_keeps_its_tab_and_scroll(cx: &mut TestAppContext)
         assert_eq!(detail.tab(), PrTab::Threads);
         assert_eq!(detail.scroll().offset(), offset);
     });
+}
+
+/// The merge facts beside the detail, by label.
+fn merge_facts(f: &GitFixture, cx: &mut TestAppContext) -> Vec<(String, String)> {
+    let DetailBody::Ready(ready) = view(f, cx).body else {
+        panic!("not read");
+    };
+    ready
+        .side
+        .merge
+        .iter()
+        .map(|fact| (fact.label.clone(), fact.value.clone()))
+        .collect()
+}
+
+/// A pull request waiting on its requirements, which the viewer may set
+/// to merge on its own.
+fn waiting(number: u64) -> PrDetail {
+    let mut detail = mergeable(number, "feat");
+    detail.mergeability = Mergeability::Blocked(daruda_github::BlockReason::Requirements);
+    detail.node_id = Some(format!("PR_{number}"));
+    detail.can_enable_auto_merge = true;
+    detail.can_disable_auto_merge = true;
+    detail
+}
+
+#[gpui::test]
+fn auto_merge_is_turned_on_once_asked_and_off_again(cx: &mut TestAppContext) {
+    use crate::surface::strings::pull_requests as s;
+    let (f, gh, id) = opened(cx, waiting(7));
+    let actions = view(&f, cx).header.actions().cloned().expect("open");
+    let methods: Vec<_> = actions
+        .merge
+        .auto
+        .iter()
+        .map(|(method, _)| *method)
+        .collect();
+    assert_eq!(
+        methods,
+        [MergeMethod::Squash, MergeMethod::Merge],
+        "the merge menu's order"
+    );
+    assert_eq!(actions.auto_merge_off, None, "off: nothing to turn off");
+
+    assert!(asks(&f, cx, |ws, window, cx| {
+        ws.ask_pr_auto_merge(id, MergeMethod::Squash, window, cx)
+    }));
+    // Polling meanwhile never turns it on.
+    cx.update(crate::github::PrPoller::tick);
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::EnableAutoMerge), 0, "nothing before OK");
+    confirm(&f, cx);
+    assert!(gh.calls().contains(&GhCall::EnableAutoMerge {
+        repo: repo(),
+        pr: "PR_7".into(),
+        method: MergeMethod::Squash,
+        head_sha: "abc".into(),
+    }));
+    assert_eq!(loaded_state(&f, cx), Some(PrState::Open), "not merged");
+    let facts = merge_facts(&f, cx);
+    assert!(
+        facts.contains(&(s::side_auto_merge(), s::auto_merge_on(s::method_squash()))),
+        "{facts:?}"
+    );
+    let actions = view(&f, cx).header.actions().cloned().expect("still open");
+    assert!(actions.merge.auto.is_empty(), "already on");
+    assert_eq!(actions.auto_merge_off, Some(ActionSlot::Ready));
+
+    f.ws.update(cx, |ws, cx| ws.disable_pr_auto_merge(id, cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::DisableAutoMerge), 1);
+    assert!(
+        !merge_facts(&f, cx)
+            .iter()
+            .any(|(label, _)| *label == s::side_auto_merge())
+    );
+    assert!(error_titles(&f, cx).is_empty());
+}
+
+#[gpui::test]
+fn auto_merge_on_a_moved_head_is_refused(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, waiting(7));
+    assert!(asks(&f, cx, |ws, window, cx| {
+        ws.ask_pr_auto_merge(id, MergeMethod::Squash, window, cx)
+    }));
+    // The branch moves before OK.
+    let mut moved = waiting(7);
+    moved.head_sha = "def".into();
+    gh.set_pr_detail(&repo(), 7, moved);
+    confirm(&f, cx);
+    assert_eq!(gh.count(GhOp::EnableAutoMerge), 1);
+    // GitHub's wording for this refusal is not known: told as a failure.
+    assert_eq!(
+        error_titles(&f, cx),
+        [crate::surface::strings::error::github_pr_auto_merge_failed(
+            7
+        )]
+    );
+    let DetailBody::Ready(_) = view(&f, cx).body else {
+        panic!("read again");
+    };
+    assert!(
+        view(&f, cx)
+            .header
+            .actions()
+            .is_some_and(|actions| actions.auto_merge_off.is_none()),
+        "still off"
+    );
+}
+
+/// In the merge queue: accepted, not merged; the merge button says so.
+#[gpui::test]
+fn a_queued_pull_request_is_shown_queued_not_merged(cx: &mut TestAppContext) {
+    use crate::surface::strings::pull_requests as s;
+    let mut queued = waiting(7);
+    queued.queue = Some(daruda_github::QueueEntry {
+        position: Some(2),
+        state: daruda_github::QueueState::AwaitingChecks,
+    });
+    let (f, _, _) = opened(cx, queued);
+    assert_eq!(view(&f, cx).state, s::state_open());
+    let actions = view(&f, cx).header.actions().cloned().expect("open");
+    assert_eq!(
+        actions.merge.slot,
+        ActionSlot::Blocked(s::merge_blocked(s::merge_in_queue()))
+    );
+    assert!(actions.merge.auto.is_empty());
+    let facts = merge_facts(&f, cx);
+    assert!(
+        facts.contains(&(
+            s::side_merge_queue(),
+            s::queue_position(2, s::queue_awaiting_checks())
+        )),
+        "{facts:?}"
+    );
 }
