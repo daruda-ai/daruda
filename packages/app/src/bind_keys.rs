@@ -24,11 +24,12 @@ use crate::workspace::{
     FocusSkillSearch, GitChangesActivate, GitChangesSelectNext, GitChangesSelectPrev,
     GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow, MoveActiveProjectToGroup,
     MoveTabLeft, MoveTabRight, NewGroup, NewTab, NextTab, OpenCommandHistory, OpenSettings,
-    PrevTab, QuestionNextField, QuestionPick1, QuestionPick2, QuestionPick3, QuestionPick4,
-    QuestionPick5, QuestionPick6, QuestionPick7, QuestionPick8, QuestionPick9, QuestionPrevField,
-    QuestionToggle, RenameActiveProject, SaveFilePane, SplitDown, SplitRight, ToggleBottomDock,
-    ToggleCommandPalette, ToggleFilesFocus, ToggleFullScreen, ToggleGitChangesFocus,
-    ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
+    PrevTab, PullRequestsFocusSearch, PullRequestsOpenSelected, PullRequestsSelectNext,
+    PullRequestsSelectPrev, QuestionNextField, QuestionPick1, QuestionPick2, QuestionPick3,
+    QuestionPick4, QuestionPick5, QuestionPick6, QuestionPick7, QuestionPick8, QuestionPick9,
+    QuestionPrevField, QuestionToggle, RenameActiveProject, SaveFilePane, SplitDown, SplitRight,
+    ToggleBottomDock, ToggleCommandPalette, ToggleFilesFocus, ToggleFullScreen,
+    ToggleGitChangesFocus, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
 };
 use crate::{
     CloseProject, NewEmptyWindow, OpenDarudaHelp, OpenFolder, OpenFolderInNewWindow,
@@ -36,6 +37,8 @@ use crate::{
 };
 use daruda_terminal::view::{Copy, Paste, SelectAll};
 use gpui::{App, AppContext as _, KeyBinding};
+
+const PR_LIST: &str = crate::workspace::PR_LIST_KEY_CONTEXT;
 
 /// Resolve host modifier aliases for both built-in and configured bindings.
 pub(crate) fn binding<A: gpui::Action>(
@@ -237,6 +240,32 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
             k::SHORTCUT_GIT_CHANGES_ACTIVATE,
             GitChangesActivate,
             Some("GitChanges"),
+            cx,
+        ),
+        // Pull requests list — only while the list body holds focus, so
+        // the search field and every input keep their own keys.
+        binding(
+            k::SHORTCUT_PULL_REQUESTS_SELECT_NEXT,
+            PullRequestsSelectNext,
+            Some(PR_LIST),
+            cx,
+        ),
+        binding(
+            k::SHORTCUT_PULL_REQUESTS_SELECT_PREV,
+            PullRequestsSelectPrev,
+            Some(PR_LIST),
+            cx,
+        ),
+        binding(
+            k::SHORTCUT_PULL_REQUESTS_OPEN,
+            PullRequestsOpenSelected,
+            Some(PR_LIST),
+            cx,
+        ),
+        binding(
+            k::SHORTCUT_PULL_REQUESTS_FOCUS_SEARCH,
+            PullRequestsFocusSearch,
+            Some(PR_LIST),
             cx,
         ),
         // Window menu — Minimize / Toggle Full Screen are global so

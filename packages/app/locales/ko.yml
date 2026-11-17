@@ -143,6 +143,7 @@ command:
   show_git_changes: "Git 변경사항 표시"
   show_lanes: "워크트리 표시"
   skills_new_skill: "스킬: 새 스킬"
+  pull_requests_search: "Pull requests: 검색"
   split_down: "아래로 분할"
   split_right: "오른쪽으로 분할"
   start_task: "작업 시작…"

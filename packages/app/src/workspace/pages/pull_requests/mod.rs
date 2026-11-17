@@ -7,7 +7,7 @@
 use crate::ui::InputState;
 use daruda_github::PrFilter;
 use daruda_store::project::LaneKind;
-use gpui::{App, AppContext as _, Context, Entity, WeakEntity, Window};
+use gpui::{App, AppContext as _, Context, Entity, FocusHandle, WeakEntity, Window};
 
 use super::Page;
 use crate::github::{PrList, PrPoller};
@@ -21,8 +21,10 @@ mod counts;
 pub(in crate::workspace) mod detail;
 mod lane;
 pub(in crate::workspace) mod list;
+pub(in crate::workspace) mod navigation;
 mod progress;
 pub(in crate::workspace) mod render;
+pub(in crate::workspace) mod row_layout;
 mod search;
 
 use std::collections::BTreeSet;
@@ -48,9 +50,20 @@ pub(in crate::workspace) struct PullRequestsPage {
     pub(in crate::workspace) detail: Option<PrDetailState>,
     /// Staged each frame while the page shows its detail; `None` otherwise.
     pub(in crate::workspace) detail_snapshot: Option<PrDetailView>,
+    /// Takes the keyboard while the list is shown, so the arrows and Enter
+    /// browse it; the search field sits outside it.
+    focus: FocusHandle,
+    /// The selected row: moved by the arrows, set by opening a detail, and
+    /// where the list comes back to. Kept while search hides it.
+    cursor: Option<PrKey>,
+    row_bounds: navigation::RowBounds,
 }
 
 impl PullRequestsPage {
+    pub(in crate::workspace) fn focus_handle(&self) -> &FocusHandle {
+        &self.focus
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Workspace>) -> Self {
         Self {
             filter: PrFilter::Mine,
@@ -63,6 +76,9 @@ impl PullRequestsPage {
             snapshot: None,
             detail: None,
             detail_snapshot: None,
+            focus: cx.focus_handle(),
+            cursor: None,
+            row_bounds: navigation::RowBounds::default(),
         }
     }
 }
@@ -78,6 +94,9 @@ pub(in crate::workspace) struct PrPageSnapshot {
     pub visible: usize,
     pub total: usize,
     pub counts: [String; 3],
+    pub focus: FocusHandle,
+    pub cursor: Option<PrKey>,
+    pub row_bounds: navigation::RowBounds,
 }
 
 impl Workspace {
@@ -135,6 +154,7 @@ impl Workspace {
             });
         let shows_list = detail.is_none();
         self.pages.pull_requests.detail_snapshot = detail;
+        self.pages.pull_requests.row_bounds.borrow_mut().clear();
         self.pages.pull_requests.snapshot = shows_list.then(|| {
             let repos = self.github_repos();
             let search = self.pages.pull_requests.search.clone();
@@ -157,6 +177,9 @@ impl Workspace {
                 visible,
                 total,
                 counts,
+                focus: self.pages.pull_requests.focus.clone(),
+                cursor: self.pages.pull_requests.cursor.clone(),
+                row_bounds: self.pages.pull_requests.row_bounds.clone(),
             }
         });
     }

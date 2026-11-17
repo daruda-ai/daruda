@@ -289,7 +289,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.close_page_detail_now(id, cx);
-        self.window_runtime.focus_handle.focus(window, cx);
+        self.focus_shown_page(window, cx);
     }
 
     /// Drop detail `id` because what it shows is gone. The keyboard comes back

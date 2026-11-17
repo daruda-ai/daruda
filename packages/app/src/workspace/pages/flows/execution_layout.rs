@@ -35,11 +35,7 @@ impl Workspace {
         window: &gpui::Window,
         cx: &gpui::App,
     ) -> ExecutionLayout {
-        let width = f32::from(window.viewport_size().width);
-        let left = self.docks.left.read(cx).display_size();
-        let right = self.docks.right.read(cx);
-        let right = if right.is_open { right.size } else { 0.0 };
-        ExecutionLayout::for_width((width - left - right).max(0.0))
+        ExecutionLayout::for_width(self.page_content_width(window, cx))
     }
 }
 

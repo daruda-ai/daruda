@@ -149,6 +149,7 @@ command:
   show_git_changes: "Show Git Changes"
   show_lanes: "Show Worktrees"
   skills_new_skill: "Skills: New skill"
+  pull_requests_search: "Pull Requests: Search"
   split_down: "Split Down"
   split_right: "Split Right"
   start_task: "Start Task…"

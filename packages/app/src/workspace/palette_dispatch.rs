@@ -77,6 +77,7 @@ impl Workspace {
                 "resume_workspace_page" => {
                     self.on_resume_workspace_page(&super::ResumeWorkspacePage, window, cx)
                 }
+                "pull_requests_focus_search" => self.focus_pr_search(window, cx),
                 "new_agent_chat" => self.on_open_agent_chat(&OpenAgentChat, window, cx),
                 "edit_task" => self.on_edit_task(&EditTask, window, cx),
                 "start_task" => self.open_task_picker_modal(

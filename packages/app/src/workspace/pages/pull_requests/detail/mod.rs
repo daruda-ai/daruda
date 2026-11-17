@@ -264,6 +264,7 @@ impl Workspace {
         if !crate::github::enabled(cx) {
             return;
         }
+        self.select_pr_row((item.repo.clone(), item.pr.number));
         if !self.github_repos().contains(&item.repo) {
             let project = self.lane_scoped.iter().find_map(|(lane, state)| {
                 state
@@ -287,8 +288,12 @@ impl Workspace {
             self.show_page(Page::PullRequests, cx);
             return;
         }
-        self.leave_page_detail_then(Page::PullRequests, window, cx, move |ws, _, cx| {
+        self.leave_page_detail_then(Page::PullRequests, window, cx, move |ws, window, cx| {
             ws.install_pr_detail(item, cx);
+            // The list that had the keyboard is no longer drawn.
+            if ws.active_page() == Some(Page::PullRequests) {
+                ws.focus_shown_page(window, cx);
+            }
         });
     }
 

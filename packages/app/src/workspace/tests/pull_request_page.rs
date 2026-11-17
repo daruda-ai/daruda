@@ -15,7 +15,7 @@ use crate::workspace::pages::Page;
 use crate::workspace::pages::pull_requests::list::{GroupBody, LaneSlot, PageBody, Trouble};
 use crate::workspace::tests::GitFixture;
 
-fn repo() -> RepoId {
+pub(super) fn repo() -> RepoId {
     RepoId::new("github.com", "o", "r")
 }
 
@@ -34,7 +34,7 @@ fn summary(number: u64, head: &str) -> PrSummary {
     }
 }
 
-fn item(number: u64) -> PrListItem {
+pub(super) fn item(number: u64) -> PrListItem {
     PrListItem {
         repo: repo(),
         pr: summary(number, &format!("head-{number}")),
@@ -52,7 +52,7 @@ fn tick(cx: &mut TestAppContext) {
 
 /// A window whose one lane pushes `feat` to o/r, linked to PR #7, with
 /// #7 and #8 among the user's open pull requests.
-fn linked_window(cx: &mut TestAppContext) -> (GitFixture, FakeGh, LaneRef) {
+pub(super) fn linked_window(cx: &mut TestAppContext) -> (GitFixture, FakeGh, LaneRef) {
     let gh = crate::test_support::fake_gh(cx);
     gh.set_prs(&repo(), vec![summary(7, "feat")]);
     gh.set_pr_list(PrFilter::Mine, vec![item(7), item(8)]);
@@ -104,7 +104,7 @@ fn linked(slot: &LaneSlot) -> Option<LaneRef> {
     }
 }
 
-fn rows(f: &GitFixture, cx: &mut TestAppContext) -> Vec<(String, Option<LaneRef>)> {
+pub(super) fn rows(f: &GitFixture, cx: &mut TestAppContext) -> Vec<(String, Option<LaneRef>)> {
     let list = f.ws.read_with(cx, |ws, cx| ws.pr_page_list(cx));
     let PageBody::Groups(groups) = list.body else {
         panic!("expected groups, got {:?}", list.body);
@@ -153,7 +153,7 @@ fn opening_the_page_lists_its_pull_requests_with_their_lanes(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-fn pull_request_rows_scroll_vertically_at_narrow_and_wide_sizes(cx: &mut TestAppContext) {
+fn pull_request_rows_scroll_vertically_and_fit_narrow_and_wide_sizes(cx: &mut TestAppContext) {
     use gpui::{ScrollDelta, ScrollEvent, ScrollSource, TouchPhase, point, px, size};
 
     let (f, gh, _) = linked_window(cx);
@@ -211,24 +211,27 @@ fn pull_request_rows_scroll_vertically_at_narrow_and_wide_sizes(cx: &mut TestApp
             row.left(),
             "{width}: vertical scrolling keeps columns in place"
         );
+        let compact = vcx.debug_bounds("pr-compact-row-github.com/o/r#7");
+        let headings = vcx.debug_bounds("pr-list-headings");
         if width == 800. {
-            vcx.simulate_event(ScrollEvent {
-                source: ScrollSource::Pointer,
-                position: viewport.center(),
-                delta: ScrollDelta::Pixels(point(px(-200.), px(0.))),
-                touch_phase: TouchPhase::Started,
-                modifiers: Default::default(),
-            });
-            vcx.run_until_parked();
-            let horizontal = vcx.debug_bounds("pr-row-github.com/o/r#7").unwrap();
+            // Between the docks the columns do not fit: rows stack instead
+            // of scrolling sideways, and no headings name absent columns.
+            assert!(compact.is_some(), "narrow rows stack their facts");
+            assert!(headings.is_none(), "stacked rows have no column headings");
             assert!(
-                horizontal.left() < shifted.left(),
-                "horizontal scrolling reaches the remaining columns"
+                shifted.right() <= viewport.right(),
+                "a stacked row fits the page: {shifted:?} in {viewport:?}"
             );
-            assert_eq!(
-                horizontal.top(),
-                shifted.top(),
-                "horizontal scrolling keeps the row in place"
+            assert!(
+                vcx.debug_bounds("pr-lane-github.com/o/r#7").is_some(),
+                "the worktree stays reachable"
+            );
+        } else {
+            assert!(compact.is_none(), "wide rows keep the table");
+            let headings = headings.expect("the table names its columns");
+            assert!(
+                headings.bottom() <= viewport.top(),
+                "column headings stay above the scrolling rows"
             );
         }
         let before_click = scroll.offset().y;

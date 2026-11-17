@@ -189,6 +189,17 @@ pub const SHORTCUT_GIT_CHANGES_TOGGLE_STAGE: &str = "space";
 pub const SHORTCUT_GIT_CHANGES_ACTIVATE: &str = "enter";
 
 // ============================================================================
+// Pull requests list
+// ============================================================================
+pub const SHORTCUT_PULL_REQUESTS_SELECT_NEXT: &str = "down";
+pub const SHORTCUT_PULL_REQUESTS_SELECT_PREV: &str = "up";
+/// Enter opens the detail of the selected pull request.
+pub const SHORTCUT_PULL_REQUESTS_OPEN: &str = "enter";
+/// Bound only while the list has the keyboard; its command palette entry
+/// reaches the search from anywhere.
+pub const SHORTCUT_PULL_REQUESTS_FOCUS_SEARCH: &str = "secondary-f";
+
+// ============================================================================
 // Command history picker
 // ============================================================================
 /// Opens the picker listing every completed command captured by the

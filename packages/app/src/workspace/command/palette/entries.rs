@@ -180,6 +180,11 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: k::SHORTCUT_NEW_TAB,
     },
     PaletteEntry {
+        id: "pull_requests_focus_search",
+        label: s::command::pull_requests_search,
+        shortcut: k::SHORTCUT_PULL_REQUESTS_FOCUS_SEARCH,
+    },
+    PaletteEntry {
         id: "resume_workspace_page",
         label: s::common::resume_workspace_page,
         shortcut: "",

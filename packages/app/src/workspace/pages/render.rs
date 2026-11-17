@@ -111,7 +111,17 @@ pub(in crate::workspace) fn body(
                     cx,
                 ));
             }
-            Some(pr_content(state, pages.snapshot.as_ref()?, cx))
+            let focused = pages.focus_handle().is_focused(window);
+            let rows = super::pull_requests::row_layout::RowLayout::for_width(
+                ws.page_content_width(window, cx),
+            );
+            Some(pr_content(
+                state,
+                pages.snapshot.as_ref()?,
+                rows,
+                focused,
+                cx,
+            ))
         }
     }
 }
@@ -179,13 +189,15 @@ pub(in crate::workspace) fn flow_content(
 pub(in crate::workspace) fn pr_content(
     state: &PageState,
     snap: &super::pull_requests::PrPageSnapshot,
+    rows: super::pull_requests::row_layout::RowLayout,
+    focused: bool,
     cx: &App,
 ) -> AnyElement {
     let close = close_button(snap.workspace.clone(), cx);
     frame(
         state,
-        super::pull_requests::render::header(snap, close, cx),
-        super::pull_requests::render::render(snap, cx),
+        super::pull_requests::render::header(snap, rows, close, cx),
+        super::pull_requests::render::render(snap, rows, focused, cx),
         cx,
     )
 }

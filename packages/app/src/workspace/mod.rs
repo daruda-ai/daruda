@@ -120,6 +120,7 @@ mod window_runtime;
 
 pub(in crate::workspace) use config_sync::ConfigMirrors;
 pub(in crate::workspace) use modal_view::ModalView;
+pub(crate) use pages::pull_requests::render::KEY_CONTEXT as PR_LIST_KEY_CONTEXT;
 pub(in crate::workspace) use persistence::LaneRuntime;
 
 use std::collections::{HashMap, HashSet};
@@ -292,6 +293,12 @@ actions!(
         GitChangesSelectPrev,
         GitChangesToggleStage,
         GitChangesActivate,
+        /// Pull requests list browsing (`PullRequestsList` context).
+        PullRequestsSelectNext,
+        PullRequestsSelectPrev,
+        PullRequestsOpenSelected,
+        /// Show the Pull requests list and put the keyboard in its search.
+        PullRequestsFocusSearch,
         OpenProjectConfig,
         InstallAgentHooks,
         UninstallAgentHooks,

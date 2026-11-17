@@ -165,7 +165,35 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.show_page(page, cx);
-        self.window_runtime.focus_handle.focus(window, cx);
+        self.focus_shown_page(window, cx);
+    }
+
+    /// Give the keyboard to the shown page: the Pull requests list when that
+    /// page shows its list, so its arrows work at once; the workspace
+    /// otherwise, whose handlers serve every page and detail.
+    pub(in crate::workspace) fn focus_shown_page(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let handle = if self.active_page() == Some(Page::PullRequests)
+            && self.shown_page_detail_id().is_none()
+        {
+            self.pages.pull_requests.focus_handle().clone()
+        } else {
+            self.window_runtime.focus_handle.clone()
+        };
+        handle.focus(window, cx);
+    }
+
+    /// The width a page has between the open docks, which its layouts are
+    /// budgeted from.
+    pub(in crate::workspace) fn page_content_width(&self, window: &Window, cx: &gpui::App) -> f32 {
+        let width = f32::from(window.viewport_size().width);
+        let left = self.docks.left.read(cx).display_size();
+        let right = self.docks.right.read(cx);
+        let right = if right.is_open { right.size } else { 0.0 };
+        (width - left - right).max(0.0)
     }
 
     pub(in crate::workspace) fn last_page(&self) -> Option<Page> {
