@@ -428,6 +428,9 @@ impl Workspace {
         // default-branch pass skipped this project — run it now that
         // git lanes exist.
         self.reconcile_project_default_branches(cx);
+        if self.active_page() == Some(super::pages::Page::PullRequests) {
+            self.refresh_pr_project_repositories(project_id, cx);
+        }
         self.mutate_durable(cx, |_, _| {});
         // The page details follow the lanes discovery found once the window
         // is free — this runs inside the workspace's own update, with no

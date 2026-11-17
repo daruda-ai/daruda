@@ -77,6 +77,7 @@ impl Workspace {
     /// The page came on screen: search for its list until it leaves.
     pub(super) fn pr_page_shown(&mut self, cx: &mut Context<Self>) {
         self.show_pr_list(self.pages.pull_requests.filter, cx);
+        self.refresh_pr_repositories(cx);
     }
 
     /// Show `filter`'s pull requests, now and whenever the page reopens.
@@ -133,7 +134,9 @@ impl Workspace {
                 query,
                 visible,
                 total,
-                counts: counts::labels(self.pr_list(), &self.github_repos()),
+                counts: counts::labels(self.pr_list(), &self.github_repos(), |host| {
+                    PrPoller::availability(host, cx)
+                }),
             }
         });
     }
@@ -155,7 +158,6 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_pr_page_filter(PrFilter::Mine, cx);
         self.clear_pr_search(window, cx);
         self.pages.scrolls[Page::PullRequests.index()]
             .set_offset(gpui::point(gpui::Pixels::ZERO, gpui::Pixels::ZERO));

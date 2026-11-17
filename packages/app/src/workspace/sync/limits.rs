@@ -339,9 +339,9 @@ fn fetch_limits(
     recipe: AccountRecipeId,
     config_dir: Option<&Path>,
 ) -> Result<ProviderUsage, daruda_agent::FetchError> {
-    // Tests must never reach the provider: every test `Workspace` starts these
-    // pumps, and the request carries the user's real OAuth token.
-    if cfg!(test) {
+    // Tests and captures must not read provider credentials or depend on
+    // external services; both the pumps and manual refresh use these sources.
+    if crate::startup::offline_sources() {
         return Ok(offline_usage(recipe));
     }
     let result = usage::source_for(recipe).fetch(config_dir);
@@ -352,13 +352,13 @@ fn fetch_limits(
 }
 
 fn fetch_status(recipe: AccountRecipeId) -> Result<ServiceStatus, daruda_agent::FetchError> {
-    if cfg!(test) {
+    if crate::startup::offline_sources() {
         return Ok(offline_status());
     }
     service_status::fetch_service_status(usage::source_for(recipe).status_url())
 }
 
-/// Fixed snapshot answering [`fetch_limits`] under test.
+/// Fixed snapshot answering [`fetch_limits`] in tests and captures.
 fn offline_usage(recipe: AccountRecipeId) -> ProviderUsage {
     let window = UsageWindow {
         window: OFFLINE_WINDOW,
@@ -369,7 +369,7 @@ fn offline_usage(recipe: AccountRecipeId) -> ProviderUsage {
     ProviderUsage::new(recipe, vec![window], None)
 }
 
-/// Fixed "operational" answer for [`fetch_status`] under test.
+/// Fixed "operational" answer for [`fetch_status`] in tests and captures.
 fn offline_status() -> ServiceStatus {
     ServiceStatus {
         indicator: StatusIndicator::None,
@@ -382,16 +382,16 @@ fn offline_status() -> ServiceStatus {
 /// strategy owned by `daruda_agent`. `config_dir` is that recipe's resolved
 /// managed-account dir (`None` = system default).
 fn fetch_activity_in(recipe: AccountRecipeId, config_dir: Option<&Path>) -> Option<ActivityStats> {
-    // Tests must never scan the user's own session logs, nor write the
-    // derived cache into the real profile.
-    if cfg!(test) {
+    // Tests and captures must not scan personal session logs or write
+    // derived activity caches into the real profile.
+    if crate::startup::offline_sources() {
         return Some(offline_activity());
     }
     activity::source_for(recipe).fetch(config_dir)
 }
 
-/// Fixed one-day aggregate answering [`fetch_activity_in`] under test. No
-/// recent sessions: those would offer restore rows no test seeded.
+/// Fixed one-day aggregate for offline inspection. No recent sessions:
+/// those would offer restore rows absent from the fixtures.
 fn offline_activity() -> ActivityStats {
     ActivityStats {
         daily: vec![DayActivity {
@@ -514,8 +514,46 @@ mod tests {
 
     use super::{
         Endpoint, FocusedAccount, STARTUP_JITTER_MAX_SECS, account_scoped, observe_focus,
-        startup_jitter, target_account, usage_account,
+        refresh_round, startup_jitter, target_account, usage_account,
     };
+
+    #[test]
+    fn offline_refresh_needs_no_provider_login_or_session_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let sticky: HashMap<_, _> = AccountRecipeId::all()
+            .map(|recipe| {
+                (
+                    recipe,
+                    FocusedAccount::Managed {
+                        id: AccountId::new(),
+                        recipe,
+                        config_dir: temp.path().join(super::recipe_slug(recipe)),
+                    },
+                )
+            })
+            .collect();
+        let round = refresh_round(&sticky);
+        for recipe in AccountRecipeId::all() {
+            assert!(
+                round
+                    .limits
+                    .iter()
+                    .any(|(key, result)| key.recipe == recipe && result.is_ok()),
+                "{recipe:?}: usage has a fixture without credentials"
+            );
+            assert!(
+                round
+                    .status
+                    .iter()
+                    .any(|(held, result)| *held == recipe && result.is_ok()),
+                "{recipe:?}: status has a fixture without HTTP"
+            );
+            assert!(
+                round.activity.iter().any(|(key, _)| key.recipe == recipe),
+                "{recipe:?}: activity has a fixture without session files"
+            );
+        }
+    }
 
     #[test]
     fn only_limits_and_activity_are_account_scoped() {

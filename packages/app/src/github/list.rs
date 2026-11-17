@@ -28,12 +28,22 @@ impl PrList {
         cx.defer(PrPoller::tick);
     }
 
-    /// Search `hosts` for `filter` again at the next round, whatever the
-    /// cadence says: the user pressed refresh.
-    pub(crate) fn refresh(hosts: impl IntoIterator<Item = String>, filter: PrFilter, cx: &mut App) {
+    /// Search `hosts` for each of `filters` again at the next round,
+    /// whatever the cadence says: the user pressed refresh, or changed
+    /// GitHub in a way every tab may show.
+    pub(crate) fn refresh(
+        hosts: impl IntoIterator<Item = String>,
+        filters: &[PrFilter],
+        cx: &mut App,
+    ) {
         let schedule = &mut cx.default_global::<Self>().schedule;
         for host in hosts {
-            schedule.refresh(ListKey { host, filter });
+            for &filter in filters {
+                schedule.refresh(ListKey {
+                    host: host.clone(),
+                    filter,
+                });
+            }
         }
         cx.defer(PrPoller::tick);
     }
@@ -155,9 +165,13 @@ impl PrList {
                 Self::broadcast(update, cx);
             }
             ListOutcome::Failed(kind) => {
-                Self::broadcast(PrListUpdate::Failed { host, filter }, cx);
                 if kind != FailureKind::Transient {
                     PrPoller::host_failed(host, kind, cx);
+                }
+                // Other tabs may still be answering after this host was
+                // blocked; their failures must not restore its cleared state.
+                if !super::is_unusable(PrPoller::availability(host, cx)) {
+                    Self::broadcast(PrListUpdate::Failed { host, filter }, cx);
                 }
             }
             ListOutcome::Dropped => {}
@@ -185,7 +199,7 @@ mod tests {
         let gh = crate::test_support::fake_gh(cx);
         cx.update(|cx| {
             SettingsStore::init(cx);
-            PrList::refresh(["github.com".to_owned()], PrFilter::Mine, cx);
+            PrList::refresh(["github.com".to_owned()], &[PrFilter::Mine], cx);
         });
         cx.run_until_parked();
         assert!(gh.calls().is_empty());

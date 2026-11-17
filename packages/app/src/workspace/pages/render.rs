@@ -3,6 +3,7 @@
 use gpui::{AnyElement, App, Context, IntoElement, Window, div, prelude::*, px};
 
 use super::{Page, PageState};
+use crate::ui::scrollbar::{Scrollbar, ScrollbarMode};
 use crate::ui::{ButtonVariants as _, button_with_icon_sized, theme};
 use crate::workspace::Workspace;
 use crate::workspace::layout::{DockSnapshot, LeftDockSnapshot, RightDockSnapshot};
@@ -216,19 +217,39 @@ pub(in crate::workspace) fn frame(
         )
         .child(
             div()
-                .id("workspace-page-scroll")
-                .debug_selector(|| "workspace-page-scroll".into())
+                .relative()
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .track_scroll(&state.scroll)
+                .flex()
+                .flex_col()
                 .child(
                     div()
-                        .w_full()
-                        .min_w_0()
-                        .debug_selector(|| "workspace-page-content".into())
-                        .p(px(theme::DOCK_PAGE_PAD))
-                        .child(body),
+                        .id("workspace-page-scroll")
+                        .debug_selector(|| "workspace-page-scroll".into())
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .restrict_scroll_to_axis()
+                        .track_scroll(&state.scroll)
+                        .child(
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .debug_selector(|| "workspace-page-content".into())
+                                .p(px(theme::DOCK_PAGE_PAD))
+                                .child(body),
+                        ),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .debug_selector(|| "workspace-page-scrollbar".into())
+                        .child(
+                            Scrollbar::vertical(&state.scroll)
+                                .id("workspace-page-scrollbar")
+                                .mode(ScrollbarMode::Always),
+                        ),
                 ),
         )
         .into_any_element()

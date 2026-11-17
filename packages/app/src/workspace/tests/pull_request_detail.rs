@@ -194,6 +194,84 @@ fn opening_a_detail_reads_the_pull_request_once(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn pull_request_detail_scrolls_long_checks_and_description(cx: &mut TestAppContext) {
+    use gpui::{ScrollDelta, ScrollEvent, ScrollSource, TouchPhase, point, px, size};
+
+    let (f, gh, _) = window(cx);
+    let mut long = detail(7, "feat");
+    long.checks = (0..60)
+        .map(|ix| {
+            let mut check = long.checks[0].clone();
+            check.run.name = format!("check {ix}");
+            check
+        })
+        .collect();
+    long.body = (0..60).map(|ix| format!("Paragraph {ix}.\n\n")).collect();
+    gh.set_pr_detail(&repo(), 7, long);
+    open(&f, item(7, "feat"), cx);
+    cx.run_until_parked();
+    let id = id(&f, cx);
+    let scroll = f.ws.read_with(cx, |ws, _| {
+        ws.pages
+            .pull_requests
+            .detail
+            .as_ref()
+            .unwrap()
+            .scroll
+            .clone()
+    });
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.simulate_resize(size(px(1280.), px(500.)));
+    for tab in [PrTab::Checks, PrTab::Description] {
+        f.ws.update(&mut vcx, |ws, cx| {
+            scroll.set_offset(point(px(0.), px(0.)));
+            ws.select_pr_detail_tab(id, tab, cx);
+        });
+        vcx.run_until_parked();
+        let viewport = scroll.bounds();
+        assert_eq!(
+            vcx.debug_bounds("pr-detail-scrollbar").unwrap(),
+            viewport,
+            "{tab:?}: scrollbar stays within the detail viewport"
+        );
+        assert!(
+            viewport.bottom() <= px(500.),
+            "{tab:?}: viewport={viewport:?}"
+        );
+        assert!(
+            scroll.max_offset().y > px(0.),
+            "{tab:?}: content overflows: {viewport:?}"
+        );
+        let before = scroll.offset().y;
+        vcx.simulate_event(ScrollEvent {
+            source: ScrollSource::Pointer,
+            position: viewport.center(),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-200.))),
+            touch_phase: TouchPhase::Started,
+            modifiers: Default::default(),
+        });
+        vcx.run_until_parked();
+        assert!(
+            scroll.offset().y < before,
+            "{tab:?}: wheel moves the detail"
+        );
+        let before_click = scroll.offset().y;
+        vcx.simulate_click(
+            point(
+                viewport.right() - px(crate::ui::theme::SCROLLBAR_MARGIN_R),
+                viewport.bottom() - px(crate::ui::theme::CONTROL_TARGET_SIZE),
+            ),
+            Default::default(),
+        );
+        vcx.run_until_parked();
+        assert!(
+            scroll.offset().y < before_click,
+            "{tab:?}: scrollbar track moves the detail"
+        );
+    }
+}
+
+#[gpui::test]
 fn a_read_landing_after_its_detail_was_replaced_or_closed_is_dropped(cx: &mut TestAppContext) {
     let (f, gh, _) = window(cx);
     // #7 answers; #8 is unknown to GitHub and fails. Replaced before either

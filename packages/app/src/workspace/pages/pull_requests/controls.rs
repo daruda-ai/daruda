@@ -90,9 +90,7 @@ pub(super) fn search(snap: &PrPageSnapshot, cx: &App) -> impl IntoElement {
 
 pub(super) fn results(snap: &PrPageSnapshot, cx: &App) -> impl IntoElement {
     let workspace = snap.workspace.clone();
-    let clear = (snap.list.filter != daruda_github::PrFilter::Mine
-        || !snap.query.trim().is_empty())
-    .then(|| {
+    let clear = (!snap.query.trim().is_empty()).then(|| {
         button("pr-clear-filters", common::clear_filters())
             .ghost()
             .tab_stop(true)

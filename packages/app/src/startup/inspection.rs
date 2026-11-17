@@ -1,5 +1,21 @@
 //! Optional inspection of the real desktop startup: replay, capture, and smoke.
 
+/// Tests and captures use fixed usage data and skip update requests, so
+/// UI fixtures need no provider credentials or service availability.
+pub(crate) fn offline_sources() -> bool {
+    if cfg!(test) {
+        return true;
+    }
+    #[cfg(feature = "screenshot")]
+    {
+        crate::screenshot::parse_screenshot_arg().is_some()
+    }
+    #[cfg(not(feature = "screenshot"))]
+    {
+        false
+    }
+}
+
 #[cfg(feature = "replay")]
 pub(super) fn load_replay() -> Option<crate::replay::Loaded> {
     // Load before a restored pane connects: its wire tap could truncate the

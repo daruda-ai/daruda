@@ -182,6 +182,7 @@ impl Workspace {
             self.respawn_flow_watcher(cx);
         }
         if self.active_page() == Some(Page::PullRequests) {
+            self.refresh_pr_repositories(cx);
             crate::github::PrList::wanted(cx);
         }
         cx.notify();

@@ -1121,6 +1121,7 @@ git:
 # Pull requests page
 pull_requests:
   count_pending: "…"
+  count_unavailable: "Unavailable"
   count_capped: "%{count}+"
   choose_worktree_project: "Choose the project for this worktree"
   project_choice: "%{name} — %{path}"

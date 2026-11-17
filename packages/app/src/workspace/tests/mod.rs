@@ -54,6 +54,7 @@ mod persistence;
 mod project_config;
 mod projects;
 mod pull_request_detail;
+mod pull_request_discovery;
 mod pull_request_list;
 mod pull_request_page;
 mod pull_requests;

@@ -81,7 +81,9 @@ fn body(snap: &PrPageSnapshot, cx: &App) -> AnyElement {
                 .iter()
                 .map(|group| render_group(group, snap, &layout, cx)),
         );
-    list_table::scroll("pr-table-scroll", table).into_any_element()
+    list_table::scroll("pr-table-scroll", table)
+        .restrict_scroll_to_axis()
+        .into_any_element()
 }
 
 fn render_group(
@@ -155,13 +157,13 @@ fn render_group(
         .into_any_element()
 }
 
-/// A quiet line inside a group, aligned with the rows' text.
+/// A readable status line inside a group, aligned with the rows' text.
 fn note(message: impl Into<SharedString>, cx: &App) -> Div {
     div()
         .px(px(theme::PAD_LG))
         .py(px(theme::PAD_SM))
-        .text_size(px(theme::FONT_SIZE_SM))
-        .text_color(theme::current(cx).text_subtle)
+        .text_size(px(theme::FONT_SIZE_MD))
+        .text_color(theme::current(cx).text_body)
         .child(message.into())
 }
 

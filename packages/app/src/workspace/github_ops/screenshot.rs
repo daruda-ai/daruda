@@ -347,6 +347,7 @@ impl Workspace {
         GhHost::set_global(Arc::new(gh.clone()), cx);
         PrPoller::seed_for_shot(GITHUB_HOST, GhAvailability::Ready, cx);
         PrPoller::seed_for_shot(CORP_HOST, GhAvailability::LoggedOut, cx);
+        self.set_page_scope(crate::workspace::pages::scope::ProjectScope::All, cx);
         self.show_page(Page::PullRequests, cx);
         cx.notify();
         (gh, sidebar_row)

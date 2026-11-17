@@ -91,6 +91,7 @@ impl Workspace {
         // consume flex space, so toggling docks doesn't reflow layout.
         let pane_area = div()
             .flex_1()
+            .min_h_0()
             .w_full()
             .flex()
             .on_drag_move::<PaneHeaderDrag>(cx.listener(Self::update_pane_drag_from_move))

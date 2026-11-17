@@ -153,6 +153,91 @@ fn opening_the_page_lists_its_pull_requests_with_their_lanes(cx: &mut TestAppCon
 }
 
 #[gpui::test]
+fn pull_request_rows_scroll_vertically_at_narrow_and_wide_sizes(cx: &mut TestAppContext) {
+    use gpui::{ScrollDelta, ScrollEvent, ScrollSource, TouchPhase, point, px, size};
+
+    let (f, gh, _) = linked_window(cx);
+    gh.set_pr_list(PrFilter::Mine, (1..=60).map(item).collect());
+    show_page(&f, cx);
+    let scroll = f.ws.read_with(cx, |ws, _| {
+        ws.workspace_page.state().unwrap().scroll.clone()
+    });
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    for width in [800., 1280.] {
+        vcx.simulate_resize(size(px(width), px(500.)));
+        f.ws.update(&mut vcx, |_, cx| {
+            scroll.set_offset(point(px(0.), px(0.)));
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        let viewport = scroll.bounds();
+        assert_eq!(
+            vcx.debug_bounds("workspace-page-scrollbar").unwrap(),
+            viewport,
+            "{width}: scrollbar stays within the list viewport"
+        );
+        assert!(
+            viewport.bottom() <= px(500.),
+            "{width}: viewport={viewport:?}"
+        );
+        assert!(
+            scroll.max_offset().y > px(0.),
+            "{width}: rows overflow: {viewport:?}"
+        );
+        let row = vcx.debug_bounds("pr-row-github.com/o/r#7").unwrap();
+        vcx.simulate_event(ScrollEvent {
+            source: ScrollSource::Pointer,
+            position: viewport.center(),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-200.))),
+            touch_phase: TouchPhase::Started,
+            modifiers: Default::default(),
+        });
+        vcx.run_until_parked();
+        assert!(scroll.offset().y < px(0.), "{width}: wheel moves the rows");
+        let shifted = vcx.debug_bounds("pr-row-github.com/o/r#7").unwrap();
+        assert!(shifted.top() < row.top(), "{width}: rows move on screen");
+        assert_eq!(
+            shifted.left(),
+            row.left(),
+            "{width}: vertical scrolling keeps columns in place"
+        );
+        if width == 800. {
+            vcx.simulate_event(ScrollEvent {
+                source: ScrollSource::Pointer,
+                position: viewport.center(),
+                delta: ScrollDelta::Pixels(point(px(-200.), px(0.))),
+                touch_phase: TouchPhase::Started,
+                modifiers: Default::default(),
+            });
+            vcx.run_until_parked();
+            let horizontal = vcx.debug_bounds("pr-row-github.com/o/r#7").unwrap();
+            assert!(
+                horizontal.left() < shifted.left(),
+                "horizontal scrolling reaches the remaining columns"
+            );
+            assert_eq!(
+                horizontal.top(),
+                shifted.top(),
+                "horizontal scrolling keeps the row in place"
+            );
+        }
+        let before_click = scroll.offset().y;
+        vcx.simulate_click(
+            point(
+                viewport.right() - px(crate::ui::theme::SCROLLBAR_MARGIN_R),
+                viewport.bottom() - px(crate::ui::theme::CONTROL_TARGET_SIZE),
+            ),
+            Default::default(),
+        );
+        vcx.run_until_parked();
+        assert!(
+            scroll.offset().y < before_click,
+            "{width}: scrollbar track moves the list"
+        );
+    }
+}
+
+#[gpui::test]
 fn clicking_a_rows_lane_goes_to_it(cx: &mut TestAppContext) {
     let (f, _gh, linked) = linked_window(cx);
     // Stand on another lane, so the click has somewhere to go.
@@ -209,7 +294,7 @@ fn a_failed_search_keeps_its_rows_and_try_again_searches_now(cx: &mut TestAppCon
 
     gh.clear_failure(GhOp::SearchPrs);
     gh.set_pr_list(PrFilter::Mine, vec![item(7)]);
-    let searched = gh.count(GhOp::SearchPrs);
+    let searched = search_totals(&gh);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, _| window.refresh());
     vcx.run_until_parked();
@@ -218,7 +303,11 @@ fn a_failed_search_keeps_its_rows_and_try_again_searches_now(cx: &mut TestAppCon
         .expect("the failed group offers Try again");
     vcx.simulate_click(retry.center(), Modifiers::default());
     vcx.run_until_parked();
-    assert_eq!(gh.count(GhOp::SearchPrs), searched + 1);
+    assert_eq!(
+        search_totals(&gh),
+        searched.map(|n| n + 1),
+        "Try again asks the failed host once per tab"
+    );
     assert_eq!(
         rows(&f, &mut vcx),
         vec![("github.com/o/r#7".to_owned(), Some(id))]
@@ -252,6 +341,32 @@ fn switching_the_filter_reuses_answers_and_counts_share_the_cadence(cx: &mut Tes
     show_page(&f, cx);
     let filter = f.ws.read_with(cx, |ws, _| ws.pr_list().filter());
     assert_eq!(filter, Some(PrFilter::ReviewRequested));
+}
+
+#[gpui::test]
+fn refreshing_searches_every_tab_so_counts_do_not_lag(cx: &mut TestAppContext) {
+    let (f, gh, _) = linked_window(cx);
+    show_page(&f, cx);
+    let counts = |f: &GitFixture, cx: &mut TestAppContext| {
+        f.ws.update(cx, |ws, cx| {
+            ws.stage_pr_page(cx);
+            ws.pages
+                .pull_requests
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .counts
+                .clone()
+        })
+    };
+    assert_eq!(counts(&f, cx), ["2", "1", "0"]);
+    // #8 closed on GitHub: every tab that held it must drop it.
+    gh.set_pr_list(PrFilter::Mine, vec![item(7)]);
+    gh.set_pr_list(PrFilter::ReviewRequested, Vec::new());
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
+    cx.run_until_parked();
+    assert_eq!(search_totals(&gh), [2, 2, 2]);
+    assert_eq!(counts(&f, cx), ["1", "0", "0"]);
 }
 
 #[gpui::test]
@@ -312,30 +427,56 @@ fn the_dock_counts_the_open_pull_requests_lanes_are_on(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
-fn tab_counts_keep_their_query_meaning_and_clear_resets_filter_and_search(cx: &mut TestAppContext) {
-    let (f, _gh, _) = linked_window(cx);
+fn clearing_search_keeps_the_selected_pull_request_tab_and_its_counts(cx: &mut TestAppContext) {
+    let (f, gh, _) = linked_window(cx);
+    gh.set_pr_list(PrFilter::AllOpen, vec![item(7), item(8), item(9)]);
     show_page(&f, cx);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
-    f.ws.update_in(&mut vcx, |ws, _, cx| {
-        ws.stage_pr_page(cx);
-        assert_eq!(
-            ws.pages.pull_requests.snapshot.as_ref().unwrap().counts,
-            ["2", "1", "0"]
+    for (filter, total) in [
+        (PrFilter::Mine, 2),
+        (PrFilter::ReviewRequested, 1),
+        (PrFilter::AllOpen, 3),
+    ] {
+        f.ws.update_in(&mut vcx, |ws, window, cx| {
+            ws.set_pr_page_filter(filter, cx);
+            let search = ws
+                .pages
+                .pull_requests
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .search
+                .clone();
+            search.update(cx, |input, cx| {
+                input.set_value("missing", window, cx);
+            });
+        });
+        vcx.run_until_parked();
+        f.ws.read_with(&vcx, |ws, _| {
+            let snap = ws.pages.pull_requests.snapshot.as_ref().unwrap();
+            assert_eq!(snap.visible, 0, "{filter:?}: search narrows rows");
+            assert_eq!(snap.counts, ["2", "1", "3"], "{filter:?}: tab counts");
+        });
+        let clear = vcx
+            .debug_bounds("pr-clear-filters")
+            .expect("filter reset action");
+        vcx.simulate_click(clear.center(), Default::default());
+        vcx.run_until_parked();
+        f.ws.read_with(&vcx, |ws, _| {
+            assert_eq!(
+                ws.pr_list().filter(),
+                Some(filter),
+                "{filter:?}: selected tab"
+            );
+            let snap = ws.pages.pull_requests.snapshot.as_ref().unwrap();
+            assert!(snap.query.is_empty(), "{filter:?}: search is cleared");
+            assert_eq!(snap.visible, total, "{filter:?}: rows restored");
+            assert_eq!(snap.counts, ["2", "1", "3"], "{filter:?}: tab counts");
+        });
+        assert!(
+            vcx.debug_bounds("pr-clear-filters").is_none(),
+            "{filter:?}: no search to reset"
         );
-        ws.set_pr_page_filter(PrFilter::ReviewRequested, cx);
-    });
-    vcx.run_until_parked();
-    let clear = vcx
-        .debug_bounds("pr-clear-filters")
-        .expect("filter reset action");
-    vcx.simulate_click(clear.center(), Default::default());
-    vcx.run_until_parked();
-    f.ws.read_with(&vcx, |ws, cx| {
-        assert_eq!(ws.pr_list().filter(), Some(PrFilter::Mine));
-        let snap = ws.pages.pull_requests.snapshot.as_ref().unwrap();
-        assert!(snap.query.is_empty());
-        assert_eq!(snap.visible, 2);
-        assert_eq!(snap.counts, ["2", "1", "0"]);
-        let _ = cx;
-    });
+    }
+    assert_eq!(search_totals(&gh), [1, 1, 1], "clearing is local");
 }

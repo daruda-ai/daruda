@@ -599,6 +599,10 @@ target/debug/daruda --screenshot /tmp/shot.png   # opens, settles ~2s, captures,
 
 The opt-in `screenshot` feature enables `devtools`, `gpui/test-support`, `gpui_macos/test-support`, and the chat and settings `screenshot` features; it is off by default to keep the shipping binary clean. Entry point: `packages/app/src/screenshot.rs`.
 
+Capture mode uses scripted GitHub answers and fixed usage, service-status, and
+activity data. Automatic update checks and update downloads are disabled during
+capture so these background sources need no network access or provider login.
+
 Verification loop: render → PNG → an agent reads the PNG and checks the result. This catches both rendering bugs and runtime state (e.g. error toasts), so it doubles as a smoke test of the real app's startup.
 
 ### Driving the Captured State

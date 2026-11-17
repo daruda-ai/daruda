@@ -5,6 +5,8 @@ mod failure;
 mod inspection;
 pub(crate) mod quit;
 
+pub(crate) use inspection::offline_sources;
+
 pub(crate) fn run() {
     // Helpers must inherit the original environment and never create a GUI,
     // initialize desktop ownership, or contend with the user's running app.

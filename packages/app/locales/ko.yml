@@ -854,6 +854,7 @@ git:
 # Pull requests page
 pull_requests:
   count_pending: "…"
+  count_unavailable: "조회 불가"
   count_capped: "%{count}+"
   choose_worktree_project: "이 worktree를 만들 프로젝트 선택"
   project_choice: "%{name} — %{path}"

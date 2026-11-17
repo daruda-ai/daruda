@@ -7,6 +7,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
 use daruda_github::{PrFilter, RepoId};
+use daruda_store::project::{LaneRef, ProjectId};
 use gpui::{Context, Task};
 
 use crate::github::{PrList, PrListAnswer, PrListUpdate};
@@ -172,6 +173,39 @@ impl PrListState {
 }
 
 impl Workspace {
+    /// Discover the shown scope's push targets even for worktrees whose
+    /// panes have never populated a lane-scoped Git cache.
+    pub(in crate::workspace) fn refresh_pr_repositories(&mut self, cx: &mut Context<Self>) {
+        let projects: Vec<_> = self.projects.iter().map(|project| project.id).collect();
+        for project in projects {
+            self.refresh_pr_project_repositories(project, cx);
+        }
+    }
+
+    /// A project's worktrees were discovered: read just that project when
+    /// it belongs to the shown scope, leaving earlier discoveries alone.
+    pub(in crate::workspace) fn refresh_pr_project_repositories(
+        &mut self,
+        project: ProjectId,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.page_scope_matches(project) {
+            return;
+        }
+        let lanes: Vec<_> = self
+            .project_for(project)
+            .into_iter()
+            .flat_map(|project| &project.lanes)
+            .map(|lane| LaneRef {
+                project,
+                lane: lane.id,
+            })
+            .collect();
+        for lane in lanes {
+            self.refresh_push_target(lane, cx);
+        }
+    }
+
     /// GitHub repositories pushed to by lanes in the shared project scope.
     pub(crate) fn github_repos(&self) -> BTreeSet<RepoId> {
         self.lane_scoped
@@ -227,8 +261,13 @@ impl Workspace {
         }
     }
 
-    /// Search this window's hosts again now, for the filter shown.
+    /// Search this window's hosts again now, for every tab: the counts
+    /// beside the shown one read the same cache and must not lag behind it.
     pub(crate) fn refresh_pr_list(&mut self, cx: &mut Context<Self>) {
+        if self.pr_list.filter().is_none() {
+            return;
+        }
+        self.refresh_pr_repositories(cx);
         let hosts: BTreeSet<String> = self
             .github_repos()
             .iter()
@@ -237,8 +276,8 @@ impl Workspace {
         self.refresh_pr_hosts(hosts, cx);
     }
 
-    /// Search `host` alone again now: its group's Try again, which must
-    /// not spend a request on hosts that did not fail.
+    /// Search `host` alone again now, for every tab: its group's Try again,
+    /// which must not spend a request on hosts that did not fail.
     pub(crate) fn refresh_pr_host(&mut self, host: &str, cx: &mut Context<Self>) {
         self.refresh_pr_hosts([host.to_owned()], cx);
     }
@@ -248,8 +287,12 @@ impl Workspace {
         hosts: impl IntoIterator<Item = String>,
         cx: &mut Context<Self>,
     ) {
-        if let Some(filter) = self.pr_list.filter() {
-            PrList::refresh(hosts, filter, cx);
+        if self.pr_list.filter().is_some() {
+            PrList::refresh(
+                hosts,
+                &crate::workspace::pages::pull_requests::list::FILTERS,
+                cx,
+            );
         }
     }
 

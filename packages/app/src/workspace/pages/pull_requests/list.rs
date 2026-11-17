@@ -222,7 +222,8 @@ pub(in crate::workspace) fn page(
                 .iter()
                 .map(|repo| {
                     let host = repo.host();
-                    let body = group_body(repo, availability(host), inputs.list.host(host), inputs);
+                    let status = repo_status(repo, availability(host), inputs.list.host(host));
+                    let body = group_body(repo, status, inputs);
                     let meta = match &body {
                         GroupBody::Listed { rows, .. } => s::group_count(host, rows.len()),
                         GroupBody::Loading | GroupBody::Blocked(_) => host.to_owned(),
@@ -260,22 +261,36 @@ fn refreshed(inputs: &PageInputs<'_>) -> Option<String> {
     })
 }
 
-/// What `repo`'s group shows. A `gh` problem is said on any host: unlike
-/// the Git panel's strip, which stays quiet off github.com, the page was
-/// opened to see these repositories' pull requests. Off github.com it is
-/// said as a possibility, since the host may not be GitHub.
-fn group_body(
+/// What is known of one repository's pull requests under one filter. The
+/// group and the tab counts both read this, so they cannot disagree about
+/// whether a host was asked, failed, or answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum RepoStatus<'a> {
+    Loading,
+    Blocked(Blocked),
+    /// `search` is `None` when no answer covering the repository can be
+    /// shown: the host is paused or its search failed before one arrived.
+    Listed {
+        search: Option<&'a PrSearch>,
+        trouble: Option<Trouble>,
+    },
+}
+
+/// `repo`'s status. A `gh` problem is said on any host: unlike the Git
+/// panel's strip, which stays quiet off github.com, the page was opened to
+/// see these repositories' pull requests. Off github.com it is said as a
+/// possibility, since the host may not be GitHub.
+pub(in crate::workspace) fn repo_status<'a>(
     repo: &RepoId,
     availability: GhAvailability,
-    list: &HostList,
-    inputs: &PageInputs<'_>,
-) -> GroupBody {
+    list: &'a HostList,
+) -> RepoStatus<'a> {
     let trouble = match availability {
         GhAvailability::Missing | GhAvailability::LoggedOut if !repo.on_github() => {
-            return GroupBody::Blocked(Blocked::UnconfirmedHost);
+            return RepoStatus::Blocked(Blocked::UnconfirmedHost);
         }
-        GhAvailability::Missing => return GroupBody::Blocked(Blocked::Missing),
-        GhAvailability::LoggedOut => return GroupBody::Blocked(Blocked::LoggedOut),
+        GhAvailability::Missing => return RepoStatus::Blocked(Blocked::Missing),
+        GhAvailability::LoggedOut => return RepoStatus::Blocked(Blocked::LoggedOut),
         GhAvailability::Backoff {
             reason: BackoffReason::RateLimited,
             ..
@@ -286,22 +301,37 @@ fn group_body(
         } => Some(Trouble::Unreachable),
         GhAvailability::Unknown | GhAvailability::Ready => None,
     };
-    let listed = |search: Option<&PrSearch>, trouble| GroupBody::Listed {
-        rows: search.map_or_else(Vec::new, |search| rows(repo, search, inputs)),
-        truncated: search.is_some_and(|search| search.truncated),
-        trouble,
-    };
     // An answer that did not ask about `repo` says nothing of it: the group
     // waits for one that did rather than claim it has no pull requests.
     let search = list.answer().and_then(|answer| answer.covering(repo));
     match (list, search) {
-        (HostList::Failed { .. }, search) => {
-            listed(search, trouble.or(Some(Trouble::SearchFailed)))
-        }
-        (HostList::Ready(_), Some(search)) => listed(Some(search), trouble),
+        (HostList::Failed { .. }, search) => RepoStatus::Listed {
+            search,
+            trouble: trouble.or(Some(Trouble::SearchFailed)),
+        },
+        (HostList::Ready(_), Some(search)) => RepoStatus::Listed {
+            search: Some(search),
+            trouble,
+        },
         // A paused host is not searched; say why rather than wait forever.
-        (HostList::Loading | HostList::Ready(_), _) if trouble.is_some() => listed(None, trouble),
-        (HostList::Loading | HostList::Ready(_), _) => GroupBody::Loading,
+        (HostList::Loading | HostList::Ready(_), _) if trouble.is_some() => RepoStatus::Listed {
+            search: None,
+            trouble,
+        },
+        (HostList::Loading | HostList::Ready(_), _) => RepoStatus::Loading,
+    }
+}
+
+/// What `repo`'s group shows for `status`.
+fn group_body(repo: &RepoId, status: RepoStatus<'_>, inputs: &PageInputs<'_>) -> GroupBody {
+    match status {
+        RepoStatus::Loading => GroupBody::Loading,
+        RepoStatus::Blocked(blocked) => GroupBody::Blocked(blocked),
+        RepoStatus::Listed { search, trouble } => GroupBody::Listed {
+            rows: search.map_or_else(Vec::new, |search| rows(repo, search, inputs)),
+            truncated: search.is_some_and(|search| search.truncated),
+            trouble,
+        },
     }
 }
 

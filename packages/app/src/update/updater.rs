@@ -286,12 +286,12 @@ impl Updater {
     }
 }
 
-/// Tests must never reach GitHub: under test every check answers "up to date".
+/// Tests and captures answer "up to date" without reaching GitHub.
 fn check_latest(
     current: &semver::Version,
     suffix: Option<&'static str>,
 ) -> Result<Option<ReleaseInfo>, UpdateError> {
-    if cfg!(test) {
+    if crate::startup::offline_sources() {
         return Ok(None);
     }
     match suffix {
@@ -301,15 +301,15 @@ fn check_latest(
 }
 
 /// The release's package, verified against its published checksum. Under
-/// test no release is ever offered, so a download has nothing to fetch.
+/// offline inspection no release is offered, so a download has nothing to fetch.
 fn download_package(release: &ReleaseInfo, dest: &Path) -> Result<(), UpdateError> {
-    if cfg!(test) {
+    if crate::startup::offline_sources() {
         return Err(UpdateError::Http(OFFLINE_DOWNLOAD.to_owned()));
     }
     daruda_update::download_verified(release, dest)
 }
 
-const OFFLINE_DOWNLOAD: &str = "network is disabled in tests";
+const OFFLINE_DOWNLOAD: &str = "network is disabled for offline inspection";
 
 #[cfg(test)]
 mod tests {

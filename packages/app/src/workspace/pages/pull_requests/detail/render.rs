@@ -11,6 +11,7 @@ use super::view::{
 };
 use super::{Load, PrDetailId, PrTab};
 use crate::surface::strings::{common, pull_requests as s};
+use crate::ui::scrollbar::{Scrollbar, ScrollbarMode};
 use crate::ui::{
     Badge, Button, Disableable as _, DropdownMenu as _, PopupMenuItem, Selectable as _,
     Sizable as _, button, button_compact, button_group, button_icon, button_primary,
@@ -51,6 +52,7 @@ pub(in crate::workspace) fn render(
                 .into_any_element(),
         });
     div()
+        .relative()
         .size_full()
         .min_h_0()
         .flex()
@@ -64,6 +66,17 @@ pub(in crate::workspace) fn render(
                 .min_h_0()
                 .overflow_y_scroll()
                 .child(body),
+        )
+        .child(
+            div()
+                .absolute()
+                .inset_0()
+                .debug_selector(|| "pr-detail-scrollbar".into())
+                .child(
+                    Scrollbar::vertical(scroll)
+                        .id(("pr-detail-scrollbar", view.id.0 as usize))
+                        .mode(ScrollbarMode::Always),
+                ),
         )
         .into_any_element()
 }

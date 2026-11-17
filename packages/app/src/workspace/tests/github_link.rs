@@ -953,8 +953,8 @@ fn a_shown_page_shares_each_filter_search_across_windows(cx: &mut TestAppContext
     cx.run_until_parked();
     assert_eq!(
         gh.count(GhOp::SearchPrs),
-        4,
-        "refresh asks for the selected rows at once"
+        6,
+        "refresh asks for the rows and all tab counts at once"
     );
 }
 
@@ -1016,11 +1016,15 @@ fn a_logged_out_search_blocks_the_host_for_the_lane_polls_too(cx: &mut TestAppCo
     );
     f.ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
     cx.run_until_parked();
-    assert_eq!(
-        host_list(&f, cx),
-        crate::workspace::github_ops::pr_list::HostList::Loading,
-        "what was read there is dropped"
-    );
+    f.ws.read_with(cx, |ws, _| {
+        for filter in crate::workspace::pages::pull_requests::list::FILTERS {
+            assert_eq!(
+                ws.pr_list().host_for(filter, "github.com"),
+                &crate::workspace::github_ops::pr_list::HostList::Loading,
+                "{filter:?}: what was read there is dropped"
+            );
+        }
+    });
     let availability = cx.update(|cx| PrPoller::availability("github.com", cx));
     assert_eq!(
         availability,
@@ -1030,7 +1034,7 @@ fn a_logged_out_search_blocks_the_host_for_the_lane_polls_too(cx: &mut TestAppCo
     cx.executor().advance_clock(Duration::from_secs(61));
     tick(cx);
     assert_eq!(gh.count(GhOp::PrsForBranches), polls, "no lane poll");
-    assert_eq!(gh.count(GhOp::SearchPrs), 4, "no further search");
+    assert_eq!(gh.count(GhOp::SearchPrs), 6, "no further search");
 }
 
 #[gpui::test]
