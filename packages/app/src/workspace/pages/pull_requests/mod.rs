@@ -236,6 +236,13 @@ impl Workspace {
             creating: &self.pages.pull_requests.creating,
             now: chrono::Utc::now(),
             clock: cx.background_executor().now(),
+            accounts: &repos
+                .iter()
+                .filter_map(|repo| {
+                    let account = PrPoller::account(repo.host(), cx)?;
+                    Some((repo.host().to_owned(), account))
+                })
+                .collect(),
         };
         list::page(&inputs, |host| PrPoller::availability(host, cx))
     }

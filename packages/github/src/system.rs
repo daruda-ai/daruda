@@ -6,12 +6,12 @@ use std::time::Duration;
 
 use daruda_core::process::{CaptureError, CaptureLimits, Captured, command_on_path, run_captured};
 
-use crate::availability::GhAuth;
+use crate::availability::{AuthStatus, GhAuth, parse_active_account};
 use crate::backend::Gh;
 use crate::query::{
-    REVIEW_THREADS_QUERY, RepoPrs, newest_first, only_numbers_not_found, parse_pr_detail,
-    parse_prs_for_branches, parse_review_threads, parse_search_prs, pr_detail_query,
-    prs_for_branches_query, search_prs_query, search_string,
+    REVIEW_THREADS_QUERY, RepoPrs, newest_first, only_numbers_not_found, parse_graphql_reset,
+    parse_pr_detail, parse_prs_for_branches, parse_review_threads, parse_search_prs,
+    pr_detail_query, prs_for_branches_query, search_prs_query, search_string,
 };
 use crate::{
     ActionsJob, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrSearch, RepoId, ReviewThreads,
@@ -174,9 +174,19 @@ impl SystemGh {
 }
 
 impl Gh for SystemGh {
-    fn auth(&self, host: &str) -> Result<GhAuth, GhError> {
+    fn auth(&self, host: &str) -> Result<AuthStatus, GhError> {
         match self.run(["auth", "status", "--hostname", host]) {
-            Ok(out) if out.status.success() => Ok(GhAuth::Ready),
+            Ok(out) if out.status.success() => {
+                let output = format!(
+                    "{}\n{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                Ok(AuthStatus {
+                    auth: GhAuth::Ready,
+                    account: parse_active_account(&output, host),
+                })
+            }
             // Exit 1 covers no login, a rejected token, and — measured with
             // gh 2.74.2 behind an unreachable proxy — no network, all saying
             // "the token is invalid". `auth token` reads the stored token
@@ -188,7 +198,7 @@ impl Gh for SystemGh {
                         code: Some(1),
                         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
                     }),
-                    Ok(_) => Ok(GhAuth::LoggedOut),
+                    Ok(_) => Ok(GhAuth::LoggedOut.into()),
                     Err(e) => Err(e),
                 }
             }
@@ -196,7 +206,7 @@ impl Gh for SystemGh {
                 code: out.status.code(),
                 stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
             }),
-            Err(GhError::NotFound) => Ok(GhAuth::Missing),
+            Err(GhError::NotFound) => Ok(GhAuth::Missing.into()),
             Err(e) => Err(e),
         }
     }
@@ -345,6 +355,12 @@ impl Gh for SystemGh {
 
     fn rerun_failed(&self, repo: &RepoId, run: u64) -> Result<(), GhError> {
         self.stdout(rerun_failed_args(repo, run)).map(drop)
+    }
+
+    fn graphql_rate_limit_reset(&self, host: &str) -> Result<Option<i64>, GhError> {
+        // Measured with gh 2.74.2: reading `rate_limit` leaves `used` as it was.
+        let json = self.stdout(["api", "--hostname", host, "rate_limit"])?;
+        parse_graphql_reset(&json)
     }
 
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {

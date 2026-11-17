@@ -76,7 +76,7 @@ pub(super) fn linked_window(cx: &mut TestAppContext) -> (GitFixture, FakeGh, Lan
     (f, gh, id)
 }
 
-fn show_page(f: &GitFixture, cx: &mut TestAppContext) {
+pub(super) fn show_page(f: &GitFixture, cx: &mut TestAppContext) {
     f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
     cx.run_until_parked();
 }
@@ -123,7 +123,7 @@ pub(super) fn rows(f: &GitFixture, cx: &mut TestAppContext) -> Vec<(String, Opti
 }
 
 /// Why the page's one group may be out of date.
-fn trouble(f: &GitFixture, cx: &mut TestAppContext) -> Option<Trouble> {
+pub(super) fn trouble(f: &GitFixture, cx: &mut TestAppContext) -> Option<Trouble> {
     let list = f.ws.read_with(cx, |ws, cx| ws.pr_page_list(cx));
     let PageBody::Groups(groups) = list.body else {
         panic!("expected groups, got {:?}", list.body);
@@ -628,4 +628,36 @@ fn clearing_search_keeps_the_selected_pull_request_tab_and_its_counts(cx: &mut T
         );
     }
     assert_eq!(search_totals(&gh), [1, 1, 1], "clearing is local");
+}
+
+#[gpui::test]
+fn the_page_names_the_account_gh_searches_as(cx: &mut TestAppContext) {
+    use daruda_github::availability::{CredentialSource, GhAccount};
+
+    let (f, gh, _) = linked_window(cx);
+    gh.set_account(
+        "github.com",
+        GhAccount {
+            login: "octocat".into(),
+            source: CredentialSource::Env("GH_TOKEN".into()),
+        },
+    );
+    f.ws.update(cx, |ws, cx| ws.recheck_gh("github.com", cx));
+    tick(cx);
+    show_page(&f, cx);
+    let accounts = f.ws.read_with(cx, |ws, cx| ws.pr_page_list(cx).accounts);
+    assert_eq!(
+        accounts,
+        vec![(
+            "github.com".to_owned(),
+            GhAccount {
+                login: "octocat".into(),
+                source: CredentialSource::Env("GH_TOKEN".into()),
+            }
+        )]
+    );
+    assert_eq!(
+        crate::surface::strings::pull_requests::accounts(&accounts),
+        "github.com: signed in as octocat via the GH_TOKEN variable"
+    );
 }

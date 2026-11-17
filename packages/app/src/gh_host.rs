@@ -58,7 +58,7 @@ mod tests {
             GhHost::set_global(Arc::new(fake.clone()), cx);
             GhHost::init_if_missing(cx);
             let auth = GhHost::global(cx).auth("github.com").unwrap();
-            assert_eq!(auth, GhAuth::LoggedOut, "the installed fake answers");
+            assert_eq!(auth.auth, GhAuth::LoggedOut, "the installed fake answers");
             assert_eq!(fake.count(GhOp::Auth), 1);
         });
     }
@@ -71,7 +71,7 @@ mod tests {
             // The real CLI would answer `LoggedOut` for a host nobody logged
             // in to; the empty fake answers `Ready` for any host.
             let auth = GhHost::global(cx).auth("ghe.example.invalid").unwrap();
-            assert_eq!(auth, GhAuth::Ready);
+            assert_eq!(auth.auth, GhAuth::Ready);
         });
     }
 }

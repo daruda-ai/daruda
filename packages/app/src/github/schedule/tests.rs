@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use daruda_github::availability::GhAuth;
+
 use super::*;
 
 const HOST: &str = "github.com";
@@ -41,7 +43,7 @@ fn answer(branches: &[&str]) -> RepoPrs {
 fn ready(now: Instant) -> Schedule {
     let mut schedule = Schedule::default();
     schedule.begin_auth_checks([HOST.to_owned()], now);
-    let availability = schedule.finish_auth(HOST, Some(GhAuth::Ready), true, now);
+    let availability = schedule.finish_auth(HOST, Some(GhAuth::Ready.into()), true, now);
     schedule.set_availability(HOST, availability.unwrap());
     schedule
 }
@@ -67,7 +69,7 @@ fn a_host_is_asked_once_until_its_answer_goes_stale() {
             .is_empty(),
         "a check already running is not repeated"
     );
-    let missing = schedule.finish_auth(HOST, Some(GhAuth::Missing), true, now);
+    let missing = schedule.finish_auth(HOST, Some(GhAuth::Missing.into()), true, now);
     schedule.set_availability(HOST, missing.unwrap());
     let cases = [
         ("missing, recently answered", MINUTE, false),
@@ -81,6 +83,7 @@ fn a_host_is_asked_once_until_its_answer_goes_stale() {
                 availability: GhAvailability::Missing,
                 auth: AuthCheck::AnsweredAt(now),
                 rate_limit_failures: 0,
+                account: None,
             },
         );
         let due = !probe
@@ -116,7 +119,7 @@ fn an_auth_answer_after_the_switch_is_off_is_dropped_and_asked_again() {
     let mut schedule = Schedule::default();
     schedule.begin_auth_checks([HOST.to_owned()], now);
     assert_eq!(
-        schedule.finish_auth(HOST, Some(GhAuth::Ready), false, now),
+        schedule.finish_auth(HOST, Some(GhAuth::Ready.into()), false, now),
         None
     );
     assert_eq!(schedule.availability(HOST), GhAvailability::Unknown);
@@ -291,6 +294,121 @@ fn a_rate_limit_heard_by_many_repositories_grows_the_pause_once() {
         "the same round's second answer does not grow the pause"
     );
     assert_eq!(schedule.hosts[HOST].rate_limit_failures, 1);
+}
+
+#[test]
+fn a_reported_reset_replaces_only_a_running_estimated_rate_limit_pause() {
+    use daruda_github::availability::{BackoffReason, Resume};
+
+    let now = Instant::now();
+    let r = repo("r");
+    let mut schedule = ready(now);
+    schedule.begin_polls(wanted(&[(&r, demand(&["a"], true))]), FOCUSED, now);
+    let PollOutcome::Host(paused) =
+        schedule.finish_poll(&r, Err(FailureKind::RateLimited), true, now)
+    else {
+        panic!("rate limit");
+    };
+    let GhAvailability::Backoff {
+        until: estimated,
+        resume: Resume::Estimated,
+        ..
+    } = paused
+    else {
+        panic!("an estimated pause first: {paused:?}");
+    };
+    schedule.set_availability(HOST, paused);
+
+    let reset = now + Duration::from_secs(40 * 60);
+    assert_eq!(
+        schedule.reset_reported(HOST, reset, now),
+        Some(GhAvailability::Backoff {
+            until: reset,
+            reason: BackoffReason::RateLimited,
+            resume: Resume::Reported,
+        }),
+        "GitHub's reset replaces the guess, even when later than it"
+    );
+    assert_eq!(
+        schedule.reset_reported(HOST, reset, estimated),
+        None,
+        "a pause that already ended is not reopened by a late answer"
+    );
+    schedule.set_availability(
+        HOST,
+        GhAvailability::Backoff {
+            until: reset,
+            reason: BackoffReason::RateLimited,
+            resume: Resume::Reported,
+        },
+    );
+    assert_eq!(
+        schedule.reset_reported(HOST, now + Duration::from_secs(60), now),
+        None,
+        "a reported pause is not replaced again"
+    );
+    assert_eq!(
+        schedule.host_failed(HOST, FailureKind::RateLimited, now),
+        HostVerdict::AlreadyPaused,
+        "a limit heard inside the reported pause does not grow it"
+    );
+    schedule.set_availability(
+        HOST,
+        GhAvailability::Backoff {
+            until: reset,
+            reason: BackoffReason::Transient,
+            resume: Resume::Estimated,
+        },
+    );
+    assert_eq!(
+        schedule.reset_reported(HOST, reset, now),
+        None,
+        "a transient pause has no limit to reset"
+    );
+}
+
+#[test]
+fn the_account_follows_the_auth_check_and_goes_with_the_login() {
+    use daruda_github::availability::{AuthStatus, CredentialSource, GhAccount};
+
+    let now = Instant::now();
+    let account = GhAccount {
+        login: "octocat".into(),
+        source: CredentialSource::Keyring,
+    };
+    let mut schedule = Schedule::default();
+    schedule.begin_auth_checks([HOST.to_owned()], now);
+    let ready = schedule.finish_auth(
+        HOST,
+        Some(AuthStatus {
+            auth: GhAuth::Ready,
+            account: Some(account.clone()),
+        }),
+        true,
+        now,
+    );
+    schedule.set_availability(HOST, ready.unwrap());
+    assert_eq!(schedule.account(HOST), Some(&account));
+
+    schedule.recheck(HOST);
+    schedule.begin_auth_checks([HOST.to_owned()], now);
+    schedule.finish_auth(HOST, None, true, now);
+    assert_eq!(
+        schedule.account(HOST),
+        Some(&account),
+        "a check that could not run keeps the last account"
+    );
+
+    let verdict = schedule.host_failed(HOST, FailureKind::LoggedOut, now);
+    let HostVerdict::Changed(logged_out) = verdict else {
+        panic!("{verdict:?}");
+    };
+    schedule.set_availability(HOST, logged_out);
+    assert_eq!(
+        schedule.account(HOST),
+        None,
+        "a logged-out host acts as no one"
+    );
 }
 
 #[test]

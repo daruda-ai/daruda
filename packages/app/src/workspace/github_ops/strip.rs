@@ -137,6 +137,7 @@ mod tests {
         let backoff = Backoff {
             until: Instant::now(),
             reason: BackoffReason::Transient,
+            resume: daruda_github::availability::Resume::Estimated,
         };
         let gh = GITHUB_HOST;
         let cases: Vec<Case> = vec![

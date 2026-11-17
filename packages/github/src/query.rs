@@ -15,10 +15,12 @@ use crate::checks::{check_run_status, rollup_from_state, status_context_status, 
 use crate::{CheckKind, CheckRollup, CheckRun, GhError, PrState, PrSummary, ReviewDecision};
 
 mod detail;
+mod rate_limit;
 mod search;
 mod threads;
 
 pub(crate) use detail::{parse_pr_detail, pr_detail_query};
+pub(crate) use rate_limit::parse_graphql_reset;
 pub(crate) use search::{newest_first, parse_search_prs, search_prs_query, search_string};
 pub(crate) use threads::{REVIEW_THREADS_QUERY, parse_review_threads};
 

@@ -51,6 +51,15 @@ through `GitHost`.
   head the user saw and never passes `--delete-branch`, `--auto` or
   `--admin`. A mutation's error is reported to the user who asked; it is
   not a poll failure and does not feed the poller's host state.
+- `auth` answers the active account and where gh keeps its token
+  (`CredentialSource`), parsed from `gh auth status` output, which gh
+  writes to stdout or stderr. The token itself is never read or kept.
+- A rate-limit pause starts on the poller's estimate (`Resume::Estimated`).
+  The poller then asks `graphql_rate_limit_reset` once for that pause;
+  `gh api rate_limit` does not draw on the limit (measured with gh 2.74.2).
+  A reported reset replaces only a running estimated pause
+  (`Resume::Reported`); an unreported or implausible one leaves the estimate,
+  and the page says which of the two it shows.
 - Polling (`app/src/github/poller.rs`) is process-wide and asks once per
   repository per round, however many windows show its lanes. Its timing,
   backoff and auth-recheck rules are GPUI-free in `app/src/github/schedule.rs`.

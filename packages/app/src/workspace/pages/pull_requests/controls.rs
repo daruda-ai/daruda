@@ -132,6 +132,13 @@ pub(super) fn results(snap: &PrPageSnapshot, cx: &App) -> impl IntoElement {
                 .text_color(theme::current(cx).text_subtle)
                 .child(label)
         }))
+        .children((!snap.list.accounts.is_empty()).then(|| {
+            div()
+                .debug_selector(|| "pr-accounts".into())
+                .text_size(px(theme::FONT_SIZE_SM))
+                .text_color(theme::current(cx).text_subtle)
+                .child(s::accounts(&snap.list.accounts))
+        }))
 }
 
 #[cfg(test)]

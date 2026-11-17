@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use daruda_github::availability::{BackoffReason, GhAvailability};
+use daruda_github::availability::{BackoffReason, GhAvailability, Resume};
 use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, PrSummary, RepoId};
 use daruda_store::project::LaneRef;
 
@@ -166,6 +166,7 @@ fn page_for(repo: RepoId, availability: GhAvailability, state: &PrListCache) -> 
         creating: &BTreeSet::new(),
         now: chrono::Utc::now(),
         clock: std::time::Instant::now(),
+        accounts: &std::collections::BTreeMap::new(),
     };
     list::page(&inputs, |_| availability)
 }
@@ -181,9 +182,15 @@ fn a_group_says_what_its_host_allows() {
             last: Some(search.clone()),
         })
     };
+    let until = std::time::Instant::now();
     let backoff = |reason| GhAvailability::Backoff {
-        until: std::time::Instant::now(),
+        until,
         reason,
+        resume: Resume::Estimated,
+    };
+    let limited = Trouble::RateLimited {
+        until,
+        resume: Resume::Estimated,
     };
     use GhAvailability::*;
     // (label, repository, availability, host list, expected)
@@ -243,7 +250,7 @@ fn a_group_says_what_its_host_allows() {
             repo(),
             backoff(BackoffReason::RateLimited),
             ready(),
-            Shape::Listed(vec![7, 8], Some(Trouble::RateLimited)),
+            Shape::Listed(vec![7, 8], Some(limited)),
         ),
         (
             "a paused host with nothing yet says why",
@@ -271,7 +278,7 @@ fn a_group_says_what_its_host_allows() {
             unasked.clone(),
             backoff(BackoffReason::RateLimited),
             ready(),
-            Shape::Listed(Vec::new(), Some(Trouble::RateLimited)),
+            Shape::Listed(Vec::new(), Some(limited)),
         ),
         (
             "a failed search has no rows for one it never asked about",
@@ -302,7 +309,13 @@ fn a_group_says_what_its_host_allows() {
 fn only_a_failed_search_offers_to_search_again() {
     let cases = [
         (Trouble::SearchFailed, true),
-        (Trouble::RateLimited, false),
+        (
+            Trouble::RateLimited {
+                until: std::time::Instant::now(),
+                resume: Resume::Reported,
+            },
+            false,
+        ),
         (Trouble::Unreachable, false),
     ];
     for (trouble, retryable) in cases {
@@ -335,6 +348,7 @@ fn a_group_lists_only_its_own_repository() {
         creating: &BTreeSet::new(),
         now: chrono::Utc::now(),
         clock: std::time::Instant::now(),
+        accounts: &std::collections::BTreeMap::new(),
     };
     let PageBody::Groups(groups) = list::page(&inputs, |_| GhAvailability::Ready).body else {
         panic!("expected groups");
@@ -415,6 +429,7 @@ fn the_header_says_how_old_the_newest_answer_is() {
             creating: &BTreeSet::new(),
             now: chrono::Utc::now(),
             clock,
+            accounts: &std::collections::BTreeMap::new(),
         };
         let page = list::page(&inputs, |_| GhAvailability::Ready);
         assert_eq!(page.refreshed, expected, "{label}");
@@ -441,6 +456,7 @@ fn a_page_with_nothing_to_search_says_why() {
             creating: &BTreeSet::new(),
             now: chrono::Utc::now(),
             clock: std::time::Instant::now(),
+            accounts: &std::collections::BTreeMap::new(),
         };
         assert_eq!(
             list::page(&inputs, |_| GhAvailability::Ready).body,
@@ -448,4 +464,18 @@ fn a_page_with_nothing_to_search_says_why() {
             "{label}"
         );
     }
+}
+
+#[test]
+fn a_pause_end_reads_on_the_wall_clock_and_a_past_one_as_now() {
+    let instant = Instant::now();
+    let wall = chrono::DateTime::parse_from_rfc3339("2026-11-17T09:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let clock = super::Clock { wall, instant };
+    assert_eq!(
+        clock.at(instant + Duration::from_secs(40 * 60)),
+        wall + chrono::Duration::minutes(40)
+    );
+    assert_eq!(clock.at(instant), wall);
 }

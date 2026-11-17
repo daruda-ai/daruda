@@ -1,6 +1,7 @@
 //! The Pull requests page's header and body, drawn from its staged snapshot.
 
 use daruda_github::ReviewDecision;
+use daruda_github::availability::Resume;
 use gpui::{
     AnyElement, App, Div, FontWeight, Hsla, IntoElement, SharedString, canvas, div, prelude::*, px,
 };
@@ -213,9 +214,16 @@ fn note(message: impl Into<SharedString>, cx: &App) -> Div {
         .child(div().min_w_0().child(message.into()))
 }
 
-fn trouble_label(trouble: Trouble) -> String {
+fn trouble_label(trouble: Trouble, as_of: list::Clock) -> String {
     match trouble {
-        Trouble::RateLimited => s::rate_limited(),
+        Trouble::RateLimited {
+            until,
+            resume: Resume::Reported,
+        } => s::rate_limited_reported(as_of.at(until)),
+        Trouble::RateLimited {
+            until,
+            resume: Resume::Estimated,
+        } => s::rate_limited_estimated(as_of.at(until)),
         Trouble::Unreachable => s::unreachable(),
         Trouble::SearchFailed => s::search_failed(),
     }
@@ -224,7 +232,7 @@ fn trouble_label(trouble: Trouble) -> String {
 /// Why the rows may be out of date, with Try again when a search can be
 /// sent now.
 fn trouble_note(group: &PrGroup, trouble: Trouble, snap: &PrPageSnapshot, cx: &App) -> AnyElement {
-    let line = note(trouble_label(trouble), cx);
+    let line = note(trouble_label(trouble, snap.list.as_of), cx);
     if !trouble.retryable() {
         return line.into_any_element();
     }

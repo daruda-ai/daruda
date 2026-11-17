@@ -345,11 +345,36 @@ impl Workspace {
         gh.set_pr_list(PrFilter::Mine, rows);
         GhHost::set_global(Arc::new(gh.clone()), cx);
         PrPoller::seed_for_shot(GITHUB_HOST, GhAvailability::Ready, cx);
+        PrPoller::seed_account_for_shot(
+            GITHUB_HOST,
+            daruda_github::availability::GhAccount {
+                login: "comelf".into(),
+                source: daruda_github::availability::CredentialSource::Keyring,
+            },
+            cx,
+        );
         PrPoller::seed_for_shot(CORP_HOST, GhAvailability::LoggedOut, cx);
         self.set_page_scope(crate::workspace::pages::scope::ProjectScope::All, cx);
         self.show_page(Page::PullRequests, cx);
         cx.notify();
         (gh, sidebar_row)
+    }
+
+    /// github.com waits out a spent rate limit GitHub said resets in 40
+    /// minutes; its rows stay, dimmed under the note.
+    pub(in crate::workspace) fn seed_pr_rate_limit_for_shot(&mut self, cx: &mut Context<Self>) {
+        use daruda_github::availability::{BackoffReason, Resume};
+        let until = cx.background_executor().now() + std::time::Duration::from_secs(40 * 60);
+        PrPoller::seed_for_shot(
+            GITHUB_HOST,
+            GhAvailability::Backoff {
+                until,
+                reason: BackoffReason::RateLimited,
+                resume: Resume::Reported,
+            },
+            cx,
+        );
+        cx.notify();
     }
 
     /// The detail of the active worktree's pull request on its Checks tab,

@@ -72,8 +72,8 @@ fn a_created_pr_is_found_by_the_next_lookup() {
 fn an_injected_failure_lasts_until_cleared() {
     let gh = FakeGh::new();
     gh.set_auth("ghe.corp", GhAuth::LoggedOut);
-    assert_eq!(gh.auth("ghe.corp").unwrap(), GhAuth::LoggedOut);
-    assert_eq!(gh.auth("github.com").unwrap(), GhAuth::Ready);
+    assert_eq!(gh.auth("ghe.corp").unwrap().auth, GhAuth::LoggedOut);
+    assert_eq!(gh.auth("github.com").unwrap().auth, GhAuth::Ready);
     gh.fail(
         GhOp::Auth,
         GhFailure::Exit {

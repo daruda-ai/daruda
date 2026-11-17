@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use daruda_github::RepoPrs;
-use daruda_github::availability::{GhAuth, GhAvailability};
+use daruda_github::availability::{AuthStatus, BackoffReason, GhAccount, GhAvailability, Resume};
 use daruda_github::{FailureKind, GhError, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
@@ -65,6 +65,18 @@ impl PrPoller {
         cx.default_global::<Self>()
             .schedule
             .seed(host, availability, now);
+    }
+
+    #[cfg(feature = "screenshot")]
+    pub(crate) fn seed_account_for_shot(host: &str, account: GhAccount, cx: &mut App) {
+        cx.default_global::<Self>()
+            .schedule
+            .seed_account(host, account);
+    }
+
+    /// The account `gh` acts as on `host`, while it can be asked.
+    pub(crate) fn account(host: &str, cx: &App) -> Option<GhAccount> {
+        cx.try_global::<Self>()?.schedule.account(host).cloned()
     }
 
     /// The default branch the last answer for `repo` named.
@@ -204,7 +216,7 @@ impl PrPoller {
         .detach();
     }
 
-    fn finish_auth(host: &str, result: Result<GhAuth, GhError>, cx: &mut App) {
+    fn finish_auth(host: &str, result: Result<AuthStatus, GhError>, cx: &mut App) {
         let now = cx.background_executor().now();
         let enabled = super::enabled(cx);
         let auth = match result {
@@ -285,6 +297,56 @@ impl PrPoller {
             if super::is_unusable(availability) {
                 PrList::host_blocked(host, cx);
             }
+            if matches!(
+                availability,
+                GhAvailability::Backoff {
+                    reason: BackoffReason::RateLimited,
+                    resume: Resume::Estimated,
+                    ..
+                }
+            ) {
+                Self::ask_reset(host.to_owned(), cx);
+            }
+        }
+    }
+
+    /// A rate-limit pause began on a guess: ask GitHub when the limit
+    /// resets. Once per pause, since a limit heard inside it does not
+    /// change the host. Without an answer the guess stands.
+    fn ask_reset(host: String, cx: &mut App) {
+        let gh = GhHost::global(cx);
+        let probe = host.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { gh.graphql_rate_limit_reset(&probe) });
+        cx.spawn(async move |cx| {
+            let result = task.await;
+            cx.update(|cx| Self::finish_reset(&host, result, cx));
+        })
+        .detach();
+    }
+
+    fn finish_reset(host: &str, result: Result<Option<i64>, GhError>, cx: &mut App) {
+        if !super::enabled(cx) {
+            return;
+        }
+        let reset = match result {
+            Ok(reset) => reset,
+            Err(e) => {
+                log_failure("github.rate_limit", host, &e);
+                return;
+            }
+        };
+        let now = cx.background_executor().now();
+        let reported = reset.and_then(|reset| {
+            daruda_github::availability::reported_resume(reset, chrono::Utc::now().timestamp(), now)
+        });
+        if let Some(availability) = reported.and_then(|until| {
+            cx.global::<Self>()
+                .schedule
+                .reset_reported(host, until, now)
+        }) {
+            Self::set_host_availability(host, availability, cx);
         }
     }
 

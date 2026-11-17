@@ -58,6 +58,7 @@ mod pull_request_discovery;
 mod pull_request_keyboard;
 mod pull_request_list;
 mod pull_request_page;
+mod pull_request_rate_limit;
 mod pull_requests;
 mod pure_ops;
 mod regression_namespace;

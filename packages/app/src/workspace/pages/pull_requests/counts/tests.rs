@@ -66,6 +66,7 @@ fn paused() -> GhAvailability {
     GhAvailability::Backoff {
         until: Instant::now(),
         reason: BackoffReason::Transient,
+        resume: daruda_github::availability::Resume::Estimated,
     }
 }
 

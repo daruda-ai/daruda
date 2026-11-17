@@ -3,12 +3,12 @@
 //! to, its pull requests under the shown filter, the worktree working on
 //! each, and why a host has nothing to show.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use daruda_core::age::{self, AgeBucket};
-use daruda_github::availability::{BackoffReason, GhAvailability};
+use daruda_github::availability::{BackoffReason, GhAccount, GhAvailability, Resume};
 use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, RepoId, ReviewDecision};
 use daruda_store::project::{LaneRef, ProjectId};
 
@@ -68,7 +68,11 @@ pub(in crate::workspace) enum Blocked {
 /// shown with one are the last answer, drawn dimmed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::workspace) enum Trouble {
-    RateLimited,
+    /// Paused until `until`, which GitHub reported or the poller guessed.
+    RateLimited {
+        until: Instant,
+        resume: Resume,
+    },
     Unreachable,
     SearchFailed,
 }
@@ -79,8 +83,24 @@ impl Trouble {
     pub(in crate::workspace) fn retryable(self) -> bool {
         match self {
             Self::SearchFailed => true,
-            Self::RateLimited | Self::Unreachable => false,
+            Self::RateLimited { .. } | Self::Unreachable => false,
         }
+    }
+}
+
+/// The page's two clocks read at one moment, so a time on the executor's
+/// clock can be said as a time of day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) struct Clock {
+    pub wall: DateTime<Utc>,
+    pub instant: Instant,
+}
+
+impl Clock {
+    /// `at` as a wall-clock time; one already past reads as now.
+    pub(in crate::workspace) fn at(self, at: Instant) -> DateTime<Utc> {
+        let ahead = at.saturating_duration_since(self.instant);
+        self.wall + chrono::Duration::from_std(ahead).unwrap_or(chrono::Duration::zero())
     }
 }
 
@@ -209,6 +229,10 @@ pub(in crate::workspace) struct PrPageView {
     pub activity: Activity,
     pub sources: Sources,
     pub body: PageBody,
+    /// When the view was built, to say pause ends as times of day.
+    pub as_of: Clock,
+    /// The account `gh` acts as on each shown host that has one, by host.
+    pub accounts: Vec<(String, GhAccount)>,
 }
 
 /// Everything the page needs from the workspace, as plain values.
@@ -225,6 +249,8 @@ pub(in crate::workspace) struct PageInputs<'a> {
     pub now: DateTime<Utc>,
     /// Now on the executor's clock, which answer times are read on.
     pub clock: Instant,
+    /// The account `gh` acts as, per host it is known for.
+    pub accounts: &'a BTreeMap<String, GhAccount>,
 }
 
 /// The page for `inputs`; `availability` says what is known about `gh` on a host.
@@ -283,7 +309,24 @@ pub(in crate::workspace) fn page(
         activity: Activity::of(inputs, &body),
         sources: Sources::of(&body),
         body,
+        as_of: Clock {
+            wall: inputs.now,
+            instant: inputs.clock,
+        },
+        accounts: shown_accounts(inputs),
     }
+}
+
+/// The accounts of the hosts the shown repositories are on, each once.
+fn shown_accounts(inputs: &PageInputs<'_>) -> Vec<(String, GhAccount)> {
+    let hosts: BTreeSet<&str> = inputs.repos.iter().map(RepoId::host).collect();
+    hosts
+        .into_iter()
+        .filter_map(|host| {
+            let account = inputs.accounts.get(host)?;
+            Some((host.to_owned(), account.clone()))
+        })
+        .collect()
 }
 
 /// `Updated 2m ago`, from the newest answer among this window's hosts.
@@ -337,9 +380,10 @@ pub(in crate::workspace) fn repo_status<'a>(
         GhAvailability::Missing => return RepoStatus::Blocked(Blocked::Missing),
         GhAvailability::LoggedOut => return RepoStatus::Blocked(Blocked::LoggedOut),
         GhAvailability::Backoff {
+            until,
             reason: BackoffReason::RateLimited,
-            ..
-        } => Some(Trouble::RateLimited),
+            resume,
+        } => Some(Trouble::RateLimited { until, resume }),
         GhAvailability::Backoff {
             reason: BackoffReason::Transient,
             ..

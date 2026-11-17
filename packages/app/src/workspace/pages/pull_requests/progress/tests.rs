@@ -115,6 +115,7 @@ fn progress_distinguishes_discovery_first_load_and_retained_answers() {
             creating: &BTreeSet::new(),
             now: chrono::Utc::now(),
             clock,
+            accounts: &std::collections::BTreeMap::new(),
         };
         let page = list::page(&inputs, |_| GhAvailability::Ready);
         assert_eq!(page.activity, expected, "{label}");
@@ -173,6 +174,7 @@ fn partial_sources_count_only_covered_visible_answers_and_keep_their_ages() {
         creating: &BTreeSet::new(),
         now: chrono::Utc::now(),
         clock,
+        accounts: &std::collections::BTreeMap::new(),
     };
     let page = list::page(&inputs, |host| {
         if host == "other.corp" {

@@ -3,15 +3,15 @@
 //! Methods are whole questions, not a passthrough to `gh api`, so a fake
 //! answers each one directly.
 
-use crate::availability::GhAuth;
+use crate::availability::AuthStatus;
 use crate::query::RepoPrs;
 use crate::{
     ActionsJob, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrSearch, RepoId, ReviewThreads,
 };
 
 pub trait Gh: Send + Sync {
-    /// Whether `gh` is installed and logged in to `host`.
-    fn auth(&self, host: &str) -> Result<GhAuth, GhError>;
+    /// Whether `gh` is installed and logged in to `host`, and as whom.
+    fn auth(&self, host: &str) -> Result<AuthStatus, GhError>;
     /// The pull requests whose head is each of `branches` in `repo`, the
     /// pull requests `numbers` name there, and the repository's default
     /// branch. Neither branches nor numbers sends no request.
@@ -54,4 +54,7 @@ pub trait Gh: Send + Sync {
     fn close_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError>;
     /// Rerun the failed jobs of Actions run `run`.
     fn rerun_failed(&self, repo: &RepoId, run: u64) -> Result<(), GhError>;
+    /// When the spent GraphQL rate limit on `host` resets (Unix seconds);
+    /// `None` while requests remain. Asking does not draw on the limit.
+    fn graphql_rate_limit_reset(&self, host: &str) -> Result<Option<i64>, GhError>;
 }

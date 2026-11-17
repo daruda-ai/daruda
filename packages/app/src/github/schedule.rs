@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use daruda_github::RepoPrs;
-use daruda_github::availability::{BackoffReason, GhAuth, GhAvailability, backoff_delay};
+use daruda_github::availability::{
+    AuthStatus, BackoffReason, GhAccount, GhAvailability, Resume, backoff_delay,
+};
 use daruda_github::{FailureKind, RepoId};
 
 /// The cadence of a repository no window is focused on.
@@ -38,6 +40,9 @@ struct HostState {
     availability: GhAvailability,
     auth: AuthCheck,
     rate_limit_failures: u32,
+    /// The account the last ready auth check named; dropped once `gh`
+    /// cannot be asked about the host.
+    account: Option<GhAccount>,
 }
 
 impl Default for HostState {
@@ -46,6 +51,7 @@ impl Default for HostState {
             availability: GhAvailability::Unknown,
             auth: AuthCheck::Due,
             rate_limit_failures: 0,
+            account: None,
         }
     }
 }
@@ -93,6 +99,7 @@ impl HostState {
         if let GhAvailability::Backoff {
             until,
             reason: BackoffReason::RateLimited,
+            ..
         } = self.availability
             && until > now
         {
@@ -102,7 +109,26 @@ impl HostState {
         Some(GhAvailability::Backoff {
             until: now + backoff_delay(self.rate_limit_failures, BackoffReason::RateLimited),
             reason: BackoffReason::RateLimited,
+            resume: Resume::Estimated,
         })
+    }
+
+    /// GitHub reported that the limit pausing the host resets at `until`.
+    /// It replaces only an estimated rate-limit pause still running; a pause
+    /// that ended or turned into something else meanwhile stands.
+    fn reset_reported(&self, until: Instant, now: Instant) -> Option<GhAvailability> {
+        match self.availability {
+            GhAvailability::Backoff {
+                until: estimated,
+                reason: BackoffReason::RateLimited,
+                resume: Resume::Estimated,
+            } if estimated > now && until > now => Some(GhAvailability::Backoff {
+                until,
+                reason: BackoffReason::RateLimited,
+                resume: Resume::Reported,
+            }),
+            _ => None,
+        }
     }
 }
 
@@ -241,8 +267,16 @@ impl Schedule {
                 availability,
                 auth: AuthCheck::AnsweredAt(now),
                 rate_limit_failures: 0,
+                account: None,
             },
         );
+    }
+
+    #[cfg(feature = "screenshot")]
+    pub(super) fn seed_account(&mut self, host: &str, account: GhAccount) {
+        if let Some(state) = self.hosts.get_mut(host) {
+            state.account = Some(account);
+        }
     }
 
     /// The feature was turned off: answers from before must not be
@@ -295,6 +329,11 @@ impl Schedule {
         due
     }
 
+    /// The account `gh` acts as on `host`, while it can be asked.
+    pub(super) fn account(&self, host: &str) -> Option<&GhAccount> {
+        self.hosts.get(host)?.account.as_ref()
+    }
+
     /// `gh auth status` answered (`auth` is `None` when running it failed).
     /// Returns the host's new availability, or `None` when the answer is not
     /// wanted any more (the feature was turned off while it ran); the host
@@ -302,7 +341,7 @@ impl Schedule {
     pub(super) fn finish_auth(
         &mut self,
         host: &str,
-        auth: Option<GhAuth>,
+        auth: Option<AuthStatus>,
         enabled: bool,
         now: Instant,
     ) -> Option<GhAvailability> {
@@ -312,11 +351,17 @@ impl Schedule {
             return None;
         }
         state.auth = AuthCheck::AnsweredAt(now);
+        // A failed check keeps the account it last named: the host is
+        // paused, not logged out.
+        if let Some(status) = &auth {
+            state.account = status.account.clone();
+        }
         Some(match auth {
-            Some(auth) => GhAvailability::from(auth),
+            Some(status) => GhAvailability::from(status.auth),
             None => GhAvailability::Backoff {
                 until: now + backoff_delay(1, BackoffReason::Transient),
                 reason: BackoffReason::Transient,
+                resume: Resume::Estimated,
             },
         })
     }
@@ -426,6 +471,18 @@ impl Schedule {
         }
     }
 
+    /// GitHub reported when the limit pausing `host` resets: the host's
+    /// availability to set, or `None` when the pause it would replace is no
+    /// longer an estimated rate-limit pause.
+    pub(super) fn reset_reported(
+        &self,
+        host: &str,
+        until: Instant,
+        now: Instant,
+    ) -> Option<GhAvailability> {
+        self.hosts.get(host)?.reset_reported(until, now)
+    }
+
     /// Whether requests may go to `host` now.
     pub(super) fn takes_requests(&self, host: &str, now: Instant) -> bool {
         self.hosts
@@ -445,6 +502,7 @@ impl Schedule {
         }
         state.availability = availability;
         if is_unusable(availability) {
+            state.account = None;
             for (repo, state) in &mut self.repos {
                 if repo.host() == host {
                     state.answer = None;

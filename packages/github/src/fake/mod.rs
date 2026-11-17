@@ -3,7 +3,7 @@
 //!
 //! | Method | Unscripted answer |
 //! |---|---|
-//! | `auth` | `Ready` |
+//! | `auth` | `Ready`, no account |
 //! | `prs_for_branches` | default branch `main`, no PRs for any branch or number |
 //! | `search_prs` | none, not truncated |
 //! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL |
@@ -14,6 +14,7 @@
 //! | `set_ready` | the PR, if scripted, becomes open |
 //! | `close_pr` | the PR, if scripted, becomes closed |
 //! | `rerun_failed` | done |
+//! | `graphql_rate_limit_reset` | `None`: requests remain |
 //!
 //! A mutation changes the state of the scripted PR in both `set_prs` and
 //! `set_pr_detail`, so the next lookup sees it.
@@ -21,7 +22,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use crate::availability::GhAuth;
+use crate::availability::{AuthStatus, GhAccount, GhAuth};
 use crate::backend::Gh;
 use crate::query::{RepoPrs, newest_first};
 use crate::system::check_head_sha;
@@ -80,6 +81,9 @@ pub enum GhCall {
         repo: RepoId,
         run: u64,
     },
+    RateLimitReset {
+        host: String,
+    },
 }
 
 /// One [`Gh`] method, for aiming failures.
@@ -96,6 +100,7 @@ pub enum GhOp {
     SetReady,
     ClosePr,
     RerunFailed,
+    RateLimitReset,
 }
 
 /// A cloneable description of a [`GhError`], turned into a fresh error on
@@ -132,6 +137,7 @@ pub struct FakeGh {
 #[derive(Debug, Default)]
 struct FakeState {
     auth: HashMap<String, GhAuth>,
+    accounts: HashMap<String, GhAccount>,
     default_branches: HashMap<RepoId, String>,
     prs: HashMap<RepoId, Vec<PrSummary>>,
     lists: HashMap<PrFilter, Vec<PrListItem>>,
@@ -140,6 +146,7 @@ struct FakeState {
     threads: HashMap<u64, ReviewThreads>,
     details: HashMap<(RepoId, u64), PrDetail>,
     failures: HashMap<GhOp, GhFailure>,
+    resets: HashMap<String, i64>,
     calls: Vec<GhCall>,
 }
 
@@ -150,6 +157,11 @@ impl FakeGh {
 
     pub fn set_auth(&self, host: &str, auth: GhAuth) {
         self.lock().auth.insert(host.to_owned(), auth);
+    }
+
+    /// The account a ready `host` answers it is logged in as.
+    pub fn set_account(&self, host: &str, account: GhAccount) {
+        self.lock().accounts.insert(host.to_owned(), account);
     }
 
     pub fn set_default_branch(&self, repo: &RepoId, branch: &str) {
@@ -188,6 +200,12 @@ impl FakeGh {
     /// What `pr_detail` answers for PR `number` of `repo`.
     pub fn set_pr_detail(&self, repo: &RepoId, number: u64, detail: PrDetail) {
         self.lock().details.insert((repo.clone(), number), detail);
+    }
+
+    /// That the GraphQL limit on `host` is spent and resets at `reset`
+    /// (Unix seconds).
+    pub fn set_rate_limit_reset(&self, host: &str, reset: i64) {
+        self.lock().resets.insert(host.to_owned(), reset);
     }
 
     /// Fail every later call of `op` until [`FakeGh::clear_failure`].
@@ -232,6 +250,7 @@ impl GhCall {
             Self::SetReady { .. } => GhOp::SetReady,
             Self::ClosePr { .. } => GhOp::ClosePr,
             Self::RerunFailed { .. } => GhOp::RerunFailed,
+            Self::RateLimitReset { .. } => GhOp::RateLimitReset,
         }
     }
 }
@@ -261,7 +280,7 @@ impl FakeState {
 }
 
 impl Gh for FakeGh {
-    fn auth(&self, host: &str) -> Result<GhAuth, GhError> {
+    fn auth(&self, host: &str) -> Result<AuthStatus, GhError> {
         let mut state = self.lock();
         state.calls.push(GhCall::Auth {
             host: host.to_owned(),
@@ -269,7 +288,13 @@ impl Gh for FakeGh {
         if let Some(failure) = state.failures.get(&GhOp::Auth) {
             return Err(failure.to_error());
         }
-        Ok(state.auth.get(host).copied().unwrap_or(GhAuth::Ready))
+        let auth = state.auth.get(host).copied().unwrap_or(GhAuth::Ready);
+        Ok(AuthStatus {
+            auth,
+            account: (auth == GhAuth::Ready)
+                .then(|| state.accounts.get(host).cloned())
+                .flatten(),
+        })
     }
 
     fn prs_for_branches(
@@ -453,6 +478,14 @@ impl Gh for FakeGh {
             repo: repo.clone(),
             run,
         })
+    }
+
+    fn graphql_rate_limit_reset(&self, host: &str) -> Result<Option<i64>, GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::RateLimitReset {
+            host: host.to_owned(),
+        })?;
+        Ok(state.resets.get(host).copied())
     }
 
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError> {
