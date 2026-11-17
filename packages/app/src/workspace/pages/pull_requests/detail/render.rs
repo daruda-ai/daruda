@@ -312,10 +312,28 @@ fn tab_content(
 ) -> AnyElement {
     match tab {
         PrTab::Checks => checks(id, ready, cx),
-        PrTab::Files => match &ready.files {
-            Some(files) => super::files_render::files(id, files, files_scroll, cx),
-            None => div().into_any_element(),
-        },
+        PrTab::Files => {
+            match &ready.files {
+                // The review sits above the listing, whatever state the listing
+                // is in: an approval needs no file read.
+                Some(files) => div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(theme::GAP_LG))
+                    .children(ready.review_comments.as_ref().and_then(|comments| {
+                        super::review_comments_render::pending(id, comments, cx)
+                    }))
+                    .child(super::files_render::files(
+                        id,
+                        files,
+                        ready.review_comments.as_ref(),
+                        files_scroll,
+                        cx,
+                    ))
+                    .into_any_element(),
+                None => div().into_any_element(),
+            }
+        }
         PrTab::Threads => super::threads_render::threads(id, ready, cx),
         PrTab::Description => super::description_render::description(id, ready, cx),
     }
@@ -634,4 +652,26 @@ fn status_glyph(status: CheckStatus, cx: &Context<Workspace>) -> (&'static str, 
         CheckStatus::Success => (icons::CHECK_CIRCLE, t.banner_success_text),
         CheckStatus::Ignored => (icons::RADIO_OFF, t.text_subtle),
     }
+}
+
+/// Under a review editor: why what is typed is not kept across restarts,
+/// when it is not.
+pub(super) fn keeping_note(
+    keeping: crate::github::DraftKeeping,
+    cx: &Context<Workspace>,
+) -> Option<AnyElement> {
+    use crate::github::DraftKeeping;
+    let text = match keeping {
+        DraftKeeping::Saved => return None,
+        DraftKeeping::MemoryOnly => s::drafts_memory_only(),
+        DraftKeeping::SaveFailed => s::drafts_save_failing(),
+        DraftKeeping::NoAccount => s::drafts_no_account(),
+    };
+    Some(
+        div()
+            .text_size(px(theme::FONT_SIZE_SM))
+            .text_color(theme::current(cx).banner_warning_text)
+            .child(text)
+            .into_any_element(),
+    )
 }

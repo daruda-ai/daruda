@@ -32,9 +32,10 @@ pub use files::{
 };
 pub use model::{
     ActionsJob, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus,
-    Conversation, DiffSide, FailedCheck, GITHUB_HOST, MergeMethod, Mergeability, NewPr, PrDetail,
-    PrFilter, PrListItem, PrSearch, PrState, PrSummary, RepoId, ReviewComment, ReviewDecision,
-    ReviewThread, ReviewThreads, ReviewerState, ThreadPermissions, reviewer_name_ok,
+    Conversation, DiffSide, FailedCheck, GITHUB_HOST, LatestReview, LatestReviewState, MergeMethod,
+    Mergeability, NewPr, PrDetail, PrFilter, PrListItem, PrSearch, PrState, PrSummary, RepoId,
+    ReviewComment, ReviewDecision, ReviewEvent, ReviewThread, ReviewThreadDraft, ReviewThreads,
+    ReviewerState, SubmittedReview, ThreadPermissions, reviewer_name_ok,
 };
 pub use query::RepoPrs;
 pub use search::{

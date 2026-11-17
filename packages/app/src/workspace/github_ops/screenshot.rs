@@ -461,6 +461,7 @@ impl Workspace {
             open_threads: 3,
             open_threads_more: false,
             can_update: false,
+            node_id: None,
             changed_files: None,
         };
         gh.set_pr_detail(&row.repo, row.pr.number, detail.clone());

@@ -95,6 +95,23 @@ pub trait Gh: Send + Sync {
         add: &[String],
         remove: &[String],
     ) -> Result<(), GhError>;
+    /// Submit a review of pull request `pr` (its node id) at `commit`:
+    /// its verdict, text and comments on lines.
+    fn submit_review(
+        &self,
+        repo: &RepoId,
+        pr: &str,
+        commit: &str,
+        event: crate::ReviewEvent,
+        body: &str,
+        threads: &[crate::ReviewThreadDraft],
+    ) -> Result<crate::SubmittedReview, GhError>;
+    /// The viewer's latest review of pull request `number`, if any.
+    fn viewer_latest_review(
+        &self,
+        repo: &RepoId,
+        number: u64,
+    ) -> Result<Option<crate::LatestReview>, GhError>;
     /// Replace pull request `number`'s description with `body`.
     fn edit_pr_body(&self, repo: &RepoId, number: u64, body: &str) -> Result<(), GhError>;
     /// Close pull request `number` unmerged. Leaves the branch.

@@ -17,6 +17,8 @@ pub(crate) fn install(cx: &mut App) {
 }
 
 fn run(until: std::time::Instant, cx: &mut App) {
+    // Unsent review text first: a write that cannot wait on the rest.
+    crate::github::DraftStore::flush(cx);
     RunsHost::quit_begin(cx);
     let cards = crate::remote_channel::cards::quit::begin(cx);
     RunsHost::quit_flush(until, cx);

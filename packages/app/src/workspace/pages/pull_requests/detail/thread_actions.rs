@@ -14,11 +14,12 @@ use gpui::{Context, Entity, Subscription, Window};
 use super::read_slot::ReadTicket;
 use super::{PrDetailId, PrDetailState, TabRead};
 use crate::gh_host::GhHost;
-use crate::github::PrPoller;
+use crate::github::{DraftStore, PrPoller};
 use crate::surface::strings::pull_requests as s;
 use crate::ui::{InputEvent, TextareaState};
 use crate::workspace::Workspace;
 use crate::workspace::spawn_helpers::spawn_bg_work_and_mutate;
+use daruda_store::review_drafts::DraftOwner;
 
 /// An action on one thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +58,8 @@ pub(in crate::workspace) struct ThreadWork {
     /// A reply that failed may still have posted: the threads read under
     /// this ticket, or a later one, say whether it did. Post waits.
     checking: Option<ReadTicket>,
+    /// Whose draft the reply is, fixed when the box opened.
+    owner: Option<DraftOwner>,
 }
 
 impl ThreadWork {
@@ -151,12 +154,14 @@ impl ThreadsWork {
     /// failed reply it may have posted is checked against the thread's last
     /// comment (`draft` reads its box); work on threads gone is let go,
     /// unless it holds a reply still being written.
+    /// Answers the threads whose failed reply turned out posted.
     pub(in crate::workspace) fn threads_read(
         &mut self,
         ticket: ReadTicket,
         threads: Option<&ReviewThreads>,
         draft: impl Fn(&Entity<TextareaState>) -> String,
-    ) {
+    ) -> Vec<String> {
+        let mut posted_after_all = Vec::new();
         self.resolved.retain(|_, stamp| *stamp > ticket);
         let Some(threads) = threads else {
             for work in self.work.values_mut() {
@@ -164,7 +169,7 @@ impl ThreadsWork {
                     work.checking = None;
                 }
             }
-            return;
+            return posted_after_all;
         };
         let last = |thread: &str| {
             threads
@@ -186,6 +191,7 @@ impl ThreadsWork {
             if posted {
                 work.close_reply();
                 work.op = None;
+                posted_after_all.push(thread.clone());
             }
         }
         self.work.retain(|thread, work| {
@@ -193,6 +199,7 @@ impl ThreadsWork {
                 || matches!(work.op, Some(ThreadOp::Running(_)))
                 || threads.threads.iter().any(|held| held.id == *thread)
         });
+        posted_after_all
     }
 }
 
@@ -221,16 +228,30 @@ impl Workspace {
         {
             return;
         }
+        // A draft kept from before continues where it was left.
+        let owner = self.pr_draft_owner(id, cx);
+        let draft = owner
+            .as_ref()
+            .and_then(|owner| DraftStore::of(owner, cx))
+            .and_then(|drafts| {
+                drafts
+                    .replies
+                    .into_iter()
+                    .find(|held| held.thread == thread)
+                    .map(|held| held.text)
+            })
+            .unwrap_or_default();
         let reply = crate::ui::make_markdown_prose_state(
-            "",
+            &draft,
             s::reply_placeholder(),
             crate::ui::theme::PR_REPLY_ROWS,
             window,
             cx,
         );
-        let typing = cx.subscribe(&reply, |_, _, event: &InputEvent, cx| {
+        let typed = thread.to_owned();
+        let typing = cx.subscribe(&reply, move |ws, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
-                cx.notify();
+                ws.pr_reply_typed(id, &typed, cx);
             }
         });
         reply.update(cx, |reply, cx| reply.focus(window, cx));
@@ -244,6 +265,7 @@ impl Workspace {
             .or_default();
         work.reply = Some(reply);
         work.typing = Some(typing);
+        work.owner = owner;
         cx.notify();
     }
 
@@ -264,7 +286,50 @@ impl Workspace {
             work.close_reply();
             work.op = None;
         }
+        self.set_pr_reply_draft(id, thread, None, cx);
         cx.notify();
+    }
+
+    /// Typing a reply: kept as typed, so leaving or quitting loses none.
+    fn pr_reply_typed(&mut self, id: PrDetailId, thread: &str, cx: &mut Context<Self>) {
+        let Some(work) = self
+            .pr_detail_mut(id)
+            .and_then(|detail| detail.thread_work.work.get(thread))
+        else {
+            return;
+        };
+        let text = work
+            .reply
+            .as_ref()
+            .map(|reply| reply.read(cx).value().to_string())
+            .filter(|text| !text.trim().is_empty());
+        if let Some(owner) = work.owner.clone() {
+            DraftStore::set_reply(&owner, thread, text, cx);
+        }
+        cx.notify();
+    }
+
+    /// Drop the reply draft kept for `thread`, which is no longer listed.
+    pub(in crate::workspace) fn discard_pr_reply_draft(
+        &mut self,
+        id: PrDetailId,
+        thread: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_pr_reply_draft(id, thread, None, cx);
+        cx.notify();
+    }
+
+    pub(super) fn set_pr_reply_draft(
+        &mut self,
+        id: PrDetailId,
+        thread: &str,
+        text: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(owner) = self.pr_draft_owner(id, cx) {
+            DraftStore::set_reply(&owner, thread, text, cx);
+        }
     }
 
     /// Post what `thread`'s reply box holds.
@@ -289,13 +354,13 @@ impl Workspace {
         if !detail.thread_work.begin(thread, ThreadAction::Replying) {
             return;
         }
-        let repo = detail.item.repo.clone();
+        let (repo, number) = (detail.item.repo.clone(), detail.item.pr.number);
         let (gh, thread) = (GhHost::global(cx), thread.to_owned());
         let bg = (repo.clone(), thread.clone());
         spawn_bg_work_and_mutate(
             cx,
             move || gh.reply_to_thread(&bg.0, &bg.1, &body),
-            move |ws, result, cx| ws.land_pr_reply(id, repo, thread, result, cx),
+            move |ws, result, cx| ws.land_pr_reply(id, repo, number, thread, result, cx),
         )
         .detach();
         cx.notify();
@@ -305,11 +370,18 @@ impl Workspace {
         &mut self,
         id: PrDetailId,
         repo: RepoId,
+        number: u64,
         thread: String,
         result: Result<ReviewComment, GhError>,
         cx: &mut Context<Self>,
     ) {
         let failure = result.as_ref().err().map(ToString::to_string);
+        // Posted: the draft is done with, even if the detail is gone.
+        if result.is_ok()
+            && let Some(owner) = DraftStore::owner(&repo, number, cx)
+        {
+            DraftStore::set_reply(&owner, &thread, None, cx);
+        }
         if let Some(detail) = self.pr_detail_mut(id) {
             let stamp = detail.tickets.issue();
             let finished =

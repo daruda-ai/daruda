@@ -18,6 +18,7 @@ mod conversation;
 mod detail;
 mod paged_search;
 mod rate_limit;
+mod review;
 mod search;
 mod thread_actions;
 mod threads;
@@ -26,6 +27,9 @@ pub(crate) use conversation::{CONVERSATION_QUERY, read_conversation};
 pub(crate) use detail::{parse_pr_detail, pr_detail_query};
 pub(crate) use paged_search::{paged_search_args, paged_search_string, parse_search_page};
 pub(crate) use rate_limit::parse_graphql_reset;
+pub(crate) use review::{
+    LATEST_REVIEW_QUERY, parse_latest_review, parse_submitted, submit_request,
+};
 pub(crate) use search::{newest_first, parse_search_prs, search_prs_query, search_string};
 pub(crate) use thread_actions::{
     REPLY_MUTATION, RESOLVE_MUTATION, UNRESOLVE_MUTATION, parse_reply, parse_resolved,

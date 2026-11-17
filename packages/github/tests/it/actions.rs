@@ -30,6 +30,7 @@ fn detail(state: PrState, mergeability: Mergeability, methods: Vec<MergeMethod>)
         open_threads: 0,
         open_threads_more: false,
         can_update: false,
+        node_id: None,
         changed_files: None,
     }
 }

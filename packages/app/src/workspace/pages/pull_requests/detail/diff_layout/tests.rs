@@ -140,3 +140,32 @@ fn a_selection_stretches_only_within_its_file_side_and_revision() {
     assert_eq!(stretched.reference(), "a.rs:3-7 (new) @ abc1234");
     assert_eq!(old.reference(), "a.rs:2 (old) @ abc1234");
 }
+
+#[test]
+fn only_a_range_whole_within_one_hunk_anchors_a_comment() {
+    let two_hunks = rows("@@ -1,2 +1,2 @@\n a\n-b\n+B\n@@ -10,2 +10,2 @@\n x\n-y\n+Y");
+    let range = |side, start, end| LineRange {
+        path: "a.rs".into(),
+        side,
+        start,
+        end,
+        revision: "r".into(),
+    };
+    // (label, side, start, end, anchored)
+    let cases = [
+        ("an unchanged and an added line", Side::New, 1, 2, true),
+        ("a removed line", Side::Old, 2, 2, true),
+        ("across the two hunks", Side::New, 2, 10, false),
+        ("lines between the hunks", Side::New, 5, 6, false),
+        ("the second hunk", Side::New, 10, 11, true),
+    ];
+    for (label, side, start, end, anchored) in cases {
+        assert_eq!(
+            anchored_rows(&two_hunks, &range(side, start, end)).is_some(),
+            anchored,
+            "{label}"
+        );
+    }
+    assert_eq!(range(Side::New, 3, 5).place(), "a.rs:3-5 (new)");
+    assert_eq!(range(Side::New, 3, 3).reference(), "a.rs:3 (new) @ r");
+}

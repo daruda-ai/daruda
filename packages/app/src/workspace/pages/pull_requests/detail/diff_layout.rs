@@ -44,8 +44,8 @@ impl LineRange {
         line_on(row, self.side).is_some_and(|line| (self.start..=self.end).contains(&line))
     }
 
-    /// `path:12-15 (new) @ 4f9c2e1`, as copied for a person or an agent.
-    pub(in crate::workspace) fn reference(&self) -> String {
+    /// `path:12-15 (new)`, without the commit.
+    pub(in crate::workspace) fn place(&self) -> String {
         let lines = if self.start == self.end {
             self.start.to_string()
         } else {
@@ -55,9 +55,40 @@ impl LineRange {
             Side::Old => "old",
             Side::New => "new",
         };
-        let revision: String = self.revision.chars().take(7).collect();
-        format!("{}:{lines} ({side}) @ {revision}", self.path)
+        format!("{}:{lines} ({side})", self.path)
     }
+
+    /// `path:12-15 (new) @ 4f9c2e1`, as copied for a person or an agent.
+    pub(in crate::workspace) fn reference(&self) -> String {
+        let revision: String = self.revision.chars().take(7).collect();
+        format!("{} @ {revision}", self.place())
+    }
+}
+
+/// The lines `range` covers, in order, when every one of them is in the
+/// diff on its side within one hunk: the only ranges a review comment can
+/// be anchored to. `rows` must be unfolded: folding drops unchanged lines.
+pub(in crate::workspace) fn anchored_rows<'a>(
+    rows: &'a [VisualRow],
+    range: &LineRange,
+) -> Option<Vec<&'a VisualRow>> {
+    let mut found: Vec<&VisualRow> = Vec::new();
+    let mut hunk = 0;
+    let mut hunk_of_first = None;
+    for row in rows {
+        if row.kind == VisualRowKind::HunkHeader {
+            hunk += 1;
+            continue;
+        }
+        if range.holds(row) {
+            if *hunk_of_first.get_or_insert(hunk) != hunk {
+                return None;
+            }
+            found.push(row);
+        }
+    }
+    let wanted = (range.end - range.start + 1) as usize;
+    (found.len() == wanted).then_some(found)
 }
 
 /// The text of the lines in `range` among `rows`, one per line, in order:

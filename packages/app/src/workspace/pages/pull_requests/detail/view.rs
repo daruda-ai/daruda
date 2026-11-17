@@ -152,6 +152,8 @@ pub(in crate::workspace) struct ThreadRowView {
     pub checking: bool,
     /// What the viewer may do to it.
     pub may: daruda_github::ThreadPermissions,
+    /// A reply to it is kept in draft.
+    pub draft: bool,
 }
 
 /// Lines of the current diff a thread is on.
@@ -169,6 +171,10 @@ pub(in crate::workspace) struct ThreadTarget {
 pub(in crate::workspace) struct DiscussionView {
     /// GitHub lets the viewer edit the description.
     pub can_edit: bool,
+    /// An edit of it is kept in draft.
+    pub draft: bool,
+    /// Whether what is typed is kept across restarts.
+    pub keeping: crate::github::DraftKeeping,
     /// The description being edited, and how saving it stands.
     pub edit: Option<(
         gpui::Entity<crate::ui::TextareaState>,
@@ -185,6 +191,56 @@ pub(in crate::workspace) enum ConversationView {
         comments: Vec<CommentView>,
         truncated: bool,
     },
+}
+
+/// Comments on lines kept for a review not yet submitted, and the one being
+/// written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct ReviewCommentsView {
+    pub pending: Vec<PendingCommentView>,
+    pub composer: Option<ComposerView>,
+    /// Whether what is typed is kept across restarts.
+    pub keeping: crate::github::DraftKeeping,
+    /// The review being written, once begun.
+    pub review: Option<ReviewView>,
+    /// A submission is in flight or its outcome unknown: pending comments
+    /// are not changed meanwhile.
+    pub locked: bool,
+}
+
+/// The review being written: text, verdict and how submitting stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct ReviewView {
+    pub body: gpui::Entity<crate::ui::TextareaState>,
+    pub event: daruda_github::ReviewEvent,
+    pub state: super::review_submit::SubmitState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct PendingCommentView {
+    pub id: u64,
+    /// `path:12-15 (new)`.
+    pub reference: String,
+    /// The first line of its text.
+    pub excerpt: String,
+    pub suggests: bool,
+    /// Written on another head than the one listed: its lines may now be
+    /// other code.
+    pub outdated: bool,
+    /// Its lines are not all in the diff within one hunk, which GitHub
+    /// refuses to anchor a review comment to.
+    pub unanchored: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct ComposerView {
+    pub reference: String,
+    pub outdated: bool,
+    pub unanchored: bool,
+    pub body: gpui::Entity<crate::ui::TextareaState>,
+    pub suggestion: Option<gpui::Entity<crate::ui::TextareaState>>,
+    /// Replacement text applies to the head's lines only.
+    pub can_suggest: bool,
 }
 
 /// One comment of an expanded thread.
@@ -205,6 +261,11 @@ pub(in crate::workspace) enum ThreadsView {
     Listed {
         rows: Vec<ThreadRowView>,
         truncated: bool,
+        /// Whether replies typed now are kept across restarts.
+        keeping: crate::github::DraftKeeping,
+        /// Reply drafts kept for threads no longer listed: thread id and
+        /// text, shown so they can be copied before being discarded.
+        orphan_drafts: Vec<(String, String)>,
     },
 }
 
@@ -248,6 +309,8 @@ pub(in crate::workspace) struct ReadyView {
     pub threads_send: SendSlot,
     /// Only while the Files tab is shown: the listing can be long.
     pub files: Option<super::files::FilesView>,
+    /// Only while the Files tab is shown: comments pending for a review.
+    pub review_comments: Option<ReviewCommentsView>,
     /// `None` when the author wrote none.
     pub description: Option<String>,
     /// Only while the Description tab is shown.
@@ -292,6 +355,10 @@ pub(in crate::workspace) struct DetailInputs<'a> {
     pub creating: &'a BTreeSet<PrKey>,
     /// Which files were marked viewed.
     pub progress: &'a super::progress::ReviewProgress,
+    /// Unsent review text kept for this pull request.
+    pub drafts: Option<daruda_store::review_drafts::PrDrafts>,
+    /// Whether what is typed now is kept across restarts.
+    pub keeping: crate::github::DraftKeeping,
     pub now: DateTime<Utc>,
 }
 
@@ -334,14 +401,9 @@ pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_
         body: match state.load() {
             Load::Loading => DetailBody::Loading,
             Load::Failed(reason) => DetailBody::Failed(reason.clone()),
-            Load::Ready(loaded) => DetailBody::Ready(Box::new(ready(
-                state,
-                item,
-                loaded,
-                row_lane,
-                inputs.sending,
-                inputs.progress,
-            ))),
+            Load::Ready(loaded) => {
+                DetailBody::Ready(Box::new(ready(state, item, loaded, row_lane, inputs)))
+            }
         },
     }
 }
@@ -351,9 +413,10 @@ fn ready(
     item: &PrListItem,
     loaded: &PrDetail,
     lane: Option<RowLane>,
-    sending: bool,
-    progress: &super::progress::ReviewProgress,
+    inputs: &DetailInputs<'_>,
 ) -> ReadyView {
+    let (sending, progress, keeping) = (inputs.sending, inputs.progress, inputs.keeping);
+    let drafts = inputs.drafts.as_ref();
     let send = |nothing: bool| match (&lane, sending, nothing) {
         (None, _, _) => SendSlot::NoLane,
         (Some(_), true, _) => SendSlot::Sending,
@@ -373,9 +436,11 @@ fn ready(
         threads: match state.threads() {
             None | Some(Load::Loading) => ThreadsView::Loading,
             Some(Load::Failed(reason)) => ThreadsView::Failed(reason.clone()),
-            Some(Load::Ready(threads)) => threads_view(threads, state),
+            Some(Load::Ready(threads)) => threads_view(threads, state, drafts, keeping),
         },
         threads_send: send(open_threads(state, loaded) == (0, false)),
+        review_comments: (state.tab() == PrTab::Files)
+            .then(|| review_comments(state, drafts, keeping)),
         files: (state.tab() == PrTab::Files).then(|| {
             let marks = progress.marks(&state.key());
             super::files::files_view(state.files(), loaded.changed_files, |file| {
@@ -384,6 +449,8 @@ fn ready(
         }),
         discussion: (state.tab() == PrTab::Description).then(|| DiscussionView {
             can_edit: loaded.can_update,
+            draft: drafts.is_some_and(|drafts| drafts.description.is_some()),
+            keeping,
             edit: state
                 .body_edit()
                 .map(|edit| (edit.input.clone(), edit.state.clone())),
@@ -497,7 +564,66 @@ fn tab_label(tab: PrTab, loaded: Option<&PrDetail>, state: &PrDetailState) -> St
     }
 }
 
-/// `2 failing · 5 passed · 1 skipped`, leaving out what there is none of.
+fn review_comments(
+    state: &PrDetailState,
+    drafts: Option<&daruda_store::review_drafts::PrDrafts>,
+    keeping: crate::github::DraftKeeping,
+) -> ReviewCommentsView {
+    let files = state.files();
+    let listed_at = files.and_then(|files| files.revision());
+    let unanchored =
+        |range: &super::diff_layout::LineRange| files.and_then(|f| f.anchors(range)) == Some(false);
+    let range = |path: &str, side, start, end, revision: &str| super::diff_layout::LineRange {
+        path: path.to_owned(),
+        side,
+        start,
+        end,
+        revision: revision.to_owned(),
+    };
+    ReviewCommentsView {
+        pending: drafts
+            .map(|drafts| drafts.comments.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .map(|draft| {
+                let lines = range(
+                    &draft.path,
+                    super::line_comments::view_side(draft.side),
+                    draft.start,
+                    draft.end,
+                    &draft.revision,
+                );
+                (draft, lines)
+            })
+            .map(|(draft, lines)| PendingCommentView {
+                id: draft.id,
+                reference: lines.place(),
+                unanchored: unanchored(&lines),
+                excerpt: excerpt(&draft.body),
+                suggests: draft.suggestion.is_some(),
+                outdated: listed_at.is_some_and(|head| head != draft.revision),
+            })
+            .collect(),
+        composer: state.composer().map(|composer| ComposerView {
+            reference: composer.range.place(),
+            outdated: listed_at.is_some_and(|head| head != composer.range.revision),
+            unanchored: unanchored(&composer.range),
+            body: composer.body.clone(),
+            suggestion: composer.suggestion.clone(),
+            can_suggest: composer.range.side == super::diff_layout::Side::New,
+        }),
+        keeping,
+        locked: state
+            .review()
+            .is_some_and(|review| !review.state.editable()),
+        review: state.review().map(|review| ReviewView {
+            body: review.body.clone(),
+            event: review.event,
+            state: review.state.clone(),
+        }),
+    }
+}
+
 /// Reviewers asked and not reviewed yet, under names `gh` can be given.
 fn removable(loaded: &PrDetail) -> Vec<String> {
     loaded
@@ -527,6 +653,7 @@ fn open_threads(state: &PrDetailState, loaded: &PrDetail) -> (usize, bool) {
     }
 }
 
+/// `2 failing · 5 passed · 1 skipped`, leaving out what there is none of.
 fn checks_summary(loaded: &PrDetail) -> String {
     if loaded.checks_truncated {
         let verdict =
@@ -582,8 +709,34 @@ fn check_row(entry: &CheckEntry, state: &PrDetailState) -> CheckRowView {
     }
 }
 
-fn threads_view(threads: &ReviewThreads, state: &PrDetailState) -> ThreadsView {
+fn threads_view(
+    threads: &ReviewThreads,
+    state: &PrDetailState,
+    drafts: Option<&daruda_store::review_drafts::PrDrafts>,
+    keeping: crate::github::DraftKeeping,
+) -> ThreadsView {
+    let replies = drafts
+        .map(|drafts| drafts.replies.as_slice())
+        .unwrap_or_default();
+    let drafted = |thread: &str| replies.iter().any(|held| held.thread == thread);
     ThreadsView::Listed {
+        keeping,
+        // Kept for threads no longer listed: resolved or gone since. With
+        // the list cut short, an unlisted thread may still be open.
+        orphan_drafts: if threads.truncated {
+            Vec::new()
+        } else {
+            replies
+                .iter()
+                .filter(|held| {
+                    !threads
+                        .threads
+                        .iter()
+                        .any(|thread| thread.id == held.thread)
+                })
+                .map(|held| (held.thread.clone(), held.text.clone()))
+                .collect()
+        },
         rows: threads
             .threads
             .iter()
@@ -594,6 +747,7 @@ fn threads_view(threads: &ReviewThreads, state: &PrDetailState) -> ThreadsView {
                 }
                 let work = state.thread_work();
                 row.resolved_here = work.resolved_here(&thread.id);
+                row.draft = drafted(&thread.id);
                 if let Some(work) = work.get(&thread.id) {
                     row.reply = work.reply.clone();
                     row.op = work.op.clone();
@@ -657,6 +811,7 @@ fn thread_row(thread: &ReviewThread) -> ThreadRowView {
         op: None,
         checking: false,
         may: thread.may,
+        draft: false,
     }
 }
 

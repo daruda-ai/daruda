@@ -322,6 +322,11 @@ impl Workspace {
             Page::Flows => ws.pages.flows.detail = None,
             Page::PullRequests => ws.pages.pull_requests.replace_detail(None),
         });
+        // What was typed in a pull request's detail is on disk before it is
+        // gone from view.
+        if id.page() == Page::PullRequests {
+            crate::github::DraftStore::flush(cx);
+        }
         cx.notify();
     }
 }

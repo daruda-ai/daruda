@@ -18,10 +18,14 @@ pub(in crate::workspace) mod diff_layout;
 mod diff_render;
 pub(in crate::workspace) mod files;
 pub(in crate::workspace) mod files_render;
+pub(in crate::workspace) mod line_comments;
 pub(in crate::workspace) mod progress;
 mod read_slot;
 pub(in crate::workspace) mod recover;
 pub(in crate::workspace) mod render;
+mod review_comments_render;
+pub(in crate::workspace) mod review_submit;
+mod review_submit_render;
 pub(in crate::workspace) mod reviewers;
 mod reviewers_render;
 pub(in crate::workspace) mod thread_actions;
@@ -127,6 +131,10 @@ pub(in crate::workspace) struct PrDetailState {
     body_edit: Option<description::BodyEdit>,
     /// The reviewer box and the last change to who is asked.
     reviewer_requests: reviewers::ReviewerRequests,
+    /// A comment being written on lines of the diff.
+    composer: Option<line_comments::LineComposer>,
+    /// The review being written and submitted.
+    review: Option<review_submit::ReviewSubmit>,
 }
 
 impl PrDetailState {
@@ -149,6 +157,8 @@ impl PrDetailState {
             conversation: None,
             body_edit: None,
             reviewer_requests: reviewers::ReviewerRequests::default(),
+            composer: None,
+            review: None,
         }
     }
 
@@ -200,6 +210,14 @@ impl PrDetailState {
 
     pub(in crate::workspace) fn scroll(&self) -> &gpui::ScrollHandle {
         &self.scroll
+    }
+
+    pub(in crate::workspace) fn review(&self) -> Option<&review_submit::ReviewSubmit> {
+        self.review.as_ref()
+    }
+
+    pub(in crate::workspace) fn composer(&self) -> Option<&line_comments::LineComposer> {
+        self.composer.as_ref()
     }
 
     pub(in crate::workspace) fn thread_work(&self) -> &thread_actions::ThreadsWork {
@@ -462,6 +480,7 @@ impl Workspace {
             .cloned();
         let tab_read = place.and_then(|place| detail.restore(&place));
         self.pages.pull_requests.replace_detail(Some(detail));
+        crate::github::DraftStore::flush(cx);
         self.read_pr_detail(id, cx);
         if let Some(read) = tab_read {
             self.send_pr_tab_read(id, read, cx);
@@ -669,11 +688,14 @@ impl Workspace {
                 .expanded_threads
                 .retain(|thread| open.contains(thread.as_str()));
         }
-        detail
+        let posted = detail
             .thread_work
             .threads_read(ticket, read.as_ref(), |reply| {
                 reply.read(cx).value().to_string()
             });
+        for thread in posted {
+            self.set_pr_reply_draft(id, &thread, None, cx);
+        }
         if let Some(e) = error {
             self.report_pr_read(&e, "github.pr_threads.read", cx);
         }

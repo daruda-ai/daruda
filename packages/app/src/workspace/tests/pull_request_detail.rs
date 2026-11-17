@@ -85,13 +85,14 @@ fn detail(number: u64, head: &str) -> PrDetail {
         open_threads: 0,
         open_threads_more: false,
         can_update: false,
+        node_id: None,
         changed_files: None,
     }
 }
 
 /// A window whose one lane pushes `feat` to o/r, linked to PR #7, which
 /// GitHub can describe, with one failing Actions job whose log it prints.
-fn window(cx: &mut TestAppContext) -> (GitFixture, FakeGh, LaneRef) {
+pub(in crate::workspace) fn window(cx: &mut TestAppContext) -> (GitFixture, FakeGh, LaneRef) {
     let gh = crate::test_support::fake_gh(cx);
     gh.set_prs(&repo(), vec![summary(7, "feat")]);
     gh.set_pr_detail(&repo(), 7, detail(7, "feat"));

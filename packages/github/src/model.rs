@@ -239,6 +239,53 @@ impl Default for ThreadPermissions {
     }
 }
 
+/// A review's verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewEvent {
+    Comment,
+    Approve,
+    RequestChanges,
+}
+
+/// A comment on lines of the diff, sent with a review.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewThreadDraft {
+    pub path: String,
+    /// The last line, on `side`.
+    pub line: u32,
+    pub side: DiffSide,
+    /// The first line, for a range of more than one.
+    pub start_line: Option<u32>,
+    pub body: String,
+}
+
+/// A review GitHub took.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmittedReview {
+    pub id: String,
+    pub url: Option<String>,
+}
+
+/// The viewer's latest review: what tells whether a submission whose
+/// answer was lost went through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LatestReview {
+    pub id: String,
+    pub body: String,
+    /// What GitHub records: `PENDING` (started, not submitted), or the
+    /// verdict given.
+    pub state: LatestReviewState,
+}
+
+/// Where the viewer's latest review stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LatestReviewState {
+    Pending,
+    Given(ReviewEvent),
+    /// Dismissed, or a state this crate does not know.
+    Other,
+}
+
 /// The comments on a pull request itself, oldest first: its conversation,
 /// apart from the review threads on its diff.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -415,6 +462,8 @@ pub struct PrDetail {
     pub open_threads_more: bool,
     /// The viewer may edit the pull request: its description among others.
     pub can_update: bool,
+    /// GitHub's node id of the pull request, which a review names.
+    pub node_id: Option<String>,
     /// How many files GitHub says it changes; `None` from an answer that
     /// did not say.
     pub changed_files: Option<u32>,

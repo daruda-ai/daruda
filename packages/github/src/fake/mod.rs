@@ -21,6 +21,8 @@
 //! | `reply_to_thread` | adds the reply to the scripted thread, answers it |
 //! | `pr_conversation` | the `set_conversation` comments, else none |
 //! | `edit_pr_reviewers` | the scripted detail asks those added, not those removed |
+//! | `submit_review` | recorded; becomes the viewer's latest review |
+//! | `viewer_latest_review` | the last review submitted, or `set_latest_review`'s |
 //! | `edit_pr_body` | the scripted detail's body becomes `body` |
 //! | `set_thread_resolved` | a resolved thread leaves `review_threads` until unresolved |
 //! | `graphql_rate_limit_reset` | `None`: requests remain |
@@ -125,6 +127,18 @@ pub enum GhCall {
         number: u64,
         body: String,
     },
+    SubmitReview {
+        repo: RepoId,
+        pr: String,
+        commit: String,
+        event: crate::ReviewEvent,
+        body: String,
+        threads: Vec<crate::ReviewThreadDraft>,
+    },
+    LatestReview {
+        repo: RepoId,
+        number: u64,
+    },
     EditPrReviewers {
         repo: RepoId,
         number: u64,
@@ -161,6 +175,8 @@ pub enum GhOp {
     SetThreadResolved,
     Conversation,
     EditPrBody,
+    SubmitReview,
+    LatestReview,
     EditPrReviewers,
     RerunFailed,
     RateLimitReset,
@@ -210,6 +226,10 @@ struct FakeState {
     threads: HashMap<u64, ReviewThreads>,
     resolved_threads: std::collections::HashSet<String>,
     conversations: HashMap<(RepoId, u64), crate::Conversation>,
+    latest_review: Option<crate::LatestReview>,
+    /// A scripted `submit_review` failure still lands, as when `gh` times
+    /// out after GitHub took the review.
+    review_lands_anyway: bool,
     details: HashMap<(RepoId, u64), PrDetail>,
     files: HashMap<(RepoId, u64), crate::PrFiles>,
     file_texts: HashMap<(RepoId, String, String), crate::FileText>,
@@ -284,6 +304,17 @@ impl FakeGh {
             .insert((repo.clone(), number), conversation);
     }
 
+    /// What `viewer_latest_review` answers, as if a review were submitted
+    /// elsewhere or a lost submission went through.
+    pub fn set_latest_review(&self, review: Option<crate::LatestReview>) {
+        self.lock().latest_review = review;
+    }
+
+    /// Whether a scripted `submit_review` failure lands the review anyway.
+    pub fn set_review_lands_anyway(&self, lands: bool) {
+        self.lock().review_lands_anyway = lands;
+    }
+
     /// What `pr_detail` answers for PR `number` of `repo`.
     pub fn set_pr_detail(&self, repo: &RepoId, number: u64, detail: PrDetail) {
         self.lock().details.insert((repo.clone(), number), detail);
@@ -344,6 +375,8 @@ impl GhCall {
             Self::SetThreadResolved { .. } => GhOp::SetThreadResolved,
             Self::Conversation { .. } => GhOp::Conversation,
             Self::EditPrBody { .. } => GhOp::EditPrBody,
+            Self::SubmitReview { .. } => GhOp::SubmitReview,
+            Self::LatestReview { .. } => GhOp::LatestReview,
             Self::EditPrReviewers { .. } => GhOp::EditPrReviewers,
             Self::RerunFailed { .. } => GhOp::RerunFailed,
             Self::RateLimitReset { .. } => GhOp::RateLimitReset,
@@ -711,6 +744,49 @@ impl Gh for FakeGh {
             }
         }
         Ok(())
+    }
+
+    fn submit_review(
+        &self,
+        repo: &RepoId,
+        pr: &str,
+        commit: &str,
+        event: crate::ReviewEvent,
+        body: &str,
+        threads: &[crate::ReviewThreadDraft],
+    ) -> Result<crate::SubmittedReview, GhError> {
+        let mut state = self.lock();
+        let answer = state.record(GhCall::SubmitReview {
+            repo: repo.clone(),
+            pr: pr.to_owned(),
+            commit: commit.to_owned(),
+            event,
+            body: body.to_owned(),
+            threads: threads.to_vec(),
+        });
+        let lands = answer.is_ok() || state.review_lands_anyway;
+        let id = format!("fake-review-{}", state.calls.len());
+        if lands {
+            state.latest_review = Some(crate::LatestReview {
+                id: id.clone(),
+                body: body.to_owned(),
+                state: crate::LatestReviewState::Given(event),
+            });
+        }
+        answer.map(|()| crate::SubmittedReview { id, url: None })
+    }
+
+    fn viewer_latest_review(
+        &self,
+        repo: &RepoId,
+        number: u64,
+    ) -> Result<Option<crate::LatestReview>, GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::LatestReview {
+            repo: repo.clone(),
+            number,
+        })?;
+        Ok(state.latest_review.clone())
     }
 
     fn edit_pr_body(&self, repo: &RepoId, number: u64, body: &str) -> Result<(), GhError> {

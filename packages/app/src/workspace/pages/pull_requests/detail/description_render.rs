@@ -22,7 +22,7 @@ pub(super) fn description(
         return div().into_any_element();
     };
     let body = match &discussion.edit {
-        Some((input, state)) => editor(id, input, state, cx),
+        Some((input, state)) => editor(id, input, state, discussion.keeping, cx),
         None => shown_body(id, ready.description.as_deref(), discussion, cx),
     };
     div()
@@ -57,11 +57,18 @@ fn shown_body(
         .when(discussion.can_edit, |column| {
             column.child(
                 div().flex().justify_end().child(
-                    button_compact("pr-body-edit", s::body_edit())
-                        .debug_selector(|| "pr-body-edit".into())
-                        .on_click(
-                            cx.listener(move |ws, _, window, cx| ws.edit_pr_body(id, window, cx)),
-                        ),
+                    button_compact(
+                        "pr-body-edit",
+                        if discussion.draft {
+                            s::body_continue_draft()
+                        } else {
+                            s::body_edit()
+                        },
+                    )
+                    .debug_selector(|| "pr-body-edit".into())
+                    .on_click(
+                        cx.listener(move |ws, _, window, cx| ws.edit_pr_body(id, window, cx)),
+                    ),
                 ),
             )
         })
@@ -74,6 +81,7 @@ fn editor(
     id: PrDetailId,
     input: &Entity<TextareaState>,
     state: &SaveState,
+    keeping: crate::github::DraftKeeping,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -93,7 +101,10 @@ fn editor(
         .flex()
         .flex_col()
         .gap(px(theme::GAP_SM))
-        .child(markdown_editor(input, cx))
+        // Read-only while it saves: text typed then would be dropped with
+        // the editor when the save lands.
+        .child(markdown_editor(input, cx).disabled(saving))
+        .children(super::render::keeping_note(keeping, cx))
         .children(line.map(|(text, color)| {
             div()
                 .text_size(px(theme::FONT_SIZE_SM))
@@ -121,6 +132,7 @@ fn editor(
                 })
                 .child(
                     button_compact("pr-body-cancel", common::btn_cancel())
+                        .debug_selector(|| "pr-body-cancel".into())
                         .disabled(saving)
                         .on_click(cx.listener(move |ws, _, _, cx| ws.cancel_pr_body_edit(id, cx))),
                 ),

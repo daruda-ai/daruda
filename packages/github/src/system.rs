@@ -600,6 +600,46 @@ impl Gh for SystemGh {
             .map(drop)
     }
 
+    fn submit_review(
+        &self,
+        repo: &RepoId,
+        pr: &str,
+        commit: &str,
+        event: crate::ReviewEvent,
+        body: &str,
+        threads: &[crate::ReviewThreadDraft],
+    ) -> Result<crate::SubmittedReview, GhError> {
+        // On stdin: a review's text can be longer than an argument may be.
+        let request = crate::query::submit_request(pr, commit, event, body, threads);
+        let json = self.stdout_fed(
+            ["api", "graphql", "--hostname", repo.host(), "--input", "-"],
+            request.to_string().into_bytes(),
+        )?;
+        crate::query::parse_submitted(&json)
+    }
+
+    fn viewer_latest_review(
+        &self,
+        repo: &RepoId,
+        number: u64,
+    ) -> Result<Option<crate::LatestReview>, GhError> {
+        let json = self.stdout([
+            "api".to_owned(),
+            "graphql".to_owned(),
+            "--hostname".to_owned(),
+            repo.host().to_owned(),
+            "-f".to_owned(),
+            format!("query={}", crate::query::LATEST_REVIEW_QUERY),
+            "-f".to_owned(),
+            format!("owner={}", repo.owner()),
+            "-f".to_owned(),
+            format!("name={}", repo.name()),
+            "-F".to_owned(),
+            format!("number={number}"),
+        ])?;
+        crate::query::parse_latest_review(&json)
+    }
+
     fn edit_pr_body(&self, repo: &RepoId, number: u64, body: &str) -> Result<(), GhError> {
         // On stdin: a description can be longer than an argument may be.
         self.stdout_fed(

@@ -7,6 +7,7 @@ use super::PrDetailId;
 use super::render::{note, send_line};
 use super::thread_actions::{ThreadAction, ThreadOp};
 use super::view::{CommentView, ReadyView, ThreadRowView, ThreadsView};
+use crate::github::DraftKeeping;
 use crate::surface::strings::{common, git as git_s, pull_requests as s};
 use crate::ui::{
     Badge, Disableable as _, TextareaState, button_compact, button_icon, button_with_icon, icons,
@@ -29,17 +30,25 @@ pub(super) fn threads(id: PrDetailId, ready: &ReadyView, cx: &Context<Workspace>
         ThreadsView::Failed(reason) => {
             vec![note(s::threads_failed(reason), cx).into_any_element()]
         }
-        ThreadsView::Listed { rows, truncated } => {
+        ThreadsView::Listed {
+            rows,
+            truncated,
+            keeping,
+            orphan_drafts,
+        } => {
             let mut body: Vec<AnyElement> = rows
                 .iter()
                 .enumerate()
-                .map(|(index, row)| thread_row(id, index, row, cx))
+                .map(|(index, row)| thread_row(id, index, row, *keeping, cx))
                 .collect();
             if rows.is_empty() {
                 body.push(note(s::threads_empty(), cx).into_any_element());
             }
             if *truncated {
                 body.push(note(s::threads_truncated(), cx).into_any_element());
+            }
+            if !orphan_drafts.is_empty() {
+                body.push(orphan_drafts_list(id, orphan_drafts, cx));
             }
             body
         }
@@ -58,6 +67,7 @@ fn thread_row(
     id: PrDetailId,
     index: usize,
     row: &ThreadRowView,
+    keeping: DraftKeeping,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -95,6 +105,9 @@ fn thread_row(
                 .when(row.resolved_here, |line| {
                     line.child(Badge::new(s::thread_resolved()).text_color(t.banner_success_text))
                 })
+                .when(row.draft && row.reply.is_none(), |line| {
+                    line.child(Badge::new(s::draft_badge()).text_color(t.banner_warning_text))
+                })
                 .child(div().flex_1())
                 .children(row.replies.clone().map(|replies| {
                     div()
@@ -131,7 +144,7 @@ fn thread_row(
         .children(
             row.comments
                 .as_ref()
-                .map(|comments| expanded(id, index, row, comments, cx)),
+                .map(|comments| expanded(id, index, row, comments, keeping, cx)),
         )
         .into_any_element()
 }
@@ -142,6 +155,7 @@ fn expanded(
     index: usize,
     row: &ThreadRowView,
     comments: &[CommentView],
+    keeping: DraftKeeping,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -212,7 +226,7 @@ fn expanded(
         .children(
             row.reply
                 .as_ref()
-                .map(|reply| reply_box(id, index, row, reply, cx)),
+                .map(|reply| reply_box(id, index, row, reply, keeping, cx)),
         )
         .children(row.op.as_ref().map(|op| op_line(op, row.checking, cx)))
         .child(actions)
@@ -276,6 +290,7 @@ fn reply_box(
     index: usize,
     row: &ThreadRowView,
     reply: &Entity<TextareaState>,
+    keeping: DraftKeeping,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let running = matches!(row.op, Some(ThreadOp::Running(_)));
@@ -288,6 +303,7 @@ fn reply_box(
         .flex_col()
         .gap(px(theme::GAP_SM))
         .child(markdown_editor(reply, cx))
+        .children(super::render::keeping_note(keeping, cx))
         .child(
             div()
                 .flex()
@@ -331,5 +347,60 @@ fn op_line(op: &ThreadOp, checking: bool, cx: &Context<Workspace>) -> AnyElement
         .text_size(px(theme::FONT_SIZE_SM))
         .text_color(color)
         .child(text)
+        .into_any_element()
+}
+
+/// Reply drafts kept for threads no longer listed, each shown so it can be
+/// copied, and discarded one by one only when asked.
+fn orphan_drafts_list(
+    id: PrDetailId,
+    drafts: &[(String, String)],
+    cx: &Context<Workspace>,
+) -> AnyElement {
+    let t = theme::current(cx);
+    div()
+        .debug_selector(|| "pr-thread-orphan-drafts".into())
+        .flex()
+        .flex_col()
+        .gap(px(theme::GAP_SM))
+        .py(px(theme::PAD_SM))
+        .text_size(px(theme::FONT_SIZE_SM))
+        .child(
+            div()
+                .text_color(t.banner_warning_text)
+                .child(s::orphan_reply_drafts(drafts.len())),
+        )
+        .children(drafts.iter().enumerate().map(|(index, (thread, text))| {
+            let (copied, thread) = (text.clone(), thread.clone());
+            div()
+                .flex()
+                .items_center()
+                .gap(px(theme::GAP_SM))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(t.text_body)
+                        .child(text.lines().next().unwrap_or_default().to_owned()),
+                )
+                .child(
+                    button_icon(("pr-orphan-copy", index), icons::COPY, cx)
+                        .tooltip(s::orphan_draft_copy())
+                        .on_click(move |_, _, cx| {
+                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(copied.clone()))
+                        }),
+                )
+                .child(
+                    button_compact(
+                        ("pr-orphan-discard", index),
+                        s::orphan_reply_drafts_discard(),
+                    )
+                    .debug_selector(move || format!("pr-orphan-discard-{index}"))
+                    .on_click(
+                        cx.listener(move |ws, _, _, cx| ws.discard_pr_reply_draft(id, &thread, cx)),
+                    ),
+                )
+        }))
         .into_any_element()
 }

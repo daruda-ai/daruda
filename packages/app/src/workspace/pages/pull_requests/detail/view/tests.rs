@@ -93,6 +93,7 @@ fn detail(failed: bool, open_threads: u32, cross_repo: bool) -> PrDetail {
         open_threads,
         open_threads_more: false,
         can_update: false,
+        node_id: None,
         changed_files: None,
     }
 }
@@ -127,6 +128,8 @@ fn inputs(lane: Option<&LaneFacts>) -> DetailInputs<'_> {
         sending: false,
         creating: &NOTHING_CREATING,
         progress: &NO_PROGRESS,
+        drafts: None,
+        keeping: crate::github::DraftKeeping::Saved,
         now: Utc::now(),
     }
 }

@@ -113,6 +113,17 @@ impl FileDiff {
     }
 }
 
+/// `file`'s diff rows with every line its patch holds, folding aside.
+fn unfolded_rows(file: &PrFile) -> Option<Vec<VisualRow>> {
+    let patch = file.patch.as_deref()?;
+    let no_newline = crate::surface::strings::file_viewer::no_newline();
+    Some(build_diff_rows(
+        &parse_diff_hunks(patch),
+        false,
+        &no_newline,
+    ))
+}
+
 /// Patch text read before pages stop being read on their own: a pull
 /// request this large is read further only when asked.
 const AUTO_READ_BYTES: usize = 4 * 1024 * 1024;
@@ -537,7 +548,42 @@ impl FilesState {
         self.pending_lines = None;
     }
 
-    #[cfg(test)]
+    /// The head commit the listing was read at, once known.
+    pub(in crate::workspace) fn revision(&self) -> Option<&str> {
+        self.revision.as_deref()
+    }
+
+    /// Whether `range` can anchor a review comment in the listing read:
+    /// its file listed with a patch, every line in it within one hunk, at
+    /// the listing's commit. `None` when the listing cannot say.
+    pub(in crate::workspace) fn anchors(&self, range: &LineRange) -> Option<bool> {
+        if self.revision.as_deref() != Some(range.revision.as_str()) {
+            return None;
+        }
+        let file = self.files.iter().find(|file| file.path == range.path)?;
+        let rows = unfolded_rows(file)?;
+        Some(super::diff_layout::anchored_rows(&rows, range).is_some())
+    }
+
+    /// The text of `range`'s lines, from the unfolded diff at its commit,
+    /// when every line is there within one hunk: what a suggestion starts
+    /// from. `None` otherwise, so it starts empty rather than wrong.
+    pub(in crate::workspace) fn lines_text(&self, range: &LineRange) -> Option<String> {
+        if self.revision.as_deref() != Some(range.revision.as_str()) {
+            return None;
+        }
+        let file = self.files.iter().find(|file| file.path == range.path)?;
+        let rows = unfolded_rows(file)?;
+        let lines = super::diff_layout::anchored_rows(&rows, range)?;
+        Some(
+            lines
+                .iter()
+                .map(|row| row.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+
     pub(in crate::workspace) fn selection(&self) -> Option<&LineRange> {
         self.selection.as_ref()
     }

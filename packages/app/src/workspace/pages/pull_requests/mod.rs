@@ -275,11 +275,20 @@ impl Workspace {
             .filter(|_| self.shown_page_detail_id().is_some())
             .map(|state| {
                 let lane = list::linked_lane(state.item(), &lanes);
+                let draft_owner = crate::github::DraftStore::owner(
+                    &state.item().repo,
+                    state.item().pr.number,
+                    cx,
+                );
                 let inputs = detail::view::DetailInputs {
                     lane,
                     sending: lane.is_some_and(|lane| self.is_sending_pr(lane.lane)),
                     creating: &self.pages.pull_requests.creating,
                     progress: &self.pages.pull_requests.progress,
+                    drafts: draft_owner
+                        .as_ref()
+                        .and_then(|owner| crate::github::DraftStore::of(owner, cx)),
+                    keeping: crate::github::DraftStore::keeping(draft_owner.as_ref(), cx),
                     now: chrono::Utc::now(),
                 };
                 detail::view::view(state, &inputs)

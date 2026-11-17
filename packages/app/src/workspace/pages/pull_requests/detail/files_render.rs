@@ -16,6 +16,7 @@ use super::files::{
 };
 use super::progress::Viewed;
 use super::recover::RecoverFailure;
+use super::view::ReviewCommentsView;
 use crate::surface::strings::{common, pull_requests as s};
 use crate::ui::{
     Disableable as _, Selectable as _, button, button_compact, button_group, button_icon,
@@ -26,6 +27,7 @@ use crate::workspace::Workspace;
 pub(super) fn files(
     id: PrDetailId,
     view: &FilesView,
+    comments: Option<&ReviewCommentsView>,
     list_scroll: &UniformListScrollHandle,
     cx: &Context<Workspace>,
 ) -> AnyElement {
@@ -49,7 +51,11 @@ pub(super) fn files(
         .gap(px(theme::GAP_LG))
         .child(progress(id, files.len(), total, viewed, more, cx))
         .child(file_list(id, files, list_scroll, cx))
-        .children(shown.as_ref().map(|shown| shown_diff(id, shown, cx)))
+        .children(
+            shown
+                .as_ref()
+                .map(|shown| shown_diff(id, shown, comments, cx)),
+        )
         .into_any_element()
 }
 
@@ -277,7 +283,13 @@ fn viewed_mark(
         .into_any_element()
 }
 
-fn shown_diff(id: PrDetailId, shown: &ShownView, cx: &Context<Workspace>) -> AnyElement {
+fn shown_diff(
+    id: PrDetailId,
+    shown: &ShownView,
+    comments: Option<&ReviewCommentsView>,
+    cx: &Context<Workspace>,
+) -> AnyElement {
+    let composer = comments.and_then(|comments| comments.composer.as_ref());
     let t = theme::current(cx);
     let body = match &shown.diff {
         FileDiff::TooLarge => too_large(id, shown.recovery.as_ref(), cx),
@@ -298,7 +310,7 @@ fn shown_diff(id: PrDetailId, shown: &ShownView, cx: &Context<Workspace>) -> Any
             shown
                 .selection
                 .as_ref()
-                .map(|lines| selection_bar(id, lines, cx)),
+                .map(|lines| selection_bar(id, lines, composer.is_none(), cx)),
         )
         .child(body)
         .into_any_element()
@@ -461,7 +473,12 @@ fn diff_header(id: PrDetailId, shown: &ShownView, cx: &Context<Workspace>) -> An
 }
 
 /// The selected lines' reference, to copy or clear.
-fn selection_bar(id: PrDetailId, lines: &LineRange, cx: &Context<Workspace>) -> AnyElement {
+fn selection_bar(
+    id: PrDetailId,
+    lines: &LineRange,
+    can_comment: bool,
+    cx: &Context<Workspace>,
+) -> AnyElement {
     let t = theme::current(cx);
     div()
         .debug_selector(|| "pr-lines-selected".into())
@@ -484,6 +501,15 @@ fn selection_bar(id: PrDetailId, lines: &LineRange, cx: &Context<Workspace>) -> 
                 .text_color(t.text_body)
                 .child(lines.reference()),
         )
+        .when(can_comment, |bar| {
+            bar.child(
+                button_compact("pr-lines-comment", s::lines_comment())
+                    .debug_selector(|| "pr-lines-comment".into())
+                    .on_click(
+                        cx.listener(move |ws, _, window, cx| ws.comment_pr_lines(id, window, cx)),
+                    ),
+            )
+        })
         .child(
             button_compact("pr-lines-copy", s::lines_copy())
                 .debug_selector(|| "pr-lines-copy".into())

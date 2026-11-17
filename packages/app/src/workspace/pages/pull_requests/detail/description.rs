@@ -10,11 +10,12 @@ use gpui::{Context, Entity, Subscription, Window};
 use super::read_slot::{ReadSlot, ReadTicket};
 use super::{Load, PrDetailId, PrDetailState};
 use crate::gh_host::GhHost;
-use crate::github::PrPoller;
+use crate::github::{DraftStore, PrPoller};
 use crate::surface::strings::pull_requests as s;
 use crate::ui::{InputEvent, TextareaState};
 use crate::workspace::Workspace;
 use crate::workspace::spawn_helpers::spawn_bg_work_and_mutate;
+use daruda_store::review_drafts::{DescriptionDraft, DraftOwner};
 
 /// Where saving an edited description stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +35,9 @@ pub(in crate::workspace) struct BodyEdit {
     pub input: Entity<TextareaState>,
     /// The description editing began from.
     base: String,
+    /// Whose draft it is, fixed when editing began: an account switched
+    /// meanwhile does not split it.
+    owner: Option<DraftOwner>,
     pub state: SaveState,
     /// Redraws the detail as it is typed in.
     _typing: Subscription,
@@ -141,8 +145,19 @@ impl Workspace {
         }) else {
             return;
         };
+        // A draft kept from before continues where it was left, against
+        // the description it began from.
+        let owner = self.pr_draft_owner(id, cx);
+        let draft = owner
+            .as_ref()
+            .and_then(|owner| DraftStore::of(owner, cx))
+            .and_then(|drafts| drafts.description);
+        let (base, text) = match draft {
+            Some(draft) => (draft.base, draft.text),
+            None => (body.clone(), body),
+        };
         let input = crate::ui::make_markdown_prose_state(
-            &body,
+            &text,
             "",
             crate::ui::theme::PR_BODY_EDIT_ROWS,
             window,
@@ -157,7 +172,8 @@ impl Workspace {
         if let Some(detail) = self.pr_detail_mut(id) {
             detail.body_edit = Some(BodyEdit {
                 input,
-                base: body,
+                base,
+                owner,
                 state: SaveState::Editing,
                 _typing: typing,
             });
@@ -178,6 +194,7 @@ impl Workspace {
                 .is_some_and(|edit| edit.state != SaveState::Saving)
         {
             detail.body_edit = None;
+            self.drop_pr_description_draft(id, cx);
             cx.notify();
         }
     }
@@ -185,12 +202,27 @@ impl Workspace {
     /// Typing in the editor: a failure or conflict line no longer
     /// describes this text.
     fn pr_body_typed(&mut self, id: PrDetailId, cx: &mut Context<Self>) {
-        if let Some(edit) = self.pr_detail_mut(id).and_then(|d| d.body_edit.as_mut())
-            && matches!(edit.state, SaveState::Failed(_))
-        {
+        let Some(edit) = self.pr_detail_mut(id).and_then(|d| d.body_edit.as_mut()) else {
+            return;
+        };
+        if matches!(edit.state, SaveState::Failed(_)) {
             edit.state = SaveState::Editing;
         }
+        // Kept as typed, so leaving or quitting loses none of it.
+        let draft = DescriptionDraft {
+            base: edit.base.clone(),
+            text: edit.input.read(cx).value().to_string(),
+        };
+        if let Some(owner) = edit.owner.clone() {
+            DraftStore::set_description(&owner, Some(draft), cx);
+        }
         cx.notify();
+    }
+
+    fn drop_pr_description_draft(&mut self, id: PrDetailId, cx: &mut Context<Self>) {
+        if let Some(owner) = self.pr_draft_owner(id, cx) {
+            DraftStore::set_description(&owner, None, cx);
+        }
     }
 
     /// Save the edited description to GitHub, unless it changed there
@@ -237,6 +269,7 @@ impl Workspace {
         if same_text(&body, on_github.as_deref().unwrap_or(&edit.base)) {
             // Nothing to change on GitHub.
             detail.body_edit = None;
+            self.drop_pr_description_draft(id, cx);
             cx.notify();
             return;
         }
@@ -247,7 +280,7 @@ impl Workspace {
         spawn_bg_work_and_mutate(
             cx,
             move || gh.edit_pr_body(&bg, number, &body),
-            move |ws, result, cx| ws.land_pr_body(id, repo, result, cx),
+            move |ws, result, cx| ws.land_pr_body(id, repo, number, result, cx),
         )
         .detach();
         cx.notify();
@@ -260,9 +293,11 @@ impl Workspace {
         &mut self,
         id: PrDetailId,
         repo: daruda_github::RepoId,
+        number: u64,
         result: Result<(), GhError>,
         cx: &mut Context<Self>,
     ) {
+        let repo_for_draft = repo.clone();
         PrPoller::nudge(repo, cx);
         let saving = self
             .pr_detail_mut(id)
@@ -274,6 +309,11 @@ impl Workspace {
                     && let Some(detail) = self.pr_detail_mut(id)
                 {
                     detail.body_edit = None;
+                }
+                // Published: the draft is done with, even if the detail is
+                // gone.
+                if let Some(owner) = DraftStore::owner(&repo_for_draft, number, cx) {
+                    DraftStore::set_description(&owner, None, cx);
                 }
                 self.refresh_pr_detail(id, cx);
             }
@@ -294,8 +334,20 @@ impl Workspace {
     }
 }
 
+impl Workspace {
+    /// Whose drafts the detail's pull request holds.
+    pub(super) fn pr_draft_owner(
+        &mut self,
+        id: PrDetailId,
+        cx: &Context<Self>,
+    ) -> Option<DraftOwner> {
+        let detail = self.pr_detail_mut(id)?;
+        DraftStore::owner(&detail.item.repo, detail.item.pr.number, cx)
+    }
+}
+
 /// The same text, whichever line endings it was written with.
-fn same_text(a: &str, b: &str) -> bool {
+pub(super) fn same_text(a: &str, b: &str) -> bool {
     a.replace("\r\n", "\n") == b.replace("\r\n", "\n")
 }
 
