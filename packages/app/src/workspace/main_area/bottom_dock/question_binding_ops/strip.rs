@@ -190,8 +190,9 @@ impl Workspace {
 
     /// `SubmitQuestion`: the card's send while the composer holds text typed
     /// for the bound field. The text is committed there first, as Enter
-    /// would, so it goes with the answer; a field that takes no text keeps
-    /// it in the composer and the strip says why.
+    /// would, so it goes with the answer; a field that takes no text, or one
+    /// the phone answered under it, keeps it in the composer and the strip
+    /// says why.
     pub(in crate::workspace) fn submit_question_with_composer_text(
         &mut self,
         pane: PaneId,
@@ -216,7 +217,7 @@ impl Workspace {
         if !typed.is_empty() {
             let taken = !self.question_swap_pending(pane, &question)
                 && view.update(cx, |v, cx| {
-                    v.commit_question_text(question_id, question.field, typed, cx)
+                    v.send_question_text(question_id, question.field, typed, cx)
                 });
             if !taken {
                 self.refuse_question_text(pane, &question, cx);

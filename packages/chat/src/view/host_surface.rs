@@ -42,13 +42,15 @@ pub struct QuestionComposer {
     /// When the answer timeout declines the question, while it runs; the
     /// strip shows the time left through [`super::QuestionCountdown`].
     pub deadline: Option<std::time::Instant>,
+    /// The phone answered a field under the composer's uncommitted text.
+    pub phone_answered: Option<super::PhoneAnswered>,
 }
 
 /// `request` in one line: its first field's title, or its message when that
 /// field has none, cut to `QUESTION_SUMMARY_MAX_CHARS`.
 pub fn question_summary(request: &daruda_acp::QuestionRequest) -> String {
     let text = field_header(request, primary_fields(request).next());
-    let (prefix, cut) = daruda_core::text::char_prefix(text, QUESTION_SUMMARY_MAX_CHARS);
+    let (prefix, cut) = daruda_core::text::char_prefix(&text, QUESTION_SUMMARY_MAX_CHARS);
     if cut {
         format!("{prefix}…")
     } else {
@@ -168,7 +170,7 @@ impl AgentChatView {
                 primary_fields(&question.request).count(),
             ),
             waiting_after: self.questions.open().count() - 1,
-            header: header.to_owned(),
+            header: header.into_owned(),
             note_mode: field.is_some_and(|f| question.is_note(f)),
             bound: question.composer.is_bound(),
             draft_became_answer: question.composer
@@ -177,6 +179,7 @@ impl AgentChatView {
                 },
             send_highlighted: question.send_highlighted(),
             deadline: question.countdown(),
+            phone_answered: question.phone_answered,
         })
     }
 

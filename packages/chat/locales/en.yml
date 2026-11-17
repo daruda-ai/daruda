@@ -231,6 +231,8 @@ agent_chat:
   question_record_expired: "expired after %{time}"
   # A whole-minute wait, e.g. "5m".
   question_timeout_minutes: "%{mins}m"
+  # Stands in for a question whose agent gave it no title and no message.
+  question_untitled: "(no question text)"
   question_yes: "Yes"
   question_no: "No"
   question_submit: "Send answer"

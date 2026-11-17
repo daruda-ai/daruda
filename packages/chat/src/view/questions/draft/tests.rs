@@ -172,3 +172,29 @@ fn companion_key_and_primary_fields() {
     assert_eq!(companion_key(&request, "question_0_custom"), None);
     assert_eq!(primary_fields(&request).count(), 1);
 }
+
+/// Each row: the field's title, the request's message, and the header.
+/// Whitespace is no header: an agent that sends neither still gets a
+/// stand-in, so nothing that names the question names it with nothing.
+#[test]
+fn a_header_falls_back_to_the_message_then_a_stand_in() {
+    let untitled = crate::strings::agent_chat::question_untitled();
+    let rows: Vec<(Option<&str>, &str, &str)> = vec![
+        (Some("Which branch?"), "Pick one", "Which branch?"),
+        (None, "Pick one", "Pick one"),
+        (Some(""), "Pick one", "Pick one"),
+        (Some("  "), "Pick one", "Pick one"),
+        (None, "", &untitled),
+        (Some(" "), "\n", &untitled),
+    ];
+    for (title, message, want) in rows {
+        let mut f = field("pick", QuestionFieldKind::Text, None);
+        f.title = title.map(str::to_owned);
+        let mut q = request(vec![f.clone()]);
+        q.message = message.into();
+        assert_eq!(field_header(&q, Some(&f)), want, "{title:?} / {message:?}");
+    }
+    let mut q = request(Vec::new());
+    q.message = String::new();
+    assert_eq!(field_header(&q, None), untitled, "no field at all");
+}

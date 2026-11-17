@@ -126,6 +126,7 @@ agent_chat:
   question_record_withdrawn: "에이전트가 거둠"
   question_record_expired: "만료 (%{time})"
   question_timeout_minutes: "%{mins}분"
+  question_untitled: "(질문 내용 없음)"
   question_yes: "예"
   question_no: "아니오"
   question_submit: "답변 보내기"

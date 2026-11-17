@@ -649,7 +649,7 @@ mod host_commands;
 mod host_surface;
 pub use host_commands::{PhoneAnswerResult, PhoneQuestion, PhoneReply};
 pub use host_surface::{QuestionComposer, question_summary};
-pub use questions::QuestionCountdown;
+pub use questions::{PhoneAnswered, QuestionCountdown};
 pub(super) mod list_sync;
 mod pane_choices;
 pub(crate) mod questions;

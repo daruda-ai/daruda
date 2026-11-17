@@ -150,6 +150,7 @@ impl AgentChatView {
             }
             return self.phone_card_for(id, field, cx);
         }
+        let composer_has_text = !self.composer_hint_empty;
         let Some(question) = self.questions.get_mut(id) else {
             return PhoneAnswerResult::AlreadySettled;
         };
@@ -186,6 +187,7 @@ impl AgentChatView {
                     };
                     question.draft.pick(&target, &value);
                     if matches!(target.kind, QuestionFieldKind::MultiSelect(_)) {
+                        question.note_phone_answer(field, composer_has_text);
                         return self.phone_card_for(id, field, cx);
                     }
                 }
@@ -199,6 +201,7 @@ impl AgentChatView {
         }
         // What the card showed is what the person answered, default included.
         question.draft.confirm(&target.key);
+        question.note_phone_answer(field, composer_has_text);
         self.phone_move_on(id, field, cx)
     }
 
@@ -299,7 +302,7 @@ fn phone_question(
         id: question.id,
         field,
         step,
-        header: header.to_owned(),
+        header: header.into_owned(),
         message: question.request.message.clone(),
         options,
         picked,

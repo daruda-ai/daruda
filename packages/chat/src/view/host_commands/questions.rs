@@ -8,7 +8,9 @@ use daruda_acp::QuestionAnswer;
 use gpui::Context;
 
 use crate::view::AgentChatView;
-use crate::view::questions::{AnswerSource, ComposerBinding, QuestionFocus, QuestionOutcome};
+use crate::view::questions::{
+    AnswerSource, ComposerBinding, DesktopCommit, QuestionFocus, QuestionOutcome,
+};
 
 impl AgentChatView {
     /// Whether the composer holds no prompt draft, kept current by the host:
@@ -17,6 +19,20 @@ impl AgentChatView {
     /// that question's countdown for good.
     pub fn set_composer_hint_empty(&mut self, empty: bool, cx: &mut Context<Self>) {
         self.composer_hint_empty = empty;
+        // Emptied, the composer holds nothing that could replace an answer
+        // the phone gave: that answer stands.
+        if empty
+            && self
+                .questions
+                .first()
+                .is_some_and(|q| q.phone_answered.is_some())
+        {
+            self.announcing_question_composer(cx, |view, _| {
+                if let Some(question) = view.questions.open_mut().next() {
+                    question.phone_answered = None;
+                }
+            });
+        }
         if !empty
             && let Some(question) = self.questions.open_mut().next()
             && question.composer.is_bound()
@@ -49,7 +65,9 @@ impl AgentChatView {
                 return false;
             };
             let field = question.focus.field;
-            if !question.commit_text_for(field, &text) {
+            if !question.desktop_may_commit(field, DesktopCommit::Deliberate)
+                || !question.commit_text_for(field, &text)
+            {
                 return false;
             }
             // The host empties the composer once the text is taken, after this
@@ -65,10 +83,11 @@ impl AgentChatView {
         })
     }
 
-    /// Commit `text` to primary field `field` without moving focus. The host
-    /// names the field its text was typed for: a card pick may already have
-    /// moved focus on, and the text must not follow it. `false` when the
-    /// field takes no text or the question is not the oldest.
+    /// Commit `text` to primary field `field` without moving focus, because
+    /// focus moved off it. The host names the field its text was typed for:
+    /// a card pick may already have moved focus on, and the text must not
+    /// follow it. `false` when the field takes no text, the question is not
+    /// the oldest, or the phone answered the field under that text.
     pub fn commit_question_text(
         &mut self,
         id: u64,
@@ -76,11 +95,35 @@ impl AgentChatView {
         text: String,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.commit_question_text_as(id, field, text, DesktopCommit::Incidental, cx)
+    }
+
+    /// [`Self::commit_question_text`] for text the person sends on purpose,
+    /// with the card's send: over a phone answer it is held back once, then
+    /// replaces it.
+    pub fn send_question_text(
+        &mut self,
+        id: u64,
+        field: usize,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.commit_question_text_as(id, field, text, DesktopCommit::Deliberate, cx)
+    }
+
+    fn commit_question_text_as(
+        &mut self,
+        id: u64,
+        field: usize,
+        text: String,
+        how: DesktopCommit,
+        cx: &mut Context<Self>,
+    ) -> bool {
         self.announcing_question_composer(cx, |view, cx| {
             let Some(question) = view.questions.oldest_mut(id) else {
                 return false;
             };
-            if !question.commit_text_for(field, &text) {
+            if !question.desktop_may_commit(field, how) || !question.commit_text_for(field, &text) {
                 return false;
             }
             view.remeasure_question(id, "question-committed-text");
@@ -140,6 +183,8 @@ impl AgentChatView {
             };
             if question.composer.is_bound() {
                 question.composer = ComposerBinding::Released;
+                // Released, the text is a prompt draft, not an answer.
+                question.phone_answered = None;
                 cx.notify();
             }
         });

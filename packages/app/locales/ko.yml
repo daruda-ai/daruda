@@ -721,6 +721,9 @@ bottom_dock:
   question_keep_queued: "대기열에 두기"
   question_esc_again: "한 번 더 Esc = Stop"
   question_text_not_taken: "이 질문은 글로 답할 수 없습니다 — 선택지를 고르거나 입력창을 비우면 다음 질문으로 넘어갑니다."
+  question_phone_answered: "입력하는 동안 휴대폰에서 답했습니다 — 보내기 전에 카드를 확인하세요."
+  question_phone_answered_replace: "Enter를 한 번 더 누르면 휴대폰 답을 입력한 글로 바꿉니다. 입력창을 비우면 휴대폰 답을 유지합니다."
+  question_phone_answered_elsewhere: "%{n}번 질문은 입력하는 동안 휴대폰에서 답했습니다. 입력창을 비우면 그 답을 유지하고, 바꾸려면 그 질문으로 돌아가세요."
 
 # Projects view
 projects:

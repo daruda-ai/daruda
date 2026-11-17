@@ -82,7 +82,9 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
         );
         // A refused Enter would otherwise do nothing visible; the reason
         // replaces the bound line until the condition clears.
-        if strip.text_not_taken {
+        if let Some(message) = phone_answered_message(strip) {
+            (message, true)
+        } else if strip.text_not_taken {
             (s::bottom_dock::question_text_not_taken(), true)
         } else {
             (bound_message(strip, strip.narrow), false)
@@ -234,6 +236,20 @@ fn bound_message(strip: &QuestionStripSnapshot, narrow: bool) -> String {
     message
 }
 
+/// What the strip says while the phone's answer sits under the composer's
+/// unsent text: first that it arrived, then that Enter replaces it — or,
+/// once focus left that field, which question the text still belongs to.
+fn phone_answered_message(strip: &QuestionStripSnapshot) -> Option<String> {
+    let phone = strip.composer.phone_answered?;
+    Some(if phone.field != strip.composer.field {
+        s::bottom_dock::question_phone_answered_elsewhere(phone.field + 1)
+    } else if phone.replace_armed {
+        s::bottom_dock::question_phone_answered_replace()
+    } else {
+        s::bottom_dock::question_phone_answered()
+    })
+}
+
 /// "+N waiting" while other questions on the pane wait behind this one;
 /// a warning line says only the warning.
 fn waiting_after_label(strip: &QuestionStripSnapshot, warn: bool) -> Option<String> {
@@ -276,7 +292,7 @@ impl Action {
 
 #[cfg(test)]
 mod tests {
-    use super::{bound_message, header_line, waiting_after_label};
+    use super::{bound_message, header_line, phone_answered_message, waiting_after_label};
     use crate::workspace::layout::QuestionStripSnapshot;
 
     fn strip(waiting_after: usize) -> QuestionStripSnapshot {
@@ -293,6 +309,7 @@ mod tests {
                 draft_became_answer: false,
                 send_highlighted: false,
                 deadline: None,
+                phone_answered: None,
             },
             pending_prompt: None,
             esc_again: false,
@@ -332,5 +349,30 @@ mod tests {
             Some(crate::surface::strings::bottom_dock::question_waiting_after(2))
         );
         assert_eq!(waiting_after_label(&strip(2), true), None);
+    }
+
+    /// Each row: the field the phone answered, whether one Enter was held
+    /// back, and what the strip says on field 0.
+    #[test]
+    fn the_strip_says_what_the_phone_answered_under_the_text() {
+        use crate::surface::strings::bottom_dock as s;
+        assert_eq!(phone_answered_message(&strip(0)), None, "no phone answer");
+        let rows = [
+            (0, false, s::question_phone_answered()),
+            (0, true, s::question_phone_answered_replace()),
+            // The text stayed with question 2 after focus moved off it.
+            (1, false, s::question_phone_answered_elsewhere(2)),
+        ];
+        for (field, replace_armed, want) in rows {
+            let mut shown = strip(0);
+            shown.composer.phone_answered = Some(daruda_chat::view::PhoneAnswered {
+                field,
+                replace_armed,
+            });
+            assert_eq!(
+                phone_answered_message(&shown).as_deref(),
+                Some(want.as_str())
+            );
+        }
     }
 }

@@ -148,6 +148,7 @@ fn question_composer_reports_the_bound_field_and_note_mode(cx: &mut gpui::TestAp
                 draft_became_answer: false,
                 send_highlighted: false,
                 deadline: None,
+                phone_answered: None,
             })
         );
         v.pick_question_option(4, 0, 1, cx);

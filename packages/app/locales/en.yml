@@ -923,6 +923,12 @@ bottom_dock:
   # Strip line while Enter cannot take the composer text as the answer
   # (the field takes no text, or the text is still on the previous field).
   question_text_not_taken: "This question takes no typed answer — pick an option, or clear the input to answer the next one."
+  # The phone answered the field the composer holds unsent text for; the
+  # first Enter is held back so the person sees that answer on the card.
+  question_phone_answered: "Answered on the phone while you typed — check the card before sending yours."
+  question_phone_answered_replace: "Enter again replaces the phone's answer with your text; clear the input to keep it."
+  # The text stayed with question `n` after focus moved on from it.
+  question_phone_answered_elsewhere: "Question %{n} was answered on the phone while you typed for it. Clear the input to keep that answer, or go back to it."
 
 # Projects view
 projects:

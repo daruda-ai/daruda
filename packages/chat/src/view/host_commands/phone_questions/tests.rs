@@ -492,3 +492,118 @@ fn phone_text_does_not_submit_other_fields_changed_after_delivery(cx: &mut gpui:
     });
     assert_eq!(answer.answer(), None);
 }
+
+/// Two text fields, `path` then `reason`.
+fn two_texts() -> QuestionRequest {
+    QuestionRequest {
+        fields: vec![
+            field("path", QuestionFieldKind::Text, None),
+            field("reason", QuestionFieldKind::Text, None),
+        ],
+        ..form()
+    }
+}
+
+/// The phone answers the field the desktop is typing for, then the desktop
+/// answers it too. Each row: how the desktop sends its text, and whether
+/// that send may replace the phone's answer at all.
+#[gpui::test]
+fn a_phone_answer_under_typed_text_is_replaced_only_on_a_second_send(
+    cx: &mut gpui::TestAppContext,
+) {
+    use crate::view::PhoneAnswered;
+    type Send = fn(&mut AgentChatView, &mut gpui::Context<AgentChatView>) -> bool;
+    let rows: [(&str, Send, bool); 3] = [
+        (
+            "Enter",
+            |v, cx| v.answer_question_text(1, "desk/".into(), cx),
+            true,
+        ),
+        (
+            "card send",
+            |v, cx| v.send_question_text(1, 0, "desk/".into(), cx),
+            true,
+        ),
+        // Nobody chose to send text carried off a field by a focus move.
+        (
+            "focus move",
+            |v, cx| v.commit_question_text(1, 0, "desk/".into(), cx),
+            false,
+        ),
+    ];
+    for (label, send, replaces) in rows {
+        let (view, _answer, _) = asked(cx, two_texts());
+        view.update(cx, |view, cx| {
+            view.set_composer_hint_empty(false, cx);
+            view.take_questions_untold_to_phone();
+            let result =
+                view.answer_question_from_phone(1, 0, PhoneReply::Text("phone/".into()), cx);
+            assert!(matches!(result, PhoneAnswerResult::Next(_)), "{label}");
+            let path = |view: &AgentChatView| {
+                view.questions
+                    .get(1)
+                    .unwrap()
+                    .draft
+                    .text("path")
+                    .map(str::to_owned)
+            };
+            let phone = |view: &AgentChatView| view.question_composer().unwrap().phone_answered;
+            assert_eq!(
+                phone(view),
+                Some(PhoneAnswered {
+                    field: 0,
+                    replace_armed: false
+                }),
+                "{label}"
+            );
+
+            assert!(!send(view, cx), "{label}: the first send is held back");
+            assert_eq!(path(view).as_deref(), Some("phone/"), "{label}");
+            assert_eq!(
+                phone(view).is_some_and(|p| p.replace_armed),
+                replaces,
+                "{label}"
+            );
+
+            assert_eq!(send(view, cx), replaces, "{label}: the second send");
+            let want = if replaces { "desk/" } else { "phone/" };
+            assert_eq!(path(view).as_deref(), Some(want), "{label}");
+            assert_eq!(phone(view).is_none(), replaces, "{label}");
+        });
+    }
+}
+
+/// Emptying the composer keeps the phone's answer and lifts the guard; the
+/// phone answering while nothing is typed sets none, and neither does
+/// releasing the composer to prompts.
+#[gpui::test]
+fn only_typed_text_held_against_a_phone_answer_is_guarded(cx: &mut gpui::TestAppContext) {
+    let (view, _answer, _) = asked(cx, two_texts());
+    view.update(cx, |view, cx| {
+        view.take_questions_untold_to_phone();
+        view.answer_question_from_phone(1, 0, PhoneReply::Text("phone/".into()), cx);
+        assert_eq!(view.question_composer().unwrap().phone_answered, None);
+    });
+
+    let (view, _answer, _) = asked(cx, two_texts());
+    view.update(cx, |view, cx| {
+        view.set_composer_hint_empty(false, cx);
+        view.take_questions_untold_to_phone();
+        view.answer_question_from_phone(1, 0, PhoneReply::Text("phone/".into()), cx);
+        view.set_composer_hint_empty(true, cx);
+        assert_eq!(view.question_composer().unwrap().phone_answered, None);
+        assert_eq!(
+            view.questions.get(1).unwrap().draft.text("path"),
+            Some("phone/")
+        );
+    });
+
+    let (view, _answer, _) = asked(cx, two_texts());
+    view.update(cx, |view, cx| {
+        view.set_composer_hint_empty(false, cx);
+        view.take_questions_untold_to_phone();
+        view.answer_question_from_phone(1, 0, PhoneReply::Text("phone/".into()), cx);
+        view.release_question_composer(1, cx);
+        assert_eq!(view.question_composer().unwrap().phone_answered, None);
+    });
+}

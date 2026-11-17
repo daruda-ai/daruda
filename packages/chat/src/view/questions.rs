@@ -56,6 +56,27 @@ pub(crate) struct OpenQuestion {
     /// the timeout is off. Cleared for good once the person touches it; read
     /// through [`OpenQuestion::countdown`].
     pub(crate) deadline: Option<Instant>,
+    /// The phone answered a field while the bound composer held text typed
+    /// for it, so that text must not replace the answer unseen.
+    pub(crate) phone_answered: Option<PhoneAnswered>,
+}
+
+/// A field the phone answered under text the desktop had not committed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhoneAnswered {
+    /// Index among the primary fields.
+    pub field: usize,
+    /// One deliberate send was held back; the next replaces the phone's
+    /// answer with the composer's text.
+    pub replace_armed: bool,
+}
+
+/// How desktop text reaches a field: sent on purpose (Enter, the card's
+/// send) or carried along because focus moved off the field it was typed for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::view) enum DesktopCommit {
+    Deliberate,
+    Incidental,
 }
 
 /// Where the keyboard is within an open question.
@@ -169,6 +190,7 @@ impl Questions {
             told_to_phone: false,
             asked_at,
             deadline: self.timeout.map(|timeout| asked_at + timeout),
+            phone_answered: None,
         });
     }
 
@@ -288,6 +310,45 @@ impl OpenQuestion {
             };
         }
         true
+    }
+
+    /// The phone answered primary field `field`. When the bound composer was
+    /// holding text typed for it, that text is now behind the phone's answer.
+    pub(in crate::view) fn note_phone_answer(&mut self, field: usize, composer_has_text: bool) {
+        let takes_text = primary_fields(&self.request)
+            .nth(field)
+            .is_some_and(|f| self.text_key(f).is_some());
+        if takes_text && self.composer.is_bound() && self.focus.field == field && composer_has_text
+        {
+            self.phone_answered = Some(PhoneAnswered {
+                field,
+                replace_armed: false,
+            });
+        }
+    }
+
+    /// Whether desktop text may land on primary field `field`. Over a phone
+    /// answer the person has not seen, a deliberate send is held back once
+    /// and the next one replaces it; text carried along by a focus move
+    /// never does, since nobody chose to send it.
+    pub(in crate::view) fn desktop_may_commit(&mut self, field: usize, how: DesktopCommit) -> bool {
+        let Some(phone) = self.phone_answered.filter(|p| p.field == field) else {
+            return true;
+        };
+        match how {
+            DesktopCommit::Incidental => false,
+            DesktopCommit::Deliberate if phone.replace_armed => {
+                self.phone_answered = None;
+                true
+            }
+            DesktopCommit::Deliberate => {
+                self.phone_answered = Some(PhoneAnswered {
+                    replace_armed: true,
+                    ..phone
+                });
+                false
+            }
+        }
     }
 
     /// Move focus on after text answered field `from`: to the next

@@ -137,6 +137,7 @@ fn open(request: QuestionRequest) -> OpenQuestion {
         told_to_phone: false,
         asked_at: std::time::Instant::now(),
         deadline: None,
+        phone_answered: None,
     }
 }
 

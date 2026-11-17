@@ -232,15 +232,22 @@ pub(crate) fn primary_fields(request: &QuestionRequest) -> impl Iterator<Item = 
 }
 
 /// How a question headed by primary field `field` reads: the field's
-/// title, or the request's message when it has none.
+/// title, else the request's message, else a stand-in. An agent may send
+/// neither, and an empty header leaves the strip, the phone card and the
+/// run report naming nothing.
 pub(crate) fn field_header<'a>(
     request: &'a QuestionRequest,
     field: Option<&'a QuestionField>,
-) -> &'a str {
+) -> std::borrow::Cow<'a, str> {
     field
         .and_then(|f| f.title.as_deref())
-        .filter(|title| !title.is_empty())
-        .unwrap_or(&request.message)
+        .into_iter()
+        .chain([request.message.as_str()])
+        .find(|text| !text.trim().is_empty())
+        .map_or_else(
+            || crate::strings::agent_chat::question_untitled().into(),
+            std::borrow::Cow::Borrowed,
+        )
 }
 
 /// The key of the free-text field supplementing `primary_key`, if any.

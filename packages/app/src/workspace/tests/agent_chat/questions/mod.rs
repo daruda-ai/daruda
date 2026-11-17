@@ -4,6 +4,7 @@
 mod composer;
 mod keys;
 mod notify;
+mod phone_conflict;
 mod theme;
 mod timeout;
 
