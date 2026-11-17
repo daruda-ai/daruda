@@ -50,7 +50,7 @@ pub(in crate::workspace) fn render(
                         .min_w_0()
                         .child(tab_content(view.id, view.tab, ready, files_scroll, cx)),
                 )
-                .child(side(&ready.side, cx))
+                .child(side(view.id, &ready.side, cx))
                 .into_any_element(),
         });
     div()
@@ -501,7 +501,7 @@ fn log_block(load: &Load<String>, cx: &Context<Workspace>) -> AnyElement {
 }
 
 /// Merge, reviews and the worktree.
-fn side(view: &SideView, cx: &Context<Workspace>) -> AnyElement {
+fn side(id: PrDetailId, view: &SideView, cx: &Context<Workspace>) -> AnyElement {
     let t = theme::current(cx);
     let lane = match &view.lane {
         Some(lane) => fact_value(lane.name.clone(), t.text_body),
@@ -516,7 +516,21 @@ fn side(view: &SideView, cx: &Context<Workspace>) -> AnyElement {
         .flex_col()
         .gap(px(theme::PAD_XL))
         .child(section(s::side_merge(), facts(&view.merge, cx), cx))
-        .child(section(s::side_reviews(), facts(&view.reviews, cx), cx))
+        .child(section(
+            s::side_reviews(),
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(theme::GAP_LG))
+                .child(facts(&view.reviews, cx))
+                .children(
+                    view.requests
+                        .as_ref()
+                        .map(|requests| super::reviewers_render::requests(id, requests, cx)),
+                )
+                .into_any_element(),
+            cx,
+        ))
         .child(section(
             s::side_lane(),
             div()

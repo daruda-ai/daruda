@@ -50,3 +50,25 @@ fn a_link_in_github_text_opens_only_a_web_page_or_an_address() {
         assert_eq!(is_openable_link(url), expected, "{url}");
     }
 }
+
+#[test]
+fn only_a_login_or_a_team_slug_is_a_reviewer_name() {
+    use daruda_github::reviewer_name_ok;
+    // (label, name, ok)
+    let cases = [
+        ("a login", "octo-cat", true),
+        ("a managed enterprise login", "Mona_corp", true),
+        ("a team starting with a dot", "org/.x", false),
+        ("a team", "my-org/core.team_1", true),
+        ("a flag", "--admin", false),
+        ("a leading hyphen", "-x", false),
+        ("a space", "a b", false),
+        ("a comma", "a,b", false),
+        ("an empty team", "org/", false),
+        ("a nested path", "org/team/x", false),
+        ("empty", "", false),
+    ];
+    for (label, name, ok) in cases {
+        assert_eq!(reviewer_name_ok(name), ok, "{label}");
+    }
+}

@@ -85,6 +85,16 @@ pub trait Gh: Send + Sync {
     ) -> Result<(), GhError>;
     /// The comments on pull request `number` itself, oldest first.
     fn pr_conversation(&self, repo: &RepoId, number: u64) -> Result<crate::Conversation, GhError>;
+    /// Ask `add` to review pull request `number` and stop asking `remove`:
+    /// user logins or `org/team` slugs, each checked by
+    /// [`crate::reviewer_name_ok`].
+    fn edit_pr_reviewers(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        add: &[String],
+        remove: &[String],
+    ) -> Result<(), GhError>;
     /// Replace pull request `number`'s description with `body`.
     fn edit_pr_body(&self, repo: &RepoId, number: u64, body: &str) -> Result<(), GhError>;
     /// Close pull request `number` unmerged. Leaves the branch.

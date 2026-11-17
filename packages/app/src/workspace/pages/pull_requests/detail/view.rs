@@ -224,6 +224,17 @@ pub(in crate::workspace) struct SideView {
     pub lane: Option<RowLane>,
     /// Said under the linked worktree: whether its pushes reach the PR.
     pub lane_note: Option<LaneNote>,
+    /// Who is asked to review can be changed: GitHub lets the viewer.
+    pub requests: Option<RequestsView>,
+}
+
+/// Changing who is asked to review.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct RequestsView {
+    /// Asked and not reviewed yet: these can be unasked.
+    pub removable: Vec<String>,
+    pub input: Option<gpui::Entity<crate::ui::InputState>>,
+    pub op: Option<super::reviewers::ReviewerOp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -388,7 +399,7 @@ fn ready(
         description: Some(loaded.body.trim())
             .filter(|body| !body.is_empty())
             .map(str::to_owned),
-        side: side(item, loaded, lane, open_threads(state, loaded)),
+        side: side(item, loaded, lane, open_threads(state, loaded), state),
     }
 }
 
@@ -487,6 +498,19 @@ fn tab_label(tab: PrTab, loaded: Option<&PrDetail>, state: &PrDetailState) -> St
 }
 
 /// `2 failing · 5 passed · 1 skipped`, leaving out what there is none of.
+/// Reviewers asked and not reviewed yet, under names `gh` can be given.
+fn removable(loaded: &PrDetail) -> Vec<String> {
+    loaded
+        .reviewers
+        .iter()
+        .filter(|(name, state)| {
+            *state == daruda_github::ReviewerState::Requested
+                && daruda_github::reviewer_name_ok(name)
+        })
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
 /// Unresolved threads, and whether there are more than that: the threads
 /// once read in full, else the detail's count of the first hundred.
 fn open_threads(state: &PrDetailState, loaded: &PrDetail) -> (usize, bool) {
@@ -653,6 +677,7 @@ fn side(
     loaded: &PrDetail,
     lane: Option<RowLane>,
     threads: (usize, bool),
+    state: &PrDetailState,
 ) -> SideView {
     let (merge_state, merge_mood) = match loaded.mergeability {
         Mergeability::Ready => (s::merge_ready(), Mood::Good),
@@ -671,9 +696,17 @@ fn side(
         let labels: Vec<String> = loaded.methods.iter().map(|m| method_label(*m)).collect();
         labels.join(", ")
     };
+    // With the reviewers editable, those that can be unasked are listed
+    // with their control instead.
+    let unaskable = if loaded.can_update {
+        removable(loaded)
+    } else {
+        Vec::new()
+    };
     let mut reviews: Vec<Fact> = loaded
         .reviewers
         .iter()
+        .filter(|(name, _)| !unaskable.contains(name))
         .map(|(name, state)| {
             let (value, mood) = reviewer_label(*state);
             Fact {
@@ -683,7 +716,7 @@ fn side(
             }
         })
         .collect();
-    if reviews.is_empty() {
+    if reviews.is_empty() && unaskable.is_empty() {
         reviews.push(Fact {
             label: s::side_reviewers(),
             value: s::reviewers_none(),
@@ -730,6 +763,14 @@ fn side(
         reviews,
         lane,
         lane_note,
+        requests: loaded.can_update.then(|| {
+            let requests = state.reviewer_requests();
+            RequestsView {
+                removable: removable(loaded),
+                input: requests.input.clone(),
+                op: requests.op.clone(),
+            }
+        }),
     }
 }
 

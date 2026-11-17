@@ -22,6 +22,8 @@ pub(in crate::workspace) mod progress;
 mod read_slot;
 pub(in crate::workspace) mod recover;
 pub(in crate::workspace) mod render;
+pub(in crate::workspace) mod reviewers;
+mod reviewers_render;
 pub(in crate::workspace) mod thread_actions;
 mod threads_render;
 pub(in crate::workspace) mod view;
@@ -123,6 +125,8 @@ pub(in crate::workspace) struct PrDetailState {
     conversation: Option<ReadSlot<daruda_github::Conversation>>,
     /// The description being edited, kept across refreshes.
     body_edit: Option<description::BodyEdit>,
+    /// The reviewer box and the last change to who is asked.
+    reviewer_requests: reviewers::ReviewerRequests,
 }
 
 impl PrDetailState {
@@ -144,6 +148,7 @@ impl PrDetailState {
             thread_work: thread_actions::ThreadsWork::default(),
             conversation: None,
             body_edit: None,
+            reviewer_requests: reviewers::ReviewerRequests::default(),
         }
     }
 

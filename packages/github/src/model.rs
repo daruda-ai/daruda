@@ -165,6 +165,31 @@ impl ReviewComment {
     }
 }
 
+/// Whether `name` can be a reviewer GitHub knows: a user login (letters,
+/// digits, hyphens and, for managed enterprise accounts, `_`) or an
+/// `org/team` slug. Malformed text, such as something starting with `-`,
+/// never reaches `gh`'s arguments; GitHub judges the rest.
+pub fn reviewer_name_ok(name: &str) -> bool {
+    let login = |part: &str| {
+        !part.is_empty()
+            && !part.starts_with('-')
+            && part
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+    };
+    match name.split_once('/') {
+        None => login(name),
+        Some((org, team)) => {
+            login(org)
+                && !team.is_empty()
+                && !team.starts_with(['-', '.'])
+                && team
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        }
+    }
+}
+
 /// The side of a diff a review comment's lines are on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DiffSide {

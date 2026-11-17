@@ -89,6 +89,43 @@ fn close_args(repo: &RepoId, number: u64) -> Vec<String> {
         .to_vec()
 }
 
+/// `gh pr edit` asking `add` and unasking `remove`; refused before `gh`
+/// runs for a name that cannot be a reviewer, or for nothing to change.
+fn edit_reviewers_args(
+    repo: &RepoId,
+    number: u64,
+    add: &[String],
+    remove: &[String],
+) -> Result<Vec<String>, GhError> {
+    if let Some(bad) = add
+        .iter()
+        .chain(remove)
+        .find(|name| !crate::reviewer_name_ok(name))
+    {
+        return Err(GhError::BadArgument(format!(
+            "not a reviewer name: {bad:?}"
+        )));
+    }
+    if add.is_empty() && remove.is_empty() {
+        return Err(GhError::BadArgument("no reviewer to change".into()));
+    }
+    let mut args = vec![
+        "pr".to_owned(),
+        "edit".to_owned(),
+        number.to_string(),
+        "--repo".to_owned(),
+        repo.qualified(),
+    ];
+    // Joined with `=`: a name is never read as a flag of its own.
+    if !add.is_empty() {
+        args.push(format!("--add-reviewer={}", add.join(",")));
+    }
+    if !remove.is_empty() {
+        args.push(format!("--remove-reviewer={}", remove.join(",")));
+    }
+    Ok(args)
+}
+
 fn rerun_failed_args(repo: &RepoId, run: u64) -> Vec<String> {
     let repo = repo.qualified();
     [
@@ -552,6 +589,17 @@ impl Gh for SystemGh {
         })
     }
 
+    fn edit_pr_reviewers(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        add: &[String],
+        remove: &[String],
+    ) -> Result<(), GhError> {
+        self.stdout(edit_reviewers_args(repo, number, add, remove)?)
+            .map(drop)
+    }
+
     fn edit_pr_body(&self, repo: &RepoId, number: u64, body: &str) -> Result<(), GhError> {
         // On stdin: a description can be longer than an argument may be.
         self.stdout_fed(
@@ -775,7 +823,11 @@ mod tests {
         let repo = RepoId::new("GHE.corp", "O", "r");
         let sha = "0123abcdef";
         let merge = |method| merge_args(&repo, 7, method, sha).unwrap();
-        let cases: [(&str, Vec<String>, &[&str]); 6] = [
+        let names = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
+        let reviewers = |add: &[&str], remove: &[&str]| {
+            edit_reviewers_args(&repo, 7, &names(add), &names(remove)).unwrap()
+        };
+        let cases: [(&str, Vec<String>, &[&str]); 9] = [
             (
                 "squash",
                 merge(MergeMethod::Squash),
@@ -830,12 +882,69 @@ mod tests {
                 rerun_failed_args(&repo, 991),
                 &["run", "rerun", "991", "--failed", "--repo", "ghe.corp/o/r"],
             ),
+            (
+                "ask reviewers",
+                reviewers(&["al_ice", "org/core"], &[]),
+                &[
+                    "pr",
+                    "edit",
+                    "7",
+                    "--repo",
+                    "ghe.corp/o/r",
+                    "--add-reviewer=al_ice,org/core",
+                ],
+            ),
+            (
+                "unask a reviewer",
+                reviewers(&[], &["bob"]),
+                &[
+                    "pr",
+                    "edit",
+                    "7",
+                    "--repo",
+                    "ghe.corp/o/r",
+                    "--remove-reviewer=bob",
+                ],
+            ),
+            (
+                "both",
+                reviewers(&["a"], &["b"]),
+                &[
+                    "pr",
+                    "edit",
+                    "7",
+                    "--repo",
+                    "ghe.corp/o/r",
+                    "--add-reviewer=a",
+                    "--remove-reviewer=b",
+                ],
+            ),
         ];
         for (label, args, expected) in cases {
             assert_eq!(args, expected, "{label}");
             for never in ["--delete-branch", "-d", "--auto", "--admin"] {
                 assert!(!args.iter().any(|a| a == never), "{label}: {never}");
             }
+        }
+    }
+
+    #[test]
+    fn a_bad_reviewer_change_is_refused_before_gh_runs() {
+        let repo = RepoId::new("github.com", "o", "r");
+        let one = |name: &str| vec![name.to_owned()];
+        // (label, add, remove)
+        let cases = [
+            ("a flag", one("--admin"), Vec::new()),
+            ("a space", Vec::new(), one("a b")),
+            ("nothing", Vec::new(), Vec::new()),
+        ];
+        for (label, add, remove) in cases {
+            // Through `SystemGh` itself: a refused change must not spawn `gh`.
+            let refused = SystemGh.edit_pr_reviewers(&repo, 1, &add, &remove);
+            assert!(
+                matches!(refused, Err(GhError::BadArgument(_))),
+                "{label}: {refused:?}"
+            );
         }
     }
 

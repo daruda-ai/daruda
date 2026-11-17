@@ -20,6 +20,7 @@
 //! | `rerun_failed` | done |
 //! | `reply_to_thread` | adds the reply to the scripted thread, answers it |
 //! | `pr_conversation` | the `set_conversation` comments, else none |
+//! | `edit_pr_reviewers` | the scripted detail asks those added, not those removed |
 //! | `edit_pr_body` | the scripted detail's body becomes `body` |
 //! | `set_thread_resolved` | a resolved thread leaves `review_threads` until unresolved |
 //! | `graphql_rate_limit_reset` | `None`: requests remain |
@@ -124,6 +125,12 @@ pub enum GhCall {
         number: u64,
         body: String,
     },
+    EditPrReviewers {
+        repo: RepoId,
+        number: u64,
+        add: Vec<String>,
+        remove: Vec<String>,
+    },
     RerunFailed {
         repo: RepoId,
         run: u64,
@@ -154,6 +161,7 @@ pub enum GhOp {
     SetThreadResolved,
     Conversation,
     EditPrBody,
+    EditPrReviewers,
     RerunFailed,
     RateLimitReset,
 }
@@ -336,6 +344,7 @@ impl GhCall {
             Self::SetThreadResolved { .. } => GhOp::SetThreadResolved,
             Self::Conversation { .. } => GhOp::Conversation,
             Self::EditPrBody { .. } => GhOp::EditPrBody,
+            Self::EditPrReviewers { .. } => GhOp::EditPrReviewers,
             Self::RerunFailed { .. } => GhOp::RerunFailed,
             Self::RateLimitReset { .. } => GhOp::RateLimitReset,
         }
@@ -670,6 +679,38 @@ impl Gh for FakeGh {
             .get(&(repo.clone(), number))
             .cloned()
             .unwrap_or_default())
+    }
+
+    fn edit_pr_reviewers(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        add: &[String],
+        remove: &[String],
+    ) -> Result<(), GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::EditPrReviewers {
+            repo: repo.clone(),
+            number,
+            add: add.to_vec(),
+            remove: remove.to_vec(),
+        })?;
+        if let Some(detail) = state.details.get_mut(&(repo.clone(), number)) {
+            detail.reviewers.retain(|(name, state)| {
+                !(remove.contains(name) && *state == crate::ReviewerState::Requested)
+            });
+            // Asked again after a review, a reviewer is requested again, as
+            // GitHub has them.
+            for name in add {
+                match detail.reviewers.iter_mut().find(|(held, _)| held == name) {
+                    Some((_, state)) => *state = crate::ReviewerState::Requested,
+                    None => detail
+                        .reviewers
+                        .push((name.clone(), crate::ReviewerState::Requested)),
+                }
+            }
+        }
+        Ok(())
     }
 
     fn edit_pr_body(&self, repo: &RepoId, number: u64, body: &str) -> Result<(), GhError> {
