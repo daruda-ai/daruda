@@ -584,6 +584,35 @@ impl FilesState {
         )
     }
 
+    /// The selection and the code the diff shows of it, read from the
+    /// unfolded diff so folded lines are not skipped, and whether every
+    /// selected line is there. `None` without a selection made in this
+    /// listing whose file has a patch.
+    pub(super) fn selection_code(&self) -> Option<(LineRange, String, bool)> {
+        let held = self.selection.as_ref()?;
+        if self.revision.as_deref() != Some(held.revision.as_str()) {
+            return None;
+        }
+        let file = self.files.iter().find(|file| file.path == held.path)?;
+        let rows = unfolded_rows(file)?;
+        let lines: Vec<&str> = rows
+            .iter()
+            .filter(|row| held.holds(row))
+            .map(|row| row.content.as_str())
+            .collect();
+        if lines.is_empty() {
+            return None;
+        }
+        let complete = lines.len() as u64 == u64::from(held.end - held.start) + 1;
+        Some((held.clone(), lines.join("\n"), complete))
+    }
+
+    /// Whether `range` is still the selection, in the listing read.
+    pub(super) fn selection_current(&self, range: &LineRange) -> bool {
+        self.selection.as_ref() == Some(range)
+            && self.revision.as_deref() == Some(range.revision.as_str())
+    }
+
     pub(in crate::workspace) fn selection(&self) -> Option<&LineRange> {
         self.selection.as_ref()
     }

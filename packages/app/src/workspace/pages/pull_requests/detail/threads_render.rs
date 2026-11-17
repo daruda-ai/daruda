@@ -20,7 +20,7 @@ pub(super) fn threads(id: PrDetailId, ready: &ReadyView, cx: &Context<Workspace>
         None,
         ready.threads_send,
         s::send_nothing_threads(),
-        move |ws, window, cx| ws.send_pr_detail_threads(id, window, cx),
+        move |ws, _, cx| ws.open_pr_handoff(id, super::handoff::Read::OpenThreads, cx),
         "pr-detail-send-threads",
         None,
         cx,

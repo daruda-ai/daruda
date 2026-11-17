@@ -130,6 +130,7 @@ fn inputs(lane: Option<&LaneFacts>) -> DetailInputs<'_> {
         progress: &NO_PROGRESS,
         drafts: None,
         keeping: crate::github::DraftKeeping::Saved,
+        handoff_chats: Vec::new(),
         now: Utc::now(),
     }
 }

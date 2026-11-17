@@ -2,6 +2,7 @@
 //! GitHub, what it drops, where Send to agent goes, and what its merge,
 //! close, ready and rerun actions ask GitHub.
 
+use crate::workspace::pages::pull_requests::detail::handoff::{Payload, Prepared, Read};
 use daruda_github::fake::{FakeGh, GhCall, GhFailure, GhOp};
 use daruda_github::{
     ActionsJob, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus, FailedCheck,
@@ -94,6 +95,10 @@ fn detail(number: u64, head: &str) -> PrDetail {
 /// GitHub can describe, with one failing Actions job whose log it prints.
 pub(in crate::workspace) fn window(cx: &mut TestAppContext) -> (GitFixture, FakeGh, LaneRef) {
     let gh = crate::test_support::fake_gh(cx);
+    // Chats focused by a handoff connect; none reaches a real adapter.
+    cx.update(|cx| {
+        super::Workspace::fake_agent_connections_for_test(cx);
+    });
     gh.set_prs(&repo(), vec![summary(7, "feat")]);
     gh.set_pr_detail(&repo(), 7, detail(7, "feat"));
     gh.set_failed_log(
@@ -429,13 +434,25 @@ fn send_to_agent_goes_to_the_linked_worktrees_chat(cx: &mut TestAppContext) {
     assert_eq!(ready.checks_send, SendSlot::Ready);
     let id = id(&f, cx);
 
+    // What goes where is prepared and shown first: the page stays.
+    f.ws.update(cx, |ws, cx| ws.open_pr_handoff(id, Read::FailedChecks, cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::FailedLog), 1);
+    let handoff = view(&f, cx).handoff.expect("the handoff is shown");
+    assert_eq!(handoff.chats.len(), 1, "the linked worktree's one chat");
+    assert_eq!(handoff.chosen, Some(handoff.chats[0].0));
+    let Prepared::Ready(prompt) = &handoff.prompt else {
+        panic!("prepared: {:?}", handoff.prompt);
+    };
+    assert!(prompt.contains("test parse ... FAILED"), "{prompt}");
+    assert_eq!(input(&f, cx), "", "nothing inserted before asked");
+    assert_eq!(f.ws.read_with(cx, |ws, _| ws.active_ref()), other);
+
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| {
-        f.ws.update(cx, |ws, cx| ws.send_pr_detail_checks(id, window, cx));
+        f.ws.update(cx, |ws, cx| ws.insert_pr_handoff(id, window, cx));
     });
     cx.run_until_parked();
-
-    assert_eq!(gh.count(GhOp::FailedLog), 1);
     f.ws.read_with(cx, |ws, _| {
         assert_eq!(ws.active_ref(), linked, "the linked worktree is shown");
         assert_eq!(ws.active_page(), None, "so its chat input is in view");
@@ -462,12 +479,13 @@ fn without_a_linked_worktree_send_to_agent_is_off(cx: &mut TestAppContext) {
     assert!(!ready.checks_send.enabled());
 
     let id = id(&f, cx);
-    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
-    vcx.update(|window, cx| {
-        f.ws.update(cx, |ws, cx| ws.send_pr_detail_checks(id, window, cx));
-    });
+    f.ws.update(cx, |ws, cx| ws.open_pr_handoff(id, Read::FailedChecks, cx));
     cx.run_until_parked();
     assert_eq!(gh.count(GhOp::FailedLog), 0);
+    assert!(
+        view(&f, cx).handoff.is_none(),
+        "no worktree, nowhere to hand to"
+    );
     assert_eq!(input(&f, cx), "");
     assert_eq!(
         f.ws.read_with(cx, |ws, _| ws.active_page()),
@@ -494,15 +512,304 @@ fn read_detail(f: &GitFixture, cx: &mut TestAppContext) -> PrDetailId {
 }
 
 #[gpui::test]
-fn a_worktree_without_a_chat_is_shown_before_the_user_is_told_to_open_one(cx: &mut TestAppContext) {
-    let (f, gh, linked) = window(cx);
+fn a_worktree_without_a_chat_is_named_and_nothing_can_be_inserted(cx: &mut TestAppContext) {
+    let (f, _, _) = window(cx);
     let id = read_detail(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.open_pr_handoff(id, Read::FailedChecks, cx));
+    cx.run_until_parked();
+    let handoff = view(&f, cx).handoff.expect("shown");
+    assert!(handoff.chats.is_empty());
+    assert_eq!(handoff.chosen, None, "nothing to insert into");
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| {
-        f.ws.update(cx, |ws, cx| ws.send_pr_detail_checks(id, window, cx));
+        f.ws.update(cx, |ws, cx| ws.insert_pr_handoff(id, window, cx));
     });
     cx.run_until_parked();
+    assert_eq!(input(&f, cx), "");
+}
 
+#[gpui::test]
+fn inserting_shows_the_worktree_whose_chat_takes_the_prompt(cx: &mut TestAppContext) {
+    let (f, _, linked) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let id = read_detail(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.open_pr_handoff(id, Read::FailedChecks, cx));
+    cx.run_until_parked();
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| ws.insert_pr_handoff(id, window, cx));
+    });
+    cx.run_until_parked();
+    f.ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_ref(), linked);
+        assert_eq!(ws.active_page(), None, "the page gives way to the chat");
+    });
+    assert!(input(&f, cx).contains("Pull request #7"));
+    assert!(view_handoff_closed(&f, cx), "inserted: the handoff closes");
+}
+
+fn view_handoff_closed(f: &GitFixture, cx: &mut TestAppContext) -> bool {
+    f.ws.read_with(cx, |ws, _| {
+        ws.pages
+            .pull_requests
+            .detail
+            .as_ref()
+            .expect("the detail stays")
+            .handoff()
+            .is_none()
+    })
+}
+
+fn insert(f: &GitFixture, id: PrDetailId, cx: &mut TestAppContext) {
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| ws.insert_pr_handoff(id, window, cx));
+    });
+    cx.run_until_parked();
+}
+
+fn handoff(f: &GitFixture, id: PrDetailId, cx: &mut TestAppContext) {
+    f.ws.update(cx, |ws, cx| ws.open_pr_handoff(id, Read::FailedChecks, cx));
+    cx.run_until_parked();
+}
+
+/// A linked worktree never shown in this window has no chat: one is
+/// opened there and takes the prompt, unsent.
+#[gpui::test]
+fn a_new_chat_takes_the_prompt_in_a_worktree_never_shown(cx: &mut TestAppContext) {
+    let (f, _, linked) = window(cx);
+    let other_dir = f.root.parent().unwrap().join("other");
+    std::fs::create_dir_all(&other_dir).unwrap();
+    let other = LaneRef {
+        project: linked.project,
+        lane: 77,
+    };
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            let lane = crate::lane::Lane::default_for_project(77, other_dir.clone());
+            ws.project_for_mut(linked.project).unwrap().lanes.push(lane);
+            ws.activate_lane(other, window, cx);
+            ws.main_area.runtimes.remove(&linked);
+            ws.show_page(Page::PullRequests, cx);
+        })
+    });
+    let id = read_detail(&f, cx);
+    handoff(&f, id, cx);
+    let shown = view(&f, cx).handoff.expect("shown");
+    assert!(shown.chats.is_empty());
+    assert!(matches!(shown.prompt, Prepared::Ready(_)));
+
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.insert_pr_handoff_in_new_chat(id, window, cx)
+        });
+    });
+    cx.run_until_parked();
+    f.ws.read_with(cx, |ws, cx| {
+        assert_eq!(ws.active_ref(), linked, "the worktree is shown");
+        assert_eq!(ws.active_page(), None);
+        assert_eq!(ws.writable_chats(linked, cx).len(), 1, "one chat opened");
+    });
+    assert_eq!(
+        cx.update(super::Workspace::faked_connect_preferences_for_test)
+            .len(),
+        1,
+        "the new chat connects"
+    );
+    assert!(
+        input(&f, cx).contains("Pull request #7"),
+        "{}",
+        input(&f, cx)
+    );
+    assert!(view_handoff_closed(&f, cx));
+}
+
+/// A worktree whose folder is gone gets no chat, and is not shown.
+#[gpui::test]
+fn a_missing_worktree_folder_opens_no_chat(cx: &mut TestAppContext) {
+    let (f, _, linked) = window(cx);
+    let id = read_detail(&f, cx);
+    handoff(&f, id, cx);
+    let path =
+        f.ws.read_with(cx, |ws, _| ws.lane_for(linked).unwrap().path.clone());
+    std::fs::remove_dir_all(&path).unwrap();
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.insert_pr_handoff_in_new_chat(id, window, cx)
+        });
+    });
+    cx.run_until_parked();
+    f.ws.read_with(cx, |ws, cx| {
+        assert!(ws.writable_chats(linked, cx).is_empty());
+        assert_eq!(ws.active_page(), Some(Page::PullRequests), "the page stays");
+        assert!(
+            ws.error_history()
+                .iter()
+                .any(|r| r.dedup_key.as_deref() == Some("github.handoff.unavailable"))
+        );
+    });
+}
+
+/// A chat appearing while the panel was open is chosen among, not
+/// joined by another.
+#[gpui::test]
+fn no_new_chat_is_opened_beside_one(cx: &mut TestAppContext) {
+    let (f, _, linked) = window(cx);
+    let id = read_detail(&f, cx);
+    handoff(&f, id, cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.insert_pr_handoff_in_new_chat(id, window, cx)
+        });
+    });
+    cx.run_until_parked();
+    f.ws.read_with(cx, |ws, cx| {
+        assert_eq!(ws.writable_chats(linked, cx).len(), 1);
+    });
+    assert_eq!(input(&f, cx), "");
+    assert_eq!(view(&f, cx).handoff.unwrap().chats.len(), 1);
+}
+
+#[gpui::test]
+fn the_chat_chosen_takes_the_prompt(cx: &mut TestAppContext) {
+    let (f, _, _) = window(cx);
+    split_chat(&f, cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let id = read_detail(&f, cx);
+    handoff(&f, id, cx);
+    let shown = view(&f, cx).handoff.expect("shown");
+    assert_eq!(shown.chats.len(), 2, "both chats are offered");
+    let second = shown.chats[1].0;
+    f.ws.update(cx, |ws, cx| ws.choose_pr_handoff_chat(id, second, cx));
+    assert_eq!(view(&f, cx).handoff.unwrap().chosen, Some(second));
+    insert(&f, id, cx);
+    assert_eq!(
+        f.ws.read_with(cx, |ws, _| ws.active_runtime().focused_pane_id),
+        second,
+        "the chosen chat is the one written into"
+    );
+    assert!(input(&f, cx).contains("Pull request #7"));
+}
+
+#[gpui::test]
+fn a_chosen_chat_closed_is_not_swapped_for_another(cx: &mut TestAppContext) {
+    let (f, _, _) = window(cx);
+    split_chat(&f, cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let id = read_detail(&f, cx);
+    handoff(&f, id, cx);
+    let chosen = view(&f, cx).handoff.unwrap().chosen.expect("one chosen");
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| ws.close_pane_by_id(chosen, window, cx));
+    })
+    .unwrap();
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let shown = view(&f, cx).handoff.expect("still shown");
+    assert!(shown.chat_gone, "{shown:?}");
+    assert_eq!(shown.chosen, None, "Insert is off until another is chosen");
+    insert(&f, id, cx);
+    assert_eq!(input(&f, cx), "", "nothing goes to a chat not chosen");
+    // The last chat closed too: a new one is offered, not another choice.
+    let last = view(&f, cx).handoff.unwrap().chats[0].0;
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| ws.close_pane_by_id(last, window, cx));
+    })
+    .unwrap();
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let shown = view(&f, cx).handoff.expect("still shown");
+    assert!(shown.chats.is_empty() && !shown.chat_gone, "{shown:?}");
+    assert_eq!(
+        f.ws.read_with(cx, |ws, _| ws.active_page()),
+        Some(Page::PullRequests)
+    );
+}
+
+#[gpui::test]
+fn a_worktree_unlinked_meanwhile_takes_nothing(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let id = read_detail(&f, cx);
+    handoff(&f, id, cx);
+    // GitHub now has another pull request on the worktree's branch.
+    gh.set_prs(&repo(), vec![summary(9, "feat")]);
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(31));
+    cx.update(crate::github::PrPoller::tick);
+    cx.run_until_parked();
+    let shown = view(&f, cx).handoff.expect("still shown");
+    assert!(shown.moved, "{shown:?}");
+    insert(&f, id, cx);
+    assert_eq!(input(&f, cx), "");
+}
+
+#[gpui::test]
+fn an_answer_for_a_closed_handoff_is_dropped(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let id = read_detail(&f, cx);
+    f.ws.update(cx, |ws, cx| {
+        ws.open_pr_handoff(id, Read::FailedChecks, cx);
+        ws.close_pr_handoff(id, cx);
+        ws.open_pr_handoff(id, Read::OpenThreads, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::FailedLog), 1, "the first was asked for");
+    let shown = view(&f, cx).handoff.expect("the second is shown");
+    assert_eq!(shown.payload, Payload::OpenThreads);
+    assert!(
+        !matches!(&shown.prompt, Prepared::Ready(p) if p.contains("FAILED")),
+        "the checks prompt does not land on the threads handoff: {:?}",
+        shown.prompt
+    );
+}
+
+#[gpui::test]
+fn a_terminal_is_not_offered(cx: &mut TestAppContext) {
+    let (f, _, _) = window(cx);
+    split_chat(&f, cx);
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.split_focused_pane_kind(
+                super::NewPaneKind::Terminal,
+                super::SplitDirection::Horizontal,
+                window,
+                cx,
+            );
+        });
+    })
+    .unwrap();
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let id = read_detail(&f, cx);
+    handoff(&f, id, cx);
+    assert_eq!(
+        view(&f, cx).handoff.unwrap().chats.len(),
+        1,
+        "the chat only"
+    );
+}
+
+/// The Git panel's Send checks nothing for a worktree with no chat: the
+/// worktree is shown so one can be opened there.
+#[gpui::test]
+fn the_git_panel_names_a_worktree_without_a_chat(cx: &mut TestAppContext) {
+    let (f, gh, linked) = window(cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::Tasks, cx));
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| ws.send_failed_checks(window, cx));
+    });
+    cx.run_until_parked();
     assert_eq!(gh.count(GhOp::FailedLog), 0, "nothing is read for nowhere");
     assert_eq!(
         send_reports(&f, cx),
@@ -510,30 +817,25 @@ fn a_worktree_without_a_chat_is_shown_before_the_user_is_told_to_open_one(cx: &m
     );
     f.ws.read_with(cx, |ws, _| {
         assert_eq!(ws.active_ref(), linked);
-        assert_eq!(
-            ws.active_page(),
-            None,
-            "the worktree to open a chat in is the one in view"
-        );
+        assert_eq!(ws.active_page(), None, "the worktree is in view");
     });
 }
 
+/// A page opened while the Git panel's prompt was read keeps it out of an
+/// input out of sight.
 #[gpui::test]
-fn a_prompt_is_not_put_behind_a_page_opened_while_it_was_read(cx: &mut TestAppContext) {
+fn the_git_panel_does_not_put_a_prompt_behind_a_page(cx: &mut TestAppContext) {
     let (f, gh, _) = window(cx);
     split_chat(&f, cx);
-    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
-    let id = read_detail(&f, cx);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| {
-            ws.send_pr_detail_checks(id, window, cx);
-            // Back to the page before the logs arrive.
+            ws.send_failed_checks(window, cx);
+            // A page before the logs arrive.
             ws.show_page(Page::PullRequests, cx);
         });
     });
     cx.run_until_parked();
-
     assert_eq!(gh.count(GhOp::FailedLog), 1);
     assert_eq!(input(&f, cx), "", "the input is out of sight");
     assert_eq!(

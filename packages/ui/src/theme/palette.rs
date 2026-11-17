@@ -801,6 +801,8 @@ pub const PR_DIFF_LINE_NO_W: f32 = 48.0;
 /// One side of a side-by-side diff at its narrowest: below twice this the
 /// diff scrolls sideways; each side clips its own longer lines.
 pub const PR_SPLIT_HALF_MIN_W: f32 = 320.0;
+/// How tall a prepared agent prompt's preview grows before it scrolls.
+pub const PR_HANDOFF_PREVIEW_MAX_H: f32 = 240.0;
 /// Lines the description editor shows before it scrolls.
 pub const PR_BODY_EDIT_ROWS: usize = 12;
 /// Lines a review reply box shows before it scrolls.

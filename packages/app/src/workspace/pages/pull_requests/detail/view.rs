@@ -307,6 +307,8 @@ pub(in crate::workspace) struct ReadyView {
     pub rerun: Option<ActionSlot>,
     pub threads: ThreadsView,
     pub threads_send: SendSlot,
+    /// Send to agent for the lines selected in the Files tab.
+    pub code_send: SendSlot,
     /// Only while the Files tab is shown: the listing can be long.
     pub files: Option<super::files::FilesView>,
     /// Only while the Files tab is shown: comments pending for a review.
@@ -342,6 +344,7 @@ pub(in crate::workspace) struct PrDetailView {
     pub error: Option<String>,
     pub tab: PrTab,
     pub tabs: Vec<(PrTab, String)>,
+    pub handoff: Option<HandoffView>,
     pub body: DetailBody,
 }
 
@@ -359,7 +362,69 @@ pub(in crate::workspace) struct DetailInputs<'a> {
     pub drafts: Option<daruda_store::review_drafts::PrDrafts>,
     /// Whether what is typed now is kept across restarts.
     pub keeping: crate::github::DraftKeeping,
+    /// The writable agent chats of the worktree a handoff goes to, the one
+    /// it would pick first; staged only while a handoff is open.
+    pub handoff_chats: Vec<(
+        crate::workspace::main_area::pane_tree::PaneId,
+        gpui::SharedString,
+        usize,
+    )>,
     pub now: DateTime<Utc>,
+}
+
+/// A handoff to an agent: what, where, and the prompt prepared.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct HandoffView {
+    pub payload: super::handoff::Payload,
+    /// The worktree's name.
+    pub lane: String,
+    /// The pull request's worktree is no longer this one: nothing can be
+    /// inserted.
+    pub moved: bool,
+    /// The chat chosen is no longer a writable chat there: pick another.
+    pub chat_gone: bool,
+    /// The lines quoted are no longer the ones selected: nothing can be
+    /// inserted.
+    pub selection_changed: bool,
+    /// Chat, title and tab number.
+    pub chats: Vec<(
+        crate::workspace::main_area::pane_tree::PaneId,
+        gpui::SharedString,
+        usize,
+    )>,
+    pub chosen: Option<crate::workspace::main_area::pane_tree::PaneId>,
+    pub prompt: super::handoff::Prepared,
+}
+
+fn handoff_view(
+    handoff: &super::handoff::Handoff,
+    state: &PrDetailState,
+    inputs: &DetailInputs<'_>,
+) -> HandoffView {
+    let chats = &inputs.handoff_chats;
+    let listed = |pane| chats.iter().any(|(held, _, _)| *held == pane);
+    // Nothing chosen yet: the first listed, as Insert would take. A chosen
+    // chat gone is never swapped for another.
+    let chosen = match handoff.chat {
+        Some(chat) => listed(chat).then_some(chat),
+        None => chats.first().map(|(pane, _, _)| *pane),
+    };
+    HandoffView {
+        payload: handoff.payload.clone(),
+        lane: handoff.lane_name.clone(),
+        selection_changed: match &handoff.payload {
+            super::handoff::Payload::SelectedCode(range) => !state
+                .files()
+                .is_some_and(|files| files.selection_current(range)),
+            _ => false,
+        },
+        moved: inputs.lane.map(|lane| lane.lane) != Some(handoff.lane),
+        // With none left, a new chat is offered instead of another choice.
+        chat_gone: !chats.is_empty() && handoff.chat.is_some_and(|chat| !listed(chat)),
+        chats: chats.clone(),
+        chosen,
+        prompt: handoff.prompt.clone(),
+    }
 }
 
 /// The detail for `state`.
@@ -393,6 +458,9 @@ pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_
             ActionState::Failed(line) => Some(line.clone()),
             ActionState::Idle | ActionState::Running(_) => None,
         },
+        handoff: state
+            .handoff()
+            .map(|handoff| handoff_view(handoff, state, inputs)),
         tab: state.tab(),
         tabs: PrTab::ALL
             .into_iter()
@@ -417,6 +485,11 @@ fn ready(
 ) -> ReadyView {
     let (sending, progress, keeping) = (inputs.sending, inputs.progress, inputs.keeping);
     let drafts = inputs.drafts.as_ref();
+    // A handoff being prepared answers its button too.
+    let sending = sending
+        || state
+            .handoff()
+            .is_some_and(|handoff| matches!(handoff.prompt, super::handoff::Prepared::Reading(_)));
     let send = |nothing: bool| match (&lane, sending, nothing) {
         (None, _, _) => SendSlot::NoLane,
         (Some(_), true, _) => SendSlot::Sending,
@@ -439,6 +512,7 @@ fn ready(
             Some(Load::Ready(threads)) => threads_view(threads, state, drafts, keeping),
         },
         threads_send: send(open_threads(state, loaded) == (0, false)),
+        code_send: send(false),
         review_comments: (state.tab() == PrTab::Files)
             .then(|| review_comments(state, drafts, keeping)),
         files: (state.tab() == PrTab::Files).then(|| {

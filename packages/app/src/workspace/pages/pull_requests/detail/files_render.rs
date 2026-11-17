@@ -16,7 +16,7 @@ use super::files::{
 };
 use super::progress::Viewed;
 use super::recover::RecoverFailure;
-use super::view::ReviewCommentsView;
+use super::view::{ReviewCommentsView, SendSlot};
 use crate::surface::strings::{common, pull_requests as s};
 use crate::ui::{
     Disableable as _, Selectable as _, button, button_compact, button_group, button_icon,
@@ -28,6 +28,7 @@ pub(super) fn files(
     id: PrDetailId,
     view: &FilesView,
     comments: Option<&ReviewCommentsView>,
+    send: SendSlot,
     list_scroll: &UniformListScrollHandle,
     cx: &Context<Workspace>,
 ) -> AnyElement {
@@ -54,7 +55,7 @@ pub(super) fn files(
         .children(
             shown
                 .as_ref()
-                .map(|shown| shown_diff(id, shown, comments, cx)),
+                .map(|shown| shown_diff(id, shown, comments, send, cx)),
         )
         .into_any_element()
 }
@@ -287,6 +288,7 @@ fn shown_diff(
     id: PrDetailId,
     shown: &ShownView,
     comments: Option<&ReviewCommentsView>,
+    send: SendSlot,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let composer = comments.and_then(|comments| comments.composer.as_ref());
@@ -310,7 +312,7 @@ fn shown_diff(
             shown
                 .selection
                 .as_ref()
-                .map(|lines| selection_bar(id, lines, composer.is_none(), cx)),
+                .map(|lines| selection_bar(id, lines, composer.is_none(), send, cx)),
         )
         .child(body)
         .into_any_element()
@@ -477,6 +479,7 @@ fn selection_bar(
     id: PrDetailId,
     lines: &LineRange,
     can_comment: bool,
+    send: SendSlot,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -510,6 +513,15 @@ fn selection_bar(
                     ),
             )
         })
+        .child(
+            button_compact("pr-lines-send", s::send_to_agent())
+                .debug_selector(|| "pr-lines-send".into())
+                .disabled(!send.enabled())
+                .when(send == SendSlot::NoLane, |button| {
+                    button.tooltip(s::send_no_lane())
+                })
+                .on_click(cx.listener(move |ws, _, _, cx| ws.open_pr_code_handoff(id, cx))),
+        )
         .child(
             button_compact("pr-lines-copy", s::lines_copy())
                 .debug_selector(|| "pr-lines-copy".into())

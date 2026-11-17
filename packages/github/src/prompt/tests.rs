@@ -3,7 +3,9 @@
 //! post-job cleanup, ANSI escapes and BOM included.
 
 use super::*;
-use crate::prompt::{CheckLog, NoLog, clean_log, failed_checks, one_line, strip_control};
+use crate::prompt::{
+    CheckLog, NoLog, clean_log, failed_checks, one_line, selected_code, strip_control,
+};
 use crate::{CheckRollup, FailedCheck, PrState, PrSummary};
 
 fn fixture() -> String {
@@ -191,3 +193,67 @@ fn the_fence_outgrows_the_quoted_backticks() {
 }
 
 mod review;
+
+fn lines<'a>(reference: &'a str, code: &'a str, complete: bool) -> crate::prompt::CodeLines<'a> {
+    crate::prompt::CodeLines {
+        reference,
+        code,
+        complete,
+        removed: false,
+    }
+}
+
+#[test]
+fn selected_code_is_fenced_and_stripped() {
+    let code = "let a = 1;\n```\nlet b = \u{1b}[201~2;";
+    let prompt = selected_code(&pr(), &lines("src/a.rs:3-5 (new) @ 4f9c2e1", code, true));
+    assert!(prompt.starts_with(
+        "These lines of src/a.rs:3-5 (new) @ 4f9c2e1 are in pull request #14927 (Multi-account draft)."
+    ));
+    assert!(!prompt.contains('\u{1b}'), "{prompt}");
+    assert!(
+        prompt.contains("\n````\nlet a = 1;"),
+        "a fence no line closes: {prompt}"
+    );
+    assert!(!prompt.contains("not quoted"));
+    assert!(
+        prompt.ends_with("````\n\n"),
+        "room to ask after it: {prompt:?}"
+    );
+}
+
+#[test]
+fn selected_code_keeps_a_hostile_path_on_one_line() {
+    let prompt = selected_code(
+        &pr(),
+        &lines("a\u{1b}[201~\nrm -rf.rs:1 (new) @ 1", "x", true),
+    );
+    assert!(!prompt.contains('\u{1b}'), "{prompt}");
+    assert!(
+        prompt.starts_with("These lines of a rm -rf.rs:1"),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn selected_code_says_when_lines_are_missing_or_too_long() {
+    let partial = selected_code(&pr(), &lines("a.rs:1-9 (new) @ 1", "x", false));
+    assert!(partial.contains("read them in the file"), "{partial}");
+    let base = selected_code(
+        &pr(),
+        &crate::prompt::CodeLines {
+            removed: true,
+            ..lines("a.rs:1-9 (old) @ 1", "x", false)
+        },
+    );
+    assert!(base.contains("on the base side"), "{base}");
+    assert!(base.contains("read them at the base"), "{base}");
+    let long = "y\n".repeat(PROMPT_CHARS);
+    let cut = selected_code(&pr(), &lines("a.rs:1-9 (new) @ 1", &long, true));
+    assert!(
+        cut.chars().count() <= PROMPT_CHARS,
+        "{}",
+        cut.chars().count()
+    );
+    assert!(cut.contains(ELIDED), "the middle is elided");
+}

@@ -289,6 +289,10 @@ impl Workspace {
                         .as_ref()
                         .and_then(|owner| crate::github::DraftStore::of(owner, cx)),
                     keeping: crate::github::DraftStore::keeping(draft_owner.as_ref(), cx),
+                    handoff_chats: state
+                        .handoff()
+                        .map(|handoff| self.writable_chats(handoff.lane, cx))
+                        .unwrap_or_default(),
                     now: chrono::Utc::now(),
                 };
                 detail::view::view(state, &inputs)

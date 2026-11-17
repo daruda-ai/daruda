@@ -38,6 +38,39 @@ pub(in crate::workspace) struct PrSendTarget {
     pub link: PrLink,
 }
 
+/// The fix-it prompt for a pull request's failing checks, their logs read
+/// through `gh`.
+pub(in crate::workspace) fn checks_prompt(
+    gh: &dyn Gh,
+    link: &PrLink,
+) -> Result<Option<String>, GhError> {
+    let logs: Vec<CheckLog> = link
+        .pr
+        .failed
+        .iter()
+        .map(|check| CheckLog {
+            check: check.clone(),
+            log: match check.job {
+                Some(job) => gh
+                    .failed_log(&link.repo, job)
+                    .map_err(|e| NoLog::Unreadable(e.to_string())),
+                None => Err(NoLog::NotActions),
+            },
+        })
+        .collect();
+    Ok((!logs.is_empty()).then(|| failed_checks(&link.pr, &logs)))
+}
+
+/// The address-them prompt for a pull request's unresolved threads; `None`
+/// when there are none.
+pub(in crate::workspace) fn threads_prompt(
+    gh: &dyn Gh,
+    link: &PrLink,
+) -> Result<Option<String>, GhError> {
+    let threads = gh.review_threads(&link.repo, link.pr.number)?;
+    Ok(review_threads(&link.pr, &threads))
+}
+
 impl Workspace {
     /// The pane in `lane` the prompt goes to: a writable agent chat, the
     /// focused one first, then one in the active tab, then one in another tab.
@@ -47,7 +80,19 @@ impl Workspace {
     /// run each line of a pasted log.
     fn pr_send_target(&self, lane: LaneRef, cx: &App) -> Option<PaneId> {
         let runtime = self.main_area.runtimes.get(&lane)?;
-        let chats = runtime
+        best_target(
+            self.lane_chats(lane, cx),
+            runtime.focused_pane_id,
+            runtime.active_tab_index,
+        )
+    }
+
+    /// `lane`'s writable agent chats as `(pane, tab)`; never a terminal.
+    fn lane_chats(&self, lane: LaneRef, cx: &App) -> Vec<(PaneId, usize)> {
+        let Some(runtime) = self.main_area.runtimes.get(&lane) else {
+            return Vec::new();
+        };
+        runtime
             .panes
             .iter()
             .filter(|pane| {
@@ -60,8 +105,60 @@ impl Workspace {
                     .iter()
                     .position(|tab| tab.layout.pane_ids().contains(&pane.id))?;
                 Some((pane.id, tab))
-            });
-        best_target(chats, runtime.focused_pane_id, runtime.active_tab_index)
+            })
+            .collect()
+    }
+
+    /// `lane`'s writable agent chats with their titles and tab numbers
+    /// (from 1), the one a send would pick first.
+    pub(in crate::workspace) fn writable_chats(
+        &self,
+        lane: LaneRef,
+        cx: &App,
+    ) -> Vec<(PaneId, gpui::SharedString, usize)> {
+        let Some(runtime) = self.main_area.runtimes.get(&lane) else {
+            return Vec::new();
+        };
+        let best = self.pr_send_target(lane, cx);
+        let mut chats: Vec<(PaneId, gpui::SharedString, usize)> = self
+            .lane_chats(lane, cx)
+            .into_iter()
+            .filter_map(|(pane, tab)| {
+                let title = runtime.panes.iter().find(|held| held.id == pane)?.title(cx);
+                Some((pane, title, tab + 1))
+            })
+            .collect();
+        chats.sort_by_key(|(pane, _, tab)| (Some(*pane) != best, *tab));
+        chats
+    }
+
+    /// Put `prompt` into the input of chat `pane` in `lane`, unsent,
+    /// showing the lane first; checked again here, as the chat may have
+    /// closed or become read-only while the prompt was prepared.
+    pub(in crate::workspace) fn deliver_to_chat(
+        &mut self,
+        lane: LaneRef,
+        pane: PaneId,
+        prompt: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self
+            .lane_chats(lane, cx)
+            .iter()
+            .any(|(held, _)| *held == pane)
+        {
+            self.report_pr_send(s::github_no_agent_pane(), ErrorSeverity::Warning, cx);
+            return false;
+        }
+        if !self.shows_lane(lane) {
+            self.activate_lane(lane, window, cx);
+        }
+        let sent = self.send_pane_selection_to(pane, prompt.into(), window, cx);
+        if !sent {
+            self.report_pr_send(s::github_send_failed(), ErrorSeverity::Warning, cx);
+        }
+        sent
     }
 
     /// Whether `lane` is what the main area shows: the active lane, with no
@@ -120,28 +217,7 @@ impl Workspace {
         if target.link.pr.failed.is_empty() {
             return;
         }
-        self.send_pr_prompt(
-            target,
-            |gh, link| {
-                let logs: Vec<CheckLog> = link
-                    .pr
-                    .failed
-                    .iter()
-                    .map(|check| CheckLog {
-                        check: check.clone(),
-                        log: match check.job {
-                            Some(job) => gh
-                                .failed_log(&link.repo, job)
-                                .map_err(|e| NoLog::Unreadable(e.to_string())),
-                            None => Err(NoLog::NotActions),
-                        },
-                    })
-                    .collect();
-                Ok(Some(failed_checks(&link.pr, &logs)))
-            },
-            window,
-            cx,
-        );
+        self.send_pr_prompt(target, checks_prompt, window, cx);
     }
 
     /// Read the unresolved review threads and put the address-them prompt
@@ -152,15 +228,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.send_pr_prompt(
-            target,
-            |gh, link| {
-                let threads = gh.review_threads(&link.repo, link.pr.number)?;
-                Ok(review_threads(&link.pr, &threads))
-            },
-            window,
-            cx,
-        );
+        self.send_pr_prompt(target, threads_prompt, window, cx);
     }
 
     /// The one path every button takes: show the lane, find a target in it,

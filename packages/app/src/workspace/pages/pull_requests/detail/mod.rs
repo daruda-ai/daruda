@@ -18,6 +18,8 @@ pub(in crate::workspace) mod diff_layout;
 mod diff_render;
 pub(in crate::workspace) mod files;
 pub(in crate::workspace) mod files_render;
+pub(in crate::workspace) mod handoff;
+mod handoff_render;
 pub(in crate::workspace) mod line_comments;
 pub(in crate::workspace) mod progress;
 mod read_slot;
@@ -135,6 +137,8 @@ pub(in crate::workspace) struct PrDetailState {
     composer: Option<line_comments::LineComposer>,
     /// The review being written and submitted.
     review: Option<review_submit::ReviewSubmit>,
+    /// A handoff to an agent being prepared.
+    handoff: Option<handoff::Handoff>,
 }
 
 impl PrDetailState {
@@ -159,6 +163,7 @@ impl PrDetailState {
             reviewer_requests: reviewers::ReviewerRequests::default(),
             composer: None,
             review: None,
+            handoff: None,
         }
     }
 
@@ -764,7 +769,7 @@ impl Workspace {
 
     /// Where the detail's Send to agent goes: the linked worktree's chat,
     /// with the pull request as last read. `None` without either.
-    fn pr_detail_send_target(&self, id: PrDetailId) -> Option<PrSendTarget> {
+    pub(super) fn pr_detail_send_target(&self, id: PrDetailId) -> Option<PrSendTarget> {
         let detail = self
             .pages
             .pull_requests
@@ -782,28 +787,6 @@ impl Workspace {
                 pr: loaded.summary.clone(),
             },
         })
-    }
-
-    pub(in crate::workspace) fn send_pr_detail_checks(
-        &mut self,
-        id: PrDetailId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(target) = self.pr_detail_send_target(id) {
-            self.send_failed_checks_to(target, window, cx);
-        }
-    }
-
-    pub(in crate::workspace) fn send_pr_detail_threads(
-        &mut self,
-        id: PrDetailId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(target) = self.pr_detail_send_target(id) {
-            self.send_review_comments_to(target, window, cx);
-        }
     }
 
     /// Make a worktree for the shown pull request, as its list row would.

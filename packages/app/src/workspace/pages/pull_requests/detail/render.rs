@@ -26,33 +26,37 @@ pub(in crate::workspace) fn render(
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
-    let body = div()
-        .w_full()
-        .min_w_0()
-        .p(px(theme::DOCK_PAGE_PAD))
-        .flex()
-        .flex_col()
-        .gap(px(theme::GAP_LG))
-        .children(view.error.clone().map(|error| action_error(error, cx)))
-        .child(match &view.body {
-            DetailBody::Loading => note(common::loading(), cx).into_any_element(),
-            DetailBody::Failed(reason) => note(s::detail_failed(reason), cx).into_any_element(),
-            DetailBody::Ready(ready) => div()
-                .flex()
-                .flex_wrap()
-                .items_start()
-                .gap(px(theme::DOCK_PAGE_PAD))
-                .child(
-                    div()
-                        .debug_selector(|| "pr-detail-tab-content".into())
-                        .flex_1()
-                        .flex_basis(px(theme::PR_DETAIL_CONTENT_BASIS))
-                        .min_w_0()
-                        .child(tab_content(view.id, view.tab, ready, files_scroll, cx)),
-                )
-                .child(side(view.id, &ready.side, cx))
-                .into_any_element(),
-        });
+    let body =
+        div()
+            .w_full()
+            .min_w_0()
+            .p(px(theme::DOCK_PAGE_PAD))
+            .flex()
+            .flex_col()
+            .gap(px(theme::GAP_LG))
+            .children(view.error.clone().map(|error| action_error(error, cx)))
+            .child(match &view.body {
+                DetailBody::Loading => note(common::loading(), cx).into_any_element(),
+                DetailBody::Failed(reason) => note(s::detail_failed(reason), cx).into_any_element(),
+                DetailBody::Ready(ready) => div()
+                    .flex()
+                    .flex_wrap()
+                    .items_start()
+                    .gap(px(theme::DOCK_PAGE_PAD))
+                    .child(
+                        div()
+                            .debug_selector(|| "pr-detail-tab-content".into())
+                            .flex_1()
+                            .flex_basis(px(theme::PR_DETAIL_CONTENT_BASIS))
+                            .min_w_0()
+                            .children(view.handoff.as_ref().map(|handoff| {
+                                super::handoff_render::handoff(view.id, handoff, cx)
+                            }))
+                            .child(tab_content(view.id, view.tab, ready, files_scroll, cx)),
+                    )
+                    .child(side(view.id, &ready.side, cx))
+                    .into_any_element(),
+            });
     div()
         .size_full()
         .min_h_0()
@@ -327,6 +331,7 @@ fn tab_content(
                         id,
                         files,
                         ready.review_comments.as_ref(),
+                        ready.code_send,
                         files_scroll,
                         cx,
                     ))
@@ -394,7 +399,7 @@ fn checks(id: PrDetailId, ready: &ReadyView, cx: &Context<Workspace>) -> AnyElem
             Some(ready.checks_summary.clone()),
             ready.checks_send,
             s::send_nothing_checks(),
-            move |ws, window, cx| ws.send_pr_detail_checks(id, window, cx),
+            move |ws, _, cx| ws.open_pr_handoff(id, super::handoff::Read::FailedChecks, cx),
             "pr-detail-send-checks",
             ready.rerun.as_ref().map(|slot| {
                 with_slot(button_compact("pr-detail-rerun", s::action_rerun()), slot)

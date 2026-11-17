@@ -799,3 +799,154 @@ fn a_file_sent_without_a_patch_is_read_whole_on_request(cx: &mut TestAppContext)
     );
     assert!(vcx.debug_bounds("pr-file-recover").is_some());
 }
+
+/// The handoff of selected lines, as prepared.
+fn code_handoff(
+    f: &super::GitFixture,
+    id: PrDetailId,
+    cx: &mut TestAppContext,
+) -> Option<(
+    crate::workspace::pages::pull_requests::detail::handoff::Payload,
+    crate::workspace::pages::pull_requests::detail::handoff::Prepared,
+)> {
+    f.ws.update(cx, |ws, cx| ws.open_pr_code_handoff(id, cx));
+    f.ws.read_with(cx, |ws, _| {
+        let handoff = ws.pages.pull_requests.detail.as_ref()?.handoff()?;
+        Some((handoff.payload.clone(), handoff.prompt.clone()))
+    })
+}
+
+#[gpui::test]
+fn selected_lines_are_handed_over_with_their_reference(cx: &mut TestAppContext) {
+    use crate::workspace::pages::pull_requests::detail::handoff::{Payload, Prepared};
+    let mut detail = mergeable(7, "feat");
+    detail.head_sha = "4f9c2e1abcdef".into();
+    let (f, gh, id) = opened(cx, detail);
+    gh.set_pr_files(
+        &repo(),
+        7,
+        PrFiles {
+            files: vec![file(
+                "src/a.rs",
+                Some("@@ -1,3 +1,3 @@\n one\n-two\n+two!\n three\n@@ -10,2 +10,2 @@\n ten\n-x\n+y"),
+            )],
+        },
+    );
+    select(&f, id, cx);
+    assert_eq!(code_handoff(&f, id, cx), None, "nothing selected");
+
+    f.ws.update(cx, |ws, cx| {
+        ws.select_pr_line(id, Side::New, 2, false, cx);
+        ws.select_pr_line(id, Side::New, 3, true, cx);
+    });
+    let Some((Payload::SelectedCode(_), Prepared::Ready(prompt))) = code_handoff(&f, id, cx) else {
+        panic!("ready at once");
+    };
+    assert!(prompt.contains("src/a.rs:2-3 (new) @ 4f9c2e1"), "{prompt}");
+    assert!(prompt.contains("two!\nthree"), "{prompt}");
+    assert!(!prompt.contains("not quoted"), "{prompt}");
+    assert_eq!(gh.count(GhOp::FailedLog), 0, "nothing is read");
+
+    // Across the gap between hunks: the lines not in the diff are named.
+    f.ws.update(cx, |ws, cx| ws.select_pr_line(id, Side::New, 11, true, cx));
+    let Some((_, Prepared::Ready(prompt))) = code_handoff(&f, id, cx) else {
+        panic!("ready");
+    };
+    assert!(prompt.contains("src/a.rs:2-11 (new)"), "{prompt}");
+    assert!(prompt.contains("three\nten\ny"), "{prompt}");
+    assert!(
+        prompt.contains("Lines outside the diff are not quoted"),
+        "{prompt}"
+    );
+}
+
+/// Lines selected otherwise after the handoff opened: it says so, Insert
+/// is off, and inserting anyway closes it with a warning.
+#[gpui::test]
+fn a_changed_selection_is_not_inserted(cx: &mut TestAppContext) {
+    use gpui::VisualTestContext;
+    let mut detail = mergeable(7, "feat");
+    detail.head_sha = "4f9c2e1abcdef".into();
+    let (f, gh, id) = opened(cx, detail);
+    gh.set_pr_files(
+        &repo(),
+        7,
+        PrFiles {
+            files: vec![file(
+                "src/a.rs",
+                Some("@@ -1,3 +1,3 @@\n one\n-two\n+two!\n three"),
+            )],
+        },
+    );
+    select(&f, id, cx);
+    f.ws.update(cx, |ws, cx| ws.select_pr_line(id, Side::New, 2, false, cx));
+    assert!(code_handoff(&f, id, cx).is_some());
+    let chosen = |f: &super::GitFixture, cx: &mut TestAppContext| {
+        f.ws.update(cx, |ws, cx| {
+            ws.stage_pr_page(cx);
+            ws.pages
+                .pull_requests
+                .detail_snapshot
+                .as_ref()
+                .and_then(|snap| snap.handoff.clone())
+        })
+    };
+    assert!(!chosen(&f, cx).unwrap().selection_changed);
+
+    f.ws.update(cx, |ws, cx| ws.select_pr_line(id, Side::New, 3, false, cx));
+    assert!(chosen(&f, cx).unwrap().selection_changed);
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| ws.insert_pr_handoff(id, window, cx));
+    });
+    cx.run_until_parked();
+    assert!(chosen(&f, cx).is_none(), "closed");
+    assert!(f.ws.read_with(cx, |ws, _| {
+        ws.error_history()
+            .iter()
+            .any(|r| r.dedup_key.as_deref() == Some("github.handoff.selection"))
+    }));
+}
+
+#[gpui::test]
+fn sending_the_same_lines_again_keeps_the_handoff(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    gh.set_pr_files(
+        &repo(),
+        7,
+        PrFiles {
+            files: vec![file("src/a.rs", Some(PATCH))],
+        },
+    );
+    select(&f, id, cx);
+    f.ws.update(cx, |ws, cx| ws.select_pr_line(id, Side::Old, 2, false, cx));
+    let Some((_, crate::workspace::pages::pull_requests::detail::handoff::Prepared::Ready(prompt))) =
+        code_handoff(&f, id, cx)
+    else {
+        panic!("ready");
+    };
+    assert!(
+        prompt.contains("a.rs:2 (old)") && prompt.contains("on the base side"),
+        "{prompt}"
+    );
+    let before = f.ws.read_with(cx, |ws, _| {
+        ws.pages
+            .pull_requests
+            .detail
+            .as_ref()
+            .unwrap()
+            .handoff()
+            .cloned()
+    });
+    assert!(code_handoff(&f, id, cx).is_some());
+    let after = f.ws.read_with(cx, |ws, _| {
+        ws.pages
+            .pull_requests
+            .detail
+            .as_ref()
+            .unwrap()
+            .handoff()
+            .cloned()
+    });
+    assert_eq!(before, after);
+}
