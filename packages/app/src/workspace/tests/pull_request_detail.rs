@@ -130,7 +130,7 @@ fn open(f: &GitFixture, item: PrListItem, cx: &mut TestAppContext) {
 fn shown(f: &GitFixture, cx: &mut TestAppContext) -> Option<(PrDetailId, u64, Load<PrDetail>)> {
     f.ws.read_with(cx, |ws, _| {
         let detail = ws.pages.pull_requests.detail.as_ref()?;
-        Some((detail.id, detail.item.pr.number, detail.load.clone()))
+        Some((detail.id(), detail.item().pr.number, detail.load().clone()))
     })
 }
 
@@ -217,7 +217,7 @@ fn pull_request_detail_scrolls_long_checks_and_description(cx: &mut TestAppConte
             .detail
             .as_ref()
             .unwrap()
-            .scroll
+            .scroll()
             .clone()
     });
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
@@ -315,15 +315,17 @@ fn a_threads_read_outdated_by_a_refresh_does_not_land(cx: &mut TestAppContext) {
     let threads = |f: &GitFixture, cx: &mut TestAppContext| {
         f.ws.read_with(cx, |ws, _| {
             let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
-            detail.threads.clone()
+            detail.threads().cloned()
         })
     };
     // The tab's first read, then a refresh's second, neither answered yet.
     f.ws.update(cx, |ws, cx| {
         ws.select_pr_detail_tab(id, PrTab::Threads, cx);
+        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let first = detail.threads_ticket().unwrap();
         ws.refresh_pr_detail(id, cx);
         // The first read answers late, into the slot the second waits in.
-        ws.land_pr_threads(id, 1, Ok(thread("old.rs")), cx);
+        ws.land_pr_threads(id, first, Ok(thread("old.rs")), cx);
     });
     assert_eq!(
         threads(&f, cx),
@@ -939,10 +941,11 @@ fn a_reopened_log_does_not_take_an_earlier_reads_answer(cx: &mut TestAppContext)
         };
         ready.checks[0].log.clone()
     };
-    // (how it reopens, the first read's number: each open is a read)
-    for (reopen, first) in [("closed and opened", 1), ("refreshed and opened", 3)] {
+    for reopen in ["closed and opened", "refreshed and opened"] {
         f.ws.update(cx, |ws, cx| {
             ws.toggle_pr_check_log(id, JOB, cx);
+            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let first = detail.log_ticket(JOB).unwrap();
             match reopen {
                 "closed and opened" => ws.toggle_pr_check_log(id, JOB, cx),
                 _ => ws.refresh_pr_detail(id, cx),
@@ -1023,17 +1026,17 @@ fn returning_to_a_pull_request_keeps_its_tab_and_scroll(cx: &mut TestAppContext)
     let (f, _gh, _) = window(cx);
     open(&f, item(7, "feat"), cx);
     f.ws.update(cx, |ws, cx| {
-        let detail = ws.pages.pull_requests.detail.as_mut().unwrap();
-        let id = detail.id;
-        detail.tab = PrTab::Threads;
+        let id = ws.pr_detail_id().unwrap();
+        ws.select_pr_detail_tab(id, PrTab::Threads, cx);
         let offset = gpui::point(gpui::px(0.), gpui::px(-240.));
-        detail.scroll.set_offset(offset);
+        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        detail.scroll().set_offset(offset);
         ws.close_page(cx);
         ws.show_page(Page::Tasks, cx);
         ws.show_page(Page::PullRequests, cx);
         let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
-        assert_eq!(detail.id, id);
-        assert_eq!(detail.tab, PrTab::Threads);
-        assert_eq!(detail.scroll.offset(), offset);
+        assert_eq!(detail.id(), id);
+        assert_eq!(detail.tab(), PrTab::Threads);
+        assert_eq!(detail.scroll().offset(), offset);
     });
 }

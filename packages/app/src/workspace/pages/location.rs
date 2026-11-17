@@ -77,9 +77,9 @@ impl Workspace {
             Page::PullRequests => {
                 let detail = self.pages.pull_requests.detail.as_ref()?;
                 (
-                    detail.item.repo.qualified(),
-                    format!("#{}", detail.item.pr.number),
-                    self.pr_detail_lane(&detail.item).map(|lane| lane.lane),
+                    detail.item().repo.qualified(),
+                    format!("#{}", detail.item().pr.number),
+                    self.pr_detail_lane(detail.item()).map(|lane| lane.lane),
                     "pr-detail-back",
                     s::pull_requests::back_to_list(),
                 )

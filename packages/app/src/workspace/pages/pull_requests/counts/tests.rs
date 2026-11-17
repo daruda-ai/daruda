@@ -7,7 +7,7 @@ use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, PrSumm
 
 use super::labels;
 use crate::github::PrListAnswer;
-use crate::workspace::github_ops::pr_list::{HostList, PrListState};
+use crate::workspace::github_ops::pr_list::{HostList, PrListCache};
 
 const GITHUB: &str = "github.com";
 const CORP: &str = "git.corp.example";
@@ -53,15 +53,13 @@ fn answer(repo: &RepoId, numbers: &[u64], truncated: bool) -> PrListAnswer {
     }
 }
 
-fn shown(hosts: Vec<(&str, HostList)>) -> PrListState {
-    PrListState::Shown {
-        filter: PrFilter::Mine,
-        hosts: hosts
+fn shown(hosts: Vec<(&str, HostList)>) -> PrListCache {
+    PrListCache::shown_with(
+        hosts
             .into_iter()
             .map(|(host, list)| ((PrFilter::Mine, host.to_owned()), list))
             .collect::<HashMap<_, _>>(),
-        _aging: gpui::Task::ready(()),
-    }
+    )
 }
 
 fn paused() -> GhAvailability {
@@ -86,7 +84,7 @@ fn a_tab_counts_what_is_known_and_marks_what_is_missing() {
     };
     // (label, list, repos, availability, the Mine tab's label)
     type Availability = Box<dyn Fn(&str) -> GhAvailability>;
-    let cases: Vec<(&str, PrListState, &BTreeSet<RepoId>, Availability, &str)> = vec![
+    let cases: Vec<(&str, PrListCache, &BTreeSet<RepoId>, Availability, &str)> = vec![
         (
             "every host answered",
             shown(vec![
@@ -192,7 +190,7 @@ fn each_tab_reads_its_own_filter() {
         ["Unavailable", "…", "…"].map(str::to_owned),
     );
     assert_eq!(
-        labels(&PrListState::Hidden, &repos, |_| GhAvailability::Unknown),
+        labels(&PrListCache::default(), &repos, |_| GhAvailability::Unknown),
         ["…", "…", "…"].map(str::to_owned),
         "a hidden page has nothing yet"
     );

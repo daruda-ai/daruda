@@ -317,16 +317,12 @@ fn render_row(
 /// The row's worktree to go to, or the button that makes one, inert while
 /// it is being made.
 fn lane_cell(row: &PrRow, snap: &PrPageSnapshot) -> AnyElement {
-    let item = match &row.lane {
+    let (item, review) = match &row.lane {
         LaneSlot::Linked(lane) => return linked_lane(row, lane, snap),
-        LaneSlot::Creating => None,
-        LaneSlot::Absent { .. } => Some(row.item.as_ref().clone()),
+        LaneSlot::Creating { review } => (None, *review),
+        LaneSlot::Absent { review } => (Some(row.item.as_ref().clone()), *review),
     };
-    let label = if row.fork {
-        s::create_review_lane()
-    } else {
-        s::create_lane()
-    };
+    let label = list::create_lane_label(review);
     let key = row.key.clone();
     let workspace = snap.workspace.clone();
     button_compact(

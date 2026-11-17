@@ -100,7 +100,7 @@ fn search_totals(gh: &FakeGh) -> [usize; 3] {
 fn linked(slot: &LaneSlot) -> Option<LaneRef> {
     match slot {
         LaneSlot::Linked(lane) => Some(lane.lane),
-        LaneSlot::Creating | LaneSlot::Absent { .. } => None,
+        LaneSlot::Creating { .. } | LaneSlot::Absent { .. } => None,
     }
 }
 
@@ -339,8 +339,8 @@ fn switching_the_filter_reuses_answers_and_counts_share_the_cadence(cx: &mut Tes
     // Reopening shows the filter last chosen.
     f.ws.update(cx, |ws, cx| ws.close_page(cx));
     show_page(&f, cx);
-    let filter = f.ws.read_with(cx, |ws, _| ws.pr_list().filter());
-    assert_eq!(filter, Some(PrFilter::ReviewRequested));
+    let filter = f.ws.read_with(cx, |ws, _| ws.pr_page_filter());
+    assert_eq!(filter, PrFilter::ReviewRequested);
 }
 
 #[gpui::test]
@@ -384,12 +384,12 @@ fn closing_the_page_stops_its_searches(cx: &mut TestAppContext) {
         [1, 1, 1],
         "nothing is searched while closed"
     );
-    assert_eq!(f.ws.read_with(cx, |ws, _| ws.pr_list().filter()), None);
+    assert!(!f.ws.read_with(cx, |ws, _| ws.pr_list().is_shown()));
 
     // Another page replacing it stops them too.
     show_page(&f, cx);
     f.ws.update(cx, |ws, cx| ws.show_page(Page::Tasks, cx));
-    assert_eq!(f.ws.read_with(cx, |ws, _| ws.pr_list().filter()), None);
+    assert!(!f.ws.read_with(cx, |ws, _| ws.pr_list().is_shown()));
 
     // So does restoring a saved state, which never holds the page.
     use gpui::AppContext as _;
@@ -403,7 +403,7 @@ fn closing_the_page_stops_its_searches(cx: &mut TestAppContext) {
     })
     .unwrap();
     assert_eq!(f.ws.read_with(cx, |ws, _| ws.active_page()), None);
-    assert_eq!(f.ws.read_with(cx, |ws, _| ws.pr_list().filter()), None);
+    assert!(!f.ws.read_with(cx, |ws, _| ws.pr_list().is_shown()));
 }
 
 #[gpui::test]
@@ -463,11 +463,7 @@ fn clearing_search_keeps_the_selected_pull_request_tab_and_its_counts(cx: &mut T
         vcx.simulate_click(clear.center(), Default::default());
         vcx.run_until_parked();
         f.ws.read_with(&vcx, |ws, _| {
-            assert_eq!(
-                ws.pr_list().filter(),
-                Some(filter),
-                "{filter:?}: selected tab"
-            );
+            assert_eq!(ws.pr_page_filter(), filter, "{filter:?}: selected tab");
             let snap = ws.pages.pull_requests.snapshot.as_ref().unwrap();
             assert!(snap.query.is_empty(), "{filter:?}: search is cleared");
             assert_eq!(snap.visible, total, "{filter:?}: rows restored");

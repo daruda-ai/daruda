@@ -216,7 +216,7 @@ pub(in crate::workspace) struct DetailInputs<'a> {
 /// The detail for `state`.
 pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_>) -> PrDetailView {
     let item = &state.item;
-    let loaded = match &state.load {
+    let loaded = match state.load() {
         Load::Ready(loaded) => Some(loaded),
         Load::Loading | Load::Failed(_) => None,
     };
@@ -244,12 +244,12 @@ pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_
             ActionState::Failed(line) => Some(line.clone()),
             ActionState::Idle | ActionState::Running(_) => None,
         },
-        tab: state.tab,
+        tab: state.tab(),
         tabs: PrTab::ALL
             .into_iter()
             .map(|tab| (tab, tab_label(tab, loaded)))
             .collect(),
-        body: match &state.load {
+        body: match state.load() {
             Load::Loading => DetailBody::Loading,
             Load::Failed(reason) => DetailBody::Failed(reason.clone()),
             Load::Ready(loaded) => DetailBody::Ready(Box::new(ready(
@@ -286,7 +286,7 @@ fn ready(
         checks_send: send(loaded.summary.failed.is_empty()),
         rerun: (!loaded.failed_runs().is_empty())
             .then(|| ActionSlot::of(&state.action, PrAction::Rerunning, None)),
-        threads: match &state.threads {
+        threads: match state.threads() {
             None | Some(Load::Loading) => ThreadsView::Loading,
             Some(Load::Failed(reason)) => ThreadsView::Failed(reason.clone()),
             Some(Load::Ready(threads)) => threads_view(threads),

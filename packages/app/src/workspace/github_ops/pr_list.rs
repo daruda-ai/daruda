@@ -1,7 +1,9 @@
-//! What this window's pull requests page shows, kept by the process-wide
-//! [`crate::github::PrList`]. Answers change it only through
-//! [`Workspace::apply_pr_list`]; the page's own moves are show, hide and
-//! refresh. Not persisted: a window starts with the page hidden.
+//! The answers this window's pull requests page holds, for every tab, kept
+//! by the process-wide [`crate::github::PrList`]. Answers change it only
+//! through [`Workspace::apply_pr_list`]; the page's own moves are show, hide
+//! and refresh. Which tab is shown is the page's alone
+//! ([`crate::workspace::pages::pull_requests::PullRequestsPage`]). Not
+//! persisted: a window starts with the page hidden.
 
 use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
@@ -13,7 +15,7 @@ use gpui::{Context, Task};
 use crate::github::{PrList, PrListAnswer, PrListUpdate};
 use crate::workspace::Workspace;
 
-/// What is known about one host's pull requests under the shown filter.
+/// What is known about one host's pull requests under one filter.
 /// Problems with `gh` itself (missing, logged out, rate limited) are the
 /// host's availability, read from [`crate::github::PrPoller::availability`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -54,71 +56,72 @@ static LOADING: HostList = HostList::Loading;
 /// while no answer arrives to repaint it. The label steps in minutes.
 const AGE_REPAINT: Duration = Duration::from_secs(30);
 
-/// Whether the page is on screen, and what it has for each host.
+/// Whether the page is on screen, and what it has for each filter and host.
+/// Its contents change only through this module (show, hide and the
+/// poller's updates), so holders elsewhere can read it and nothing more.
 #[derive(Debug, Default)]
-pub(crate) enum PrListState {
-    #[default]
-    Hidden,
-    Shown {
-        filter: PrFilter,
-        hosts: HashMap<(PrFilter, String), HostList>,
-        /// Repaints the page every [`AGE_REPAINT`]; ends with this state.
-        _aging: Task<()>,
-    },
+pub(crate) struct PrListCache {
+    /// `None` while the page is hidden.
+    shown: Option<Shown>,
 }
 
-impl PrListState {
-    pub(crate) fn filter(&self) -> Option<PrFilter> {
-        match self {
-            Self::Hidden => None,
-            Self::Shown { filter, .. } => Some(*filter),
+#[derive(Debug)]
+struct Shown {
+    hosts: HashMap<(PrFilter, String), HostList>,
+    /// Repaints the page every [`AGE_REPAINT`]; ends with this state.
+    _aging: Task<()>,
+}
+
+impl PrListCache {
+    pub(crate) fn is_shown(&self) -> bool {
+        self.shown.is_some()
+    }
+
+    /// What `host` has under `filter`; `Loading` while hidden.
+    pub(crate) fn host(&self, filter: PrFilter, host: &str) -> &HostList {
+        self.shown
+            .as_ref()
+            .and_then(|shown| shown.hosts.get(&(filter, host.to_owned())))
+            .unwrap_or(&LOADING)
+    }
+
+    /// A shown cache holding `hosts`, without a repaint task.
+    #[cfg(test)]
+    pub(crate) fn shown_with(hosts: HashMap<(PrFilter, String), HostList>) -> Self {
+        Self {
+            shown: Some(Shown {
+                hosts,
+                _aging: Task::ready(()),
+            }),
         }
     }
 
-    /// What `host` has under the shown filter; `Loading` while hidden.
-    pub(crate) fn host(&self, host: &str) -> &HostList {
-        self.filter()
-            .map_or(&LOADING, |filter| self.host_for(filter, host))
+    /// When `host`'s last answer under `filter` arrived. It stays through a
+    /// failed search, as the answer's rows do.
+    pub(crate) fn answered_at(&self, filter: PrFilter, host: &str) -> Option<Instant> {
+        self.host(filter, host).answer().map(|answer| answer.at)
     }
 
-    pub(crate) fn host_for(&self, filter: PrFilter, host: &str) -> &HostList {
-        match self {
-            Self::Hidden => &LOADING,
-            Self::Shown { hosts, .. } => hosts.get(&(filter, host.to_owned())).unwrap_or(&LOADING),
-        }
-    }
-
-    /// When `host`'s last answer under the shown filter arrived. It stays
-    /// through a failed search, as the answer's rows do.
-    pub(crate) fn answered_at(&self, host: &str) -> Option<Instant> {
-        self.host(host).answer().map(|answer| answer.at)
-    }
-
-    /// Switch the selected rows while retaining answers for the other tab counts.
-    fn show(&mut self, filter: PrFilter, aging: impl FnOnce() -> Task<()>) -> bool {
-        if self.filter() == Some(filter) {
+    /// Start holding answers; `false` when already shown.
+    fn show(&mut self, aging: impl FnOnce() -> Task<()>) -> bool {
+        if self.is_shown() {
             return false;
         }
-        if let Self::Shown { filter: shown, .. } = self {
-            *shown = filter;
-            return true;
-        }
-        *self = Self::Shown {
-            filter,
+        self.shown = Some(Shown {
             hosts: HashMap::new(),
             _aging: aging(),
-        };
+        });
         true
     }
 
     fn hide(&mut self) -> bool {
-        !matches!(std::mem::take(self), Self::Hidden)
+        self.shown.take().is_some()
     }
 
     /// Apply what the poller says. Returns whether anything changed; a new
     /// arrival time alone does, since the header says how old the list is.
     fn apply(&mut self, update: PrListUpdate<'_>) -> bool {
-        let Self::Shown { hosts, .. } = self else {
+        let Some(Shown { hosts, .. }) = &mut self.shown else {
             return false;
         };
         let (host, filter, list) = match update {
@@ -215,29 +218,25 @@ impl Workspace {
             .collect()
     }
 
-    /// The filter the page shows and the repositories to search, while it
-    /// is on screen.
-    pub(crate) fn pr_list_demand(&self) -> Option<(PrFilter, BTreeSet<RepoId>)> {
-        Some((self.pr_list.filter()?, self.github_repos()))
-    }
-
-    /// Counts and selected rows share the process cache and its refresh cadence.
+    /// Counts and selected rows share the process cache and its refresh
+    /// cadence: every tab is searched while the page is on screen.
     pub(crate) fn pr_list_demands(&self) -> Vec<(PrFilter, BTreeSet<RepoId>)> {
-        let Some((_, repos)) = self.pr_list_demand() else {
+        if !self.pr_list().is_shown() {
             return Vec::new();
-        };
+        }
+        let repos = self.github_repos();
         crate::workspace::pages::pull_requests::list::FILTERS
             .into_iter()
             .map(|filter| (filter, repos.clone()))
             .collect()
     }
 
-    pub(crate) fn pr_list(&self) -> &PrListState {
-        &self.pr_list
+    pub(crate) fn pr_list(&self) -> &PrListCache {
+        &self.pages.pull_requests.cache
     }
 
-    /// The page is on screen with `filter`, or switched to it.
-    pub(crate) fn show_pr_list(&mut self, filter: PrFilter, cx: &mut Context<Self>) {
+    /// The page came on screen: hold answers for it until it leaves.
+    pub(crate) fn show_pr_list(&mut self, cx: &mut Context<Self>) {
         let aging = || {
             cx.spawn(async move |this, cx| {
                 loop {
@@ -248,7 +247,7 @@ impl Workspace {
                 }
             })
         };
-        if self.pr_list.show(filter, aging) {
+        if self.pages.pull_requests.cache.show(aging) {
             PrList::wanted(cx);
             cx.notify();
         }
@@ -256,7 +255,7 @@ impl Workspace {
 
     /// The page left the screen: its hosts are no longer asked for it.
     pub(crate) fn hide_pr_list(&mut self, cx: &mut Context<Self>) {
-        if self.pr_list.hide() {
+        if self.pages.pull_requests.cache.hide() {
             cx.notify();
         }
     }
@@ -264,7 +263,7 @@ impl Workspace {
     /// Search this window's hosts again now, for every tab: the counts
     /// beside the shown one read the same cache and must not lag behind it.
     pub(crate) fn refresh_pr_list(&mut self, cx: &mut Context<Self>) {
-        if self.pr_list.filter().is_none() {
+        if !self.pr_list().is_shown() {
             return;
         }
         self.refresh_pr_repositories(cx);
@@ -287,7 +286,7 @@ impl Workspace {
         hosts: impl IntoIterator<Item = String>,
         cx: &mut Context<Self>,
     ) {
-        if self.pr_list.filter().is_some() {
+        if self.pr_list().is_shown() {
             PrList::refresh(
                 hosts,
                 &crate::workspace::pages::pull_requests::list::FILTERS,
@@ -298,7 +297,7 @@ impl Workspace {
 
     /// The one write of the list the page shows.
     pub(crate) fn apply_pr_list(&mut self, update: PrListUpdate<'_>, cx: &mut Context<Self>) {
-        if self.pr_list.apply(update) {
+        if self.pages.pull_requests.cache.apply(update) {
             cx.notify();
         }
     }

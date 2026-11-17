@@ -7,10 +7,10 @@ use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, PrSumm
 use daruda_store::project::LaneRef;
 
 use super::{
-    self as list, Blocked, GroupBody, LaneFacts, PageBody, PageInputs, PrPageList, Trouble,
+    self as list, Blocked, GroupBody, LaneFacts, PageBody, PageInputs, PrPageView, Trouble,
 };
 use crate::github::PrListAnswer;
-use crate::workspace::github_ops::pr_list::{HostList, PrListState};
+use crate::workspace::github_ops::pr_list::{HostList, PrListCache};
 
 const HOST: &str = "github.com";
 
@@ -113,7 +113,7 @@ enum Shape {
     Listed(Vec<u64>, Option<Trouble>),
 }
 
-fn shape(list: &PrPageList) -> Shape {
+fn shape(list: &PrPageView) -> Shape {
     let PageBody::Groups(groups) = &list.body else {
         panic!("expected groups, got {:?}", list.body);
     };
@@ -129,14 +129,12 @@ fn shape(list: &PrPageList) -> Shape {
     }
 }
 
-fn shown(host_list: Option<HostList>) -> PrListState {
-    PrListState::Shown {
-        filter: PrFilter::Mine,
-        hosts: host_list
+fn shown(host_list: Option<HostList>) -> PrListCache {
+    PrListCache::shown_with(
+        host_list
             .map(|list| HashMap::from([((PrFilter::Mine, HOST.to_owned()), list)]))
             .unwrap_or_default(),
-        _aging: gpui::Task::ready(()),
-    }
+    )
 }
 
 /// An answer holding `items` that asked about `covered`, arrived at `at`.
@@ -155,7 +153,7 @@ fn answer(items: Vec<PrListItem>, covered: &[RepoId]) -> PrListAnswer {
     answer_at(items, covered, Instant::now())
 }
 
-fn page_for(repo: RepoId, availability: GhAvailability, state: &PrListState) -> PrPageList {
+fn page_for(repo: RepoId, availability: GhAvailability, state: &PrListCache) -> PrPageView {
     let repos = BTreeSet::from([repo]);
     let inputs = PageInputs {
         enabled: true,
@@ -393,17 +391,15 @@ fn the_header_says_how_old_the_newest_answer_is() {
         ),
     ];
     for (label, times, expected) in cases {
-        let state = PrListState::Shown {
-            filter: PrFilter::Mine,
-            hosts: times
+        let state = PrListCache::shown_with(
+            times
                 .into_iter()
                 .map(|(host, at)| {
                     let list = HostList::Ready(answer_at(Vec::new(), &[], at));
                     ((PrFilter::Mine, host.to_owned()), list)
                 })
                 .collect(),
-            _aging: gpui::Task::ready(()),
-        };
+        );
         let inputs = PageInputs {
             enabled: true,
             filter: PrFilter::Mine,

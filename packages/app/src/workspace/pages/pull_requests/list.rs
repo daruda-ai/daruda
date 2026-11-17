@@ -13,7 +13,7 @@ use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, RepoId
 use daruda_store::project::{LaneRef, ProjectId};
 
 use crate::surface::strings::{git as git_s, pull_requests as s};
-use crate::workspace::github_ops::pr_list::{HostList, PrListState};
+use crate::workspace::github_ops::pr_list::{HostList, PrListCache};
 use crate::workspace::github_ops::tone::PrTone;
 
 /// What the page needs to know about one lane to match it to a pull request.
@@ -121,8 +121,9 @@ pub(in crate::workspace) type PrKey = (RepoId, u64);
 pub(in crate::workspace) enum LaneSlot {
     /// The worktree working on it, to go to.
     Linked(RowLane),
-    /// One is being made for it, from its row or its detail.
-    Creating,
+    /// One is being made for it, from its row or its detail; `review` as
+    /// in `Absent`.
+    Creating { review: bool },
     /// None yet: offer to make one; `review` for a fork's review worktree.
     Absent { review: bool },
 }
@@ -141,13 +142,22 @@ impl LaneSlot {
                 name: lane.name.clone(),
             });
         }
+        let review = item.pr.cross_repo;
         if creating.contains(&(item.repo.clone(), item.pr.number)) {
-            Self::Creating
+            Self::Creating { review }
         } else {
-            Self::Absent {
-                review: item.pr.cross_repo,
-            }
+            Self::Absent { review }
         }
+    }
+}
+
+/// What the button that makes a worktree says, on the row and the detail
+/// alike, while it is offered and while it is being made.
+pub(in crate::workspace) fn create_lane_label(review: bool) -> String {
+    if review {
+        s::create_review_lane()
+    } else {
+        s::create_lane()
     }
 }
 
@@ -184,7 +194,7 @@ pub(in crate::workspace) enum PageBody {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workspace) struct PrPageList {
+pub(in crate::workspace) struct PrPageView {
     pub filter: PrFilter,
     /// How old the newest answer under the filter is; `None` until one
     /// arrives.
@@ -197,7 +207,7 @@ pub(in crate::workspace) struct PageInputs<'a> {
     pub enabled: bool,
     pub filter: PrFilter,
     pub repos: &'a BTreeSet<RepoId>,
-    pub list: &'a PrListState,
+    pub list: &'a PrListCache,
     pub lanes: &'a [LaneFacts],
     /// Pull requests a worktree is being made for.
     pub creating: &'a BTreeSet<PrKey>,
@@ -210,7 +220,7 @@ pub(in crate::workspace) struct PageInputs<'a> {
 pub(in crate::workspace) fn page(
     inputs: &PageInputs<'_>,
     availability: impl Fn(&str) -> GhAvailability,
-) -> PrPageList {
+) -> PrPageView {
     let body = if !inputs.enabled {
         PageBody::Off
     } else if inputs.repos.is_empty() {
@@ -222,7 +232,11 @@ pub(in crate::workspace) fn page(
                 .iter()
                 .map(|repo| {
                     let host = repo.host();
-                    let status = repo_status(repo, availability(host), inputs.list.host(host));
+                    let status = repo_status(
+                        repo,
+                        availability(host),
+                        inputs.list.host(inputs.filter, host),
+                    );
                     let body = group_body(repo, status, inputs);
                     let meta = match &body {
                         GroupBody::Listed { rows, .. } => s::group_count(host, rows.len()),
@@ -238,7 +252,7 @@ pub(in crate::workspace) fn page(
                 .collect(),
         )
     };
-    PrPageList {
+    PrPageView {
         filter: inputs.filter,
         refreshed: refreshed(inputs),
         body,
@@ -250,7 +264,7 @@ fn refreshed(inputs: &PageInputs<'_>) -> Option<String> {
     let newest = inputs
         .repos
         .iter()
-        .filter_map(|repo| inputs.list.answered_at(repo.host()))
+        .filter_map(|repo| inputs.list.answered_at(inputs.filter, repo.host()))
         .max()?;
     let seconds = inputs.clock.saturating_duration_since(newest).as_secs();
     Some(match age::bucket(seconds) {

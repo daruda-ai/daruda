@@ -1,8 +1,8 @@
 //! Local narrowing never spends a GitHub request or hides host failures.
 
-use super::list::{GroupBody, PageBody, PrPageList};
+use super::list::{GroupBody, PageBody, PrPageView};
 
-pub(super) fn narrow(list: &mut PrPageList, query: &str) -> (usize, usize) {
+pub(super) fn narrow(list: &mut PrPageView, query: &str) -> (usize, usize) {
     let PageBody::Groups(groups) = &mut list.body else {
         return (0, 0);
     };

@@ -106,7 +106,7 @@ impl Workspace {
                 .as_ref()
                 .is_some_and(|detail| {
                     self.page_scope() == super::scope::ProjectScope::All
-                        || self.github_repos().contains(&detail.item.repo)
+                        || self.github_repos().contains(&detail.item().repo)
                 }),
         };
         matches.then(|| self.page_detail_id(page)).flatten()

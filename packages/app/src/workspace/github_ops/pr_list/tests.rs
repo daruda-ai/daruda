@@ -50,13 +50,33 @@ fn idle() -> Task<()> {
     Task::ready(())
 }
 
-fn shown(filter: PrFilter, host: Option<HostList>) -> PrListState {
-    let mut state = PrListState::default();
-    state.show(filter, idle);
-    if let (PrListState::Shown { hosts, .. }, Some(list)) = (&mut state, host) {
-        hosts.insert((filter, HOST.to_owned()), list);
+/// The cache as one tab reads it.
+struct Viewed {
+    cache: PrListCache,
+    filter: PrFilter,
+}
+
+impl Viewed {
+    fn apply(&mut self, update: PrListUpdate<'_>) -> bool {
+        self.cache.apply(update)
     }
-    state
+
+    fn host(&self, host: &str) -> &HostList {
+        self.cache.host(self.filter, host)
+    }
+
+    fn answered_at(&self, host: &str) -> Option<Instant> {
+        self.cache.answered_at(self.filter, host)
+    }
+}
+
+fn shown(filter: PrFilter, host: Option<HostList>) -> Viewed {
+    let mut cache = PrListCache::default();
+    cache.show(idle);
+    if let (Some(shown), Some(list)) = (&mut cache.shown, host) {
+        shown.hosts.insert((filter, HOST.to_owned()), list);
+    }
+    Viewed { cache, filter }
 }
 
 #[test]
@@ -73,7 +93,7 @@ fn updates_change_only_the_shown_filter() {
         last: Some(answer.clone()),
     };
     /// (label, state before, update, expected host list, expected changed)
-    type Row<'a> = (&'static str, PrListState, PrListUpdate<'a>, HostList, bool);
+    type Row<'a> = (&'static str, Viewed, PrListUpdate<'a>, HostList, bool);
     let fresh = PrListUpdate::Answer {
         host: HOST,
         filter: PrFilter::Mine,
@@ -115,7 +135,7 @@ fn updates_change_only_the_shown_filter() {
             false,
         ),
         (
-            "another filter fills counts without changing selected rows",
+            "another filter fills counts without changing this tab",
             shown(PrFilter::AllOpen, None),
             fresh,
             HostList::Loading,
@@ -123,7 +143,10 @@ fn updates_change_only_the_shown_filter() {
         ),
         (
             "hidden ignores answers",
-            PrListState::Hidden,
+            Viewed {
+                cache: PrListCache::default(),
+                filter: PrFilter::Mine,
+            },
             fresh,
             HostList::Loading,
             false,
@@ -272,34 +295,33 @@ fn each_hosts_answer_time_follows_its_answers() {
     state.apply(PrListUpdate::HostBlocked { host: HOST });
     assert_eq!(state.answered_at(HOST), None, "a blocked host drops it");
     state.apply(at(&late));
-    assert!(state.show(PrFilter::AllOpen, idle));
-    assert_eq!(state.answered_at(HOST), None, "another filter starts over");
+    state.filter = PrFilter::AllOpen;
+    assert_eq!(state.answered_at(HOST), None, "another filter has its own");
 }
 
 #[test]
 fn show_and_hide_report_changes() {
-    let mut state = PrListState::default();
-    assert!(state.show(PrFilter::Mine, idle));
-    assert!(!state.show(PrFilter::Mine, idle), "already shown");
+    let mut state = PrListCache::default();
+    assert!(state.show(idle));
+    assert!(!state.show(idle), "already shown");
     state.apply(PrListUpdate::Answer {
         host: HOST,
         filter: PrFilter::Mine,
         answer: &answer(vec![item("r", 1)], &["r"], Instant::now()),
     });
-    assert!(state.show(PrFilter::AllOpen, idle));
     assert_eq!(
-        state.host(HOST),
+        state.host(PrFilter::AllOpen, HOST),
         &HostList::Loading,
-        "another filter starts over"
+        "each tab holds its own answer"
     );
-    assert!(state.show(PrFilter::Mine, idle));
-    assert!(
-        matches!(state.host(HOST), HostList::Ready(_)),
-        "tab changes retain cached answers"
-    );
+    assert!(matches!(
+        state.host(PrFilter::Mine, HOST),
+        HostList::Ready(_)
+    ));
     assert!(state.hide());
     assert!(!state.hide(), "already hidden");
-    assert_eq!(state.filter(), None);
+    assert!(!state.is_shown());
+    assert_eq!(state.host(PrFilter::Mine, HOST), &HostList::Loading);
 }
 
 #[gpui::test]
@@ -330,7 +352,7 @@ fn a_shown_page_repaints_as_its_answer_ages(cx: &mut gpui::TestAppContext) {
     aged(cx);
     let hidden = aged(cx);
 
-    f.ws.update(cx, |ws, cx| ws.show_pr_list(PrFilter::Mine, cx));
+    f.ws.update(cx, |ws, cx| ws.show_pr_list(cx));
     assert_eq!(aged(cx), hidden + 2, "once per interval while shown");
 
     f.ws.update(cx, |ws, cx| ws.hide_pr_list(cx));

@@ -12,6 +12,7 @@ use gpui::{App, AppContext as _, Context, Entity, WeakEntity, Window};
 use super::Page;
 use crate::github::PrPoller;
 use crate::workspace::Workspace;
+use crate::workspace::github_ops::pr_list::PrListCache;
 use crate::workspace::lane_scoped::LaneScoped;
 
 pub(in crate::workspace) mod actions;
@@ -27,12 +28,15 @@ use std::collections::BTreeSet;
 
 use detail::PrDetailState;
 use detail::view::PrDetailView;
-use list::{LaneFacts, PageInputs, PrKey, PrPageList};
+use list::{LaneFacts, PageInputs, PrKey, PrPageView};
 
 /// What the page remembers while it is not on screen. Never persisted.
 pub(in crate::workspace) struct PullRequestsPage {
-    /// The filter the page shows, and shows again when reopened.
+    /// The filter the page shows, and shows again when reopened. The one
+    /// place the selected tab lives; the cache holds every tab's answers.
     filter: PrFilter,
+    /// What GitHub answered for every tab while the page is on screen.
+    pub(in crate::workspace) cache: PrListCache,
     search: Entity<InputState>,
     /// Pull requests a worktree is being made for, so their rows do not
     /// offer to make a second one.
@@ -54,6 +58,7 @@ impl PullRequestsPage {
                     .placeholder(crate::surface::strings::pull_requests::search_placeholder())
             }),
             creating: BTreeSet::new(),
+            cache: PrListCache::default(),
             snapshot: None,
             detail: None,
             detail_snapshot: None,
@@ -64,7 +69,7 @@ impl PullRequestsPage {
 /// Plain data for one frame of the page, so drawing it reads no entity.
 pub(in crate::workspace) struct PrPageSnapshot {
     pub workspace: WeakEntity<Workspace>,
-    pub list: PrPageList,
+    pub list: PrPageView,
     pub scope: super::scope::ScopeSnapshot,
     pub search: Entity<InputState>,
     pub query: String,
@@ -76,11 +81,17 @@ pub(in crate::workspace) struct PrPageSnapshot {
 impl Workspace {
     /// The page came on screen: search for its list until it leaves.
     pub(super) fn pr_page_shown(&mut self, cx: &mut Context<Self>) {
-        self.show_pr_list(self.pages.pull_requests.filter, cx);
+        self.show_pr_list(cx);
         self.refresh_pr_repositories(cx);
     }
 
+    /// The tab the page shows, and shows again when reopened.
+    pub(in crate::workspace) fn pr_page_filter(&self) -> PrFilter {
+        self.pages.pull_requests.filter
+    }
+
     /// Show `filter`'s pull requests, now and whenever the page reopens.
+    /// Every tab's answers are already held, so switching asks nothing.
     pub(in crate::workspace) fn set_pr_page_filter(
         &mut self,
         filter: PrFilter,
@@ -90,9 +101,6 @@ impl Workspace {
             return;
         }
         self.pages.pull_requests.filter = filter;
-        if self.active_page() == Some(Page::PullRequests) {
-            self.show_pr_list(filter, cx);
-        }
         cx.notify();
     }
 
@@ -108,7 +116,7 @@ impl Workspace {
             .as_ref()
             .filter(|_| shown && self.shown_page_detail_id().is_some())
             .map(|state| {
-                let lane = self.pr_detail_lane(&state.item);
+                let lane = self.pr_detail_lane(state.item());
                 let inputs = detail::view::DetailInputs {
                     lane: lane.as_ref(),
                     sending: lane
@@ -163,12 +171,12 @@ impl Workspace {
             .set_offset(gpui::point(gpui::Pixels::ZERO, gpui::Pixels::ZERO));
     }
 
-    pub(in crate::workspace) fn pr_page_list(&self, cx: &App) -> PrPageList {
+    pub(in crate::workspace) fn pr_page_list(&self, cx: &App) -> PrPageView {
         let repos = self.github_repos();
         let lanes = self.pr_page_lanes();
         let inputs = PageInputs {
             enabled: crate::github::enabled(cx),
-            filter: self.pages.pull_requests.filter,
+            filter: self.pr_page_filter(),
             repos: &repos,
             list: self.pr_list(),
             lanes: &lanes,

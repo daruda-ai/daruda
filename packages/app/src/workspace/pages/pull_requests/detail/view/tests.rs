@@ -96,7 +96,7 @@ fn detail(failed: bool, open_threads: u32, cross_repo: bool) -> PrDetail {
 
 fn state(load: Load<PrDetail>, cross_repo: bool) -> PrDetailState {
     let mut state = PrDetailState::new(PrDetailId(1), item(cross_repo));
-    state.load = load;
+    state.pr = super::super::ReadSlot::settled(load);
     state
 }
 
@@ -211,10 +211,7 @@ fn only_a_failed_actions_check_opens_its_log() {
 
     state.logs.insert(
         (11, 22),
-        super::super::JobLog {
-            read: 1,
-            load: Load::Ready("boom".into()),
-        },
+        super::super::ReadSlot::settled(Load::Ready("boom".into())),
     );
     let open = ready(view(&state, &inputs(None)));
     assert_eq!(
@@ -443,7 +440,20 @@ fn without_a_worktree_the_header_offers_to_make_one() {
     // (label, cross_repo, linked, creating, slot)
     let cases = [
         ("linked", false, true, false, LaneSlot::Linked(linked)),
-        ("being made", false, false, true, LaneSlot::Creating),
+        (
+            "being made",
+            false,
+            false,
+            true,
+            LaneSlot::Creating { review: false },
+        ),
+        (
+            "a fork's, being made: still a review worktree",
+            true,
+            false,
+            true,
+            LaneSlot::Creating { review: true },
+        ),
         (
             "same repository",
             false,

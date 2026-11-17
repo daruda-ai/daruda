@@ -79,7 +79,7 @@ fn tick(cx: &mut TestAppContext) {
 
 /// Show the page's list without letting the search it starts answer.
 fn show_unanswered(f: &GitFixture, cx: &mut TestAppContext) {
-    f.ws.update(cx, |ws, cx| ws.show_pr_list(PrFilter::Mine, cx));
+    f.ws.update(cx, |ws, cx| ws.show_pr_list(cx));
 }
 
 /// The pull request numbers `name`'s group lists; `None` while it loads.

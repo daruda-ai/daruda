@@ -3,7 +3,7 @@
 //! search, or a stale answer makes the count a lower bound (`N+`).
 
 use crate::surface::strings::pull_requests as s;
-use crate::workspace::github_ops::pr_list::PrListState;
+use crate::workspace::github_ops::pr_list::PrListCache;
 use daruda_github::availability::GhAvailability;
 use daruda_github::{PrFilter, RepoId};
 use std::collections::BTreeSet;
@@ -24,7 +24,7 @@ enum Tally {
 }
 
 pub(super) fn labels(
-    list: &PrListState,
+    list: &PrListCache,
     repos: &BTreeSet<RepoId>,
     availability: impl Fn(&str) -> GhAvailability,
 ) -> [String; 3] {
@@ -43,7 +43,7 @@ pub(super) fn labels(
 }
 
 fn tally(
-    list: &PrListState,
+    list: &PrListCache,
     repos: &BTreeSet<RepoId>,
     filter: PrFilter,
     availability: &impl Fn(&str) -> GhAvailability,
@@ -51,7 +51,7 @@ fn tally(
     let (mut count, mut known, mut lower_bound) = (0, false, false);
     for repo in repos {
         let host = repo.host();
-        match repo_status(repo, availability(host), list.host_for(filter, host)) {
+        match repo_status(repo, availability(host), list.host(filter, host)) {
             RepoStatus::Loading => return Tally::Pending,
             RepoStatus::Blocked(_) | RepoStatus::Listed { search: None, .. } => {
                 lower_bound = true;

@@ -150,7 +150,7 @@ fn title_block(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
 /// makes one, inert while it is being made.
 fn lane_button(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
     let id = view.id;
-    let review = match &view.lane {
+    let (creating, review) = match &view.lane {
         LaneSlot::Linked(lane) => {
             return button_with_icon(
                 "pr-detail-lane",
@@ -161,18 +161,14 @@ fn lane_button(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
             .on_click(cx.listener(move |ws, _, window, cx| ws.open_pr_detail_lane(id, window, cx)))
             .into_any_element();
         }
-        LaneSlot::Creating => None,
-        LaneSlot::Absent { review } => Some(*review),
+        LaneSlot::Creating { review } => (true, *review),
+        LaneSlot::Absent { review } => (false, *review),
     };
-    let label = if review.unwrap_or(false) {
-        s::create_review_lane()
-    } else {
-        s::create_lane()
-    };
+    let label = super::super::list::create_lane_label(review);
     button("pr-detail-create-lane", label)
         .debug_selector(|| "pr-detail-create-lane".into())
-        .loading(review.is_none())
-        .disabled(review.is_none())
+        .loading(creating)
+        .disabled(creating)
         .on_click(cx.listener(move |ws, _, window, cx| ws.create_pr_detail_lane(id, window, cx)))
         .into_any_element()
 }

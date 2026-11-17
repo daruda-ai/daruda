@@ -20,7 +20,6 @@ use crate::github::{PrLink, PrLookup, PrPoller};
 use crate::lane::git::{GitTracking, PushTarget};
 use crate::workspace::Workspace;
 use crate::workspace::pages::Page;
-use crate::workspace::pages::pull_requests::detail::Load;
 
 /// An Enterprise host the captures' `gh` is not logged in to.
 const CORP_HOST: &str = "ghe.corp";
@@ -446,8 +445,8 @@ impl Workspace {
             .pull_requests
             .detail
             .as_ref()
-            .filter(|d| d.item == item)
-            .map(|d| d.id)
+            .filter(|d| *d.item() == item)
+            .map(|d| d.id())
         {
             match shot {
                 PrDetailShot::FailedLog => self.toggle_pr_check_log(id, test, cx),
@@ -456,7 +455,7 @@ impl Workspace {
                     // of reach of a capture, so the shot is the dialog a
                     // menu item raises; it needs the detail already read.
                     if let Some(shown) = self.pages.pull_requests.detail.as_mut() {
-                        shown.load = Load::Ready(detail);
+                        shown.show_read(detail);
                     }
                     self.ask_pr_merge(id, MergeMethod::Squash, window, cx);
                 }

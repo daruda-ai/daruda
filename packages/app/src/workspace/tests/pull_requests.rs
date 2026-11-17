@@ -396,7 +396,7 @@ fn slot(f: &GitFixture, cx: &mut TestAppContext) -> Slot {
     };
     match &rows[0].lane {
         LaneSlot::Linked(_) => Slot::Linked,
-        LaneSlot::Creating => Slot::Creating,
+        LaneSlot::Creating { .. } => Slot::Creating,
         LaneSlot::Absent { .. } => Slot::Absent,
     }
 }
@@ -446,7 +446,7 @@ fn the_details_button_makes_the_worktree_its_row_would(cx: &mut TestAppContext) 
     });
     assert_eq!(
         detail_slot(&f, cx),
-        LaneSlot::Creating,
+        LaneSlot::Creating { review: false },
         "inert while git runs"
     );
     assert_eq!(slot(&f, cx), Slot::Creating, "and so is its row");

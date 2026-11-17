@@ -105,7 +105,7 @@ pub(in crate::workspace) fn body(
                     state.page,
                     super::pull_requests::detail::render::render(
                         detail,
-                        &pages.detail.as_ref()?.scroll,
+                        pages.detail.as_ref()?.scroll(),
                         cx,
                     ),
                     cx,

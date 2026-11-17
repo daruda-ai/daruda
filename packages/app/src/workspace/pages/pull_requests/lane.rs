@@ -180,12 +180,7 @@ impl Workspace {
             return;
         };
         let Some(lock) = self.lock_repo(&repo_root) else {
-            let report = ErrorReport::new(error::lane_create_busy())
-                .severity(ErrorSeverity::Warning)
-                .at(file!(), line!())
-                .dedup("pull_requests.lane_busy")
-                .build();
-            self.report_error(report, cx);
+            self.warn_pr_lane(error::lane_create_busy(), "pull_requests.lane_busy", cx);
             return;
         };
         let key: PrKey = (item.repo.clone(), item.pr.number);
@@ -351,20 +346,33 @@ impl Workspace {
         self.report_error(report, cx);
     }
 
+    #[track_caller]
     fn report_review_branch_taken(&mut self, branch: &str, cx: &mut Context<Self>) {
-        let report = ErrorReport::new(error::lane_review_branch_taken(branch))
-            .severity(ErrorSeverity::Warning)
-            .at(file!(), line!())
-            .dedup("pull_requests.review_branch_taken")
-            .build();
-        self.report_error(report, cx);
+        self.warn_pr_lane(
+            error::lane_review_branch_taken(branch),
+            "pull_requests.review_branch_taken",
+            cx,
+        );
     }
 
+    #[track_caller]
     fn report_kept_local_commits(&mut self, branch: &str, cx: &mut Context<Self>) {
-        let report = ErrorReport::new(error::lane_kept_local_commits(branch))
+        self.warn_pr_lane(
+            error::lane_kept_local_commits(branch),
+            "pull_requests.kept_local_commits",
+            cx,
+        );
+    }
+
+    /// A worktree was not made, or not as asked, for a reason the person
+    /// can act on. Located at the caller, as an inline report would be.
+    #[track_caller]
+    fn warn_pr_lane(&mut self, title: String, dedup: &'static str, cx: &mut Context<Self>) {
+        let at = std::panic::Location::caller();
+        let report = ErrorReport::new(title)
             .severity(ErrorSeverity::Warning)
-            .at(file!(), line!())
-            .dedup("pull_requests.kept_local_commits")
+            .at(at.file(), at.line())
+            .dedup(dedup)
             .build();
         self.report_error(report, cx);
     }

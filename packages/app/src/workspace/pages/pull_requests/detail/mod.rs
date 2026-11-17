@@ -9,11 +9,15 @@ use daruda_github::{ActionsJob, GhError, PrDetail, PrListItem, ReviewThreads};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{App, Context, Window};
 
-use super::actions::ActionState;
+use super::actions::{ActionState, PrAction};
 use super::list::{self, LaneFacts};
 
+mod read_slot;
 pub(in crate::workspace) mod render;
 pub(in crate::workspace) mod view;
+
+use read_slot::Tickets;
+pub(in crate::workspace) use read_slot::{ReadSlot, ReadTicket};
 
 use crate::gh_host::GhHost;
 use crate::github::PrLink;
@@ -58,15 +62,6 @@ fn job_key(job: ActionsJob) -> JobKey {
     (job.run, job.job)
 }
 
-/// An open log, and which read of it may land: a log closed (or cleared
-/// by a refresh) and opened again while its first read is out waits for
-/// its own read, not that one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct JobLog {
-    read: u64,
-    pub(super) load: Load<String>,
-}
-
 /// The description's link opener. The text is any author's, so a link
 /// reaches the system opener only when it is a web page or an e-mail
 /// address; any other is swallowed rather than left to the default opener.
@@ -78,25 +73,23 @@ pub(in crate::workspace) fn open_description_link(url: &str, _: &mut Window, cx:
 }
 
 pub(in crate::workspace) struct PrDetailState {
-    pub id: PrDetailId,
+    id: PrDetailId,
     /// The row it was opened from: what the header shows until the detail
     /// is read, and how its worktree is found.
-    pub item: PrListItem,
-    pub load: Load<PrDetail>,
-    pub tab: PrTab,
-    pub scroll: gpui::ScrollHandle,
+    item: PrListItem,
+    /// The pull request as last read; a refresh keeps it up until the
+    /// next read lands.
+    pr: ReadSlot<PrDetail>,
+    tab: PrTab,
+    scroll: gpui::ScrollHandle,
     /// The unresolved threads, read when their tab is first shown.
-    pub threads: Option<Load<ReviewThreads>>,
+    threads: Option<ReadSlot<ReviewThreads>>,
     /// The failed Actions jobs whose log is open.
-    pub(super) logs: BTreeMap<JobKey, JobLog>,
+    logs: BTreeMap<JobKey, ReadSlot<String>>,
     /// What it is doing to the pull request on GitHub, or what failed.
-    pub(super) action: ActionState,
-    /// Which read of the detail may land; a refresh outdates the one before.
-    read: u64,
-    /// The same for the threads, which are read on their own.
-    threads_read: u64,
-    /// The same for the logs: numbers every log read of this detail.
-    logs_read: u64,
+    action: ActionState,
+    /// Every read this detail sends, whichever slot it fills.
+    tickets: Tickets,
 }
 
 impl PrDetailState {
@@ -105,20 +98,144 @@ impl PrDetailState {
         Self {
             id,
             item,
-            load: Load::Loading,
+            pr: ReadSlot::settled(Load::Loading),
             tab: PrTab::default(),
             scroll: gpui::ScrollHandle::new(),
             threads: None,
             logs: BTreeMap::new(),
             action: ActionState::Idle,
-            read: 0,
-            threads_read: 0,
-            logs_read: 0,
+            tickets: Tickets::default(),
         }
     }
 
+    pub(in crate::workspace) fn id(&self) -> PrDetailId {
+        self.id
+    }
+
+    pub(in crate::workspace) fn item(&self) -> &PrListItem {
+        &self.item
+    }
+
+    pub(in crate::workspace) fn scroll(&self) -> &gpui::ScrollHandle {
+        &self.scroll
+    }
+
+    pub(in crate::workspace) fn load(&self) -> &Load<PrDetail> {
+        self.pr.load()
+    }
+
+    pub(in crate::workspace) fn tab(&self) -> PrTab {
+        self.tab
+    }
+
+    /// The pull request as read, when no action is running on it: what an
+    /// action may be asked about.
+    pub(super) fn idle_read(&self) -> Option<&PrDetail> {
+        match (self.action.running(), self.pr.load()) {
+            (None, Load::Ready(loaded)) => Some(loaded),
+            _ => None,
+        }
+    }
+
+    pub(super) fn begin_action(&mut self, action: PrAction) {
+        self.action = ActionState::Running(action);
+    }
+
+    /// `action` came back. `true` when this detail was waiting on it, which
+    /// is then idle; a detail running nothing, or something else, is left
+    /// as it is.
+    pub(super) fn finish_action(&mut self, action: PrAction) -> bool {
+        let waiting = self.action == ActionState::Running(action);
+        if waiting {
+            self.action = ActionState::Idle;
+        }
+        waiting
+    }
+
+    /// Say under the header what the last action's failure was. Called
+    /// after the reload the action asks for, which clears an older one.
+    pub(super) fn fail_action(&mut self, line: String) {
+        self.action = ActionState::Failed(line);
+    }
+
+    /// Forget what a reload replaces: the open logs, a failure already
+    /// said, and the threads. `Some` with the threads' new read when their
+    /// tab is shown, so they are read again at once.
+    fn reset_for_refresh(&mut self) -> (ReadTicket, Option<ReadTicket>) {
+        self.logs.clear();
+        if matches!(self.action, ActionState::Failed(_)) {
+            self.action = ActionState::Idle;
+        }
+        let threads = self.threads.take().is_some() && self.tab == PrTab::Threads;
+        (
+            self.begin_read(),
+            threads.then(|| self.begin_threads_read()),
+        )
+    }
+
+    /// Send the pull request's next read; what is shown stays until it lands.
+    fn begin_read(&mut self) -> ReadTicket {
+        let ticket = self.tickets.issue();
+        self.pr.reread(ticket);
+        ticket
+    }
+
+    fn begin_threads_read(&mut self) -> ReadTicket {
+        let ticket = self.tickets.issue();
+        self.threads = Some(ReadSlot::reading(ticket));
+        ticket
+    }
+
+    /// Show `tab`. `Some` with the threads' read when their tab is shown
+    /// for the first time, or again after a failed read.
+    fn select_tab(&mut self, tab: PrTab) -> Option<ReadTicket> {
+        self.tab = tab;
+        let unread = matches!(self.threads(), None | Some(Load::Failed(_)));
+        (tab == PrTab::Threads && unread).then(|| self.begin_threads_read())
+    }
+
+    /// Close `job`'s log if open (`None`), else open it with a new read.
+    fn toggle_log(&mut self, job: ActionsJob) -> Option<ReadTicket> {
+        if self.logs.remove(&job_key(job)).is_some() {
+            return None;
+        }
+        let ticket = self.tickets.issue();
+        self.logs.insert(job_key(job), ReadSlot::reading(ticket));
+        Some(ticket)
+    }
+
+    /// Show `detail` as read, for a capture that needs it in hand.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn show_read(&mut self, detail: PrDetail) {
+        self.pr = ReadSlot::settled(Load::Ready(detail));
+    }
+
+    /// The read the threads' slot waits on, for a test to answer it late.
+    #[cfg(test)]
+    pub(in crate::workspace) fn threads_ticket(&self) -> Option<ReadTicket> {
+        self.threads.as_ref()?.waiting()
+    }
+
+    pub(in crate::workspace) fn threads(&self) -> Option<&Load<ReviewThreads>> {
+        self.threads.as_ref().map(ReadSlot::load)
+    }
+
     pub(in crate::workspace) fn log(&self, job: ActionsJob) -> Option<&Load<String>> {
-        self.logs.get(&job_key(job)).map(|log| &log.load)
+        self.logs.get(&job_key(job)).map(ReadSlot::load)
+    }
+
+    /// The read `job`'s open log waits on, for a test to answer it late.
+    #[cfg(test)]
+    pub(in crate::workspace) fn log_ticket(&self, job: ActionsJob) -> Option<ReadTicket> {
+        self.logs.get(&job_key(job))?.waiting()
+    }
+}
+
+/// A read's answer as its slot keeps it, and the error to report.
+fn split<T>(result: Result<T, GhError>) -> (Result<T, String>, Option<GhError>) {
+    match result {
+        Ok(value) => (Ok(value), None),
+        Err(e) => (Err(e.to_string()), Some(e)),
     }
 }
 
@@ -220,31 +337,31 @@ impl Workspace {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        detail.logs.clear();
-        if matches!(detail.action, ActionState::Failed(_)) {
-            detail.action = ActionState::Idle;
-        }
-        let reread_threads = detail.threads.take().is_some() && detail.tab == PrTab::Threads;
-        self.read_pr_detail(id, cx);
-        if reread_threads {
-            self.read_pr_threads(id, cx);
+        let (read, threads) = detail.reset_for_refresh();
+        self.send_pr_detail_read(id, read, cx);
+        if let Some(ticket) = threads {
+            self.send_pr_threads_read(id, ticket, cx);
         }
         self.refresh_pr_list(cx);
         cx.notify();
     }
 
     fn read_pr_detail(&mut self, id: PrDetailId, cx: &mut Context<Self>) {
+        if let Some(ticket) = self.pr_detail_mut(id).map(PrDetailState::begin_read) {
+            self.send_pr_detail_read(id, ticket, cx);
+        }
+    }
+
+    fn send_pr_detail_read(&mut self, id: PrDetailId, ticket: ReadTicket, cx: &mut Context<Self>) {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        detail.read += 1;
-        let read = detail.read;
         let (repo, number) = (detail.item.repo.clone(), detail.item.pr.number);
         let gh = GhHost::global(cx);
         spawn_bg_work_and_mutate(
             cx,
             move || gh.pr_detail(&repo, number),
-            move |ws, result, cx| ws.land_pr_detail(id, read, result, cx),
+            move |ws, result, cx| ws.land_pr_detail(id, ticket, result, cx),
         )
         .detach();
     }
@@ -253,21 +370,19 @@ impl Workspace {
     pub(in crate::workspace) fn land_pr_detail(
         &mut self,
         id: PrDetailId,
-        read: u64,
+        ticket: ReadTicket,
         result: Result<PrDetail, GhError>,
         cx: &mut Context<Self>,
     ) {
-        let Some(detail) = self.pr_detail_mut(id).filter(|d| d.read == read) else {
+        let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        match result {
-            Ok(loaded) => detail.load = Load::Ready(loaded),
-            Err(e) => {
-                if !matches!(detail.load, Load::Ready(_)) {
-                    detail.load = Load::Failed(e.to_string());
-                }
-                self.report_pr_read(&e, "github.pr_detail.read", cx);
-            }
+        let (answer, error) = split(result);
+        if !detail.pr.land_keeping_ready(ticket, answer) {
+            return;
+        }
+        if let Some(e) = error {
+            self.report_pr_read(&e, "github.pr_detail.read", cx);
         }
         cx.notify();
     }
@@ -283,52 +398,44 @@ impl Workspace {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        detail.tab = tab;
-        let unread = matches!(detail.threads, None | Some(Load::Failed(_)));
-        if tab == PrTab::Threads && unread {
-            self.read_pr_threads(id, cx);
+        if let Some(ticket) = detail.select_tab(tab) {
+            self.send_pr_threads_read(id, ticket, cx);
         }
         cx.notify();
     }
 
-    fn read_pr_threads(&mut self, id: PrDetailId, cx: &mut Context<Self>) {
+    fn send_pr_threads_read(&mut self, id: PrDetailId, ticket: ReadTicket, cx: &mut Context<Self>) {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        detail.threads = Some(Load::Loading);
-        detail.threads_read += 1;
-        let read = detail.threads_read;
         let (repo, number) = (detail.item.repo.clone(), detail.item.pr.number);
         let gh = GhHost::global(cx);
         spawn_bg_work_and_mutate(
             cx,
             move || gh.review_threads(&repo, number),
-            move |ws, result, cx| ws.land_pr_threads(id, read, result, cx),
+            move |ws, result, cx| ws.land_pr_threads(id, ticket, result, cx),
         )
         .detach();
     }
 
     /// Only the newest read lands: after a refresh an older answer would
-    /// otherwise fill the slot the newer read is waiting in.
+    /// otherwise fill the slot the newer read is waiting in, and a refresh
+    /// away from the tab dropped the slot altogether.
     pub(in crate::workspace) fn land_pr_threads(
         &mut self,
         id: PrDetailId,
-        read: u64,
+        ticket: ReadTicket,
         result: Result<ReviewThreads, GhError>,
         cx: &mut Context<Self>,
     ) {
-        let Some(detail) = self.pr_detail_mut(id).filter(|d| d.threads_read == read) else {
+        let Some(slot) = self.pr_detail_mut(id).and_then(|d| d.threads.as_mut()) else {
             return;
         };
-        // A refresh away from the tab dropped the read without another.
-        if detail.threads != Some(Load::Loading) {
+        let (answer, error) = split(result);
+        if !slot.land(ticket, answer) {
             return;
         }
-        detail.threads = Some(match &result {
-            Ok(threads) => Load::Ready(threads.clone()),
-            Err(e) => Load::Failed(e.to_string()),
-        });
-        if let Err(e) = result {
+        if let Some(e) = error {
             self.report_pr_read(&e, "github.pr_threads.read", cx);
         }
         cx.notify();
@@ -345,19 +452,10 @@ impl Workspace {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        if detail.logs.remove(&job_key(job)).is_some() {
+        let Some(ticket) = detail.toggle_log(job) else {
             cx.notify();
             return;
-        }
-        detail.logs_read += 1;
-        let read = detail.logs_read;
-        detail.logs.insert(
-            job_key(job),
-            JobLog {
-                read,
-                load: Load::Loading,
-            },
-        );
+        };
         let repo = detail.item.repo.clone();
         let gh = GhHost::global(cx);
         spawn_bg_work_and_mutate(
@@ -366,7 +464,7 @@ impl Workspace {
                 gh.failed_log(&repo, job)
                     .map(|raw| daruda_github::prompt::clean_log(&raw))
             },
-            move |ws, result, cx| ws.land_pr_check_log(id, job, read, result, cx),
+            move |ws, result, cx| ws.land_pr_check_log(id, job, ticket, result, cx),
         )
         .detach();
         cx.notify();
@@ -378,22 +476,21 @@ impl Workspace {
         &mut self,
         id: PrDetailId,
         job: ActionsJob,
-        read: u64,
+        ticket: ReadTicket,
         result: Result<String, GhError>,
         cx: &mut Context<Self>,
     ) {
         let Some(slot) = self
             .pr_detail_mut(id)
             .and_then(|detail| detail.logs.get_mut(&job_key(job)))
-            .filter(|slot| slot.read == read && slot.load == Load::Loading)
         else {
             return;
         };
-        slot.load = match &result {
-            Ok(log) => Load::Ready(log.clone()),
-            Err(e) => Load::Failed(e.to_string()),
-        };
-        if let Err(e) = result {
+        let (answer, error) = split(result);
+        if !slot.land(ticket, answer) {
+            return;
+        }
+        if let Some(e) = error {
             self.report_pr_read(&e, "github.pr_log.read", cx);
         }
         cx.notify();
@@ -413,7 +510,7 @@ impl Workspace {
             .detail
             .as_ref()
             .filter(|d| d.id == id)?;
-        let Load::Ready(loaded) = &detail.load else {
+        let Load::Ready(loaded) = detail.load() else {
             return None;
         };
         let lane = self.pr_detail_lane(&detail.item)?.lane;

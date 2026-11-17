@@ -897,7 +897,10 @@ fn list_item(number: u64) -> daruda_github::PrListItem {
 }
 
 fn show_list(f: &GitFixture, filter: daruda_github::PrFilter, cx: &mut TestAppContext) {
-    f.ws.update(cx, |ws, cx| ws.show_pr_list(filter, cx));
+    f.ws.update(cx, |ws, cx| {
+        ws.set_pr_page_filter(filter, cx);
+        ws.show_pr_list(cx);
+    });
     cx.run_until_parked();
 }
 
@@ -905,7 +908,9 @@ fn host_list(
     f: &GitFixture,
     cx: &mut TestAppContext,
 ) -> crate::workspace::github_ops::pr_list::HostList {
-    f.ws.read_with(cx, |ws, _| ws.pr_list().host("github.com").clone())
+    f.ws.read_with(cx, |ws, _| {
+        ws.pr_list().host(ws.pr_page_filter(), "github.com").clone()
+    })
 }
 
 fn listed(f: &GitFixture, cx: &mut TestAppContext) -> Vec<u64> {
@@ -1019,7 +1024,7 @@ fn a_logged_out_search_blocks_the_host_for_the_lane_polls_too(cx: &mut TestAppCo
     f.ws.read_with(cx, |ws, _| {
         for filter in crate::workspace::pages::pull_requests::list::FILTERS {
             assert_eq!(
-                ws.pr_list().host_for(filter, "github.com"),
+                ws.pr_list().host(filter, "github.com"),
                 &crate::workspace::github_ops::pr_list::HostList::Loading,
                 "{filter:?}: what was read there is dropped"
             );
