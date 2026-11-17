@@ -20,7 +20,7 @@ mod unsupported;
 #[cfg(not(any(unix, windows)))]
 use unsupported as backend;
 
-pub use capture::{CaptureError, CaptureLimits, Captured, run_captured};
+pub use capture::{CaptureError, CaptureLimits, Captured, run_captured, run_captured_with_input};
 
 /// The OS-provided archive extractor. Windows' bsdtar understands Node's ZIP
 /// archives; a Git installation's GNU tar may shadow it on PATH.

@@ -309,6 +309,24 @@ fn run_captured_returns_both_streams_and_the_exit_status() {
 }
 
 #[test]
+fn run_captured_with_input_feeds_stdin_then_closes_it() {
+    // Larger than a pipe buffer, so the write must not block the drains.
+    let input = "가".repeat(100_000).into_bytes();
+    let out = run_captured_with_input(
+        fixture(&["--echo-stdin"]),
+        input.clone(),
+        CaptureLimits {
+            timeout: Duration::from_secs(30),
+            stdout: 1024 * 1024,
+            stderr: 1024,
+        },
+    )
+    .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(out.stdout, input, "read to the end: stdin was closed");
+}
+
+#[test]
 fn run_captured_kills_a_child_that_outlives_the_deadline() {
     let started = std::time::Instant::now();
     let result = run_captured(

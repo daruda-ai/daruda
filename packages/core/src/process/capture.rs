@@ -62,7 +62,29 @@ impl std::error::Error for CaptureError {}
 /// The child leads its own process group, so a timeout or an overflow ends
 /// the helpers it forked (ssh, credential helpers) as well as the child.
 /// Both streams drain concurrently, so a full pipe never stalls the child.
-pub fn run_captured(mut command: Command, limits: CaptureLimits) -> Result<Captured, CaptureError> {
+pub fn run_captured(command: Command, limits: CaptureLimits) -> Result<Captured, CaptureError> {
+    run(command, None, limits)
+}
+
+/// [`run_captured`], with `input` written to the child's stdin and then
+/// closed: for text too long to pass as an argument, which every OS caps
+/// (a whole Windows command line at 32,767 UTF-16 units).
+pub fn run_captured_with_input(
+    command: Command,
+    input: Vec<u8>,
+    limits: CaptureLimits,
+) -> Result<Captured, CaptureError> {
+    run(command, Some(input), limits)
+}
+
+fn run(
+    mut command: Command,
+    input: Option<Vec<u8>>,
+    limits: CaptureLimits,
+) -> Result<Captured, CaptureError> {
+    if input.is_some() {
+        command.stdin(Stdio::piped());
+    }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     lead_own_group(&mut command);
     let mut child = command.spawn().map_err(CaptureError::Spawn)?;
@@ -75,6 +97,16 @@ pub fn run_captured(mut command: Command, limits: CaptureLimits) -> Result<Captu
         }
     };
 
+    // Written from its own thread, so a child that reads slowly, or not
+    // at all, never stalls the drains or the deadline; closing stdin after
+    // is the end of input the child waits for.
+    let input_thread = input.and_then(|input| {
+        let mut stdin = child.stdin.take()?;
+        Some(thread::spawn(move || {
+            use std::io::Write as _;
+            let _ = stdin.write_all(&input);
+        }))
+    });
     // Invariant: both streams were piped above; std guarantees Some after spawn.
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
@@ -133,6 +165,9 @@ pub fn run_captured(mut command: Command, limits: CaptureLimits) -> Result<Captu
     }
     let _ = stdout_thread.join();
     let _ = stderr_thread.join();
+    // The child exited, so a write still blocked would have failed on the
+    // closed pipe: nothing is left to wait on.
+    drop(input_thread);
 
     let mut out = Captured {
         status,

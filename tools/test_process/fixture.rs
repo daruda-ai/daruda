@@ -37,6 +37,12 @@ fn main() {
                 print!("{}", args.next().expect("stdout text"));
                 std::io::stdout().flush().unwrap();
             }
+            "--echo-stdin" => {
+                let mut input = Vec::new();
+                std::io::Read::read_to_end(&mut std::io::stdin(), &mut input).unwrap();
+                std::io::stdout().write_all(&input).unwrap();
+                std::io::stdout().flush().unwrap();
+            }
             "--stderr" => {
                 std::io::stderr()
                     .write_all(args.next().expect("stderr text").as_bytes())
