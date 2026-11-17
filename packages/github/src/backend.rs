@@ -83,6 +83,10 @@ pub trait Gh: Send + Sync {
         thread: &str,
         resolved: bool,
     ) -> Result<(), GhError>;
+    /// The comments on pull request `number` itself, oldest first.
+    fn pr_conversation(&self, repo: &RepoId, number: u64) -> Result<crate::Conversation, GhError>;
+    /// Replace pull request `number`'s description with `body`.
+    fn edit_pr_body(&self, repo: &RepoId, number: u64, body: &str) -> Result<(), GhError>;
     /// Close pull request `number` unmerged. Leaves the branch.
     fn close_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError>;
     /// Rerun the failed jobs of Actions run `run`.

@@ -12,6 +12,8 @@ use gpui::{App, Context, Window};
 use super::actions::{ActionState, PrAction};
 use super::list::{self, LaneFacts};
 
+pub(in crate::workspace) mod description;
+mod description_render;
 pub(in crate::workspace) mod diff_layout;
 mod diff_render;
 pub(in crate::workspace) mod files;
@@ -69,6 +71,7 @@ impl PrTab {
 enum TabRead {
     Threads(ReadTicket),
     Files(ReadTicket),
+    Conversation(ReadTicket),
 }
 
 /// A failed Actions job's log, keyed as `(run, job)`.
@@ -115,6 +118,11 @@ pub(in crate::workspace) struct PrDetailState {
     expanded_threads: std::collections::HashSet<String>,
     /// Replies being written and actions on threads.
     thread_work: thread_actions::ThreadsWork,
+    /// The comments on the pull request itself, read when the Description
+    /// tab is first shown.
+    conversation: Option<ReadSlot<daruda_github::Conversation>>,
+    /// The description being edited, kept across refreshes.
+    body_edit: Option<description::BodyEdit>,
 }
 
 impl PrDetailState {
@@ -134,6 +142,8 @@ impl PrDetailState {
             tickets: Tickets::default(),
             expanded_threads: std::collections::HashSet::new(),
             thread_work: thread_actions::ThreadsWork::default(),
+            conversation: None,
+            body_edit: None,
         }
     }
 
@@ -252,6 +262,14 @@ impl PrDetailState {
             self.action = ActionState::Idle;
         }
         let threads = self.threads.take().is_some() && self.tab == PrTab::Threads;
+        // Shown, the conversation is read again in place; hidden, dropped
+        // and read when shown again.
+        let conversation = if self.tab == PrTab::Description {
+            self.conversation.is_some()
+        } else {
+            self.conversation = None;
+            false
+        };
         // Shown, the files are read again in place: the listing and the
         // chosen file stay up until the new answer. Hidden, they are dropped
         // and read when shown again.
@@ -264,6 +282,8 @@ impl PrDetailState {
         let read = self.begin_read();
         let tab = if threads {
             Some(TabRead::Threads(self.begin_threads_read()))
+        } else if conversation {
+            Some(TabRead::Conversation(self.reread_conversation()))
         } else if files {
             Some(TabRead::Files(self.reread_files()))
         } else {
@@ -315,6 +335,9 @@ impl PrDetailState {
                     .is_none_or(files::FilesState::wants_read) =>
             {
                 Some(TabRead::Files(self.begin_files_read()))
+            }
+            PrTab::Description if self.conversation_wanted() => {
+                Some(TabRead::Conversation(self.begin_conversation_read()))
             }
             PrTab::Checks | PrTab::Files | PrTab::Threads | PrTab::Description => None,
         }
@@ -587,6 +610,7 @@ impl Workspace {
         match read {
             TabRead::Threads(ticket) => self.send_pr_threads_read(id, ticket, cx),
             TabRead::Files(ticket) => self.send_pr_files_read(id, ticket, 1, cx),
+            TabRead::Conversation(ticket) => self.send_pr_conversation_read(id, ticket, cx),
         }
     }
 

@@ -163,6 +163,30 @@ pub(in crate::workspace) struct ThreadTarget {
     pub end: u32,
 }
 
+/// The Description tab beyond the description: editing it, and the
+/// conversation under it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct DiscussionView {
+    /// GitHub lets the viewer edit the description.
+    pub can_edit: bool,
+    /// The description being edited, and how saving it stands.
+    pub edit: Option<(
+        gpui::Entity<crate::ui::TextareaState>,
+        super::description::SaveState,
+    )>,
+    pub conversation: ConversationView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum ConversationView {
+    Loading,
+    Failed(String),
+    Listed {
+        comments: Vec<CommentView>,
+        truncated: bool,
+    },
+}
+
 /// One comment of an expanded thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct CommentView {
@@ -215,6 +239,8 @@ pub(in crate::workspace) struct ReadyView {
     pub files: Option<super::files::FilesView>,
     /// `None` when the author wrote none.
     pub description: Option<String>,
+    /// Only while the Description tab is shown.
+    pub discussion: Option<DiscussionView>,
     pub side: SideView,
 }
 
@@ -344,6 +370,20 @@ fn ready(
             super::files::files_view(state.files(), loaded.changed_files, |file| {
                 marks.viewed(&file.path, file.blob.as_deref())
             })
+        }),
+        discussion: (state.tab() == PrTab::Description).then(|| DiscussionView {
+            can_edit: loaded.can_update,
+            edit: state
+                .body_edit()
+                .map(|edit| (edit.input.clone(), edit.state.clone())),
+            conversation: match state.conversation() {
+                None | Some(Load::Loading) => ConversationView::Loading,
+                Some(Load::Failed(reason)) => ConversationView::Failed(reason.clone()),
+                Some(Load::Ready(read)) => ConversationView::Listed {
+                    comments: read.comments.iter().map(comment_view).collect(),
+                    truncated: read.truncated,
+                },
+            },
         }),
         description: Some(loaded.body.trim())
             .filter(|body| !body.is_empty())

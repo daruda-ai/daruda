@@ -317,16 +317,7 @@ fn tab_content(
             None => div().into_any_element(),
         },
         PrTab::Threads => super::threads_render::threads(id, ready, cx),
-        PrTab::Description => match &ready.description {
-            Some(body) => {
-                crate::ui::markdown(("pr-detail-description", id.0 as usize), body.clone())
-                    .selectable(true)
-                    .full_width(true)
-                    .link_click_handler(super::open_description_link)
-                    .into_any_element()
-            }
-            None => note(s::description_empty(), cx).into_any_element(),
-        },
+        PrTab::Description => super::description_render::description(id, ready, cx),
     }
 }
 

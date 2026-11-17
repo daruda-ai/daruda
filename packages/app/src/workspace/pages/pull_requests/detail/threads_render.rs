@@ -200,10 +200,14 @@ fn expanded(
                 )
                 // Keyed by GitHub's id, so a refresh that drops a thread
                 // does not hand another comment this one's parsed state.
-                .child(crate::ui::markdown(
-                    gpui::ElementId::Name(format!("pr-thread-comment-{}", comment.id).into()),
-                    comment.body.clone(),
-                ))
+                .child(
+                    crate::ui::markdown(
+                        gpui::ElementId::Name(format!("pr-thread-comment-{}", comment.id).into()),
+                        comment.body.clone(),
+                    )
+                    // Written by any reviewer: only web pages open.
+                    .link_click_handler(super::open_description_link),
+                )
         }))
         .children(
             row.reply

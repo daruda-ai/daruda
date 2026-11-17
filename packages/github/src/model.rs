@@ -214,6 +214,15 @@ impl Default for ThreadPermissions {
     }
 }
 
+/// The comments on a pull request itself, oldest first: its conversation,
+/// apart from the review threads on its diff.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Conversation {
+    pub comments: Vec<ReviewComment>,
+    /// GitHub had more comments than are read for one pull request.
+    pub truncated: bool,
+}
+
 /// The unresolved threads of a pull request.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReviewThreads {
@@ -379,6 +388,8 @@ pub struct PrDetail {
     /// GitHub has more than 100 threads: `open_threads` counts the first
     /// hundred's only.
     pub open_threads_more: bool,
+    /// The viewer may edit the pull request: its description among others.
+    pub can_update: bool,
     /// How many files GitHub says it changes; `None` from an answer that
     /// did not say.
     pub changed_files: Option<u32>,

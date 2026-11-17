@@ -53,6 +53,7 @@ mod lanes;
 mod persistence;
 mod project_config;
 mod projects;
+mod pull_request_description;
 pub(in crate::workspace) mod pull_request_detail;
 mod pull_request_discovery;
 mod pull_request_files;

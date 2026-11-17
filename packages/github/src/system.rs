@@ -4,7 +4,9 @@ use std::ffi::OsStr;
 use std::process::Stdio;
 use std::time::Duration;
 
-use daruda_core::process::{CaptureError, CaptureLimits, Captured, command_on_path, run_captured};
+use daruda_core::process::{
+    CaptureError, CaptureLimits, Captured, command_on_path, run_captured, run_captured_with_input,
+};
 
 use crate::availability::{AuthStatus, GhAuth, parse_active_account};
 use crate::backend::Gh;
@@ -129,6 +131,36 @@ impl SystemGh {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.run_fed(cwd, args, None)
+    }
+
+    /// `gh` with `input` on its stdin: for text an argument cannot carry,
+    /// as every OS caps the command line.
+    fn stdout_fed<I, S>(&self, args: I, input: Vec<u8>) -> Result<String, GhError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let out = self.run_fed(None, args, Some(input))?;
+        if !out.status.success() {
+            return Err(GhError::Exit {
+                code: out.status.code(),
+                stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            });
+        }
+        String::from_utf8(out.stdout).map_err(|_| GhError::Parse("output is not UTF-8".into()))
+    }
+
+    fn run_fed<I, S>(
+        &self,
+        cwd: Option<&std::path::Path>,
+        args: I,
+        input: Option<Vec<u8>>,
+    ) -> Result<Captured, GhError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         let mut command = command_on_path("gh", None);
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
@@ -139,7 +171,11 @@ impl SystemGh {
             .env("GH_PROMPT_DISABLED", "1")
             .env("NO_COLOR", "1")
             .stdin(Stdio::null());
-        match run_captured(command, LIMITS) {
+        let ran = match input {
+            Some(input) => run_captured_with_input(command, input, LIMITS),
+            None => run_captured(command, LIMITS),
+        };
+        match ran {
             Ok(out) => Ok(out),
             Err(CaptureError::Spawn(e)) if e.kind() == std::io::ErrorKind::NotFound => {
                 Err(GhError::NotFound)
@@ -456,19 +492,16 @@ impl Gh for SystemGh {
         thread: &str,
         body: &str,
     ) -> Result<crate::ReviewComment, GhError> {
-        // `-f` sends the body as it is: `-F` would read `@path` as a file.
-        let json = self.stdout([
-            "api".to_owned(),
-            "graphql".to_owned(),
-            "--hostname".to_owned(),
-            repo.host().to_owned(),
-            "-f".to_owned(),
-            format!("query={}", crate::query::REPLY_MUTATION),
-            "-f".to_owned(),
-            format!("thread={thread}"),
-            "-f".to_owned(),
-            format!("body={body}"),
-        ])?;
+        // The request goes on stdin: a reply can be longer than an
+        // argument may be.
+        let request = serde_json::json!({
+            "query": crate::query::REPLY_MUTATION,
+            "variables": { "thread": thread, "body": body },
+        });
+        let json = self.stdout_fed(
+            ["api", "graphql", "--hostname", repo.host(), "--input", "-"],
+            request.to_string().into_bytes(),
+        )?;
         crate::query::parse_reply(&json)
     }
 
@@ -494,6 +527,46 @@ impl Gh for SystemGh {
             format!("thread={thread}"),
         ])?;
         crate::query::parse_resolved(&json, resolved)
+    }
+
+    fn pr_conversation(&self, repo: &RepoId, number: u64) -> Result<crate::Conversation, GhError> {
+        crate::query::read_conversation(|after| {
+            let mut args = vec![
+                "api".to_owned(),
+                "graphql".to_owned(),
+                "--hostname".to_owned(),
+                repo.host().to_owned(),
+                "-f".to_owned(),
+                format!("query={}", crate::query::CONVERSATION_QUERY),
+                "-f".to_owned(),
+                format!("owner={}", repo.owner()),
+                "-f".to_owned(),
+                format!("name={}", repo.name()),
+                "-F".to_owned(),
+                format!("number={number}"),
+            ];
+            if let Some(after) = after {
+                args.extend(["-f".to_owned(), format!("after={after}")]);
+            }
+            self.stdout(args)
+        })
+    }
+
+    fn edit_pr_body(&self, repo: &RepoId, number: u64, body: &str) -> Result<(), GhError> {
+        // On stdin: a description can be longer than an argument may be.
+        self.stdout_fed(
+            [
+                "pr".to_owned(),
+                "edit".to_owned(),
+                number.to_string(),
+                "--repo".to_owned(),
+                repo.qualified(),
+                "--body-file".to_owned(),
+                "-".to_owned(),
+            ],
+            body.as_bytes().to_vec(),
+        )
+        .map(drop)
     }
 
     fn close_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError> {

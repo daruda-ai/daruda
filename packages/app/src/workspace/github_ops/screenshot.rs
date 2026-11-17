@@ -460,6 +460,7 @@ impl Workspace {
             checks_truncated: !merge_ready,
             open_threads: 3,
             open_threads_more: false,
+            can_update: false,
             changed_files: None,
         };
         gh.set_pr_detail(&row.repo, row.pr.number, detail.clone());
@@ -510,6 +511,29 @@ impl Workspace {
                         None,
                     ),
                 ],
+            },
+        );
+        gh.set_conversation(
+            &row.repo,
+            row.pr.number,
+            daruda_github::Conversation {
+                comments: vec![
+                    daruda_github::ReviewComment {
+                        id: "shot-conversation-1".into(),
+                        url: Some(format!("{}#issuecomment-1", row.pr.url)),
+                        author: Some("hanji".into()),
+                        body:
+                            "Could this wait for the rail metrics change? It touches the same rows."
+                                .into(),
+                    },
+                    daruda_github::ReviewComment {
+                        id: "shot-conversation-2".into(),
+                        author: Some("comelf".into()),
+                        body: "Rebased onto it: the diff is smaller now.".into(),
+                        ..Default::default()
+                    },
+                ],
+                truncated: false,
             },
         );
         gh.set_review_threads(

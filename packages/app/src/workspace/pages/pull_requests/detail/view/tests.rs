@@ -92,6 +92,7 @@ fn detail(failed: bool, open_threads: u32, cross_repo: bool) -> PrDetail {
         checks_truncated: false,
         open_threads,
         open_threads_more: false,
+        can_update: false,
         changed_files: None,
     }
 }

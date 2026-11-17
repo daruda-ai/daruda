@@ -47,9 +47,14 @@ through `GitHost`.
   quote or end a bracketed paste. The app sends it only to writable agent
   chats, inserted and never submitted.
 - Mutations (`merge_pr`, `set_ready`, `close_pr`, `rerun_failed`,
-  `reply_to_thread`, `set_thread_resolved`) run only on the user's action
-  and are never retried on their own; a failed thread reply is reconciled
-  against a fresh thread read before it can be posted again. A merge is pinned with `--match-head-commit` to the
+  `reply_to_thread`, `set_thread_resolved`, `edit_pr_body`) run only on the
+  user's action and are never retried on their own; a failed thread reply is
+  reconciled against a fresh thread read before it can be posted again, and a
+  description changed on GitHub since editing began is overwritten only when
+  asked. Reply and description text go to `gh` on stdin (`--input -`,
+  `--body-file -`), not as arguments, which every OS caps.
+- `pr_conversation` reads the pull request's own comments, 100 per page up
+  to 10 pages; past that it is marked `truncated`. A merge is pinned with `--match-head-commit` to the
   head the user saw and never passes `--delete-branch`, `--auto` or
   `--admin`. A mutation's error is reported to the user who asked; it is
   not a poll failure and does not feed the poller's host state.

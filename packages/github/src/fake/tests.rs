@@ -144,6 +144,7 @@ fn a_scripted_detail_answers_its_repository_and_number_only() {
         checks_truncated: false,
         open_threads: 0,
         open_threads_more: false,
+        can_update: false,
         changed_files: None,
     };
     let other = RepoId::new("github.com", "o", "other");
@@ -186,6 +187,7 @@ fn detail(number: u64, state: PrState, head_sha: &str) -> PrDetail {
         checks_truncated: false,
         open_threads: 0,
         open_threads_more: false,
+        can_update: false,
         changed_files: None,
     }
 }

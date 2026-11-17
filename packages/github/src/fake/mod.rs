@@ -19,6 +19,8 @@
 //! | `close_pr` | the PR, if scripted, becomes closed |
 //! | `rerun_failed` | done |
 //! | `reply_to_thread` | adds the reply to the scripted thread, answers it |
+//! | `pr_conversation` | the `set_conversation` comments, else none |
+//! | `edit_pr_body` | the scripted detail's body becomes `body` |
 //! | `set_thread_resolved` | a resolved thread leaves `review_threads` until unresolved |
 //! | `graphql_rate_limit_reset` | `None`: requests remain |
 //!
@@ -113,6 +115,15 @@ pub enum GhCall {
         thread: String,
         resolved: bool,
     },
+    Conversation {
+        repo: RepoId,
+        number: u64,
+    },
+    EditPrBody {
+        repo: RepoId,
+        number: u64,
+        body: String,
+    },
     RerunFailed {
         repo: RepoId,
         run: u64,
@@ -141,6 +152,8 @@ pub enum GhOp {
     ClosePr,
     ReplyToThread,
     SetThreadResolved,
+    Conversation,
+    EditPrBody,
     RerunFailed,
     RateLimitReset,
 }
@@ -188,6 +201,7 @@ struct FakeState {
     logs: HashMap<(u64, u64), String>,
     threads: HashMap<u64, ReviewThreads>,
     resolved_threads: std::collections::HashSet<String>,
+    conversations: HashMap<(RepoId, u64), crate::Conversation>,
     details: HashMap<(RepoId, u64), PrDetail>,
     files: HashMap<(RepoId, u64), crate::PrFiles>,
     file_texts: HashMap<(RepoId, String, String), crate::FileText>,
@@ -255,6 +269,13 @@ impl FakeGh {
             .insert((repo.clone(), path.to_owned(), commit.to_owned()), text);
     }
 
+    /// What `pr_conversation` answers for PR `number` of `repo`.
+    pub fn set_conversation(&self, repo: &RepoId, number: u64, conversation: crate::Conversation) {
+        self.lock()
+            .conversations
+            .insert((repo.clone(), number), conversation);
+    }
+
     /// What `pr_detail` answers for PR `number` of `repo`.
     pub fn set_pr_detail(&self, repo: &RepoId, number: u64, detail: PrDetail) {
         self.lock().details.insert((repo.clone(), number), detail);
@@ -313,6 +334,8 @@ impl GhCall {
             Self::ClosePr { .. } => GhOp::ClosePr,
             Self::ReplyToThread { .. } => GhOp::ReplyToThread,
             Self::SetThreadResolved { .. } => GhOp::SetThreadResolved,
+            Self::Conversation { .. } => GhOp::Conversation,
+            Self::EditPrBody { .. } => GhOp::EditPrBody,
             Self::RerunFailed { .. } => GhOp::RerunFailed,
             Self::RateLimitReset { .. } => GhOp::RateLimitReset,
         }
@@ -632,6 +655,32 @@ impl Gh for FakeGh {
             state.resolved_threads.insert(thread.to_owned());
         } else {
             state.resolved_threads.remove(thread);
+        }
+        Ok(())
+    }
+
+    fn pr_conversation(&self, repo: &RepoId, number: u64) -> Result<crate::Conversation, GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::Conversation {
+            repo: repo.clone(),
+            number,
+        })?;
+        Ok(state
+            .conversations
+            .get(&(repo.clone(), number))
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    fn edit_pr_body(&self, repo: &RepoId, number: u64, body: &str) -> Result<(), GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::EditPrBody {
+            repo: repo.clone(),
+            number,
+            body: body.to_owned(),
+        })?;
+        if let Some(detail) = state.details.get_mut(&(repo.clone(), number)) {
+            detail.body = body.to_owned();
         }
         Ok(())
     }
