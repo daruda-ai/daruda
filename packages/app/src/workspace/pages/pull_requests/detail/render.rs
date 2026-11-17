@@ -6,8 +6,8 @@ use gpui::{AnyElement, Context, Div, FontWeight, Hsla, SharedString, div, prelud
 
 use super::super::list::LaneSlot;
 use super::view::{
-    ActionSlot, CheckRowView, DetailBody, Fact, HeaderActions, HeaderControls, LaneNote, LogSlot,
-    MergeView, Mood, PrDetailView, ReadyView, SendSlot, SideView,
+    ActionNotice, ActionSlot, CheckRowView, DetailBody, Fact, HeaderActions, HeaderControls,
+    LaneNote, LogSlot, MergeView, Mood, PrDetailView, ReadyView, SendSlot, SideView,
 };
 use super::{Load, PrDetailId, PrTab};
 use crate::surface::strings::{common, pull_requests as s};
@@ -34,7 +34,7 @@ pub(in crate::workspace) fn render(
             .flex()
             .flex_col()
             .gap(px(theme::GAP_LG))
-            .children(view.error.clone().map(|error| action_error(error, cx)))
+            .children(view.notice.clone().map(|notice| action_notice(notice, cx)))
             .child(match &view.body {
                 DetailBody::Loading => note(common::loading(), cx).into_any_element(),
                 DetailBody::Failed(reason) => note(s::detail_failed(reason), cx).into_any_element(),
@@ -220,12 +220,17 @@ fn lane_button(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
 }
 
 /// What the last action's failure said, as `gh` put it.
-fn action_error(error: String, cx: &Context<Workspace>) -> AnyElement {
+fn action_notice(notice: ActionNotice, cx: &Context<Workspace>) -> AnyElement {
+    let t = theme::current(cx);
+    let (line, color, selector) = match notice {
+        ActionNotice::Failed(line) => (line, t.banner_error_text, "pr-detail-error"),
+        ActionNotice::Done(line) => (line, t.text_muted, "pr-detail-done"),
+    };
     div()
-        .debug_selector(|| "pr-detail-error".into())
+        .debug_selector(move || selector.into())
         .text_size(px(theme::FONT_SIZE_SM))
-        .text_color(theme::current(cx).banner_error_text)
-        .child(error)
+        .text_color(color)
+        .child(line)
         .into_any_element()
 }
 
@@ -511,6 +516,33 @@ fn check_row(id: PrDetailId, ix: usize, row: &CheckRowView, cx: &Context<Workspa
                 .text_color(t.text_subtle)
                 .child(duration)
         }))
+        // Each icon keeps its column, so durations line up row to row.
+        .child(
+            div()
+                .flex_none()
+                .w(px(theme::CONTROL_TARGET_SIZE))
+                .children(row.rerun.as_ref().map(|(run, slot)| {
+                    let run = *run;
+                    with_slot(
+                        button_icon(("pr-check-rerun", ix), icons::REFRESH, cx),
+                        slot,
+                    )
+                    .tooltip(s::rerun_check())
+                    .debug_selector(move || format!("pr-check-rerun-{ix}"))
+                    .on_click(cx.listener(move |ws, _, _, cx| ws.rerun_pr_check_run(id, run, cx)))
+                })),
+        )
+        .child(
+            div()
+                .flex_none()
+                .w(px(theme::CONTROL_TARGET_SIZE))
+                .children(row.url.clone().map(|url| {
+                    button_icon(("pr-check-open", ix), icons::OPEN_IN_NEW, cx)
+                        .tooltip(s::open_check())
+                        .debug_selector(move || format!("pr-check-open-{ix}"))
+                        .on_click(move |_, _, cx| cx.open_url(&url))
+                })),
+        )
         .child(
             div()
                 .flex_none()

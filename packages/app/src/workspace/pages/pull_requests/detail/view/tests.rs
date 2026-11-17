@@ -515,10 +515,10 @@ fn without_a_worktree_the_header_offers_to_make_one() {
 #[test]
 fn a_failed_action_is_said_under_the_header_and_frees_the_buttons() {
     let mut state = state(Load::Ready(detail(true, 0, false)), false);
-    assert_eq!(view(&state, &inputs(None)).error, None);
+    assert_eq!(view(&state, &inputs(None)).error(), None);
     state.action = ActionState::Failed("Merging #7 failed: nope".into());
     let failed = view(&state, &inputs(None));
-    assert_eq!(failed.error.as_deref(), Some("Merging #7 failed: nope"));
+    assert_eq!(failed.error().as_deref(), Some("Merging #7 failed: nope"));
     let actions = failed.header.actions().cloned().expect("open");
     assert_eq!(actions.close, ActionSlot::Ready);
     assert_eq!(ready(failed).rerun, Some(ActionSlot::Ready));

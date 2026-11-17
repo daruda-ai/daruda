@@ -37,13 +37,17 @@ pub(in crate::workspace) enum ActionState {
     /// The last action failed: what it was and what `gh` said, shown under
     /// the header until the next action or a reload. Actions can run again.
     Failed(String),
+    /// GitHub took the last action, but nothing on the page shows it yet
+    /// (a rerun starts later): said under the header until the next action
+    /// or a reload.
+    Done(String),
 }
 
 impl ActionState {
     pub(in crate::workspace) fn running(&self) -> Option<PrAction> {
         match self {
             Self::Running(action) => Some(*action),
-            Self::Idle | Self::Failed(_) => None,
+            Self::Idle | Self::Failed(_) | Self::Done(_) => None,
         }
     }
 }
@@ -152,7 +156,11 @@ impl Request {
                 pr.node_id.as_deref() == Some(node.as_str()) && pr.can_disable_auto_merge_now()
             }
             Self::Ready => pr.is_draft(),
-            Self::Rerun(runs) => !runs.is_empty(),
+            // Only runs with a failed job: a rerun reruns those jobs.
+            Self::Rerun(runs) => {
+                let failed = pr.failed_runs();
+                !runs.is_empty() && runs.iter().all(|run| failed.contains(run))
+            }
         }
     }
 
@@ -340,6 +348,16 @@ impl Workspace {
         self.run_pr_action(id, Request::Ready, cx);
     }
 
+    /// A failed check's own Rerun: the failed jobs of its Actions run.
+    pub(in crate::workspace) fn rerun_pr_check_run(
+        &mut self,
+        id: PrDetailId,
+        run: u64,
+        cx: &mut Context<Self>,
+    ) {
+        self.run_pr_action(id, Request::Rerun(vec![run]), cx);
+    }
+
     /// The Checks tab's Rerun failed checks: each failed run once.
     pub(in crate::workspace) fn rerun_pr_detail_checks(
         &mut self,
@@ -437,11 +455,14 @@ impl Workspace {
         } else if result.is_ok() {
             self.refresh_pr_list(cx);
         }
-        // After the reload, which clears an earlier failure.
-        if let (true, Some(line)) = (asker_waiting, failure)
-            && let Some(detail) = self.pr_detail_mut(id)
-        {
-            detail.fail_action(line);
+        // After the reload, which clears an earlier line.
+        if asker_waiting && let Some(detail) = self.pr_detail_mut(id) {
+            match failure {
+                Some(line) => detail.fail_action(line),
+                // A rerun shows nowhere until GitHub starts the jobs.
+                None if action == PrAction::Rerunning => detail.done_action(s::rerun_requested()),
+                None => {}
+            }
         }
         cx.notify();
     }
@@ -505,6 +526,23 @@ mod tests {
             M::Blocked(daruda_github::BlockReason::Requirements),
         );
         let closed = pr(S::Closed, M::Unknown);
+        let failing = PrDetail {
+            checks: vec![daruda_github::CheckEntry {
+                run: daruda_github::CheckRun {
+                    kind: daruda_github::CheckKind::Run,
+                    workflow: None,
+                    event: None,
+                    name: "test".into(),
+                    status: daruda_github::CheckStatus::Failure,
+                    details_url: None,
+                    started_at: None,
+                    completed_at: None,
+                },
+                job: Some(daruda_github::ActionsJob { run: 1, job: 10 }),
+                duration: None,
+            }],
+            ..pr(S::Open, M::Ready)
+        };
         let merged = pr(S::Merged, M::Unknown);
         let not_mine = PrDetail {
             can_close: false,
@@ -596,7 +634,19 @@ mod tests {
             ),
             ("mark a draft ready", Request::Ready, &draft, true),
             ("mark an open PR ready", Request::Ready, &open, false),
-            ("rerun failed runs", Request::Rerun(vec![1]), &open, true),
+            ("rerun failed runs", Request::Rerun(vec![1]), &failing, true),
+            (
+                "rerun a run that did not fail",
+                Request::Rerun(vec![1, 2]),
+                &failing,
+                false,
+            ),
+            (
+                "rerun on a PR with no failure",
+                Request::Rerun(vec![1]),
+                &open,
+                false,
+            ),
             ("rerun nothing", Request::Rerun(Vec::new()), &open, false),
         ];
         for (label, request, pr, applies) in cases {

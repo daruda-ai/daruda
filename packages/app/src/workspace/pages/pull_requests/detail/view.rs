@@ -115,6 +115,24 @@ impl HeaderControls {
     }
 }
 
+/// What the last action came to, under the header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum ActionNotice {
+    Failed(String),
+    Done(String),
+}
+
+#[cfg(test)]
+impl PrDetailView {
+    /// The failure said under the header, for a test.
+    pub(in crate::workspace) fn error(&self) -> Option<String> {
+        match &self.notice {
+            Some(ActionNotice::Failed(line)) => Some(line.clone()),
+            Some(ActionNotice::Done(_)) | None => None,
+        }
+    }
+}
+
 /// The header's actions on an open or draft pull request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct HeaderActions {
@@ -148,6 +166,10 @@ pub(in crate::workspace) enum LogSlot {
 pub(in crate::workspace) struct CheckRowView {
     pub status: CheckStatus,
     pub name: String,
+    /// The check's page on GitHub, when it has one that is a web page.
+    pub url: Option<String>,
+    /// A failed Actions job's run, to rerun its failed jobs.
+    pub rerun: Option<(u64, ActionSlot)>,
     /// `workflow · event`, for an Actions check.
     pub context: Option<String>,
     pub duration: Option<String>,
@@ -371,8 +393,8 @@ pub(in crate::workspace) struct PrDetailView {
     pub url: Option<String>,
     pub lane: LaneSlot,
     pub header: HeaderControls,
-    /// What the last action's failure said, until the next action or reload.
-    pub error: Option<String>,
+    /// What the last action came to, until the next action or reload.
+    pub notice: Option<ActionNotice>,
     pub tab: PrTab,
     pub tabs: Vec<(PrTab, String)>,
     pub handoff: Option<HandoffView>,
@@ -487,8 +509,9 @@ pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_
         header: loaded.map_or(HeaderControls::None, |loaded| {
             header_controls(loaded, &state.action)
         }),
-        error: match &state.action {
-            ActionState::Failed(line) => Some(line.clone()),
+        notice: match &state.action {
+            ActionState::Failed(line) => Some(ActionNotice::Failed(line.clone())),
+            ActionState::Done(line) => Some(ActionNotice::Done(line.clone())),
             ActionState::Idle | ActionState::Running(_) => None,
         },
         handoff: state
@@ -823,6 +846,13 @@ fn checks_summary(loaded: &PrDetail) -> String {
 }
 
 fn check_row(entry: &CheckEntry, state: &PrDetailState) -> CheckRowView {
+    let rerun = match entry.job {
+        Some(job) if entry.run.status == CheckStatus::Failure => Some((
+            job.run,
+            ActionSlot::of(&state.action, PrAction::Rerunning, None),
+        )),
+        _ => None,
+    };
     let run = &entry.run;
     let context: Vec<&str> = [run.workflow.as_deref(), run.event.as_deref()]
         .into_iter()
@@ -838,6 +868,12 @@ fn check_row(entry: &CheckEntry, state: &PrDetailState) -> CheckRowView {
     CheckRowView {
         status: run.status,
         name: run.name.clone(),
+        url: run
+            .details_url
+            .as_deref()
+            .filter(|url| daruda_github::model::is_web_url(url))
+            .map(str::to_owned),
+        rerun,
         context: (!context.is_empty()).then(|| context.join(" · ")),
         duration: entry.duration.map(notification::format_duration_compact),
         log,

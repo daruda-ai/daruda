@@ -281,12 +281,18 @@ impl PrDetailState {
         self.action = ActionState::Failed(line);
     }
 
+    /// Say under the header that the last action was taken. Called after
+    /// the reload, like [`Self::fail_action`].
+    pub(super) fn done_action(&mut self, line: String) {
+        self.action = ActionState::Done(line);
+    }
+
     /// Forget what a reload replaces: the open logs, a failure already
     /// said, the threads and the files. `Some` with the shown tab's new read
     /// when it had one, so it is read again at once.
     fn reset_for_refresh(&mut self) -> (ReadTicket, Option<TabRead>) {
         self.logs.clear();
-        if matches!(self.action, ActionState::Failed(_)) {
+        if matches!(self.action, ActionState::Failed(_) | ActionState::Done(_)) {
             self.action = ActionState::Idle;
         }
         let threads = self.threads.take().is_some() && self.tab == PrTab::Threads;

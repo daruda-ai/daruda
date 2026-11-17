@@ -1165,7 +1165,7 @@ fn a_refused_reopen_keeps_it_closed(cx: &mut TestAppContext) {
     assert_eq!(loaded_state(&f, cx), Some(PrState::Closed));
     let shown = view(&f, cx);
     assert_eq!(shown.header.reopen().cloned(), Some(ActionSlot::Ready));
-    let error = shown.error.expect("said under the header");
+    let error = shown.error().expect("said under the header");
     assert!(error.contains("head branch was deleted"), "{error}");
     assert_eq!(
         error_titles(&f, cx),
@@ -1224,7 +1224,10 @@ fn a_failed_action_reports_what_gh_said(cx: &mut TestAppContext) {
         "a failure leaves GitHub's state unknown, so the detail is read again"
     );
     let shown = view(&f, cx);
-    let error = shown.error.clone().expect("the detail keeps what gh said");
+    let error = shown
+        .error()
+        .clone()
+        .expect("the detail keeps what gh said");
     assert!(error.contains("run 11 cannot be rerun"), "{error}");
     let DetailBody::Ready(ready) = shown.body else {
         panic!("not read");
@@ -1238,9 +1241,9 @@ fn a_failed_action_reports_what_gh_said(cx: &mut TestAppContext) {
     // The next action clears it while it runs; a reload clears it too.
     gh.clear_failure(GhOp::RerunFailed);
     f.ws.update(cx, |ws, cx| ws.rerun_pr_detail_checks(id, cx));
-    assert_eq!(view(&f, cx).error, None);
+    assert_eq!(view(&f, cx).error(), None);
     cx.run_until_parked();
-    assert_eq!(view(&f, cx).error, None, "it succeeded");
+    assert_eq!(view(&f, cx).error(), None, "it succeeded");
     gh.fail(
         GhOp::RerunFailed,
         GhFailure::Exit {
@@ -1250,9 +1253,9 @@ fn a_failed_action_reports_what_gh_said(cx: &mut TestAppContext) {
     );
     f.ws.update(cx, |ws, cx| ws.rerun_pr_detail_checks(id, cx));
     cx.run_until_parked();
-    assert!(view(&f, cx).error.is_some());
+    assert!(view(&f, cx).error().is_some());
     f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
-    assert_eq!(view(&f, cx).error, None, "a reload clears it");
+    assert_eq!(view(&f, cx).error(), None, "a reload clears it");
 }
 
 #[gpui::test]
@@ -1276,7 +1279,7 @@ fn merge_goes_to_github_even_when_it_may_refuse(cx: &mut TestAppContext) {
     confirm(&f, cx);
     assert_eq!(gh.count(GhOp::MergePr), 1);
     let error = view(&f, cx)
-        .error
+        .error()
         .expect("GitHub's refusal stays in the detail");
     assert!(error.contains("base branch policy"), "{error}");
 
@@ -1376,7 +1379,7 @@ fn a_failed_merge_reloads_the_detail_and_keeps_the_failure(cx: &mut TestAppConte
         [crate::surface::strings::error::github_pr_merge_failed(7)]
     );
     assert!(
-        view(&f, cx).error.is_some(),
+        view(&f, cx).error().is_some(),
         "the failure outlives the reload"
     );
 }
@@ -1627,4 +1630,57 @@ fn a_queued_pull_request_is_shown_queued_not_merged(cx: &mut TestAppContext) {
         )),
         "{facts:?}"
     );
+}
+
+/// One failed check's own Rerun asks for its run alone, says it was asked
+/// (nothing else shows it until GitHub starts), and links to GitHub.
+#[gpui::test]
+fn a_failed_check_reruns_its_own_run_and_links_to_github(cx: &mut TestAppContext) {
+    use crate::workspace::pages::pull_requests::detail::view::ActionNotice;
+    let mut detail = mergeable(7, "feat");
+    detail.checks[2].run.details_url = Some("https://github.com/o/r/actions/runs/12/job/30".into());
+    detail.checks[1].run.details_url = Some("javascript:alert(1)".into());
+    let (f, gh, id) = opened(cx, detail);
+    let DetailBody::Ready(ready) = view(&f, cx).body else {
+        panic!("not read");
+    };
+    let runs: Vec<_> = ready
+        .checks
+        .iter()
+        .map(|row| row.rerun.as_ref().map(|(run, _)| *run))
+        .collect();
+    assert_eq!(runs, [Some(11), Some(11), Some(12)]);
+    assert_eq!(
+        ready.checks[2].url.as_deref(),
+        Some("https://github.com/o/r/actions/runs/12/job/30")
+    );
+    assert_eq!(ready.checks[1].url, None, "only a web page is opened");
+
+    f.ws.update(cx, |ws, cx| ws.rerun_pr_check_run(id, 12, cx));
+    cx.run_until_parked();
+    let reruns: Vec<u64> = gh
+        .calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            GhCall::RerunFailed { run, .. } => Some(run),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(reruns, [12], "that run alone");
+    assert_eq!(
+        view(&f, cx).notice,
+        Some(ActionNotice::Done(
+            crate::surface::strings::pull_requests::rerun_requested()
+        ))
+    );
+
+    // A run with no failed job is never asked to rerun.
+    f.ws.update(cx, |ws, cx| ws.rerun_pr_check_run(id, 99, cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::RerunFailed), 1);
+
+    // A reload clears the line.
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    cx.run_until_parked();
+    assert_eq!(view(&f, cx).notice, None);
 }
