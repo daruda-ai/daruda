@@ -9,7 +9,9 @@ use std::time::Instant;
 use chrono::{DateTime, Utc};
 use daruda_core::age::{self, AgeBucket};
 use daruda_github::availability::{BackoffReason, GhAccount, GhAvailability, Resume};
-use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, RepoId, ReviewDecision};
+use daruda_github::{
+    CheckRollup, PrFilter, PrListItem, PrSearch, PrSearchState, PrState, RepoId, ReviewDecision,
+};
 use daruda_store::project::{LaneRef, ProjectId};
 
 use super::progress::{Activity, Sources};
@@ -184,6 +186,13 @@ pub(in crate::workspace) fn create_lane_label(review: bool) -> String {
     }
 }
 
+/// How a listed pull request ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum Ended {
+    Merged,
+    Closed,
+}
+
 /// One pull request, ready to draw.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct PrRow {
@@ -195,6 +204,8 @@ pub(in crate::workspace) struct PrRow {
     pub meta: String,
     pub tone: PrTone,
     pub draft: bool,
+    /// A pull request no longer open, listed under another state.
+    pub ended: Option<Ended>,
     pub fork: bool,
     pub checks: CheckRollup,
     pub review: Option<ReviewDecision>,
@@ -223,6 +234,13 @@ pub(in crate::workspace) enum PageBody {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct PrPageView {
     pub filter: PrFilter,
+    pub state: PrSearchState,
+    /// Some host's list has a later page to read, offered below the rows.
+    pub more: More,
+    /// How many pull requests GitHub matched for the shown search on every
+    /// shown host, loaded or not; `None` while a host has no answer or its
+    /// answer also counts another window's repositories.
+    pub found: Option<u32>,
     /// How old the newest answer under the filter is; `None` until one
     /// arrives.
     pub refreshed: Option<String>,
@@ -240,7 +258,12 @@ pub(in crate::workspace) struct PageInputs<'a> {
     pub enabled: bool,
     pub discovering: bool,
     pub refreshing: bool,
+    /// A later page is being read.
+    pub loading_more: bool,
     pub filter: PrFilter,
+    pub state: PrSearchState,
+    /// The shown tab's GitHub search; empty for the bare tab.
+    pub refine: &'a crate::github::Refine,
     pub repos: &'a BTreeSet<RepoId>,
     pub list: &'a PrListCache,
     pub lanes: &'a [LaneFacts],
@@ -276,7 +299,9 @@ pub(in crate::workspace) fn page(
                     let status = repo_status(
                         repo,
                         availability(host),
-                        inputs.list.host(inputs.filter, host),
+                        inputs
+                            .list
+                            .host_searched(inputs.filter, inputs.state, inputs.refine, host),
                     );
                     let body = group_body(repo, status, inputs);
                     let refreshed = match status {
@@ -284,7 +309,7 @@ pub(in crate::workspace) fn page(
                             search: Some(_), ..
                         } => inputs
                             .list
-                            .answered_at(inputs.filter, host)
+                            .answered_at(inputs.filter, inputs.state, inputs.refine, host)
                             .map(|at| answer_age(inputs.clock, at)),
                         _ => None,
                     };
@@ -303,8 +328,13 @@ pub(in crate::workspace) fn page(
                 .collect(),
         )
     };
+    let more = more(inputs);
+    let found = found(inputs);
     PrPageView {
+        found,
         filter: inputs.filter,
+        state: inputs.state,
+        more,
         refreshed: refreshed(inputs),
         activity: Activity::of(inputs, &body),
         sources: Sources::of(&body),
@@ -315,6 +345,49 @@ pub(in crate::workspace) fn page(
         },
         accounts: shown_accounts(inputs),
     }
+}
+
+/// Whether the list offers to read further, and whether it is reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum More {
+    /// Every host's list is read to its end, or as far as GitHub lets it.
+    None,
+    Offered,
+    Loading,
+}
+
+fn found(inputs: &PageInputs<'_>) -> Option<u32> {
+    let hosts: BTreeSet<&str> = inputs.repos.iter().map(RepoId::host).collect();
+    hosts.into_iter().try_fold(0, |sum, host| {
+        let answer = inputs
+            .list
+            .host_searched(inputs.filter, inputs.state, inputs.refine, host)
+            .answer()?;
+        let own = answer
+            .covered
+            .iter()
+            .all(|repo| inputs.repos.contains(repo));
+        own.then_some(sum + answer.matches)
+    })
+}
+
+fn more(inputs: &PageInputs<'_>) -> More {
+    if inputs.loading_more {
+        return More::Loading;
+    }
+    // A queued refresh reads the list from the top; a later page of the
+    // list it replaces is not offered meanwhile.
+    if inputs.refreshing {
+        return More::None;
+    }
+    let offered = inputs.repos.iter().any(|repo| {
+        inputs
+            .list
+            .host_searched(inputs.filter, inputs.state, inputs.refine, repo.host())
+            .answer()
+            .is_some_and(|answer| answer.more)
+    });
+    if offered { More::Offered } else { More::None }
 }
 
 /// The accounts of the hosts the shown repositories are on, each once.
@@ -334,7 +407,11 @@ fn refreshed(inputs: &PageInputs<'_>) -> Option<String> {
     let newest = inputs
         .repos
         .iter()
-        .filter_map(|repo| inputs.list.answered_at(inputs.filter, repo.host()))
+        .filter_map(|repo| {
+            inputs
+                .list
+                .answered_at(inputs.filter, inputs.state, inputs.refine, repo.host())
+        })
         .max()?;
     Some(answer_age(inputs.clock, newest))
 }
@@ -452,6 +529,11 @@ fn row(item: &PrListItem, inputs: &PageInputs<'_>) -> PrRow {
         meta,
         tone: PrTone::of(pr),
         draft: pr.state == PrState::Draft,
+        ended: match pr.state {
+            PrState::Merged => Some(Ended::Merged),
+            PrState::Closed => Some(Ended::Closed),
+            PrState::Open | PrState::Draft => None,
+        },
         fork: pr.cross_repo,
         checks: pr.checks,
         review: pr.review,
@@ -511,11 +593,28 @@ pub(in crate::workspace) fn review_label(review: ReviewDecision) -> String {
 pub(in crate::workspace) const FILTERS: [PrFilter; 3] =
     [PrFilter::Mine, PrFilter::ReviewRequested, PrFilter::AllOpen];
 
+/// The states the page lists, in the order the control shows them.
+pub(in crate::workspace) const STATES: [PrSearchState; 4] = [
+    PrSearchState::Open,
+    PrSearchState::Merged,
+    PrSearchState::Closed,
+    PrSearchState::All,
+];
+
+pub(in crate::workspace) fn state_label(state: PrSearchState) -> String {
+    match state {
+        PrSearchState::Open => s::state_open(),
+        PrSearchState::Merged => s::state_merged(),
+        PrSearchState::Closed => s::state_closed(),
+        PrSearchState::All => s::state_all(),
+    }
+}
+
 pub(in crate::workspace) fn filter_label(filter: PrFilter) -> String {
     match filter {
         PrFilter::Mine => s::filter_mine(),
         PrFilter::ReviewRequested => s::filter_review_requested(),
-        PrFilter::AllOpen => s::filter_all_open(),
+        PrFilter::AllOpen => s::filter_all(),
     }
 }
 

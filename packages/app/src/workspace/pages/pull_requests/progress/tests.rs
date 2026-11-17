@@ -1,3 +1,4 @@
+use daruda_github::PrSearchState;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -19,6 +20,8 @@ fn progress_distinguishes_discovery_first_load_and_retained_answers() {
         search: Arc::new(PrSearch::default()),
         covered: Arc::new(repos.clone()),
         at: clock,
+        more: false,
+        matches: 0,
     };
     // (label, enabled, repositories discovered, discovery running, search running, cached answer, expected)
     for (label, enabled, known, discovering, refreshing, cached, expected) in [
@@ -97,7 +100,12 @@ fn progress_distinguishes_discovery_first_load_and_retained_answers() {
     ] {
         let cache = PrListCache::shown_with(if cached {
             HashMap::from([(
-                (PrFilter::Mine, "github.com".into()),
+                (
+                    PrFilter::Mine,
+                    PrSearchState::Open,
+                    crate::github::Refine::default(),
+                    "github.com".into(),
+                ),
                 HostList::Ready(answer.clone()),
             )])
         } else {
@@ -108,7 +116,10 @@ fn progress_distinguishes_discovery_first_load_and_retained_answers() {
             enabled,
             discovering,
             refreshing,
+            loading_more: false,
             filter: PrFilter::Mine,
+            state: PrSearchState::Open,
+            refine: &crate::github::NO_REFINE,
             repos: if known { &repos } else { &empty },
             list: &cache,
             lanes: &[],
@@ -145,21 +156,38 @@ fn partial_sources_count_only_covered_visible_answers_and_keep_their_ages() {
         search: Arc::new(PrSearch::default()),
         covered: Arc::new(BTreeSet::from([repo])),
         at: clock - Duration::from_secs(seconds),
+        more: false,
+        matches: 0,
     };
     let cache = PrListCache::shown_with(HashMap::from([
         (
-            (PrFilter::Mine, "github.com".into()),
+            (
+                PrFilter::Mine,
+                PrSearchState::Open,
+                crate::github::Refine::default(),
+                "github.com".into(),
+            ),
             HostList::Ready(answer(ready, 60)),
         ),
         (
-            (PrFilter::Mine, "ghe.corp".into()),
+            (
+                PrFilter::Mine,
+                PrSearchState::Open,
+                crate::github::Refine::default(),
+                "ghe.corp".into(),
+            ),
             HostList::Failed {
                 last: Some(answer(stale, 3600)),
             },
         ),
         // A blocked host cannot contribute even when an old answer exists.
         (
-            (PrFilter::Mine, "other.corp".into()),
+            (
+                PrFilter::Mine,
+                PrSearchState::Open,
+                crate::github::Refine::default(),
+                "other.corp".into(),
+            ),
             HostList::Ready(answer(blocked, 0)),
         ),
     ]));
@@ -167,7 +195,10 @@ fn partial_sources_count_only_covered_visible_answers_and_keep_their_ages() {
         enabled: true,
         discovering: false,
         refreshing: false,
+        loading_more: false,
         filter: PrFilter::Mine,
+        state: PrSearchState::Open,
+        refine: &crate::github::NO_REFINE,
         repos: &repos,
         list: &cache,
         lanes: &[],

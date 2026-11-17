@@ -8,11 +8,11 @@
 use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
-use daruda_github::{PrFilter, RepoId};
+use daruda_github::{PrFilter, PrSearchState, RepoId};
 use daruda_store::project::{LaneRef, ProjectId};
 use gpui::{Context, Task};
 
-use crate::github::{PrList, PrListAnswer, PrListUpdate};
+use crate::github::{NO_REFINE, PrList, PrListAnswer, PrListUpdate, Refine};
 use crate::workspace::Workspace;
 
 /// What is known about one host's pull requests under one filter.
@@ -65,9 +65,12 @@ pub(crate) struct PrListCache {
     shown: Option<Shown>,
 }
 
+/// One audience, state and GitHub search of one host.
+type ListSlot = (PrFilter, PrSearchState, Refine, String);
+
 #[derive(Debug)]
 struct Shown {
-    hosts: HashMap<(PrFilter, String), HostList>,
+    hosts: HashMap<ListSlot, HostList>,
     /// Repaints the page every [`AGE_REPAINT`]; ends with this state.
     _aging: Task<()>,
 }
@@ -77,17 +80,34 @@ impl PrListCache {
         self.shown.is_some()
     }
 
-    /// What `host` has under `filter`; `Loading` while hidden.
-    pub(crate) fn host(&self, filter: PrFilter, host: &str) -> &HostList {
+    /// What `host` has under `filter` and `state`, without a GitHub
+    /// search: what the tab badges count. `Loading` while hidden.
+    pub(crate) fn host(&self, filter: PrFilter, state: PrSearchState, host: &str) -> &HostList {
+        self.host_searched(filter, state, &NO_REFINE, host)
+    }
+
+    /// What `host` has under `filter` and `state` for the GitHub search
+    /// `refine`; `Loading` while hidden.
+    pub(crate) fn host_searched(
+        &self,
+        filter: PrFilter,
+        state: PrSearchState,
+        refine: &Refine,
+        host: &str,
+    ) -> &HostList {
         self.shown
             .as_ref()
-            .and_then(|shown| shown.hosts.get(&(filter, host.to_owned())))
+            .and_then(|shown| {
+                shown
+                    .hosts
+                    .get(&(filter, state, refine.clone(), host.to_owned()))
+            })
             .unwrap_or(&LOADING)
     }
 
     /// A shown cache holding `hosts`, without a repaint task.
     #[cfg(test)]
-    pub(crate) fn shown_with(hosts: HashMap<(PrFilter, String), HostList>) -> Self {
+    pub(crate) fn shown_with(hosts: HashMap<ListSlot, HostList>) -> Self {
         Self {
             shown: Some(Shown {
                 hosts,
@@ -96,10 +116,18 @@ impl PrListCache {
         }
     }
 
-    /// When `host`'s last answer under `filter` arrived. It stays through a
-    /// failed search, as the answer's rows do.
-    pub(crate) fn answered_at(&self, filter: PrFilter, host: &str) -> Option<Instant> {
-        self.host(filter, host).answer().map(|answer| answer.at)
+    /// When `host`'s last answer under `filter` and `state` arrived. It
+    /// stays through a failed search, as the answer's rows do.
+    pub(crate) fn answered_at(
+        &self,
+        filter: PrFilter,
+        state: PrSearchState,
+        refine: &Refine,
+        host: &str,
+    ) -> Option<Instant> {
+        self.host_searched(filter, state, refine, host)
+            .answer()
+            .map(|answer| answer.at)
     }
 
     /// Start holding answers; `false` when already shown.
@@ -114,6 +142,14 @@ impl PrListCache {
         true
     }
 
+    /// Keep only the slots `wanted` names: a state, tab or search shown
+    /// again later starts from its fresh answer, not rows held from before.
+    fn retain(&mut self, wanted: impl Fn(&ListSlot) -> bool) {
+        if let Some(shown) = &mut self.shown {
+            shown.hosts.retain(|slot, _| wanted(slot));
+        }
+    }
+
     fn hide(&mut self) -> bool {
         self.shown.take().is_some()
     }
@@ -124,18 +160,26 @@ impl PrListCache {
         let Some(Shown { hosts, .. }) = &mut self.shown else {
             return false;
         };
-        let (host, filter, list) = match update {
+        let (slot, list) = match update {
             PrListUpdate::Answer {
                 host,
                 filter,
+                state,
+                refine,
                 answer,
-            } => (host, filter, HostList::Ready(answer.clone())),
+            } => (
+                (filter, state, refine.clone(), host.to_owned()),
+                HostList::Ready(answer.clone()),
+            ),
             PrListUpdate::Cached {
                 host,
                 filter,
+                state,
+                refine,
                 answer,
             } => {
-                let held = hosts.get(&(filter, host.to_owned())).unwrap_or(&LOADING);
+                let slot = (filter, state, refine.clone(), host.to_owned());
+                let held = hosts.get(&slot).unwrap_or(&LOADING);
                 if !held.lacks(answer) {
                     return false;
                 }
@@ -147,18 +191,21 @@ impl PrListCache {
                     },
                     HostList::Loading | HostList::Ready(_) => HostList::Ready(answer.clone()),
                 };
-                (host, filter, list)
+                (slot, list)
             }
-            PrListUpdate::Failed { host, filter } => {
-                let last = hosts
-                    .get(&(filter, host.to_owned()))
-                    .and_then(HostList::answer)
-                    .cloned();
-                (host, filter, HostList::Failed { last })
+            PrListUpdate::Failed {
+                host,
+                filter,
+                state,
+                refine,
+            } => {
+                let slot = (filter, state, refine.clone(), host.to_owned());
+                let last = hosts.get(&slot).and_then(HostList::answer).cloned();
+                (slot, HostList::Failed { last })
             }
             PrListUpdate::HostBlocked { host } => {
                 let before = hosts.len();
-                hosts.retain(|(_, held), _| held != host);
+                hosts.retain(|(_, _, _, held), _| held != host);
                 return hosts.len() != before;
             }
             PrListUpdate::Disabled => {
@@ -167,10 +214,10 @@ impl PrListCache {
                 return had;
             }
         };
-        if hosts.get(&(filter, host.to_owned())) == Some(&list) {
+        if hosts.get(&slot) == Some(&list) {
             return false;
         }
-        hosts.insert((filter, host.to_owned()), list);
+        hosts.insert(slot, list);
         true
     }
 }
@@ -215,16 +262,61 @@ impl Workspace {
     }
 
     /// Counts and selected rows share the process cache and its refresh
-    /// cadence: every tab is searched while the page is on screen.
-    pub(crate) fn pr_list_demands(&self) -> Vec<(PrFilter, BTreeSet<RepoId>)> {
+    /// cadence: every tab is searched under the shown state while the page
+    /// is on screen. A GitHub search adds one more, for the shown tab
+    /// alone: typing does not search every tab.
+    pub(crate) fn pr_list_demands(
+        &self,
+    ) -> Vec<(PrFilter, PrSearchState, Refine, BTreeSet<RepoId>)> {
         if !self.pr_list().is_shown() {
             return Vec::new();
         }
         let repos = self.github_repos();
-        crate::workspace::pages::pull_requests::list::FILTERS
+        let state = self.pr_page_state();
+        self.pr_refresh_searches()
             .into_iter()
-            .map(|filter| (filter, repos.clone()))
+            .map(|(filter, refine)| (filter, state, refine, repos.clone()))
             .collect()
+    }
+
+    /// Let go of what this window holds for searches it no longer shows:
+    /// another state, another tab's GitHub search, an earlier typed one.
+    pub(crate) fn prune_pr_list(&mut self) {
+        let wanted: Vec<(PrFilter, PrSearchState, Refine)> = self
+            .pr_list_demands()
+            .into_iter()
+            .map(|(filter, state, refine, _)| (filter, state, refine))
+            .collect();
+        self.pages
+            .pull_requests
+            .cache
+            .retain(|(filter, state, refine, _)| {
+                wanted
+                    .iter()
+                    .any(|(f, s, r)| f == filter && s == state && r == refine)
+            });
+    }
+
+    /// Read the next page of the shown tab's list on every host that has
+    /// one. Earlier rows stay; the cadence leaves the longer list alone
+    /// until a refresh reads it from the top again.
+    pub(crate) fn load_more_prs(&mut self, cx: &mut Context<Self>) {
+        if !self.pr_list().is_shown() {
+            return;
+        }
+        let hosts: BTreeSet<String> = self
+            .github_repos()
+            .iter()
+            .map(|repo| repo.host().to_owned())
+            .collect();
+        PrList::load_more(
+            hosts,
+            self.pr_page_filter(),
+            self.pr_page_state(),
+            self.pr_page_refine().clone(),
+            cx,
+        );
+        cx.notify();
     }
 
     pub(crate) fn pr_list(&self) -> &PrListCache {
@@ -283,11 +375,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if self.pr_list().is_shown() {
-            PrList::refresh(
-                hosts,
-                &crate::workspace::pages::pull_requests::list::FILTERS,
-                cx,
-            );
+            PrList::refresh(hosts, &self.pr_refresh_searches(), self.pr_page_state(), cx);
         }
     }
 

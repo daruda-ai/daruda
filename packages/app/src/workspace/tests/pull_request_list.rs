@@ -2,7 +2,7 @@
 //! search answers the union, and a window says a repository is loading
 //! until an answer that asked about it arrives.
 
-use daruda_github::fake::{FakeGh, GhCall};
+use daruda_github::fake::FakeGh;
 use daruda_github::{CheckRollup, PrFilter, PrListItem, PrState, PrSummary, RepoId};
 use gpui::TestAppContext;
 
@@ -106,12 +106,8 @@ fn group(f: &GitFixture, name: &str, cx: &mut TestAppContext) -> Option<Vec<u64>
 fn searched(gh: &FakeGh) -> Vec<Vec<RepoId>> {
     gh.calls()
         .into_iter()
-        .filter_map(|call| match call {
-            GhCall::SearchPrs {
-                repos,
-                filter: PrFilter::Mine,
-                ..
-            } => Some(repos),
+        .filter_map(|call| match crate::test_support::list_search(&call)? {
+            (PrFilter::Mine, repos) => Some(repos),
             _ => None,
         })
         .collect()

@@ -909,7 +909,9 @@ fn host_list(
     cx: &mut TestAppContext,
 ) -> crate::workspace::github_ops::pr_list::HostList {
     f.ws.read_with(cx, |ws, _| {
-        ws.pr_list().host(ws.pr_page_filter(), "github.com").clone()
+        ws.pr_list()
+            .host(ws.pr_page_filter(), ws.pr_page_state(), "github.com")
+            .clone()
     })
 }
 
@@ -938,26 +940,30 @@ fn a_shown_page_shares_each_filter_search_across_windows(cx: &mut TestAppContext
     let searches: Vec<GhCall> = gh
         .calls()
         .into_iter()
-        .filter(|call| matches!(call, GhCall::SearchPrs { .. }))
+        .filter(|call| crate::test_support::list_search(call).is_some())
         .collect();
     for filter in crate::workspace::pages::pull_requests::list::FILTERS {
         assert_eq!(
             searches
                 .iter()
-                .filter(
-                    |call| matches!(call, GhCall::SearchPrs { filter: held, .. } if *held == filter)
-                )
+                .filter(|call| {
+                    crate::test_support::list_search(call).is_some_and(|(held, _)| held == filter)
+                })
                 .count(),
             1,
             "one search per filter across windows"
         );
     }
     tick(cx);
-    assert_eq!(gh.count(GhOp::SearchPrs), 3, "not due within the minute");
+    assert_eq!(
+        gh.count(GhOp::SearchPrsPage),
+        3,
+        "not due within the minute"
+    );
     first.ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
     cx.run_until_parked();
     assert_eq!(
-        gh.count(GhOp::SearchPrs),
+        gh.count(GhOp::SearchPrsPage),
         6,
         "refresh asks for the rows and all tab counts at once"
     );
@@ -969,18 +975,18 @@ fn a_hidden_page_is_not_searched(cx: &mut TestAppContext) {
     let gh = gh_with_open_pr(cx);
     let (f, _) = lane_pushing_feat(cx);
     tick(cx);
-    assert_eq!(gh.count(GhOp::SearchPrs), 0, "never shown");
+    assert_eq!(gh.count(GhOp::SearchPrsPage), 0, "never shown");
 
     show_list(&f, PrFilter::AllOpen, cx);
     assert_eq!(
-        gh.count(GhOp::SearchPrs),
+        gh.count(GhOp::SearchPrsPage),
         3,
         "showing asks for rows and tab counts"
     );
     f.ws.update(cx, |ws, cx| ws.hide_pr_list(cx));
     cx.executor().advance_clock(Duration::from_secs(120));
     tick(cx);
-    assert_eq!(gh.count(GhOp::SearchPrs), 3, "hidden stops asking");
+    assert_eq!(gh.count(GhOp::SearchPrsPage), 3, "hidden stops asking");
     // The lane polls go on: they do not depend on the page.
     assert!(gh.count(GhOp::PrsForBranches) > 1);
 }
@@ -998,7 +1004,7 @@ fn another_filter_is_searched_and_only_its_page_shows_it(cx: &mut TestAppContext
     tick(cx);
     assert_eq!(listed(&mine, cx), vec![7]);
     assert_eq!(listed(&all, cx).len(), 2);
-    assert_eq!(gh.count(GhOp::SearchPrs), 3, "one search per filter");
+    assert_eq!(gh.count(GhOp::SearchPrsPage), 3, "one search per filter");
 }
 
 #[gpui::test]
@@ -1013,7 +1019,7 @@ fn a_logged_out_search_blocks_the_host_for_the_lane_polls_too(cx: &mut TestAppCo
     let polls = gh.count(GhOp::PrsForBranches);
 
     gh.fail(
-        GhOp::SearchPrs,
+        GhOp::SearchPrsPage,
         GhFailure::Exit {
             code: Some(4),
             stderr: "gh auth login".into(),
@@ -1024,7 +1030,7 @@ fn a_logged_out_search_blocks_the_host_for_the_lane_polls_too(cx: &mut TestAppCo
     f.ws.read_with(cx, |ws, _| {
         for filter in crate::workspace::pages::pull_requests::list::FILTERS {
             assert_eq!(
-                ws.pr_list().host(filter, "github.com"),
+                ws.pr_list().host(filter, ws.pr_page_state(), "github.com"),
                 &crate::workspace::github_ops::pr_list::HostList::Loading,
                 "{filter:?}: what was read there is dropped"
             );
@@ -1039,7 +1045,7 @@ fn a_logged_out_search_blocks_the_host_for_the_lane_polls_too(cx: &mut TestAppCo
     cx.executor().advance_clock(Duration::from_secs(61));
     tick(cx);
     assert_eq!(gh.count(GhOp::PrsForBranches), polls, "no lane poll");
-    assert_eq!(gh.count(GhOp::SearchPrs), 6, "no further search");
+    assert_eq!(gh.count(GhOp::SearchPrsPage), 6, "no further search");
 }
 
 #[gpui::test]
@@ -1052,7 +1058,7 @@ fn a_transient_search_failure_keeps_the_list_on_show(cx: &mut TestAppContext) {
     show_list(&f, PrFilter::Mine, cx);
     tick(cx);
     gh.fail(
-        GhOp::SearchPrs,
+        GhOp::SearchPrsPage,
         GhFailure::Exit {
             code: Some(1),
             stderr: "error connecting to api.github.com".into(),
@@ -1085,5 +1091,5 @@ fn turning_the_feature_off_clears_the_list(cx: &mut TestAppContext) {
     cx.executor().advance_clock(Duration::from_secs(61));
     tick(cx);
     assert!(listed(&f, cx).is_empty());
-    assert_eq!(gh.count(GhOp::SearchPrs), 3, "no search while off");
+    assert_eq!(gh.count(GhOp::SearchPrsPage), 3, "no search while off");
 }

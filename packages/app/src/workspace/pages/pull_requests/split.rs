@@ -3,6 +3,9 @@
 use gpui::{Context, Window};
 
 use super::page_layout::{ListColumn, list_width};
+use daruda_github::{PrFilter, PrSearchState};
+use daruda_store::project::{PullRequestsAudience, PullRequestsLayout, PullRequestsState};
+
 use crate::workspace::Workspace;
 
 /// A drag of the divider between the list and the detail, in window pixels.
@@ -90,21 +93,46 @@ impl Workspace {
 }
 
 impl super::PullRequestsPage {
-    /// The layout choices a window's saved state keeps.
-    pub(in crate::workspace) fn layout_record(&self) -> daruda_store::project::PullRequestsLayout {
-        daruda_store::project::PullRequestsLayout {
+    /// The layout and list choices a window's saved state keeps.
+    pub(in crate::workspace) fn layout_record(&self) -> PullRequestsLayout {
+        PullRequestsLayout {
+            audience: (self.filter != PrFilter::Mine).then_some(match self.filter {
+                PrFilter::Mine => PullRequestsAudience::Mine,
+                PrFilter::ReviewRequested => PullRequestsAudience::ReviewRequested,
+                PrFilter::AllOpen => PullRequestsAudience::All,
+            }),
+            state: (self.state != PrSearchState::Open).then_some(match self.state {
+                PrSearchState::Open => PullRequestsState::Open,
+                PrSearchState::Merged => PullRequestsState::Merged,
+                PrSearchState::Closed => PullRequestsState::Closed,
+                PrSearchState::All => PullRequestsState::All,
+            }),
+            search_github: self.search_mode == super::remote_search::SearchMode::GitHub,
             list_width: (self.list_width != crate::ui::theme::PR_SPLIT_LIST_W)
                 .then_some(self.list_width),
             list_hidden: self.list_column == ListColumn::Hidden,
         }
     }
 
-    /// Take a saved window's layout choices; an unusable width keeps the
-    /// default.
-    pub(in crate::workspace) fn restore_layout(
-        &mut self,
-        record: &daruda_store::project::PullRequestsLayout,
-    ) {
+    /// Take a saved window's choices; an unusable width keeps the default.
+    /// The search field starts empty, so a GitHub search starts bare.
+    pub(in crate::workspace) fn restore_layout(&mut self, record: &PullRequestsLayout) {
+        self.filter = match record.audience {
+            None | Some(PullRequestsAudience::Mine) => PrFilter::Mine,
+            Some(PullRequestsAudience::ReviewRequested) => PrFilter::ReviewRequested,
+            Some(PullRequestsAudience::All) => PrFilter::AllOpen,
+        };
+        self.state = match record.state {
+            None | Some(PullRequestsState::Open) => PrSearchState::Open,
+            Some(PullRequestsState::Merged) => PrSearchState::Merged,
+            Some(PullRequestsState::Closed) => PrSearchState::Closed,
+            Some(PullRequestsState::All) => PrSearchState::All,
+        };
+        self.search_mode = if record.search_github {
+            super::remote_search::SearchMode::GitHub
+        } else {
+            super::remote_search::SearchMode::Loaded
+        };
         self.list_width = record
             .list_width
             .filter(|width| width.is_finite())

@@ -6,6 +6,7 @@
 //! | `auth` | `Ready`, no account |
 //! | `prs_for_branches` | default branch `main`, no PRs for any branch or number |
 //! | `search_prs` | none, not truncated |
+//! | `search_prs_page` | the `set_pr_list` list of its audience, narrowed to its repositories, state and title words (not facets), paged |
 //! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL |
 //! | `failed_log` | exit 1, as for a run that has no failed log |
 //! | `review_threads` | none |
@@ -28,8 +29,10 @@ use crate::query::{RepoPrs, newest_first};
 use crate::system::check_head_sha;
 use crate::{
     ActionsJob, CheckRollup, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrListItem, PrSearch,
-    PrState, PrSummary, RepoId, ReviewThreads,
+    PrSearchPage, PrSearchRequest, PrState, PrSummary, RepoId, ReviewThreads,
 };
+
+mod search;
 
 /// A request the code under test made.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +49,9 @@ pub enum GhCall {
         host: String,
         repos: Vec<RepoId>,
         filter: PrFilter,
+    },
+    SearchPrsPage {
+        request: Box<PrSearchRequest>,
     },
     CreatePr {
         repo: RepoId,
@@ -92,6 +98,7 @@ pub enum GhOp {
     Auth,
     PrsForBranches,
     SearchPrs,
+    SearchPrsPage,
     CreatePr,
     FailedLog,
     ReviewThreads,
@@ -142,6 +149,7 @@ struct FakeState {
     prs: HashMap<RepoId, Vec<PrSummary>>,
     lists: HashMap<PrFilter, Vec<PrListItem>>,
     truncated: HashMap<PrFilter, bool>,
+    search_pages: HashMap<PrSearchRequest, String>,
     logs: HashMap<(u64, u64), String>,
     threads: HashMap<u64, ReviewThreads>,
     details: HashMap<(RepoId, u64), PrDetail>,
@@ -242,6 +250,7 @@ impl GhCall {
             Self::Auth { .. } => GhOp::Auth,
             Self::PrsForBranches { .. } => GhOp::PrsForBranches,
             Self::SearchPrs { .. } => GhOp::SearchPrs,
+            Self::SearchPrsPage { .. } => GhOp::SearchPrsPage,
             Self::CreatePr { .. } => GhOp::CreatePr,
             Self::FailedLog { .. } => GhOp::FailedLog,
             Self::ReviewThreads { .. } => GhOp::ReviewThreads,
@@ -375,6 +384,10 @@ impl Gh for FakeGh {
             items,
             truncated: state.truncated.get(&filter).copied().unwrap_or(false),
         })
+    }
+
+    fn search_prs_page(&self, request: &PrSearchRequest) -> Result<PrSearchPage, GhError> {
+        self.search_page(request)
     }
 
     fn failed_log(&self, repo: &RepoId, job: ActionsJob) -> Result<String, GhError> {

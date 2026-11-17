@@ -101,7 +101,7 @@ fn pull_request_page_discovers_repositories_without_a_pane_visit(cx: &mut TestAp
         assert_eq!(listed(&f, cx), BTreeMap::from([(repo("r"), vec![7])]));
     }
     assert_eq!(f.ws.read_with(cx, |ws, _| ws.active_ref()), active);
-    assert_eq!(gh.count(GhOp::SearchPrs), 3, "tab answers are reused");
+    assert_eq!(gh.count(GhOp::SearchPrsPage), 3, "tab answers are reused");
 }
 
 #[gpui::test]
@@ -151,7 +151,7 @@ fn pull_request_refresh_retries_repository_discovery(cx: &mut TestAppContext) {
     f.fake.add_repo(FakeRepo::at(&f.root).branch("main"));
     f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
     cx.run_until_parked();
-    assert_eq!(gh.count(GhOp::SearchPrs), 0);
+    assert_eq!(gh.count(GhOp::SearchPrsPage), 0);
     assert_eq!(
         f.ws.read_with(cx, |ws, cx| ws.pr_page_list(cx).body),
         PageBody::NoRepos
@@ -249,7 +249,7 @@ fn a_non_git_project_finishes_discovery_without_requesting_github(cx: &mut TestA
         1,
         "coalesced discovery"
     );
-    assert_eq!(gh.count(GhOp::SearchPrs), 0);
+    assert_eq!(gh.count(GhOp::SearchPrsPage), 0);
 }
 
 #[gpui::test]

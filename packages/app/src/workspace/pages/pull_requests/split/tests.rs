@@ -116,6 +116,7 @@ fn the_saved_layout_keeps_only_deliberate_choices(cx: &mut TestAppContext) {
                 PullRequestsLayout {
                     list_width: Some(480.0),
                     list_hidden: true,
+                    ..Default::default()
                 },
                 480.0,
                 true,
@@ -131,6 +132,7 @@ fn the_saved_layout_keeps_only_deliberate_choices(cx: &mut TestAppContext) {
                 PullRequestsLayout {
                     list_width: Some(f32::NAN),
                     list_hidden: false,
+                    ..Default::default()
                 },
                 theme::PR_SPLIT_LIST_W,
                 false,
@@ -140,6 +142,7 @@ fn the_saved_layout_keeps_only_deliberate_choices(cx: &mut TestAppContext) {
                 PullRequestsLayout {
                     list_width: Some(10.0),
                     list_hidden: false,
+                    ..Default::default()
                 },
                 theme::PR_SPLIT_LIST_MIN_W,
                 false,

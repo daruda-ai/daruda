@@ -43,7 +43,9 @@ fn incomplete_workspace_is_preserved_instead_of_partially_restored() {
 
 #[test]
 fn the_pull_requests_layout_round_trips_and_older_files_read_as_default() {
-    use daruda_store::project::{PullRequestsLayout, WorkspaceState};
+    use daruda_store::project::{
+        PullRequestsAudience, PullRequestsLayout, PullRequestsState, WorkspaceState,
+    };
 
     let project = sample_project();
     let mut workspace = sample_workspace(project.uuid);
@@ -58,6 +60,9 @@ fn the_pull_requests_layout_round_trips_and_older_files_read_as_default() {
     assert_eq!(read.pull_requests, PullRequestsLayout::default());
 
     workspace.pull_requests = PullRequestsLayout {
+        audience: Some(PullRequestsAudience::ReviewRequested),
+        state: Some(PullRequestsState::Merged),
+        search_github: true,
         list_width: Some(480.0),
         list_hidden: true,
     };

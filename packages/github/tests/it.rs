@@ -5,4 +5,5 @@ mod it {
     mod link;
     mod model;
     mod remote_parse;
+    mod search;
 }

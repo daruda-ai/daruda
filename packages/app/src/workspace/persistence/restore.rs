@@ -56,6 +56,7 @@ impl Workspace {
         self.pages
             .pull_requests
             .restore_layout(&workspace.pull_requests);
+        self.sync_pr_search_placeholder(window, cx);
         self.docks.left_view = workspace.active_dock_view;
         self.docks.right_view = workspace.active_right_panel_view;
         self.restore_workspace_page(

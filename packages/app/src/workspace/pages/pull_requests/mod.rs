@@ -5,7 +5,7 @@
 //! it draws.
 
 use crate::ui::InputState;
-use daruda_github::PrFilter;
+use daruda_github::{PrFilter, PrSearchState};
 use daruda_store::project::LaneKind;
 use gpui::{App, AppContext as _, Context, Entity, FocusHandle, WeakEntity, Window};
 
@@ -24,6 +24,7 @@ pub(in crate::workspace) mod list;
 pub(in crate::workspace) mod navigation;
 pub(in crate::workspace) mod page_layout;
 mod progress;
+mod remote_search;
 pub(in crate::workspace) mod render;
 pub(in crate::workspace) mod row_layout;
 mod search;
@@ -40,6 +41,9 @@ pub(in crate::workspace) struct PullRequestsPage {
     /// The filter the page shows, and shows again when reopened. The one
     /// place the selected tab lives; the cache holds every tab's answers.
     filter: PrFilter,
+    /// Which pull requests the tabs list: open (drafts too), merged,
+    /// closed unmerged, or all. Shown again when the page reopens.
+    state: PrSearchState,
     /// What GitHub answered for every tab while the page is on screen.
     pub(in crate::workspace) cache: PrListCache,
     search: Entity<InputState>,
@@ -74,6 +78,13 @@ pub(in crate::workspace) struct PullRequestsPage {
     /// The list was laid out anew this frame: once it is drawn, bring the
     /// selected row back into view.
     reveal_pending: bool,
+    /// Whether the search narrows the loaded rows or asks GitHub.
+    search_mode: remote_search::SearchMode,
+    /// The GitHub search last sent: the field's text once typing paused.
+    committed: crate::github::Refine,
+    /// Sends the GitHub search once typing pauses; replaced on each edit.
+    debounce: Option<gpui::Task<()>>,
+    _search_changes: gpui::Subscription,
 }
 
 impl PullRequestsPage {
@@ -102,12 +113,19 @@ impl PullRequestsPage {
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Workspace>) -> Self {
+        let search = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(crate::surface::strings::pull_requests::search_placeholder())
+        });
+        let search_changes = cx.subscribe(&search, |ws, _, event: &crate::ui::InputEvent, cx| {
+            if matches!(event, crate::ui::InputEvent::Change) {
+                ws.pr_search_edited(cx);
+            }
+        });
         Self {
             filter: PrFilter::Mine,
-            search: cx.new(|cx| {
-                InputState::new(window, cx)
-                    .placeholder(crate::surface::strings::pull_requests::search_placeholder())
-            }),
+            state: PrSearchState::Open,
+            search,
             creating: BTreeSet::new(),
             cache: PrListCache::default(),
             snapshot: None,
@@ -123,6 +141,10 @@ impl PullRequestsPage {
             staged_layout: None,
             return_point: None,
             reveal_pending: false,
+            search_mode: remote_search::SearchMode::Loaded,
+            committed: crate::github::Refine::default(),
+            debounce: None,
+            _search_changes: search_changes,
         }
     }
 }
@@ -149,6 +171,13 @@ pub(in crate::workspace) struct PrPageSnapshot {
     pub focus: FocusHandle,
     pub cursor: Option<PrKey>,
     pub row_bounds: navigation::RowBounds,
+    pub mode: remote_search::SearchMode,
+    /// The field holds text, whether or not a GitHub search has sent it.
+    pub typed: bool,
+    /// The GitHub search's facets, shown as removable chips.
+    pub facets: Vec<crate::github::Facet>,
+    /// Why the typed GitHub search was not sent with the shown tab.
+    pub problem: Option<crate::github::RefineProblem>,
 }
 
 impl Workspace {
@@ -163,6 +192,27 @@ impl Workspace {
         self.pages.pull_requests.filter
     }
 
+    /// Which pull requests the tabs list.
+    pub(in crate::workspace) fn pr_page_state(&self) -> PrSearchState {
+        self.pages.pull_requests.state
+    }
+
+    /// List `state`'s pull requests on every tab. Each state is its own
+    /// search; the first time one is shown it is asked at once.
+    pub(in crate::workspace) fn set_pr_page_state(
+        &mut self,
+        state: PrSearchState,
+        cx: &mut Context<Self>,
+    ) {
+        if self.pages.pull_requests.state == state {
+            return;
+        }
+        self.mutate_durable(cx, |ws, _| ws.pages.pull_requests.state = state);
+        self.prune_pr_list();
+        PrList::wanted(cx);
+        cx.notify();
+    }
+
     /// Show `filter`'s pull requests, now and whenever the page reopens.
     /// Every tab's answers are already held, so switching asks nothing.
     pub(in crate::workspace) fn set_pr_page_filter(
@@ -173,7 +223,12 @@ impl Workspace {
         if self.pages.pull_requests.filter == filter {
             return;
         }
-        self.pages.pull_requests.filter = filter;
+        self.mutate_durable(cx, |ws, _| ws.pages.pull_requests.filter = filter);
+        self.prune_pr_list();
+        // A GitHub search is sent for the shown tab alone.
+        if !self.pr_page_refine().is_empty() {
+            PrList::wanted(cx);
+        }
         cx.notify();
     }
 
@@ -222,13 +277,36 @@ impl Workspace {
         self.pages.pull_requests.snapshot = shows_list.then(|| {
             let repos = self.github_repos();
             let search = self.pages.pull_requests.search.clone();
-            let query = search.read(cx).value().trim().to_owned();
+            let typed = !search.read(cx).value().trim().is_empty();
             let mut list = self.pr_page_view(&repos, &lanes, cx);
-            let (visible, total) = search::narrow(&mut list, &query);
+            let (query, facets, problem) = match self.pr_page_search(cx) {
+                remote_search::PageSearch::Loaded(query) => (query, Vec::new(), None),
+                remote_search::PageSearch::GitHub(refine) => {
+                    (refine.text(), refine.facets.clone(), None)
+                }
+                remote_search::PageSearch::Blocked(problem) => {
+                    // Nothing was asked for it: neither the bare tab's rows,
+                    // its later pages, nor its age and sources stand for it.
+                    list.body = list::PageBody::Groups(Vec::new());
+                    list.more = list::More::None;
+                    list.found = None;
+                    list.refreshed = None;
+                    list.sources = progress::Sources::default();
+                    let committed = &self.pages.pull_requests.committed;
+                    (committed.text(), committed.facets.clone(), Some(problem))
+                }
+            };
+            let (visible, total) = match self.pr_search_mode() {
+                remote_search::SearchMode::Loaded => search::narrow(&mut list, &query),
+                remote_search::SearchMode::GitHub => {
+                    let shown = navigation::rows(&list).count();
+                    (shown, shown)
+                }
+            };
             let counts = if repos.is_empty() && list.activity.busy() {
                 std::array::from_fn(|_| crate::surface::strings::pull_requests::count_pending())
             } else {
-                counts::labels(self.pr_list(), &repos, |host| {
+                counts::labels(self.pr_list(), self.pr_page_state(), &repos, |host| {
                     PrPoller::availability(host, cx)
                 })
             };
@@ -244,6 +322,10 @@ impl Workspace {
                 focus: self.pages.pull_requests.focus.clone(),
                 cursor: self.pages.pull_requests.cursor.clone(),
                 row_bounds: self.pages.pull_requests.row_bounds.clone(),
+                mode: self.pr_search_mode(),
+                typed,
+                facets,
+                problem,
             }
         });
     }
@@ -282,11 +364,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Silently: the search is applied here, at once, not after a pause.
         self.pages
             .pull_requests
             .search
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        cx.notify();
+            .update(cx, |input, cx| input.set_value_silently("", window, cx));
+        self.commit_pr_search(cx);
     }
 
     pub(in crate::workspace) fn clear_pr_filters(
@@ -321,8 +404,23 @@ impl Workspace {
                             || matches!(state.git.push_target_refresh, RefreshSlot::Running { .. })
                     })
             }),
-            refreshing: PrList::is_refreshing(self.pr_page_filter(), repos, cx),
+            refreshing: PrList::is_refreshing(
+                self.pr_page_filter(),
+                self.pr_page_state(),
+                self.pr_page_refine(),
+                repos,
+                cx,
+            ),
+            loading_more: PrList::is_loading_more(
+                self.pr_page_filter(),
+                self.pr_page_state(),
+                self.pr_page_refine(),
+                repos,
+                cx,
+            ),
             filter: self.pr_page_filter(),
+            state: self.pr_page_state(),
+            refine: self.pr_page_refine(),
             repos,
             list: self.pr_list(),
             lanes,

@@ -1,3 +1,4 @@
+use daruda_github::PrSearchState;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
@@ -50,6 +51,8 @@ fn answer(repo: &RepoId, numbers: &[u64], truncated: bool) -> PrListAnswer {
         }),
         covered: Arc::new([repo.clone()].into()),
         at: Instant::now(),
+        more: false,
+        matches: 0,
     }
 }
 
@@ -57,7 +60,17 @@ fn shown(hosts: Vec<(&str, HostList)>) -> PrListCache {
     PrListCache::shown_with(
         hosts
             .into_iter()
-            .map(|(host, list)| ((PrFilter::Mine, host.to_owned()), list))
+            .map(|(host, list)| {
+                (
+                    (
+                        PrFilter::Mine,
+                        PrSearchState::Open,
+                        crate::github::Refine::default(),
+                        host.to_owned(),
+                    ),
+                    list,
+                )
+            })
             .collect::<HashMap<_, _>>(),
     )
 }
@@ -178,7 +191,11 @@ fn a_tab_counts_what_is_known_and_marks_what_is_missing() {
         ),
     ];
     for (label, list, repos, availability, expected) in cases {
-        assert_eq!(labels(&list, repos, availability)[0], expected, "{label}");
+        assert_eq!(
+            labels(&list, PrSearchState::Open, repos, availability)[0],
+            expected,
+            "{label}"
+        );
     }
 }
 
@@ -187,11 +204,15 @@ fn each_tab_reads_its_own_filter() {
     let repos: BTreeSet<RepoId> = [gh_repo()].into();
     let list = shown(vec![(GITHUB, HostList::Failed { last: None })]);
     assert_eq!(
-        labels(&list, &repos, |_| GhAvailability::Ready),
+        labels(&list, PrSearchState::Open, &repos, |_| {
+            GhAvailability::Ready
+        }),
         ["Unavailable", "…", "…"].map(str::to_owned),
     );
     assert_eq!(
-        labels(&PrListCache::default(), &repos, |_| GhAvailability::Unknown),
+        labels(&PrListCache::default(), PrSearchState::Open, &repos, |_| {
+            GhAvailability::Unknown
+        }),
         ["…", "…", "…"].map(str::to_owned),
         "a hidden page has nothing yet"
     );

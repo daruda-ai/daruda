@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use daruda_github::fake::{FakeGh, GhCall, GhFailure, GhOp};
+use daruda_github::fake::{FakeGh, GhFailure, GhOp};
 use daruda_github::{CheckRollup, PrFilter, PrListItem, PrState, PrSummary, RepoId};
 use daruda_store::project::LaneRef;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
@@ -78,7 +78,7 @@ pub(in crate::workspace) fn linked_window(
     (f, gh, id)
 }
 
-pub(super) fn show_page(f: &GitFixture, cx: &mut TestAppContext) {
+pub(in crate::workspace) fn show_page(f: &GitFixture, cx: &mut TestAppContext) {
     f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
     cx.run_until_parked();
 }
@@ -86,10 +86,7 @@ pub(super) fn show_page(f: &GitFixture, cx: &mut TestAppContext) {
 fn searches(gh: &FakeGh) -> Vec<PrFilter> {
     gh.calls()
         .into_iter()
-        .filter_map(|call| match call {
-            GhCall::SearchPrs { filter, .. } => Some(filter),
-            _ => None,
-        })
+        .filter_map(|call| crate::test_support::list_search(&call).map(|(filter, _)| filter))
         .collect()
 }
 
@@ -106,7 +103,10 @@ fn linked(slot: &LaneSlot) -> Option<LaneRef> {
     }
 }
 
-pub(super) fn rows(f: &GitFixture, cx: &mut TestAppContext) -> Vec<(String, Option<LaneRef>)> {
+pub(in crate::workspace) fn rows(
+    f: &GitFixture,
+    cx: &mut TestAppContext,
+) -> Vec<(String, Option<LaneRef>)> {
     let list = f.ws.read_with(cx, |ws, cx| ws.pr_page_list(cx));
     let PageBody::Groups(groups) = list.body else {
         panic!("expected groups, got {:?}", list.body);
@@ -292,7 +292,7 @@ fn a_failed_search_keeps_its_rows_and_try_again_searches_now(cx: &mut TestAppCon
     let (f, gh, id) = linked_window(cx);
     show_page(&f, cx);
     gh.fail(
-        GhOp::SearchPrs,
+        GhOp::SearchPrsPage,
         GhFailure::Exit {
             code: Some(1),
             stderr: "HTTP 502".into(),
@@ -307,7 +307,7 @@ fn a_failed_search_keeps_its_rows_and_try_again_searches_now(cx: &mut TestAppCon
     );
     assert_eq!(trouble(&f, cx), Some(Trouble::SearchFailed));
 
-    gh.clear_failure(GhOp::SearchPrs);
+    gh.clear_failure(GhOp::SearchPrsPage);
     gh.set_pr_list(PrFilter::Mine, vec![item(7)]);
     let searched = search_totals(&gh);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
@@ -333,7 +333,7 @@ fn a_failed_search_keeps_its_rows_and_try_again_searches_now(cx: &mut TestAppCon
 fn reopening_after_a_failed_search_keeps_manual_refresh_available(cx: &mut TestAppContext) {
     let (f, gh, _) = linked_window(cx);
     gh.fail(
-        GhOp::SearchPrs,
+        GhOp::SearchPrsPage,
         GhFailure::Exit {
             code: Some(1),
             stderr: "HTTP 502".into(),
@@ -346,7 +346,7 @@ fn reopening_after_a_failed_search_keeps_manual_refresh_available(cx: &mut TestA
 
     f.ws.update(cx, |ws, cx| ws.close_page(cx));
     tick(cx);
-    gh.clear_failure(GhOp::SearchPrs);
+    gh.clear_failure(GhOp::SearchPrsPage);
     show_page(&f, cx);
     assert_eq!(
         search_totals(&gh),

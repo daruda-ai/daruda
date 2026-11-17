@@ -64,9 +64,32 @@ through `GitHost`.
   repository per round, however many windows show its lanes. Its timing,
   backoff and auth-recheck rules are GPUI-free in `app/src/github/schedule.rs`.
 - The pull request list (`app/src/github/list.rs`) runs from the same tick:
-  one search per (host, filter) per round while a window's page is shown.
-  All three filters supply tab counts through that same cache and cadence;
-  selecting a tab reuses its answer. Only hosts the poller's state lets
-  through are asked. Host-wide failures feed that same host state;
-  timing is GPUI-free in
+  one paged search (`search_prs_page`) per (host, audience, state) per round
+  while a window's page is shown, each 20-repository chunk with its own
+  cursor. All three audiences supply tab counts through that same cache and
+  cadence; selecting a tab reuses its answer. A later page is read only on
+  request and appended without repeats; while one is shown the cadence
+  leaves the list alone, and a refresh reads it from the first page. Each
+  list has an epoch: a page that answers after its list was dropped or
+  replaced is discarded. Lists are dropped when the host's `gh` account
+  changes. A GitHub search (`app/src/github/refine.rs`: words and typed
+  `key:value` facets read from the page's field once typing pauses) is its
+  own key, sent for the shown tab alone; tab counts stay on the bare tabs,
+  and a typed key nobody shows is let go. A facet that would repeat the
+  tab's own identity qualifier is not sent. Only hosts the poller's state
+  lets through are asked; host-wide
+  failures feed that same host state. Timing is GPUI-free in
   `app/src/github/list_schedule.rs`.
+- `search_prs_page` is the history/search boundary the page lists through;
+  `search_prs` remains for compatibility. Each immutable request
+  covers one host and up to 20 canonical repositories, with 1–50 results.
+  Its continuation retains criteria, chunk and cursor history; a new refresh
+  starts a new request. The caller owns account/generation and refresh epochs,
+  cross-page deduplication, chunk failures and cache lifetime.
+  `PrSearchContinuation` distinguishes more pages, exhausted coverage, the
+  1,000-result search cap and detected omissions. Counts describe matches
+  visible to the account, never proof that an inaccessible resource is absent.
+  Criteria use typed qualifiers and literal words/phrases (AND); quotes,
+  backslashes and controls are rejected rather than interpreted as raw syntax.
+  `commit_status` is GitHub's search qualifier, not `checks::summarize`.
+  Unlike the active-work legacy search, history includes archived repositories.

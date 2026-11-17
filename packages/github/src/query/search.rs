@@ -4,10 +4,8 @@
 use serde::Deserialize;
 
 use super::{ApiError, Author, PrNode, api_messages, parse_error, pr_fragment};
+use crate::search::SEARCH_PAGE_MAX;
 use crate::{GhError, PrFilter, PrListItem, PrSearch, RepoId};
-
-/// Pull requests one search answers; more are left out of the list.
-const SEARCH_RESULTS: u32 = 50;
 
 /// The search text for open pull requests of `repos` matching `filter`,
 /// most recently updated first so a truncated answer keeps the live ones.
@@ -27,9 +25,13 @@ pub(crate) fn search_string(repos: &[RepoId], filter: PrFilter) -> String {
 
 /// The search for open pull requests, bound to `$q` ([`search_string`]).
 pub(crate) fn search_prs_query() -> String {
+    search_query(&format!("first: {SEARCH_PAGE_MAX}"), "", "")
+}
+
+pub(super) fn search_query(arguments: &str, declarations: &str, fields: &str) -> String {
     format!(
-        "query($q: String!) {{ search(query: $q, type: ISSUE, first: {SEARCH_RESULTS}) {{ \
-         issueCount nodes {{ ... on PullRequest {{ ...pr repository {{ nameWithOwner }} \
+        "query($q: String!{declarations}) {{ search(query: $q, type: ISSUE, {arguments}) {{ \
+         issueCount {fields} nodes {{ ... on PullRequest {{ ...pr repository {{ nameWithOwner }} \
          headRepositoryOwner {{ login }} author {{ login }} baseRefName \
          comments {{ totalCount }} }} }} }} }} {}",
         pr_fragment()
@@ -50,27 +52,7 @@ pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<PrSearch, GhErr
         .nodes
         .into_iter()
         .filter(|node| !is_not_a_pull_request(node))
-        .map(|node| {
-            let node: SearchNode = serde_json::from_value(node).map_err(parse_error)?;
-            let (owner, name) =
-                node.repository
-                    .name_with_owner
-                    .split_once('/')
-                    .ok_or_else(|| {
-                        GhError::Parse(format!(
-                            "repository {} is not owner/name",
-                            node.repository.name_with_owner
-                        ))
-                    })?;
-            Ok(PrListItem {
-                repo: RepoId::new(host, owner, name),
-                head_owner: node.head_repository_owner.map(|a| a.login),
-                author: node.author.map(|a| a.login),
-                base_branch: node.base_ref_name,
-                comments: node.comments.total_count,
-                pr: node.pr.into_summary()?,
-            })
-        })
+        .map(|node| parse_search_node(node, host))
         .collect::<Result<Vec<_>, GhError>>()?;
     Ok(PrSearch { items, truncated })
 }
@@ -78,12 +60,37 @@ pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<PrSearch, GhErr
 /// A search node that carries no pull request: `null`, or the empty object
 /// `... on PullRequest` leaves for a match of another type. One such entry
 /// must not fail the whole list; a node with fields still has to parse.
-fn is_not_a_pull_request(node: &serde_json::Value) -> bool {
+pub(super) fn is_not_a_pull_request(node: &serde_json::Value) -> bool {
     match node {
         serde_json::Value::Null => true,
         serde_json::Value::Object(fields) => fields.is_empty(),
         _ => false,
     }
+}
+
+pub(super) fn parse_search_node(
+    node: serde_json::Value,
+    host: &str,
+) -> Result<PrListItem, GhError> {
+    let node: SearchNode = serde_json::from_value(node).map_err(parse_error)?;
+    let (owner, name) = node
+        .repository
+        .name_with_owner
+        .split_once('/')
+        .ok_or_else(|| {
+            GhError::Parse(format!(
+                "repository {} is not owner/name",
+                node.repository.name_with_owner
+            ))
+        })?;
+    Ok(PrListItem {
+        repo: RepoId::new(host, owner, name),
+        head_owner: node.head_repository_owner.map(|a| a.login),
+        author: node.author.map(|a| a.login),
+        base_branch: node.base_ref_name,
+        comments: node.comments.total_count,
+        pr: node.pr.into_summary()?,
+    })
 }
 
 /// Order list items most recently updated first. `updated_at` is RFC 3339

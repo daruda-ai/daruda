@@ -229,10 +229,16 @@ impl PrPoller {
                 None
             }
         };
+        let before = Self::account(host, cx);
         let answered = cx
             .global_mut::<Self>()
             .schedule
             .finish_auth(host, auth, enabled, now);
+        // Audiences such as "Mine" and private repositories answer per
+        // account: a list read as one account is not shown as another's.
+        if Self::account(host, cx) != before {
+            PrList::host_blocked(host, cx);
+        }
         if let Some(availability) = answered {
             Self::set_host_availability(host, availability, cx);
             cx.defer(Self::tick);

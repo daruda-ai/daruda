@@ -217,7 +217,7 @@ pub enum PrFilter {
     AllOpen,
 }
 
-/// One open pull request in a list search, with the repository it is in.
+/// One pull request in a list search, with the repository it is in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrListItem {
     pub repo: RepoId,

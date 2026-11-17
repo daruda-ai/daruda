@@ -42,7 +42,11 @@ pub(in crate::workspace) fn header(
                 .px(px(theme::DOCK_PAGE_PAD))
                 .pb(px(theme::PAD_LG))
                 .gap(px(theme::GAP_LG))
-                .child(super::controls::filters(snap))
+                .child(super::controls::filters(
+                    snap,
+                    rows == RowLayout::Compact,
+                    cx,
+                ))
                 .child(super::controls::search(snap, cx))
                 .child(super::controls::results(snap, cx)),
         )
@@ -112,7 +116,10 @@ fn body(draw: &Draw<'_>, cx: &App) -> AnyElement {
         PageBody::NoRepos => return list_page::empty(s::empty_no_repos(), cx).into_any_element(),
         PageBody::Groups(groups) => groups,
     };
-    let groups = groups.iter().map(|group| render_group(group, draw, cx));
+    let groups = groups
+        .iter()
+        .map(|group| render_group(group, draw, cx))
+        .chain(load_more(draw.snap));
     match draw.rows {
         // The columns fit by construction; a pixel lost to rounding is
         // clipped rather than scrolled, keeping the headings aligned.
@@ -200,6 +207,43 @@ fn render_group(group: &PrGroup, draw: &Draw<'_>, cx: &App) -> AnyElement {
         .child(heading)
         .children(body)
         .into_any_element()
+}
+
+/// Below the rows while some host's list has a later page: reads it, and
+/// shows that it is reading.
+fn load_more(snap: &PrPageSnapshot) -> Option<AnyElement> {
+    let loading = match snap.list.more {
+        list::More::None => return None,
+        list::More::Offered => false,
+        list::More::Loading => true,
+    };
+    let workspace = snap.workspace.clone();
+    Some(
+        div()
+            .flex()
+            .justify_center()
+            .px(px(theme::PAD_LG))
+            .py(px(theme::PAD_LG))
+            .child(
+                button_compact(
+                    "pr-load-more",
+                    if loading {
+                        s::loading_more()
+                    } else {
+                        s::load_more()
+                    },
+                )
+                .debug_selector(|| "pr-load-more".into())
+                .loading(loading)
+                .disabled(loading)
+                .on_click(move |_, _, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.load_more_prs(cx));
+                    }
+                }),
+            )
+            .into_any_element(),
+    )
 }
 
 /// A readable status line inside a group, aligned with the rows' text.
@@ -572,6 +616,12 @@ fn title(row: &PrRow, stale: bool, cell: Div, cx: &App) -> AnyElement {
                         .child(row.title.clone()),
                 )
                 .when(row.draft, |line| line.child(chip(git_s::pr_state_draft())))
+                .children(row.ended.map(|ended| {
+                    chip(match ended {
+                        list::Ended::Merged => git_s::pr_state_merged(),
+                        list::Ended::Closed => git_s::pr_state_closed(),
+                    })
+                }))
                 .when(row.fork, |line| line.child(chip(s::fork()))),
         )
         .child(

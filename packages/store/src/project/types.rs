@@ -200,16 +200,45 @@ pub struct WorkspaceState {
     pub project_tabs: BTreeMap<ProjectUuid, Vec<PaneLayout>>,
 }
 
-/// The Pull requests page's layout choices for one window. Deliberate
-/// choices only: what the page shows and its scroll are not kept.
+/// The Pull requests page's layout and list choices for one window.
+/// Deliberate choices only: the typed search, what the page shows and its
+/// scroll are not kept.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PullRequestsLayout {
+    /// The tab shown; `None` for the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<PullRequestsAudience>,
+    /// Which pull requests the tabs list; `None` for open ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<PullRequestsState>,
+    /// Whether the search asks GitHub rather than narrowing loaded rows.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub search_github: bool,
     /// The list column's width beside a detail; `None` for the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub list_width: Option<f32>,
     /// The detail is shown alone even where the list fits beside it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub list_hidden: bool,
+}
+
+/// Serializable mirror of the Pull requests page's tabs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestsAudience {
+    Mine,
+    ReviewRequested,
+    All,
+}
+
+/// Serializable mirror of the states the Pull requests page lists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestsState {
+    Open,
+    Merged,
+    Closed,
+    All,
 }
 
 /// ACP titles retained after their chat panes close.

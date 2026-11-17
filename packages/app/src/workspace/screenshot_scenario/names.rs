@@ -38,6 +38,8 @@ const NAME_CREATE_PR_MODAL: &str = "create-pr-modal";
 const NAME_PULL_REQUESTS_LIST: &str = "pull-requests-list";
 /// The same page while github.com waits out a rate limit GitHub reported.
 const NAME_PULL_REQUESTS_RATE_LIMITED: &str = "pull-requests-rate-limited";
+/// The same page searching GitHub with words and facets typed.
+const NAME_PULL_REQUESTS_GITHUB_SEARCH: &str = "pull-requests-github-search";
 /// A pull request's detail, a failing check's log open.
 const NAME_PULL_REQUESTS_DETAIL: &str = "pull-requests-detail";
 /// A mergeable pull request's detail, its merge confirmation up.
@@ -307,6 +309,7 @@ impl ScreenshotScenario {
             NAME_CREATE_PR_MODAL => Some(Self::CreatePrModal),
             NAME_PULL_REQUESTS_LIST => Some(Self::PullRequestsList),
             NAME_PULL_REQUESTS_RATE_LIMITED => Some(Self::PullRequestsRateLimited),
+            NAME_PULL_REQUESTS_GITHUB_SEARCH => Some(Self::PullRequestsGithubSearch),
             NAME_PULL_REQUESTS_DETAIL => Some(Self::PullRequestsDetail),
             NAME_PULL_REQUESTS_MERGE => Some(Self::PullRequestsMerge),
             NAME_LEFT_DOCK_WORKTREES => Some(Self::LeftDockWorktrees),

@@ -1,3 +1,4 @@
+use daruda_github::PrSearchState;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -132,7 +133,17 @@ fn shape(list: &PrPageView) -> Shape {
 fn shown(host_list: Option<HostList>) -> PrListCache {
     PrListCache::shown_with(
         host_list
-            .map(|list| HashMap::from([((PrFilter::Mine, HOST.to_owned()), list)]))
+            .map(|list| {
+                HashMap::from([(
+                    (
+                        PrFilter::Mine,
+                        PrSearchState::Open,
+                        crate::github::Refine::default(),
+                        HOST.to_owned(),
+                    ),
+                    list,
+                )])
+            })
             .unwrap_or_default(),
     )
 }
@@ -146,6 +157,8 @@ fn answer_at(items: Vec<PrListItem>, covered: &[RepoId], at: Instant) -> PrListA
         }),
         covered: Arc::new(covered.iter().cloned().collect()),
         at,
+        more: false,
+        matches: 0,
     }
 }
 
@@ -159,7 +172,10 @@ fn page_for(repo: RepoId, availability: GhAvailability, state: &PrListCache) -> 
         enabled: true,
         discovering: false,
         refreshing: false,
+        loading_more: false,
         filter: PrFilter::Mine,
+        state: PrSearchState::Open,
+        refine: &crate::github::NO_REFINE,
         repos: &repos,
         list: state,
         lanes: &[],
@@ -336,12 +352,17 @@ fn a_group_lists_only_its_own_repository() {
         }),
         covered: Arc::new(repos.clone()),
         at: Instant::now(),
+        more: false,
+        matches: 0,
     })));
     let inputs = PageInputs {
         enabled: true,
         discovering: false,
         refreshing: false,
+        loading_more: false,
         filter: PrFilter::Mine,
+        state: PrSearchState::Open,
+        refine: &crate::github::NO_REFINE,
         repos: &repos,
         list: &state,
         lanes: &[],
@@ -414,7 +435,15 @@ fn the_header_says_how_old_the_newest_answer_is() {
                 .into_iter()
                 .map(|(host, at)| {
                     let list = HostList::Ready(answer_at(Vec::new(), &[], at));
-                    ((PrFilter::Mine, host.to_owned()), list)
+                    (
+                        (
+                            PrFilter::Mine,
+                            PrSearchState::Open,
+                            crate::github::Refine::default(),
+                            host.to_owned(),
+                        ),
+                        list,
+                    )
                 })
                 .collect(),
         );
@@ -422,7 +451,10 @@ fn the_header_says_how_old_the_newest_answer_is() {
             enabled: true,
             discovering: false,
             refreshing: false,
+            loading_more: false,
             filter: PrFilter::Mine,
+            state: PrSearchState::Open,
+            refine: &crate::github::NO_REFINE,
             repos: &repos,
             list: &state,
             lanes: &[],
@@ -449,7 +481,10 @@ fn a_page_with_nothing_to_search_says_why() {
             enabled,
             discovering: false,
             refreshing: false,
+            loading_more: false,
             filter: PrFilter::Mine,
+            state: PrSearchState::Open,
+            refine: &crate::github::NO_REFINE,
             repos,
             list: &state,
             lanes: &[],

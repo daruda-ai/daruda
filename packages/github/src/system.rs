@@ -9,12 +9,15 @@ use daruda_core::process::{CaptureError, CaptureLimits, Captured, command_on_pat
 use crate::availability::{AuthStatus, GhAuth, parse_active_account};
 use crate::backend::Gh;
 use crate::query::{
-    REVIEW_THREADS_QUERY, RepoPrs, newest_first, only_numbers_not_found, parse_graphql_reset,
-    parse_pr_detail, parse_prs_for_branches, parse_review_threads, parse_search_prs,
-    pr_detail_query, prs_for_branches_query, search_prs_query, search_string,
+    REVIEW_THREADS_QUERY, RepoPrs, newest_first, only_numbers_not_found, paged_search_args,
+    parse_graphql_reset, parse_pr_detail, parse_prs_for_branches, parse_review_threads,
+    parse_search_page, parse_search_prs, pr_detail_query, prs_for_branches_query, search_prs_query,
+    search_string,
 };
+use crate::search::SEARCH_REPOS_MAX;
 use crate::{
-    ActionsJob, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrSearch, RepoId, ReviewThreads,
+    ActionsJob, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrSearch, PrSearchPage,
+    PrSearchRequest, RepoId, ReviewThreads,
 };
 
 const LIMITS: CaptureLimits = CaptureLimits {
@@ -25,8 +28,6 @@ const LIMITS: CaptureLimits = CaptureLimits {
 
 /// Branches, and separately numbers, per request; the query grows with each.
 const BRANCHES_PER_REQUEST: usize = 50;
-/// Repositories per search; GitHub caps the search text's length.
-const REPOS_PER_SEARCH: usize = 20;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemGh;
@@ -262,7 +263,7 @@ impl Gh for SystemGh {
     ) -> Result<PrSearch, GhError> {
         let repos = searched_repos(host, repos);
         let mut all = PrSearch::default();
-        for chunk in repos.chunks(REPOS_PER_SEARCH) {
+        for chunk in repos.chunks(SEARCH_REPOS_MAX) {
             let json = self.stdout([
                 "api".to_owned(),
                 "graphql".to_owned(),
@@ -279,6 +280,13 @@ impl Gh for SystemGh {
         }
         newest_first(&mut all.items);
         Ok(all)
+    }
+
+    fn search_prs_page(&self, request: &PrSearchRequest) -> Result<PrSearchPage, GhError> {
+        if request.repos().is_empty() {
+            return request.finish_page(Vec::new(), 0, 0, false, None);
+        }
+        parse_search_page(&self.stdout(paged_search_args(request)?)?, request)
     }
 
     fn failed_log(&self, repo: &RepoId, job: ActionsJob) -> Result<String, GhError> {

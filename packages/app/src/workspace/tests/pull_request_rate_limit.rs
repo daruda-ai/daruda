@@ -14,7 +14,7 @@ use crate::workspace::pages::pull_requests::list::Trouble;
 
 fn hit_the_limit(f: &GitFixture, gh: &FakeGh, cx: &mut TestAppContext) {
     gh.fail(
-        GhOp::SearchPrs,
+        GhOp::SearchPrsPage,
         GhFailure::Exit {
             code: Some(1),
             stderr: "gh: API rate limit exceeded for user ID 1. (HTTP 403)".into(),

@@ -1128,6 +1128,17 @@ pull_requests:
   choose_worktree_project: "Choose the project for this worktree"
   project_choice: "%{name} — %{path}"
   search_placeholder: "Search loaded pull requests…"
+  # Words, and facets written key:value, sent to GitHub for the shown tab.
+  search_placeholder_github: "Search GitHub: words, author:, label:, assignee:, reviewer:, review:, draft:, status:"
+  search_loaded: "Loaded"
+  search_github: "GitHub"
+  remove_facet: "Remove from the search"
+  # Loaded rows, of everything GitHub matched for the search.
+  result_count_github: "%{visible} of %{found} pull requests found on GitHub"
+  # GitHub's total is not known for this window's repositories alone.
+  result_count_github_loaded: "%{visible} pull requests loaded from GitHub"
+  search_needs_all_tab: "author: and reviewer: or team: need the All tab here; this tab already names who is searched for."
+  search_unsupported: "GitHub search here takes plain words: remove quotes and backslashes."
   result_count: "%{visible} of %{total} loaded pull requests"
   discovering: "Finding repositories…"
   waiting: "Waiting for pull requests…"
@@ -1144,7 +1155,12 @@ pull_requests:
   title: "Pull requests"
   filter_mine: "Mine"
   filter_review_requested: "Review requested"
-  filter_all_open: "All open"
+  filter_all: "All"
+  state_merged: "Merged"
+  state_closed: "Closed"
+  state_all: "All"
+  load_more: "Load more"
+  loading_more: "Loading more…"
   # A repository group's host and how many pull requests it lists.
   group_count: "%{host} · %{count}"
   # Second line of a row: the head and base branches, the author and when it last changed.
@@ -1171,7 +1187,7 @@ pull_requests:
   create_review_lane: "Review worktree"
   # Description of a worktree made to review a fork's pull request.
   review_lane_description: "Review of #%{number} from %{owner}:%{branch} — pushes do not reach the pull request"
-  empty_repo: "No open pull requests in this repository match this filter."
+  empty_repo: "No pull requests in this repository match this filter."
   # GitHub matched more than one search returns.
   truncated: "More pull requests than shown here."
   gh_missing: "Install the GitHub CLI (gh) to list this repository’s pull requests."

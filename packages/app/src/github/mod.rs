@@ -4,10 +4,13 @@
 mod list;
 mod list_schedule;
 mod poller;
+mod refine;
 mod schedule;
 
 pub(crate) use list::PrList;
+pub(crate) use list_schedule::audience;
 pub(crate) use poller::PrPoller;
+pub(crate) use refine::{Facet, NO_REFINE, Refine, RefineProblem};
 pub(crate) use schedule::is_unusable;
 
 use std::collections::BTreeSet;
@@ -16,7 +19,7 @@ use std::time::Instant;
 
 use daruda_github::RepoPrs;
 use daruda_github::availability::GhAvailability;
-use daruda_github::{PrFilter, PrSearch, PrSummary, RepoId};
+use daruda_github::{PrFilter, PrSearch, PrSearchState, PrSummary, RepoId};
 use gpui::App;
 
 /// `[github] enabled`: whether lanes look up their pull requests at all.
@@ -97,17 +100,24 @@ pub(crate) enum PrUpdate<'a> {
     Disabled,
 }
 
-/// One list search's answer, shared by every window showing its filter.
+/// One list search's answer, shared by every window showing its filter:
+/// its first page, and every later page read since.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PrListAnswer {
-    /// Every asked repository's pull requests, newest first.
+    /// Every asked repository's pull requests read so far, newest first;
+    /// `truncated` while GitHub matched more than it holds.
     pub search: Arc<PrSearch>,
     /// The repositories the search asked about: the union over the windows
     /// showing the filter then. A repository outside it has no answer yet,
     /// which is not the same as having no pull requests.
     pub covered: Arc<BTreeSet<RepoId>>,
-    /// When it arrived, on the executor's clock.
+    /// When its first page arrived, on the executor's clock.
     pub at: Instant,
+    /// A later page can be read.
+    pub more: bool,
+    /// How many pull requests GitHub matched across the covered
+    /// repositories, read or not, as its first pages said.
+    pub matches: u32,
 }
 
 impl PrListAnswer {
@@ -125,6 +135,8 @@ pub(crate) enum PrListUpdate<'a> {
     Answer {
         host: &'a str,
         filter: PrFilter,
+        state: PrSearchState,
+        refine: &'a Refine,
         answer: &'a PrListAnswer,
     },
     /// The process's last answer, for a window that has not seen it: one
@@ -132,11 +144,19 @@ pub(crate) enum PrListUpdate<'a> {
     Cached {
         host: &'a str,
         filter: PrFilter,
+        state: PrSearchState,
+        refine: &'a Refine,
         answer: &'a PrListAnswer,
     },
     /// The search failed; the last answer stays on show.
-    Failed { host: &'a str, filter: PrFilter },
-    /// `gh` on `host` is gone or logged out: drop what was read there.
+    Failed {
+        host: &'a str,
+        filter: PrFilter,
+        state: PrSearchState,
+        refine: &'a Refine,
+    },
+    /// What was read on `host` can no longer be shown: `gh` is gone or
+    /// logged out, or acts as another account now.
     HostBlocked { host: &'a str },
     /// The feature was switched off: forget every list.
     Disabled,

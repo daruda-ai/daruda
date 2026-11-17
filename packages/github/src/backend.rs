@@ -6,7 +6,8 @@
 use crate::availability::AuthStatus;
 use crate::query::RepoPrs;
 use crate::{
-    ActionsJob, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrSearch, RepoId, ReviewThreads,
+    ActionsJob, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrSearch, PrSearchPage,
+    PrSearchRequest, RepoId, ReviewThreads,
 };
 
 pub trait Gh: Send + Sync {
@@ -31,6 +32,9 @@ pub trait Gh: Send + Sync {
         repos: &[RepoId],
         filter: PrFilter,
     ) -> Result<PrSearch, GhError>;
+    /// One bounded provider-search page. Follow its scoped continuation to
+    /// read later pages; empty repository scope sends no request.
+    fn search_prs_page(&self, request: &PrSearchRequest) -> Result<PrSearchPage, GhError>;
     /// Open a pull request; answers its URL.
     fn create_pr(&self, repo: &RepoId, new: &NewPr) -> Result<String, GhError>;
     /// The log of the failed steps of one Actions job.

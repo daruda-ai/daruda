@@ -19,6 +19,7 @@ pub mod model;
 pub mod prompt;
 mod query;
 pub mod remote_parse;
+mod search;
 mod system;
 
 pub use actions::MergeBlock;
@@ -32,4 +33,8 @@ pub use model::{
     ReviewThreads, ReviewerState,
 };
 pub use query::RepoPrs;
+pub use search::{
+    PrAudience, PrCommitStatus, PrRequestedReviewer, PrReviewFilter, PrSearchContinuation,
+    PrSearchCriteria, PrSearchPage, PrSearchRequest, PrSearchState,
+};
 pub use system::SystemGh;

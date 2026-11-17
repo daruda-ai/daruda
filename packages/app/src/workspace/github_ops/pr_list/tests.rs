@@ -42,6 +42,8 @@ fn answer(items: Vec<PrListItem>, covered: &[&str], at: Instant) -> PrListAnswer
         }),
         covered: Arc::new(covered.iter().map(|name| repo(name)).collect()),
         at,
+        more: false,
+        matches: 0,
     }
 }
 
@@ -62,11 +64,12 @@ impl Viewed {
     }
 
     fn host(&self, host: &str) -> &HostList {
-        self.cache.host(self.filter, host)
+        self.cache.host(self.filter, PrSearchState::Open, host)
     }
 
     fn answered_at(&self, host: &str) -> Option<Instant> {
-        self.cache.answered_at(self.filter, host)
+        self.cache
+            .answered_at(self.filter, PrSearchState::Open, &NO_REFINE, host)
     }
 }
 
@@ -74,7 +77,15 @@ fn shown(filter: PrFilter, host: Option<HostList>) -> Viewed {
     let mut cache = PrListCache::default();
     cache.show(idle);
     if let (Some(shown), Some(list)) = (&mut cache.shown, host) {
-        shown.hosts.insert((filter, HOST.to_owned()), list);
+        shown.hosts.insert(
+            (
+                filter,
+                PrSearchState::Open,
+                Refine::default(),
+                HOST.to_owned(),
+            ),
+            list,
+        );
     }
     Viewed { cache, filter }
 }
@@ -97,16 +108,22 @@ fn updates_change_only_the_shown_filter() {
     let fresh = PrListUpdate::Answer {
         host: HOST,
         filter: PrFilter::Mine,
+        state: PrSearchState::Open,
+        refine: &NO_REFINE,
         answer: &both,
     };
     let cached = PrListUpdate::Cached {
         host: HOST,
         filter: PrFilter::Mine,
+        state: PrSearchState::Open,
+        refine: &NO_REFINE,
         answer: &both,
     };
     let failed = PrListUpdate::Failed {
         host: HOST,
         filter: PrFilter::Mine,
+        state: PrSearchState::Open,
+        refine: &NO_REFINE,
     };
     let cases: Vec<Row> = vec![
         (
@@ -122,6 +139,8 @@ fn updates_change_only_the_shown_filter() {
             PrListUpdate::Answer {
                 host: HOST,
                 filter: PrFilter::Mine,
+                state: PrSearchState::Open,
+                refine: &NO_REFINE,
                 answer: &again,
             },
             HostList::Ready(again.clone()),
@@ -185,6 +204,8 @@ fn updates_change_only_the_shown_filter() {
             PrListUpdate::Cached {
                 host: HOST,
                 filter: PrFilter::Mine,
+                state: PrSearchState::Open,
+                refine: &NO_REFINE,
                 answer: &old,
             },
             HostList::Ready(both.clone()),
@@ -276,6 +297,8 @@ fn each_hosts_answer_time_follows_its_answers() {
     let at = |answer| PrListUpdate::Answer {
         host: HOST,
         filter: PrFilter::Mine,
+        state: PrSearchState::Open,
+        refine: &NO_REFINE,
         answer,
     };
     let mut state = shown(PrFilter::Mine, None);
@@ -289,6 +312,8 @@ fn each_hosts_answer_time_follows_its_answers() {
     let failed = PrListUpdate::Failed {
         host: HOST,
         filter: PrFilter::Mine,
+        state: PrSearchState::Open,
+        refine: &NO_REFINE,
     };
     state.apply(failed);
     assert_eq!(state.answered_at(HOST), Some(later), "a failure keeps it");
@@ -307,21 +332,26 @@ fn show_and_hide_report_changes() {
     state.apply(PrListUpdate::Answer {
         host: HOST,
         filter: PrFilter::Mine,
+        state: PrSearchState::Open,
+        refine: &NO_REFINE,
         answer: &answer(vec![item("r", 1)], &["r"], Instant::now()),
     });
     assert_eq!(
-        state.host(PrFilter::AllOpen, HOST),
+        state.host(PrFilter::AllOpen, PrSearchState::Open, HOST),
         &HostList::Loading,
         "each tab holds its own answer"
     );
     assert!(matches!(
-        state.host(PrFilter::Mine, HOST),
+        state.host(PrFilter::Mine, PrSearchState::Open, HOST),
         HostList::Ready(_)
     ));
     assert!(state.hide());
     assert!(!state.hide(), "already hidden");
     assert!(!state.is_shown());
-    assert_eq!(state.host(PrFilter::Mine, HOST), &HostList::Loading);
+    assert_eq!(
+        state.host(PrFilter::Mine, PrSearchState::Open, HOST),
+        &HostList::Loading
+    );
 }
 
 #[gpui::test]

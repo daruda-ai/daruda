@@ -125,6 +125,7 @@ pub(crate) enum ScreenshotScenario {
     },
     PullRequestsList,
     PullRequestsRateLimited,
+    PullRequestsGithubSearch,
     PullRequestsDetail,
     PullRequestsMerge,
     /// Open the command palette (`CommandPaletteState::open`).
@@ -885,6 +886,17 @@ pub(crate) fn drive(
                 // As after arrowing to the active worktree's row.
                 ws.select_pr_row((row.repo, row.pr.number));
                 ws.focus_shown_page(window, cx);
+            });
+        }
+        ScreenshotScenario::PullRequestsGithubSearch => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_left_dock_for_shot(false, true, false, window, cx);
+                ws.seed_pr_page_for_shot(cx);
+                ws.seed_pr_github_search_for_shot(
+                    "sidebar label:ui review:changes_requested",
+                    window,
+                    cx,
+                );
             });
         }
         ScreenshotScenario::PullRequestsRateLimited => {
