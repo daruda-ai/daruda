@@ -185,6 +185,7 @@ impl Workspace {
             task_detail: self.task_detail_target(cx),
             flow_detail: self.flow_detail_target(cx),
             window_open_policy: self.window_open_policy,
+            pull_requests: self.pages.pull_requests.layout_record(),
             next_group_id: self.next_group_id,
             project_tabs,
         };

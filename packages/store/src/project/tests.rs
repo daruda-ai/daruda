@@ -50,6 +50,7 @@ pub(super) mod new_schema_fixtures {
             task_detail: None,
             flow_detail: None,
             window_open_policy: Default::default(),
+            pull_requests: Default::default(),
             next_group_id: Default::default(),
             project_tabs: BTreeMap::new(),
         }

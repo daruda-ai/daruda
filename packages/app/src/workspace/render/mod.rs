@@ -114,10 +114,23 @@ impl Workspace {
         // screen re-registers it as displayed, and every notify it sends
         // becomes a full workspace render thrown away. The dock snapshots are
         // re-staged by the render that `close_settings` notifies.
+        if self.settings_view().is_none()
+            && self.active_page() == Some(super::pages::Page::PullRequests)
+        {
+            let content = self.page_content_width(window, cx);
+            self.pages.pull_requests.measure(content);
+        }
         let body = match self.settings_view() {
             Some(view) => FrameBody::Settings(view.clone()),
             None => FrameBody::Workspace(self.stage_docks(cx)),
         };
+        // SAFETY-style exception to view purity: only scroll geometry moves.
+        // A next-frame callback would run before the next frame draws, with
+        // this frame's rows not yet painted; a deferral runs when the update
+        // that draws this frame ends, after paint recorded the row bounds.
+        if self.pages.pull_requests.take_reveal_pending() {
+            cx.defer_in(window, |ws, _, cx| ws.reveal_pr_cursor(cx));
+        }
 
         self.reconcile_session_chooser(window, cx);
         let has_project_config = self.project_layer_overrides();

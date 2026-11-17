@@ -861,6 +861,7 @@ fn test_restore_inaccessible_active_lane_leaves_no_tab(cx: &mut TestAppContext) 
             task_detail: None,
             flow_detail: None,
             window_open_policy: WindowOpenPolicy::default(),
+            pull_requests: Default::default(),
             next_group_id: 0,
             project_tabs: BTreeMap::new(),
         };
@@ -938,6 +939,7 @@ fn test_restore_state_clamps_stale_active_lane_id(cx: &mut TestAppContext) {
             task_detail: None,
             flow_detail: None,
             window_open_policy: WindowOpenPolicy::default(),
+            pull_requests: Default::default(),
             next_group_id: 0,
             project_tabs: BTreeMap::new(),
         };

@@ -178,6 +178,10 @@ pub struct WorkspaceState {
     #[serde(default)]
     pub flow_detail: Option<FlowDetailTarget>,
     pub window_open_policy: WindowOpenPolicy,
+    /// Absent in files written before the Pull requests page could show its
+    /// list beside a detail.
+    #[serde(default)]
+    pub pull_requests: PullRequestsLayout,
 
     #[serde(default)]
     pub next_group_id: GroupId,
@@ -194,6 +198,18 @@ pub struct WorkspaceState {
     /// per-lane default, this field will become canonical and
     /// `SerializedLane::tabs` will become its initialization seed.
     pub project_tabs: BTreeMap<ProjectUuid, Vec<PaneLayout>>,
+}
+
+/// The Pull requests page's layout choices for one window. Deliberate
+/// choices only: what the page shows and its scroll are not kept.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PullRequestsLayout {
+    /// The list column's width beside a detail; `None` for the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_width: Option<f32>,
+    /// The detail is shown alone even where the list fits beside it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub list_hidden: bool,
 }
 
 /// ACP titles retained after their chat panes close.

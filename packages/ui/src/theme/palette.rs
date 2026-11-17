@@ -796,6 +796,14 @@ pub const TASK_EDIT_PROMPT_ROWS: usize = 10;
 pub const PR_DETAIL_SIDE_W: f32 = 240.0;
 /// Content budget before the PR summary wraps below the active tab.
 pub const PR_DETAIL_CONTENT_BASIS: f32 = 360.0;
+/// The Pull requests list column beside an open detail: compact rows.
+pub const PR_SPLIT_LIST_W: f32 = 360.0;
+/// The narrowest the list column can be dragged.
+pub const PR_SPLIT_LIST_MIN_W: f32 = 280.0;
+/// The narrowest detail the list sits beside; below it the detail is shown
+/// alone. Keeps the header actions on two rows at most and a check log
+/// readable; the summary column may still wrap below the tab content.
+pub const PR_SPLIT_DETAIL_MIN_W: f32 = 560.0;
 pub const TASK_EDIT_NOTES_ROWS: usize = 4;
 pub const LIST_ROW_RADIUS: f32 = RADIUS_SM;
 pub const LIST_ROW_PAD_X: f32 = PAD_STANDARD;

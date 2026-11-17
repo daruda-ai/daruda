@@ -40,3 +40,28 @@ fn incomplete_workspace_is_preserved_instead_of_partially_restored() {
         Some((workspace, vec![project]))
     );
 }
+
+#[test]
+fn the_pull_requests_layout_round_trips_and_older_files_read_as_default() {
+    use daruda_store::project::{PullRequestsLayout, WorkspaceState};
+
+    let project = sample_project();
+    let mut workspace = sample_workspace(project.uuid);
+    let json = serde_json::to_value(&workspace).unwrap();
+    assert!(
+        json["pull_requests"].as_object().unwrap().is_empty(),
+        "defaults write nothing: {json}"
+    );
+    let mut older = json.clone();
+    older.as_object_mut().unwrap().remove("pull_requests");
+    let read: WorkspaceState = serde_json::from_value(older).unwrap();
+    assert_eq!(read.pull_requests, PullRequestsLayout::default());
+
+    workspace.pull_requests = PullRequestsLayout {
+        list_width: Some(480.0),
+        list_hidden: true,
+    };
+    let text = serde_json::to_string(&workspace).unwrap();
+    let back: WorkspaceState = serde_json::from_str(&text).unwrap();
+    assert_eq!(back.pull_requests, workspace.pull_requests);
+}

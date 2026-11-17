@@ -22,10 +22,12 @@ pub(in crate::workspace) mod detail;
 mod lane;
 pub(in crate::workspace) mod list;
 pub(in crate::workspace) mod navigation;
+pub(in crate::workspace) mod page_layout;
 mod progress;
 pub(in crate::workspace) mod render;
 pub(in crate::workspace) mod row_layout;
 mod search;
+mod split;
 
 use std::collections::BTreeSet;
 
@@ -57,11 +59,46 @@ pub(in crate::workspace) struct PullRequestsPage {
     /// where the list comes back to. Kept while search hides it.
     cursor: Option<PrKey>,
     row_bounds: navigation::RowBounds,
+    /// The width between the docks at the last frame; measured before
+    /// staging.
+    content_width: f32,
+    /// The list column's width beside a detail, as last chosen; the window
+    /// may narrow what is drawn without changing it.
+    list_width: f32,
+    list_column: page_layout::ListColumn,
+    divider_drag: Option<split::DividerDrag>,
+    /// What the last staged frame drew; a change re-flows the rows.
+    staged_layout: Option<page_layout::PageLayout>,
+    /// Where the list stood in the layout last left, to come back to.
+    return_point: Option<ReturnPoint>,
+    /// The list was laid out anew this frame: once it is drawn, bring the
+    /// selected row back into view.
+    reveal_pending: bool,
 }
 
 impl PullRequestsPage {
     pub(in crate::workspace) fn focus_handle(&self) -> &FocusHandle {
         &self.focus
+    }
+
+    /// The width between the docks this frame, before the page is staged.
+    pub(in crate::workspace) fn measure(&mut self, content: f32) {
+        self.content_width = content;
+    }
+
+    /// Whether the window holds the list beside a detail.
+    pub(in crate::workspace) fn split_fits(&self) -> bool {
+        page_layout::PageLayout::split_fits(self.content_width)
+    }
+
+    /// Whether this frame laid the list out anew; asking clears it.
+    pub(in crate::workspace) fn take_reveal_pending(&mut self) -> bool {
+        std::mem::take(&mut self.reveal_pending)
+    }
+
+    /// The list column's width beside a detail this frame.
+    pub(in crate::workspace) fn list_width(&self) -> f32 {
+        page_layout::list_width(self.content_width, self.list_width)
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Workspace>) -> Self {
@@ -79,8 +116,23 @@ impl PullRequestsPage {
             focus: cx.focus_handle(),
             cursor: None,
             row_bounds: navigation::RowBounds::default(),
+            content_width: 0.0,
+            list_width: crate::ui::theme::PR_SPLIT_LIST_W,
+            list_column: page_layout::ListColumn::Beside,
+            divider_drag: None,
+            staged_layout: None,
+            return_point: None,
+            reveal_pending: false,
         }
     }
+}
+
+/// The list's scroll in a layout it left, with the row selected then.
+#[derive(Debug, Clone, PartialEq)]
+struct ReturnPoint {
+    layout: page_layout::PageLayout,
+    offset: gpui::Point<gpui::Pixels>,
+    cursor: Option<PrKey>,
 }
 
 /// Plain data for one frame of the page, so drawing it reads no entity.
@@ -125,16 +177,28 @@ impl Workspace {
         cx.notify();
     }
 
+    /// What the shown page draws: the list, its detail, or both.
+    pub(in crate::workspace) fn pr_page_layout(&self) -> page_layout::PageLayout {
+        let page = &self.pages.pull_requests;
+        page_layout::PageLayout::of(
+            page.detail.is_some() && self.shown_page_detail_id().is_some(),
+            page.split_fits() && page.list_column == page_layout::ListColumn::Beside,
+        )
+    }
+
     /// Stage what the page draws this frame: its detail when it holds one,
-    /// its list otherwise. Only while it is on screen: the rows cost a pass
-    /// over every lane and pull request, so the lanes and repositories are
-    /// read once here for everything the frame draws.
+    /// its list when no detail covers it. Only while it is on screen: the
+    /// rows cost a pass over every lane and pull request, so the lanes and
+    /// repositories are read once here for everything the frame draws.
     pub(in crate::workspace) fn stage_pr_page(&mut self, cx: &Context<Self>) {
         if self.active_page() != Some(Page::PullRequests) {
             self.pages.pull_requests.detail_snapshot = None;
             self.pages.pull_requests.snapshot = None;
+            self.pages.pull_requests.staged_layout = None;
             return;
         }
+        let layout = self.pr_page_layout();
+        self.follow_pr_layout(layout);
         let lanes = self.pr_lanes();
         let detail = self
             .pages
@@ -152,7 +216,7 @@ impl Workspace {
                 };
                 detail::view::view(state, &inputs)
             });
-        let shows_list = detail.is_none();
+        let shows_list = layout.shows_list();
         self.pages.pull_requests.detail_snapshot = detail;
         self.pages.pull_requests.row_bounds.borrow_mut().clear();
         self.pages.pull_requests.snapshot = shows_list.then(|| {
@@ -182,6 +246,35 @@ impl Workspace {
                 row_bounds: self.pages.pull_requests.row_bounds.clone(),
             }
         });
+    }
+
+    /// Rows change shape between the table, the column beside a detail, and
+    /// not being drawn, so one scroll offset means different rows in each.
+    /// Coming back to the layout last left with the same row selected
+    /// returns to its exact place; any other change brings the selected row
+    /// into view once the new layout is painted.
+    fn follow_pr_layout(&mut self, layout: page_layout::PageLayout) {
+        let scroll = &self.pages.scrolls[Page::PullRequests.index()];
+        let page = &mut self.pages.pull_requests;
+        let last = page.staged_layout.replace(layout);
+        let Some(last) = last.filter(|last| *last != layout) else {
+            return;
+        };
+        let previous = page.return_point.take();
+        if last.shows_list() {
+            page.return_point = Some(ReturnPoint {
+                layout: last,
+                offset: scroll.offset(),
+                cursor: page.cursor.clone(),
+            });
+        }
+        if !layout.shows_list() {
+            return;
+        }
+        match previous.filter(|point| point.layout == layout && point.cursor == page.cursor) {
+            Some(point) => scroll.set_offset(point.offset),
+            None => page.reveal_pending = true,
+        }
     }
 
     pub(in crate::workspace) fn clear_pr_search(

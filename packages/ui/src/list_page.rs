@@ -14,10 +14,14 @@ pub fn header(
     close: impl IntoElement,
     cx: &App,
 ) -> Div {
+    // Wraps rather than squeezing the actions to nothing in a narrow column,
+    // such as the list beside a detail.
     div()
         .flex()
+        .flex_wrap()
         .items_center()
-        .gap(px(theme::GAP_STANDARD))
+        .gap_x(px(theme::GAP_STANDARD))
+        .gap_y(px(theme::GAP_SM))
         .px(px(theme::DOCK_PAGE_PAD))
         .py(px(theme::PAD_STANDARD))
         .child(
@@ -29,9 +33,16 @@ pub fn header(
                 .child(title.into()),
         )
         .child(scope)
-        .child(div().flex_1())
-        .child(action)
-        .child(close)
+        .child(
+            div()
+                .ml_auto()
+                .flex()
+                .items_center()
+                .min_w_0()
+                .gap(px(theme::GAP_STANDARD))
+                .child(action)
+                .child(close),
+        )
 }
 
 pub fn toolbar() -> Div {

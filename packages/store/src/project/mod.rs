@@ -34,8 +34,9 @@ pub use persistence::{
 };
 pub use session_host_id::SessionHostId;
 pub use types::{
-    FlowDetailTarget, PaneId, PaneLayout, ProjectOverride, ProjectState, ProjectUuid, RecentEntry,
-    TaskDetailTarget, WORKSPACE_SCHEMA_VERSION, WorkspaceState, WorkspaceUuid,
+    FlowDetailTarget, PaneId, PaneLayout, ProjectOverride, ProjectState, ProjectUuid,
+    PullRequestsLayout, RecentEntry, TaskDetailTarget, WORKSPACE_SCHEMA_VERSION, WorkspaceState,
+    WorkspaceUuid,
 };
 
 use serde::{Deserialize, Serialize};

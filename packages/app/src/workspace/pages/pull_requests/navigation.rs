@@ -78,16 +78,37 @@ impl Workspace {
         let Some(next) = step(&order, page.cursor.as_ref(), delta) else {
             return;
         };
-        let row = page.row_bounds.borrow().get(&next).copied();
-        let scroll = &self.pages.scrolls[Page::PullRequests.index()];
-        if let Some(row) = row {
-            let offset = scroll.offset();
-            if let Some(y) = reveal(scroll.bounds(), row, offset.y) {
-                scroll.set_offset(point(offset.x, y));
-            }
-        }
+        self.scroll_pr_row_into_view(&next);
         self.pages.pull_requests.cursor = Some(next);
         cx.notify();
+    }
+
+    /// Scroll the list so `key`'s row, where the last frame drew it, is in
+    /// view. Whether the list moved.
+    fn scroll_pr_row_into_view(&self, key: &PrKey) -> bool {
+        let page = &self.pages.pull_requests;
+        let Some(row) = page.row_bounds.borrow().get(key).copied() else {
+            return false;
+        };
+        let scroll = &self.pages.scrolls[Page::PullRequests.index()];
+        let offset = scroll.offset();
+        let Some(y) = reveal(scroll.bounds(), row, offset.y) else {
+            return false;
+        };
+        scroll.set_offset(point(offset.x, y));
+        true
+    }
+
+    /// Bring the selected row back into view after the list was laid out
+    /// anew. Deferred from the render that laid it out, so it runs once
+    /// that frame has painted and the row bounds are its own.
+    pub(in crate::workspace) fn reveal_pr_cursor(&mut self, cx: &mut Context<Self>) {
+        let Some(cursor) = self.pages.pull_requests.cursor.clone() else {
+            return;
+        };
+        if self.scroll_pr_row_into_view(&cursor) {
+            cx.notify();
+        }
     }
 
     /// Open the selected row's detail, as clicking it would.

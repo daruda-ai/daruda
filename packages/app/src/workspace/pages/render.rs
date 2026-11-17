@@ -98,32 +98,101 @@ pub(in crate::workspace) fn body(
             Some(flow_content(state, snap, cx))
         }
         Page::PullRequests => {
+            use super::pull_requests::page_layout::PageLayout;
+            use super::pull_requests::row_layout::RowLayout;
             let pages = &ws.pages.pull_requests;
-            if let Some(detail) = &pages.detail_snapshot {
-                return Some(detail_frame(
-                    ws,
-                    state.page,
-                    super::pull_requests::detail::render::render(
-                        detail,
-                        pages.detail.as_ref()?.scroll(),
-                        cx,
-                    ),
-                    cx,
-                ));
+            let layout = ws.pr_page_layout();
+            let detail = |cx: &mut Context<Workspace>| -> Option<AnyElement> {
+                let view = pages.detail_snapshot.as_ref()?;
+                let scroll = pages.detail.as_ref()?.scroll();
+                Some(super::pull_requests::detail::render::render(
+                    view, scroll, cx,
+                ))
+            };
+            if layout == PageLayout::Detail {
+                let body = detail(cx)?;
+                return Some(detail_frame(ws, state.page, body, cx));
             }
             let focused = pages.focus_handle().is_focused(window);
-            let rows = super::pull_requests::row_layout::RowLayout::for_width(
-                ws.page_content_width(window, cx),
-            );
-            Some(pr_content(
-                state,
-                pages.snapshot.as_ref()?,
-                rows,
-                focused,
-                cx,
-            ))
+            let snap = pages.snapshot.as_ref()?;
+            if layout == PageLayout::List {
+                let rows = RowLayout::for_width(ws.page_content_width(window, cx));
+                return Some(pr_content(state, snap, rows, focused, cx));
+            }
+            let list_w = pages.list_width();
+            let list = pr_content(state, snap, RowLayout::for_width(list_w), focused, cx);
+            let detail = detail(cx)?;
+            Some(pr_split(ws, state.page, list_w, list, detail, cx))
         }
     }
+}
+
+/// The list column beside the detail: the list keeps its header, search
+/// and scroll; the detail keeps its location bar with Back and its own
+/// scroll.
+fn pr_split(
+    ws: &Workspace,
+    page: Page,
+    list_w: f32,
+    list: AnyElement,
+    detail: AnyElement,
+    cx: &mut Context<Workspace>,
+) -> AnyElement {
+    use crate::ui::cursor::{CursorReach, CursorReachExt as _};
+    let t = theme::current(cx);
+    let hit = theme::RESIZE_HANDLE_HIT_PX;
+    // Not `.cursor()`: a hitbox-bound style stops applying the moment the drag
+    // pulls the pointer off these few pixels.
+    let reach =
+        CursorReach::while_dragging(gpui::CursorStyle::ResizeLeftRight, ws.pr_divider_dragging());
+    div()
+        .relative()
+        .flex()
+        .size_full()
+        .min_w_0()
+        .min_h_0()
+        .bg(t.dock_bg)
+        .child(
+            div()
+                .debug_selector(|| "pr-split-list".into())
+                .flex_none()
+                .w(px(list_w))
+                .h_full()
+                .min_h_0()
+                .border_r_1()
+                .border_color(t.border)
+                .child(list),
+        )
+        .child(
+            div()
+                .debug_selector(|| "pr-split-detail".into())
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .children(super::location::render(ws, page, cx))
+                .child(div().flex_1().min_h_0().child(detail)),
+        )
+        .child(
+            div()
+                .id("pr-split-divider")
+                .debug_selector(|| "pr-split-divider".into())
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(px(list_w - hit / 2.0))
+                .w(px(hit))
+                .cursor_reach(Some(reach))
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(|ws, ev: &gpui::MouseDownEvent, _, cx| {
+                        ws.press_pr_divider(ev.position.x.into(), ev.click_count, cx)
+                    }),
+                ),
+        )
+        .into_any_element()
 }
 
 fn detail_frame(

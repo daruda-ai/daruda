@@ -135,6 +135,32 @@ pub(super) fn render(ws: &Workspace, page: Page, cx: &Context<Workspace>) -> Opt
                     workspace,
                 )
             }))
+            .when_some(
+                ws.pr_list_column_toggle()
+                    .filter(|_| page == Page::PullRequests),
+                |row, beside| {
+                    row.child(
+                        button_icon(
+                            "pr-list-toggle",
+                            if beside {
+                                icons::EXPAND
+                            } else {
+                                icons::COLLAPSE
+                            },
+                            cx,
+                        )
+                        .debug_selector(|| "pr-list-toggle".into())
+                        .tooltip(if beside {
+                            s::pull_requests::hide_list()
+                        } else {
+                            s::pull_requests::show_list()
+                        })
+                        .on_click(
+                            cx.listener(|ws, _, window, cx| ws.toggle_pr_list_column(window, cx)),
+                        ),
+                    )
+                },
+            )
             .when(page == Page::PullRequests, |row| {
                 row.child(
                     button_icon("pr-detail-refresh", icons::REFRESH, cx)

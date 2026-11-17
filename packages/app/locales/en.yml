@@ -1178,6 +1178,8 @@ pull_requests:
   gh_logged_out: "Run “gh auth login --hostname %{host}” in a terminal to list this repository’s pull requests."
   # A host other than github.com that gh cannot be asked about: it may be a GitHub Enterprise Server nobody logged in to, or not GitHub at all.
   gh_unconfirmed_host: "The GitHub CLI (gh) has no login for %{host}. If this is a GitHub Enterprise Server, install gh if needed and run “gh auth login --hostname %{host}” in a terminal."
+  hide_list: "Show the detail alone"
+  show_list: "Show the list beside the detail"
   # One host's gh account and where its token is kept; joined per host.
   accounts: "%{host}: signed in as %{login} via %{source}"
   source_keyring: "the system keychain"

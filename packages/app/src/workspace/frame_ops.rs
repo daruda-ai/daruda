@@ -98,6 +98,9 @@ impl Workspace {
             self.finish_tab_drag(false, cx);
             return;
         }
+        if self.drag_pr_divider(ev.position.x.into(), cx) {
+            return;
+        }
         if let Some(drag) = self.docks.drag {
             let cursor_px: f32 = match drag.position {
                 DockPosition::Left | DockPosition::Right => ev.position.x.into(),
@@ -124,6 +127,7 @@ impl Workspace {
     ) {
         self.end_divider_drag(cx);
         self.end_dock_drag(cx);
+        self.end_pr_divider_drag(cx);
         self.end_file_selection_drag(cx);
         self.clear_pane_drop_hover(cx);
         self.finish_tab_drag(false, cx);

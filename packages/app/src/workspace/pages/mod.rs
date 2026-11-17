@@ -168,16 +168,16 @@ impl Workspace {
         self.focus_shown_page(window, cx);
     }
 
-    /// Give the keyboard to the shown page: the Pull requests list when that
-    /// page shows its list, so its arrows work at once; the workspace
-    /// otherwise, whose handlers serve every page and detail.
+    /// Give the keyboard to the shown page: the Pull requests list whenever
+    /// that page draws it, beside a detail too, so its arrows work at once;
+    /// the workspace otherwise, whose handlers serve every page and detail.
     pub(in crate::workspace) fn focus_shown_page(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let handle = if self.active_page() == Some(Page::PullRequests)
-            && self.shown_page_detail_id().is_none()
+            && self.pr_page_layout().shows_list()
         {
             self.pages.pull_requests.focus_handle().clone()
         } else {

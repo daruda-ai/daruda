@@ -34,7 +34,7 @@ fn summary(number: u64, head: &str) -> PrSummary {
     }
 }
 
-pub(super) fn item(number: u64) -> PrListItem {
+pub(in crate::workspace) fn item(number: u64) -> PrListItem {
     PrListItem {
         repo: repo(),
         pr: summary(number, &format!("head-{number}")),
@@ -52,7 +52,9 @@ fn tick(cx: &mut TestAppContext) {
 
 /// A window whose one lane pushes `feat` to o/r, linked to PR #7, with
 /// #7 and #8 among the user's open pull requests.
-pub(super) fn linked_window(cx: &mut TestAppContext) -> (GitFixture, FakeGh, LaneRef) {
+pub(in crate::workspace) fn linked_window(
+    cx: &mut TestAppContext,
+) -> (GitFixture, FakeGh, LaneRef) {
     let gh = crate::test_support::fake_gh(cx);
     gh.set_prs(&repo(), vec![summary(7, "feat")]);
     gh.set_pr_list(PrFilter::Mine, vec![item(7), item(8)]);

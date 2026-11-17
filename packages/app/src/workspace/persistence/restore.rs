@@ -53,6 +53,9 @@ impl Workspace {
                 d.resize(left_size);
             }
         });
+        self.pages
+            .pull_requests
+            .restore_layout(&workspace.pull_requests);
         self.docks.left_view = workspace.active_dock_view;
         self.docks.right_view = workspace.active_right_panel_view;
         self.restore_workspace_page(

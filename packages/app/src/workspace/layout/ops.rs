@@ -460,6 +460,7 @@ impl Workspace {
     pub(in crate::workspace) fn end_stale_resize_drags(&mut self, cx: &mut Context<Self>) {
         self.end_dock_drag(cx);
         self.end_divider_drag(cx);
+        self.end_pr_divider_drag(cx);
     }
 
     /// Resize the bottom dock to a preset height matching N rows of
