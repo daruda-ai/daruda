@@ -89,6 +89,13 @@ fn close_args(repo: &RepoId, number: u64) -> Vec<String> {
         .to_vec()
 }
 
+fn reopen_args(repo: &RepoId, number: u64) -> Vec<String> {
+    let repo = repo.qualified();
+    ["pr", "reopen", &number.to_string(), "--repo", &repo]
+        .map(str::to_owned)
+        .to_vec()
+}
+
 /// `gh pr edit` asking `add` and unasking `remove`; refused before `gh`
 /// runs for a name that cannot be a reviewer, or for nothing to change.
 fn edit_reviewers_args(
@@ -661,6 +668,10 @@ impl Gh for SystemGh {
         self.stdout(close_args(repo, number)).map(drop)
     }
 
+    fn reopen_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError> {
+        self.stdout(reopen_args(repo, number)).map(drop)
+    }
+
     fn rerun_failed(&self, repo: &RepoId, run: u64) -> Result<(), GhError> {
         self.stdout(rerun_failed_args(repo, run)).map(drop)
     }
@@ -867,7 +878,7 @@ mod tests {
         let reviewers = |add: &[&str], remove: &[&str]| {
             edit_reviewers_args(&repo, 7, &names(add), &names(remove)).unwrap()
         };
-        let cases: [(&str, Vec<String>, &[&str]); 9] = [
+        let cases: [(&str, Vec<String>, &[&str]); 10] = [
             (
                 "squash",
                 merge(MergeMethod::Squash),
@@ -916,6 +927,11 @@ mod tests {
                 "close",
                 close_args(&repo, 7),
                 &["pr", "close", "7", "--repo", "ghe.corp/o/r"],
+            ),
+            (
+                "reopen",
+                reopen_args(&repo, 7),
+                &["pr", "reopen", "7", "--repo", "ghe.corp/o/r"],
             ),
             (
                 "rerun failed",

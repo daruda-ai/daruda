@@ -1,6 +1,6 @@
 //! What a pull request, as its detail was read, lets the user do to it on
-//! GitHub: merge (and with which methods), mark ready for review, and rerun
-//! failed checks. Plain decisions over [`PrDetail`]; asking GitHub is
+//! GitHub: merge (and with which methods), mark ready for review, close or
+//! reopen, and rerun failed checks. Plain decisions over [`PrDetail`]; asking GitHub is
 //! [`crate::Gh`]'s.
 
 use std::collections::BTreeSet;
@@ -48,6 +48,19 @@ impl PrDetail {
         } else {
             None
         }
+    }
+
+    /// Whether closing may be asked of GitHub: open or draft, and the
+    /// viewer may close it.
+    pub fn can_close_now(&self) -> bool {
+        self.summary.state.is_active() && self.can_close
+    }
+
+    /// Whether reopening may be asked of GitHub: closed unmerged, and the
+    /// viewer may reopen it. GitHub can still refuse (a deleted head
+    /// branch); that comes back as the reopen's error.
+    pub fn can_reopen_now(&self) -> bool {
+        self.summary.state == PrState::Closed && self.can_reopen
     }
 
     /// Whether merging with `method` may be asked of GitHub.

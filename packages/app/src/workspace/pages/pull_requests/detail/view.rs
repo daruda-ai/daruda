@@ -85,6 +85,34 @@ pub(in crate::workspace) struct MergeView {
     pub slot: ActionSlot,
 }
 
+/// What the header offers to do to the pull request, by its state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum HeaderControls {
+    /// Not read yet, or merged: nothing.
+    None,
+    /// Open or a draft.
+    Active(HeaderActions),
+    /// Closed unmerged.
+    Reopen(ActionSlot),
+}
+
+#[cfg(test)]
+impl HeaderControls {
+    pub(in crate::workspace) fn actions(&self) -> Option<&HeaderActions> {
+        match self {
+            Self::Active(actions) => Some(actions),
+            Self::None | Self::Reopen(_) => None,
+        }
+    }
+
+    pub(in crate::workspace) fn reopen(&self) -> Option<&ActionSlot> {
+        match self {
+            Self::Reopen(slot) => Some(slot),
+            Self::None | Self::Active(_) => None,
+        }
+    }
+}
+
 /// The header's actions on an open or draft pull request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct HeaderActions {
@@ -338,8 +366,7 @@ pub(in crate::workspace) struct PrDetailView {
     pub meta: String,
     pub url: Option<String>,
     pub lane: LaneSlot,
-    /// Once read, while the pull request is open or a draft.
-    pub actions: Option<HeaderActions>,
+    pub header: HeaderControls,
     /// What the last action's failure said, until the next action or reload.
     pub error: Option<String>,
     pub tab: PrTab,
@@ -453,7 +480,9 @@ pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_
         meta: meta(item, loaded, inputs.now),
         url: pr.web_url().map(str::to_owned),
         lane: LaneSlot::of(item, inputs.lane, inputs.creating),
-        actions: loaded.and_then(|loaded| header_actions(loaded, &state.action)),
+        header: loaded.map_or(HeaderControls::None, |loaded| {
+            header_controls(loaded, &state.action)
+        }),
         error: match &state.action {
             ActionState::Failed(line) => Some(line.clone()),
             ActionState::Idle | ActionState::Running(_) => None,
@@ -546,10 +575,18 @@ fn ready(
 
 /// Merge is offered unless it cannot go at all (see [`MergeBlock`]); then
 /// its tooltip says why, in the words the summary column uses.
-fn header_actions(loaded: &PrDetail, running: &ActionState) -> Option<HeaderActions> {
-    if !loaded.summary.state.is_active() {
-        return None;
+fn header_controls(loaded: &PrDetail, running: &ActionState) -> HeaderControls {
+    match loaded.summary.state {
+        PrState::Open | PrState::Draft => HeaderControls::Active(header_actions(loaded, running)),
+        PrState::Closed => {
+            let refused = (!loaded.can_reopen).then(s::reopen_not_allowed);
+            HeaderControls::Reopen(ActionSlot::of(running, PrAction::Reopening, refused))
+        }
+        PrState::Merged => HeaderControls::None,
     }
+}
+
+fn header_actions(loaded: &PrDetail, running: &ActionState) -> HeaderActions {
     let draft = loaded.is_draft();
     let methods: Vec<(MergeMethod, String)> = loaded
         .merge_menu()
@@ -561,7 +598,7 @@ fn header_actions(loaded: &PrDetail, running: &ActionState) -> Option<HeaderActi
         MergeBlock::Draft => s::merge_blocked(s::blocked_draft()),
         MergeBlock::Conflicting => s::merge_blocked(s::merge_conflicting()),
     });
-    Some(HeaderActions {
+    HeaderActions {
         merge: MergeView {
             label: methods
                 .first()
@@ -569,9 +606,13 @@ fn header_actions(loaded: &PrDetail, running: &ActionState) -> Option<HeaderActi
             methods,
             slot: ActionSlot::of(running, PrAction::Merging, blocked),
         },
-        close: ActionSlot::of(running, PrAction::Closing, None),
+        close: ActionSlot::of(
+            running,
+            PrAction::Closing,
+            (!loaded.can_close).then(s::close_not_allowed),
+        ),
         ready: draft.then(|| ActionSlot::of(running, PrAction::MarkingReady, None)),
-    })
+    }
 }
 
 fn state_label(state: PrState) -> (String, Mood) {
@@ -597,10 +638,12 @@ fn meta(item: &PrListItem, loaded: Option<&PrDetail>, now: DateTime<Utc>) -> Str
         None => s::row_meta_undated(&pr.head_branch, base, author),
     }];
     parts.extend(pr.review.map(list::review_label));
-    if let Some(Mergeability::Blocked(reason)) = loaded.map(|loaded| loaded.mergeability) {
+    // Why a merge waits says nothing about one closed or merged.
+    let waiting = loaded.filter(|loaded| loaded.summary.state.is_active());
+    if let Some(Mergeability::Blocked(reason)) = waiting.map(|loaded| loaded.mergeability) {
         parts.push(block_label(reason));
     }
-    if loaded.is_some_and(|loaded| loaded.mergeability == Mergeability::Conflicting) {
+    if waiting.is_some_and(|loaded| loaded.mergeability == Mergeability::Conflicting) {
         parts.push(s::merge_conflicting());
     }
     parts.join(" · ")

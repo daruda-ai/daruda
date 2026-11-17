@@ -16,7 +16,7 @@ pub(crate) fn pr_detail_query() -> String {
     format!(
         "query($owner: String!, $name: String!, $number: Int!) {{ \
          repository(owner: $owner, name: $name) {{ mergeCommitAllowed squashMergeAllowed \
-         rebaseMergeAllowed viewerDefaultMergeMethod pullRequest(number: $number) {{ ...pr id body headRefOid baseRefName changedFiles viewerCanUpdate \
+         rebaseMergeAllowed viewerDefaultMergeMethod pullRequest(number: $number) {{ ...pr id body headRefOid baseRefName changedFiles viewerCanUpdate viewerCanClose viewerCanReopen \
          author {{ login }} mergeable mergeStateStatus \
          latestReviews(first: {DETAIL_PAGE}) {{ nodes {{ author {{ login }} state }} }} \
          reviewRequests(first: {DETAIL_PAGE}) {{ nodes {{ requestedReviewer {{ __typename \
@@ -89,6 +89,8 @@ pub(crate) fn parse_pr_detail(json: &str) -> Result<PrDetail, GhError> {
             .is_some_and(|page| page.has_next_page),
         changed_files: pr.changed_files,
         can_update: pr.viewer_can_update,
+        can_close: pr.viewer_can_close,
+        can_reopen: pr.viewer_can_reopen,
         node_id: pr.id,
     })
 }
@@ -193,6 +195,9 @@ struct DetailPr {
     changed_files: Option<u32>,
     #[serde(default)]
     viewer_can_update: bool,
+    // Required: a missing answer must not read as "not allowed".
+    viewer_can_close: bool,
+    viewer_can_reopen: bool,
     #[serde(default)]
     id: Option<String>,
     author: Option<Author>,

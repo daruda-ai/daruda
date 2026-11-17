@@ -30,6 +30,8 @@ fn detail(state: PrState, mergeability: Mergeability, methods: Vec<MergeMethod>)
         open_threads: 0,
         open_threads_more: false,
         can_update: false,
+        can_close: true,
+        can_reopen: true,
         node_id: None,
         changed_files: None,
     }
@@ -204,4 +206,48 @@ fn each_failed_run_is_rerun_once() {
     };
     assert_eq!(with(checks.clone()).failed_runs(), [4, 9]);
     assert!(with(checks[3..].to_vec()).failed_runs().is_empty());
+}
+
+#[test]
+fn close_and_reopen_follow_state_and_permission() {
+    let open = Mergeability::Ready;
+    // (label, state, viewer may close, viewer may reopen, can close, can reopen)
+    let cases = [
+        ("open", PrState::Open, true, true, true, false),
+        ("draft", PrState::Draft, true, false, true, false),
+        (
+            "open, not the viewer's to close",
+            PrState::Open,
+            false,
+            true,
+            false,
+            false,
+        ),
+        ("closed", PrState::Closed, true, true, false, true),
+        (
+            "closed, not the viewer's to reopen",
+            PrState::Closed,
+            true,
+            false,
+            false,
+            false,
+        ),
+        (
+            "merged never reopens",
+            PrState::Merged,
+            true,
+            true,
+            false,
+            false,
+        ),
+    ];
+    for (label, state, may_close, may_reopen, close, reopen) in cases {
+        let pr = PrDetail {
+            can_close: may_close,
+            can_reopen: may_reopen,
+            ..detail(state, open, Vec::new())
+        };
+        assert_eq!(pr.can_close_now(), close, "{label}: close");
+        assert_eq!(pr.can_reopen_now(), reopen, "{label}: reopen");
+    }
 }

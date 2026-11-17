@@ -5,6 +5,9 @@
 //! `viewerDefaultMergeMethod` was added to the query afterwards; its value
 //! is GitHub's answer for `cli/cli` to that field alone, the same day.
 //! `changedFiles` was added likewise on 2026-11-17: GitHub answered 1.
+//! `viewerCanClose` and `viewerCanReopen` likewise on 2026-11-18, read
+//! from the PR as it was then (closed) and spliced into this open snapshot:
+//! both false.
 
 use serde_json::{Value, json};
 
@@ -33,6 +36,10 @@ fn a_real_detail_answer_parses() {
     );
     assert_eq!(detail.head_sha, "38aef55a786788888bd90ddaeaac0bf6b0b98bb1");
     assert_eq!(detail.base_branch, "trunk");
+    assert!(
+        !detail.can_close && !detail.can_reopen,
+        "as GitHub answered once the PR was closed"
+    );
     assert_eq!(detail.author.as_deref(), Some("pad895"));
     assert_eq!(
         detail.mergeability,
@@ -286,4 +293,15 @@ fn the_detail_query_names_every_field_the_parser_reads() {
     ] {
         assert!(query.contains(field), "{field}");
     }
+}
+
+#[test]
+fn the_viewers_close_and_reopen_permissions_are_read() {
+    let answer = detail_answer(|repo| {
+        repo["pullRequest"]["viewerCanClose"] = json!(true);
+        repo["pullRequest"]["viewerCanReopen"] = json!(true);
+    });
+    let loaded = parse_pr_detail(&answer).unwrap();
+    assert!(loaded.can_close && loaded.can_reopen);
+    assert!(pr_detail_query().contains("viewerCanClose viewerCanReopen"));
 }

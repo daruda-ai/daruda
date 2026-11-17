@@ -93,6 +93,8 @@ fn detail(failed: bool, open_threads: u32, cross_repo: bool) -> PrDetail {
         open_threads,
         open_threads_more: false,
         can_update: false,
+        can_close: true,
+        can_reopen: true,
         node_id: None,
         changed_files: None,
     }
@@ -407,7 +409,7 @@ fn the_header_offers_what_github_allows_on_an_open_pull_request() {
         let view = view(&state, &inputs(None));
         let draft = if ready.is_some() { "Draft" } else { "Open" };
         assert_eq!(view.state, draft, "{label}: state");
-        let actions = view.actions.expect(label);
+        let actions = view.header.actions().cloned().expect(label);
         assert_eq!(actions.merge.label, button, "{label}: button");
         let labels: Vec<_> = actions
             .merge
@@ -424,10 +426,18 @@ fn the_header_offers_what_github_allows_on_an_open_pull_request() {
         let mut loaded = detail(false, 0, false);
         loaded.summary.state = done;
         let state = state(Load::Ready(loaded), false);
-        assert_eq!(view(&state, &inputs(None)).actions, None, "{done:?}");
+        assert_eq!(
+            view(&state, &inputs(None)).header.actions().cloned(),
+            None,
+            "{done:?}"
+        );
     }
     let unread = view(&state(Load::Loading, false), &inputs(None));
-    assert_eq!(unread.actions, None, "nothing to act on before it is read");
+    assert_eq!(
+        unread.header.actions(),
+        None,
+        "nothing to act on before it is read"
+    );
 }
 
 #[test]
@@ -505,7 +515,7 @@ fn a_failed_action_is_said_under_the_header_and_frees_the_buttons() {
     state.action = ActionState::Failed("Merging #7 failed: nope".into());
     let failed = view(&state, &inputs(None));
     assert_eq!(failed.error.as_deref(), Some("Merging #7 failed: nope"));
-    let actions = failed.actions.clone().expect("open");
+    let actions = failed.header.actions().cloned().expect("open");
     assert_eq!(actions.close, ActionSlot::Ready);
     assert_eq!(ready(failed).rerun, Some(ActionSlot::Ready));
 }

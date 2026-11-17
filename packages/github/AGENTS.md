@@ -34,8 +34,8 @@ through `GitHost`.
   having no PR, so it is never offered one to create. A number GitHub cannot
   resolve fails only that alias (`NOT_FOUND`; `gh` exits non-zero but
   prints the partial answer), so it never pauses the repository's poll.
-- `PrDetail`'s `is_draft`, `merge_block`, `can_merge`, `merge_menu` and
-  `failed_runs` (`actions.rs`) decide what the detail may ask of GitHub;
+- `PrDetail`'s `is_draft`, `merge_block`, `can_merge`, `merge_menu`,
+  `can_close_now`, `can_reopen_now` and `failed_runs` (`actions.rs`) decide what the detail may ask of GitHub;
   the app maps their answers to labels and buttons and never re-derives them.
 - `PrCheckout::of` decides how a pull request's head reaches a worktree:
   a same-repository PR's own branch, or a fork's `pr-<N>` review branch
@@ -46,7 +46,7 @@ through `GitHost`.
   field a header holds) and is fenced or quoted so it cannot close its
   quote or end a bracketed paste. The app sends it only to writable agent
   chats, inserted and never submitted.
-- Mutations (`merge_pr`, `set_ready`, `close_pr`, `rerun_failed`,
+- Mutations (`merge_pr`, `set_ready`, `close_pr`, `reopen_pr`, `rerun_failed`,
   `reply_to_thread`, `set_thread_resolved`, `edit_pr_body`,
   `edit_pr_reviewers`, `submit_review`) run only on the
   user's action and are never retried on their own; a failed thread reply is

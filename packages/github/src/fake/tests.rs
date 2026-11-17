@@ -145,6 +145,8 @@ fn a_scripted_detail_answers_its_repository_and_number_only() {
         open_threads: 0,
         open_threads_more: false,
         can_update: false,
+        can_close: true,
+        can_reopen: true,
         node_id: None,
         changed_files: None,
     };
@@ -189,6 +191,8 @@ fn detail(number: u64, state: PrState, head_sha: &str) -> PrDetail {
         open_threads: 0,
         open_threads_more: false,
         can_update: false,
+        can_close: true,
+        can_reopen: true,
         node_id: None,
         changed_files: None,
     }
@@ -197,7 +201,7 @@ fn detail(number: u64, state: PrState, head_sha: &str) -> PrDetail {
 #[test]
 fn a_mutation_moves_the_scripted_pr_to_its_new_state() {
     type Mutate = fn(&FakeGh, &RepoId, u64) -> Result<(), GhError>;
-    let cases: [(&str, PrState, Mutate, PrState); 3] = [
+    let cases: [(&str, PrState, Mutate, PrState); 4] = [
         (
             "merge",
             PrState::Open,
@@ -206,6 +210,7 @@ fn a_mutation_moves_the_scripted_pr_to_its_new_state() {
         ),
         ("ready", PrState::Draft, FakeGh::set_ready, PrState::Open),
         ("close", PrState::Open, FakeGh::close_pr, PrState::Closed),
+        ("reopen", PrState::Closed, FakeGh::reopen_pr, PrState::Open),
     ];
     for (label, before, mutate, after) in cases {
         let gh = FakeGh::new();
@@ -274,6 +279,7 @@ fn rerun_is_logged_and_a_scripted_failure_answers_each_mutation() {
         GhOp::MergePr,
         GhOp::SetReady,
         GhOp::ClosePr,
+        GhOp::ReopenPr,
         GhOp::RerunFailed,
     ];
     for op in ops {
@@ -283,6 +289,7 @@ fn rerun_is_logged_and_a_scripted_failure_answers_each_mutation() {
         ("merge", gh.merge_pr(&repo(), 1, MergeMethod::Merge, "abc")),
         ("ready", gh.set_ready(&repo(), 1)),
         ("close", gh.close_pr(&repo(), 1)),
+        ("reopen", gh.reopen_pr(&repo(), 1)),
         ("rerun", gh.rerun_failed(&repo(), 1)),
     ];
     for (label, answer) in answers {

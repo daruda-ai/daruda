@@ -20,6 +20,7 @@ use crate::workspace::Workspace;
 pub(in crate::workspace) enum PrAction {
     Merging,
     Closing,
+    Reopening,
     MarkingReady,
     Rerunning,
 }
@@ -63,6 +64,7 @@ impl PrAction {
             (GhError::HeadMoved, _) => error::github_pr_head_moved(number),
             (_, Self::Merging) => error::github_pr_merge_failed(number),
             (_, Self::Closing) => error::github_pr_close_failed(number),
+            (_, Self::Reopening) => error::github_pr_reopen_failed(number),
             (_, Self::MarkingReady) => error::github_pr_ready_failed(number),
             (_, Self::Rerunning) => error::github_pr_rerun_failed(number),
         }
@@ -102,6 +104,7 @@ enum Request {
         head_sha: String,
     },
     Close,
+    Reopen,
     Ready,
     Rerun(Vec<u64>),
 }
@@ -111,6 +114,7 @@ impl Request {
         match self {
             Self::Merge { .. } => PrAction::Merging,
             Self::Close => PrAction::Closing,
+            Self::Reopen => PrAction::Reopening,
             Self::Ready => PrAction::MarkingReady,
             Self::Rerun(_) => PrAction::Rerunning,
         }
@@ -121,7 +125,8 @@ impl Request {
     fn applies(&self, pr: &PrDetail) -> bool {
         match self {
             Self::Merge { method, .. } => pr.can_merge(*method),
-            Self::Close => true,
+            Self::Close => pr.can_close_now(),
+            Self::Reopen => pr.can_reopen_now(),
             Self::Ready => pr.is_draft(),
             Self::Rerun(runs) => !runs.is_empty(),
         }
@@ -132,6 +137,7 @@ impl Request {
         match self {
             Self::Merge { method, head_sha } => gh.merge_pr(repo, number, method, &head_sha),
             Self::Close => gh.close_pr(repo, number),
+            Self::Reopen => gh.reopen_pr(repo, number),
             Self::Ready => gh.set_ready(repo, number),
             // Every run is asked even after one fails; the first failure
             // is what is reported.
@@ -226,6 +232,16 @@ impl Workspace {
             window,
             cx,
         );
+    }
+
+    /// The header's Reopen, on a pull request closed unmerged. Nothing is
+    /// lost by it, so it is not asked first.
+    pub(in crate::workspace) fn reopen_pr_detail(
+        &mut self,
+        id: PrDetailId,
+        cx: &mut Context<Self>,
+    ) {
+        self.run_pr_action(id, Request::Reopen, cx);
     }
 
     /// The header's Ready for review, on a draft.
@@ -376,6 +392,8 @@ mod tests {
             open_threads: 0,
             open_threads_more: false,
             can_update: false,
+            can_close: true,
+            can_reopen: true,
             node_id: None,
             changed_files: None,
         }
@@ -391,6 +409,17 @@ mod tests {
         let open = pr(S::Open, M::Ready);
         let draft = pr(S::Draft, M::Unknown);
         let conflicting = pr(S::Open, M::Conflicting);
+        let closed = pr(S::Closed, M::Unknown);
+        let merged = pr(S::Merged, M::Unknown);
+        let not_mine = PrDetail {
+            can_close: false,
+            can_reopen: false,
+            ..pr(S::Closed, M::Unknown)
+        };
+        let open_not_mine = PrDetail {
+            can_close: false,
+            ..pr(S::Open, M::Ready)
+        };
         // (label, request, pull request, applies)
         let cases = [
             ("merge an open PR", merge(MergeMethod::Squash), &open, true),
@@ -407,7 +436,23 @@ mod tests {
                 &conflicting,
                 false,
             ),
-            ("close anything", Request::Close, &draft, true),
+            ("close a draft", Request::Close, &draft, true),
+            ("close a closed PR", Request::Close, &closed, false),
+            ("reopen a closed PR", Request::Reopen, &closed, true),
+            ("reopen an open PR", Request::Reopen, &open, false),
+            ("reopen a merged PR", Request::Reopen, &merged, false),
+            (
+                "reopen without permission",
+                Request::Reopen,
+                &not_mine,
+                false,
+            ),
+            (
+                "close without permission",
+                Request::Close,
+                &open_not_mine,
+                false,
+            ),
             ("mark a draft ready", Request::Ready, &draft, true),
             ("mark an open PR ready", Request::Ready, &open, false),
             ("rerun failed runs", Request::Rerun(vec![1]), &open, true),

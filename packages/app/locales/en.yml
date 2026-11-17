@@ -1435,6 +1435,9 @@ pull_requests:
   # The detail's header buttons.
   action_ready: "Ready for review"
   action_close: "Close"
+  action_reopen: "Reopen"
+  close_not_allowed: "GitHub does not let you close this pull request"
+  reopen_not_allowed: "GitHub does not let you reopen this pull request"
   # The Checks tab's button: reruns the failed jobs of each failed Actions run.
   action_rerun: "Rerun failed checks"
   # Merge methods as the merge button, its menu and the confirmation name them.
@@ -1451,7 +1454,7 @@ pull_requests:
   merge_confirm_title: "%{method} #%{number}?"
   merge_confirm_body: "“%{title}” goes into %{base}. Only the head commit shown here is merged: if the branch moved since, nothing is."
   close_confirm_title: "Close #%{number}?"
-  close_confirm_body: "“%{title}” is closed without merging. Its branch stays, and it can be reopened on GitHub."
+  close_confirm_body: "“%{title}” is closed without merging. Its branch stays, and it can be reopened."
   close_confirm_ok: "Close pull request"
 
 # Settings panel
@@ -1931,6 +1934,7 @@ error:
   github_no_open_comments: "This pull request has no unresolved review comments"
   github_pr_merge_failed: "Merging #%{number} failed"
   github_pr_close_failed: "Closing #%{number} failed"
+  github_pr_reopen_failed: "Reopening #%{number} failed"
   github_pr_ready_failed: "Marking #%{number} ready for review failed"
   github_pr_rerun_failed: "Rerunning the failed checks of #%{number} failed"
   # A merge pinned to the shown head commit found the branch moved on.

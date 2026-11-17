@@ -6,8 +6,8 @@ use gpui::{AnyElement, Context, Div, FontWeight, Hsla, SharedString, div, prelud
 
 use super::super::list::LaneSlot;
 use super::view::{
-    ActionSlot, CheckRowView, DetailBody, Fact, HeaderActions, LaneNote, LogSlot, MergeView, Mood,
-    PrDetailView, ReadyView, SendSlot, SideView,
+    ActionSlot, CheckRowView, DetailBody, Fact, HeaderActions, HeaderControls, LaneNote, LogSlot,
+    MergeView, Mood, PrDetailView, ReadyView, SendSlot, SideView,
 };
 use super::{Load, PrDetailId, PrTab};
 use crate::surface::strings::{common, pull_requests as s};
@@ -177,11 +177,16 @@ fn title_block(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
                 .gap(px(theme::GAP_SM))
                 .child(lane)
                 .children(github)
-                .children(
-                    view.actions
-                        .as_ref()
-                        .map(|actions| header_actions(id, actions, cx)),
-                ),
+                .children(match &view.header {
+                    HeaderControls::None => None,
+                    HeaderControls::Active(actions) => Some(header_actions(id, actions, cx)),
+                    HeaderControls::Reopen(slot) => Some(
+                        with_slot(button("pr-detail-reopen", s::action_reopen()), slot)
+                            .debug_selector(|| "pr-detail-reopen".into())
+                            .on_click(cx.listener(move |ws, _, _, cx| ws.reopen_pr_detail(id, cx)))
+                            .into_any_element(),
+                    ),
+                }),
         )
         .into_any_element()
 }

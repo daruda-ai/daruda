@@ -462,6 +462,10 @@ pub struct PrDetail {
     pub open_threads_more: bool,
     /// The viewer may edit the pull request: its description among others.
     pub can_update: bool,
+    /// The viewer may close it (GitHub's `viewerCanClose`).
+    pub can_close: bool,
+    /// The viewer may reopen it once closed (GitHub's `viewerCanReopen`).
+    pub can_reopen: bool,
     /// GitHub's node id of the pull request, which a review names.
     pub node_id: Option<String>,
     /// How many files GitHub says it changes; `None` from an answer that

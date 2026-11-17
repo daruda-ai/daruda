@@ -17,6 +17,7 @@
 //! | `merge_pr` | `HeadMoved` if a scripted detail's head differs, else merged |
 //! | `set_ready` | the PR, if scripted, becomes open |
 //! | `close_pr` | the PR, if scripted, becomes closed |
+//! | `reopen_pr` | the PR, if scripted, becomes open |
 //! | `rerun_failed` | done |
 //! | `reply_to_thread` | adds the reply to the scripted thread, answers it |
 //! | `pr_conversation` | the `set_conversation` comments, else none |
@@ -108,6 +109,10 @@ pub enum GhCall {
         repo: RepoId,
         number: u64,
     },
+    ReopenPr {
+        repo: RepoId,
+        number: u64,
+    },
     ReplyToThread {
         repo: RepoId,
         thread: String,
@@ -171,6 +176,7 @@ pub enum GhOp {
     MergePr,
     SetReady,
     ClosePr,
+    ReopenPr,
     ReplyToThread,
     SetThreadResolved,
     Conversation,
@@ -371,6 +377,7 @@ impl GhCall {
             Self::MergePr { .. } => GhOp::MergePr,
             Self::SetReady { .. } => GhOp::SetReady,
             Self::ClosePr { .. } => GhOp::ClosePr,
+            Self::ReopenPr { .. } => GhOp::ReopenPr,
             Self::ReplyToThread { .. } => GhOp::ReplyToThread,
             Self::SetThreadResolved { .. } => GhOp::SetThreadResolved,
             Self::Conversation { .. } => GhOp::Conversation,
@@ -809,6 +816,16 @@ impl Gh for FakeGh {
             number,
         })?;
         state.set_state(repo, number, PrState::Closed);
+        Ok(())
+    }
+
+    fn reopen_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::ReopenPr {
+            repo: repo.clone(),
+            number,
+        })?;
+        state.set_state(repo, number, PrState::Open);
         Ok(())
     }
 

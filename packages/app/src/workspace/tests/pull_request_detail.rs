@@ -86,6 +86,8 @@ fn detail(number: u64, head: &str) -> PrDetail {
         open_threads: 0,
         open_threads_more: false,
         can_update: false,
+        can_close: true,
+        can_reopen: true,
         node_id: None,
         changed_files: None,
     }
@@ -1023,8 +1025,9 @@ fn every_action_is_off_while_one_runs(cx: &mut TestAppContext) {
     f.ws.update(cx, |ws, cx| ws.rerun_pr_detail_checks(id, cx));
     let shown = view(&f, cx);
     let actions = shown
-        .actions
-        .clone()
+        .header
+        .actions()
+        .cloned()
         .expect("an open pull request has actions");
     assert_eq!(actions.merge.slot, ActionSlot::Waiting);
     assert_eq!(actions.close, ActionSlot::Waiting);
@@ -1041,7 +1044,7 @@ fn every_action_is_off_while_one_runs(cx: &mut TestAppContext) {
     }));
     cx.run_until_parked();
     assert_eq!(gh.count(GhOp::ClosePr) + gh.count(GhOp::MergePr), 0);
-    let actions = view(&f, cx).actions.expect("still open");
+    let actions = view(&f, cx).header.actions().cloned().expect("still open");
     assert_eq!(actions.merge.slot, ActionSlot::Ready);
     assert_eq!(actions.close, ActionSlot::Ready);
 }
@@ -1064,12 +1067,23 @@ fn ready_close_and_rerun_each_ask_github_once(cx: &mut TestAppContext) {
         .collect();
     assert_eq!(reruns, [11, 12], "two failed jobs of run 11 are one rerun");
 
-    assert!(view(&f, cx).actions.expect("a draft").ready.is_some());
+    assert!(
+        view(&f, cx)
+            .header
+            .actions()
+            .cloned()
+            .expect("a draft")
+            .ready
+            .is_some()
+    );
     f.ws.update(cx, |ws, cx| ws.mark_pr_detail_ready(id, cx));
     cx.run_until_parked();
     assert_eq!(gh.count(GhOp::SetReady), 1);
     assert_eq!(loaded_state(&f, cx), Some(PrState::Open));
-    assert_eq!(view(&f, cx).actions.expect("open").ready, None);
+    assert_eq!(
+        view(&f, cx).header.actions().cloned().expect("open").ready,
+        None
+    );
 
     assert!(asks(&f, cx, |ws, window, cx| ws.ask_pr_close(id, window, cx)));
     cx.run_until_parked();
@@ -1077,8 +1091,98 @@ fn ready_close_and_rerun_each_ask_github_once(cx: &mut TestAppContext) {
     confirm(&f, cx);
     assert_eq!(gh.count(GhOp::ClosePr), 1);
     assert_eq!(loaded_state(&f, cx), Some(PrState::Closed));
-    assert_eq!(view(&f, cx).actions, None, "a closed pull request has none");
+    assert_eq!(
+        view(&f, cx).header.actions().cloned(),
+        None,
+        "a closed pull request has none"
+    );
+    assert_eq!(
+        view(&f, cx).header.reopen().cloned(),
+        Some(ActionSlot::Ready)
+    );
     assert!(error_titles(&f, cx).is_empty());
+
+    // Reopening asks nothing first and brings the actions back.
+    f.ws.update(cx, |ws, cx| ws.reopen_pr_detail(id, cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::ReopenPr), 1);
+    assert_eq!(loaded_state(&f, cx), Some(PrState::Open));
+    assert_eq!(view(&f, cx).header.reopen().cloned(), None);
+    assert!(view(&f, cx).header.actions().cloned().is_some());
+}
+
+/// What GitHub does not let the viewer do is off, with the reason, and
+/// never asked of GitHub.
+#[gpui::test]
+fn close_and_reopen_follow_the_viewers_permission(cx: &mut TestAppContext) {
+    let mut open = mergeable(7, "feat");
+    open.can_close = false;
+    let (f, gh, id) = opened(cx, open.clone());
+    assert!(matches!(
+        view(&f, cx).header.actions().cloned().expect("open").close,
+        ActionSlot::Blocked(_)
+    ));
+    let _ = asks(&f, cx, |ws, window, cx| ws.ask_pr_close(id, window, cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::ClosePr), 0);
+
+    let mut closed = open;
+    closed.summary.state = PrState::Closed;
+    closed.can_reopen = false;
+    gh.set_pr_detail(&repo(), 7, closed);
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    cx.run_until_parked();
+    assert!(matches!(
+        view(&f, cx).header.reopen().cloned(),
+        Some(ActionSlot::Blocked(_))
+    ));
+    f.ws.update(cx, |ws, cx| ws.reopen_pr_detail(id, cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::ReopenPr), 0);
+}
+
+/// GitHub refusing a reopen (a deleted head branch, say) leaves it closed,
+/// Reopen offered again, and says what `gh` said.
+#[gpui::test]
+fn a_refused_reopen_keeps_it_closed(cx: &mut TestAppContext) {
+    let mut closed = mergeable(7, "feat");
+    closed.summary.state = PrState::Closed;
+    let (f, gh, id) = opened(cx, closed);
+    gh.fail(
+        GhOp::ReopenPr,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "Could not reopen: the head branch was deleted".into(),
+        },
+    );
+    f.ws.update(cx, |ws, cx| ws.reopen_pr_detail(id, cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::ReopenPr), 1);
+    assert_eq!(loaded_state(&f, cx), Some(PrState::Closed));
+    let shown = view(&f, cx);
+    assert_eq!(shown.header.reopen().cloned(), Some(ActionSlot::Ready));
+    let error = shown.error.expect("said under the header");
+    assert!(error.contains("head branch was deleted"), "{error}");
+    assert_eq!(
+        error_titles(&f, cx),
+        [crate::surface::strings::error::github_pr_reopen_failed(7)]
+    );
+}
+
+#[gpui::test]
+fn a_merged_pull_request_cannot_be_reopened(cx: &mut TestAppContext) {
+    let mut merged = mergeable(7, "feat");
+    merged.summary.state = PrState::Merged;
+    // GitHub can still answer a reason for one no longer open.
+    merged.mergeability = Mergeability::Conflicting;
+    let (f, _, _) = opened(cx, merged);
+    assert_eq!(view(&f, cx).header.reopen().cloned(), None);
+    assert_eq!(view(&f, cx).header.actions().cloned(), None);
+    let meta = view(&f, cx).meta;
+    assert!(
+        !meta.contains(&crate::surface::strings::pull_requests::merge_conflicting()),
+        "no merge reason on a merged pull request: {meta}"
+    );
 }
 
 #[gpui::test]
@@ -1152,7 +1256,7 @@ fn merge_goes_to_github_even_when_it_may_refuse(cx: &mut TestAppContext) {
     let mut blocked = mergeable(7, "feat");
     blocked.mergeability = Mergeability::Blocked(daruda_github::BlockReason::Requirements);
     let (f, gh, id) = opened(cx, blocked);
-    let actions = view(&f, cx).actions.expect("open");
+    let actions = view(&f, cx).header.actions().cloned().expect("open");
     assert_eq!(actions.merge.slot, ActionSlot::Ready);
     gh.fail(
         GhOp::MergePr,
@@ -1201,7 +1305,7 @@ fn an_answer_landing_after_its_detail_was_replaced_is_dropped(cx: &mut TestAppCo
         panic!("{:?}", shown(&f, cx));
     };
     assert_ne!(shown_id, id);
-    let actions = view(&f, cx).actions.expect("#8 is open");
+    let actions = view(&f, cx).header.actions().cloned().expect("#8 is open");
     assert_eq!(actions.merge.slot, ActionSlot::Ready, "#8 runs nothing");
 }
 

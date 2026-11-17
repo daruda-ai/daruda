@@ -461,6 +461,8 @@ impl Workspace {
             open_threads: 3,
             open_threads_more: false,
             can_update: false,
+            can_close: true,
+            can_reopen: true,
             node_id: None,
             changed_files: None,
         };

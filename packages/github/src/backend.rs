@@ -116,6 +116,8 @@ pub trait Gh: Send + Sync {
     fn edit_pr_body(&self, repo: &RepoId, number: u64, body: &str) -> Result<(), GhError>;
     /// Close pull request `number` unmerged. Leaves the branch.
     fn close_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError>;
+    /// Reopen closed pull request `number`.
+    fn reopen_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError>;
     /// Rerun the failed jobs of Actions run `run`.
     fn rerun_failed(&self, repo: &RepoId, run: u64) -> Result<(), GhError>;
     /// When the spent GraphQL rate limit on `host` resets (Unix seconds);
