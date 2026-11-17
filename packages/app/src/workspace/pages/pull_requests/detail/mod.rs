@@ -12,7 +12,13 @@ use gpui::{App, Context, Window};
 use super::actions::{ActionState, PrAction};
 use super::list::{self, LaneFacts};
 
+pub(in crate::workspace) mod diff_layout;
+mod diff_render;
+pub(in crate::workspace) mod files;
+pub(in crate::workspace) mod files_render;
+pub(in crate::workspace) mod progress;
 mod read_slot;
+pub(in crate::workspace) mod recover;
 pub(in crate::workspace) mod render;
 pub(in crate::workspace) mod view;
 
@@ -46,13 +52,21 @@ pub(in crate::workspace) enum Load<T> {
 pub(in crate::workspace) enum PrTab {
     #[default]
     Checks,
+    Files,
     Threads,
     Description,
 }
 
 impl PrTab {
-    pub(in crate::workspace) const ALL: [Self; 3] =
-        [Self::Checks, Self::Threads, Self::Description];
+    pub(in crate::workspace) const ALL: [Self; 4] =
+        [Self::Checks, Self::Files, Self::Threads, Self::Description];
+}
+
+/// A read a tab starts when it is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TabRead {
+    Threads(ReadTicket),
+    Files(ReadTicket),
 }
 
 /// A failed Actions job's log, keyed as `(run, job)`.
@@ -82,8 +96,13 @@ pub(in crate::workspace) struct PrDetailState {
     pr: ReadSlot<PrDetail>,
     tab: PrTab,
     scroll: gpui::ScrollHandle,
+    /// The Files tab's listing, kept with the detail so stepping through
+    /// files can bring the shown one into view.
+    files_scroll: gpui::UniformListScrollHandle,
     /// The unresolved threads, read when their tab is first shown.
     threads: Option<ReadSlot<ReviewThreads>>,
+    /// The changed files, read when their tab is first shown.
+    files: Option<files::FilesState>,
     /// The failed Actions jobs whose log is open.
     logs: BTreeMap<JobKey, ReadSlot<String>>,
     /// What it is doing to the pull request on GitHub, or what failed.
@@ -101,7 +120,9 @@ impl PrDetailState {
             pr: ReadSlot::settled(Load::Loading),
             tab: PrTab::default(),
             scroll: gpui::ScrollHandle::new(),
+            files_scroll: gpui::UniformListScrollHandle::new(),
             threads: None,
+            files: None,
             logs: BTreeMap::new(),
             action: ActionState::Idle,
             tickets: Tickets::default(),
@@ -116,8 +137,56 @@ impl PrDetailState {
         &self.item
     }
 
+    pub(in crate::workspace) fn key(&self) -> super::list::PrKey {
+        (self.item.repo.clone(), self.item.pr.number)
+    }
+
+    /// Where it stands, to come back to when the same pull request is
+    /// opened again.
+    pub(super) fn place(&self) -> progress::Place {
+        // Left before coming back: the place come back to still stands.
+        if let Some((file, offset)) = self
+            .files
+            .as_ref()
+            .and_then(files::FilesState::pending_place)
+        {
+            return progress::Place {
+                tab: PrTab::Files,
+                file: Some(file),
+                offset,
+            };
+        }
+        let offset = self.scroll.offset();
+        progress::Place {
+            tab: self.tab,
+            file: self.files.as_ref().and_then(files::FilesState::place_file),
+            offset: (offset.x.into(), offset.y.into()),
+        }
+    }
+
+    /// Come back to `place`: its tab, and on the Files tab the file shown,
+    /// with where the detail was scrolled if that file did not change.
+    /// `Some` with the read the tab needs.
+    fn restore(&mut self, place: &progress::Place) -> Option<TabRead> {
+        let read = self.select_tab(place.tab);
+        if let (Some(files), Some(file)) = (self.files.as_mut(), place.file.as_ref()) {
+            files.restore_to(file, place.offset);
+        }
+        read
+    }
+
     pub(in crate::workspace) fn scroll(&self) -> &gpui::ScrollHandle {
         &self.scroll
+    }
+
+    pub(in crate::workspace) fn files_scroll(&self) -> &gpui::UniformListScrollHandle {
+        &self.files_scroll
+    }
+
+    /// The pull request's read out, for a test to answer it late.
+    #[cfg(test)]
+    pub(in crate::workspace) fn pr_waiting(&self) -> Option<ReadTicket> {
+        self.pr.waiting()
     }
 
     pub(in crate::workspace) fn load(&self) -> &Load<PrDetail> {
@@ -159,18 +228,47 @@ impl PrDetailState {
     }
 
     /// Forget what a reload replaces: the open logs, a failure already
-    /// said, and the threads. `Some` with the threads' new read when their
-    /// tab is shown, so they are read again at once.
-    fn reset_for_refresh(&mut self) -> (ReadTicket, Option<ReadTicket>) {
+    /// said, the threads and the files. `Some` with the shown tab's new read
+    /// when it had one, so it is read again at once.
+    fn reset_for_refresh(&mut self) -> (ReadTicket, Option<TabRead>) {
         self.logs.clear();
         if matches!(self.action, ActionState::Failed(_)) {
             self.action = ActionState::Idle;
         }
         let threads = self.threads.take().is_some() && self.tab == PrTab::Threads;
-        (
-            self.begin_read(),
-            threads.then(|| self.begin_threads_read()),
-        )
+        // Shown, the files are read again in place: the listing and the
+        // chosen file stay up until the new answer. Hidden, they are dropped
+        // and read when shown again.
+        let files = if self.tab == PrTab::Files {
+            self.files.is_some()
+        } else {
+            self.files = None;
+            false
+        };
+        let read = self.begin_read();
+        let tab = if threads {
+            Some(TabRead::Threads(self.begin_threads_read()))
+        } else if files {
+            Some(TabRead::Files(self.reread_files()))
+        } else {
+            None
+        };
+        (read, tab)
+    }
+
+    /// The head just read, told to the files: a listing read at another
+    /// commit is read again when shown, and dropped when hidden.
+    fn files_at_head(&mut self) -> Option<TabRead> {
+        let head = self.pr.current()?.head_sha.clone();
+        if !self.files.as_mut()?.head_read(&head) {
+            return None;
+        }
+        if self.tab == PrTab::Files {
+            Some(TabRead::Files(self.reread_files()))
+        } else {
+            self.files = None;
+            None
+        }
     }
 
     /// Send the pull request's next read; what is shown stays until it lands.
@@ -186,12 +284,24 @@ impl PrDetailState {
         ticket
     }
 
-    /// Show `tab`. `Some` with the threads' read when their tab is shown
-    /// for the first time, or again after a failed read.
-    fn select_tab(&mut self, tab: PrTab) -> Option<ReadTicket> {
+    /// Show `tab`. `Some` with its read when the threads or the files are
+    /// shown for the first time, or again after a failed read.
+    fn select_tab(&mut self, tab: PrTab) -> Option<TabRead> {
         self.tab = tab;
-        let unread = matches!(self.threads(), None | Some(Load::Failed(_)));
-        (tab == PrTab::Threads && unread).then(|| self.begin_threads_read())
+        match tab {
+            PrTab::Threads if matches!(self.threads(), None | Some(Load::Failed(_))) => {
+                Some(TabRead::Threads(self.begin_threads_read()))
+            }
+            PrTab::Files
+                if self
+                    .files
+                    .as_ref()
+                    .is_none_or(files::FilesState::wants_read) =>
+            {
+                Some(TabRead::Files(self.begin_files_read()))
+            }
+            PrTab::Checks | PrTab::Files | PrTab::Threads | PrTab::Description => None,
+        }
     }
 
     /// Close `job`'s log if open (`None`), else open it with a new read.
@@ -299,8 +409,19 @@ impl Workspace {
 
     fn install_pr_detail(&mut self, item: PrListItem, cx: &mut Context<Self>) {
         let id = PrDetailId(self.alloc_id());
-        self.pages.pull_requests.detail = Some(PrDetailState::new(id, item));
+        let mut detail = PrDetailState::new(id, item);
+        let place = self
+            .pages
+            .pull_requests
+            .progress
+            .place(&detail.key())
+            .cloned();
+        let tab_read = place.and_then(|place| detail.restore(&place));
+        self.pages.pull_requests.replace_detail(Some(detail));
         self.read_pr_detail(id, cx);
+        if let Some(read) = tab_read {
+            self.send_pr_tab_read(id, read, cx);
+        }
         cx.notify();
     }
 
@@ -342,10 +463,10 @@ impl Workspace {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        let (read, threads) = detail.reset_for_refresh();
+        let (read, tab) = detail.reset_for_refresh();
         self.send_pr_detail_read(id, read, cx);
-        if let Some(ticket) = threads {
-            self.send_pr_threads_read(id, ticket, cx);
+        if let Some(tab) = tab {
+            self.send_pr_tab_read(id, tab, cx);
         }
         self.refresh_pr_list(cx);
         cx.notify();
@@ -386,6 +507,10 @@ impl Workspace {
         if !detail.pr.land_keeping_ready(ticket, answer) {
             return;
         }
+        detail.come_back();
+        if let Some(read) = detail.files_at_head() {
+            self.send_pr_tab_read(id, read, cx);
+        }
         if let Some(e) = error {
             self.report_pr_read(&e, "github.pr_detail.read", cx);
         }
@@ -403,10 +528,18 @@ impl Workspace {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        if let Some(ticket) = detail.select_tab(tab) {
-            self.send_pr_threads_read(id, ticket, cx);
+        detail.stop_coming_back();
+        if let Some(read) = detail.select_tab(tab) {
+            self.send_pr_tab_read(id, read, cx);
         }
         cx.notify();
+    }
+
+    fn send_pr_tab_read(&mut self, id: PrDetailId, read: TabRead, cx: &mut Context<Self>) {
+        match read {
+            TabRead::Threads(ticket) => self.send_pr_threads_read(id, ticket, cx),
+            TabRead::Files(ticket) => self.send_pr_files_read(id, ticket, 1, cx),
+        }
     }
 
     fn send_pr_threads_read(&mut self, id: PrDetailId, ticket: ReadTicket, cx: &mut Context<Self>) {
@@ -588,7 +721,12 @@ impl Workspace {
         }
     }
 
-    fn report_pr_read(&mut self, e: &GhError, dedup: &'static str, cx: &mut Context<Self>) {
+    pub(super) fn report_pr_read(
+        &mut self,
+        e: &GhError,
+        dedup: &'static str,
+        cx: &mut Context<Self>,
+    ) {
         let report = ErrorReport::new(error::github_read_failed())
             .severity(ErrorSeverity::Warning)
             .from_error(e)

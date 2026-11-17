@@ -56,6 +56,9 @@ pub(in crate::workspace) struct PullRequestsPage {
     pub(in crate::workspace) detail: Option<PrDetailState>,
     /// Staged each frame while the page shows its detail; `None` otherwise.
     pub(in crate::workspace) detail_snapshot: Option<PrDetailView>,
+    /// Files marked viewed and where each detail closed, while the window
+    /// is open.
+    pub(in crate::workspace) progress: detail::progress::ReviewProgress,
     /// Takes the keyboard while the list is shown, so the arrows and Enter
     /// browse it; the search field sits outside it.
     focus: FocusHandle,
@@ -107,6 +110,14 @@ impl PullRequestsPage {
         std::mem::take(&mut self.reveal_pending)
     }
 
+    /// Show `next` as the detail, or none; the one it replaces leaves its
+    /// place in the review progress to come back to.
+    pub(in crate::workspace) fn replace_detail(&mut self, next: Option<PrDetailState>) {
+        if let Some(gone) = std::mem::replace(&mut self.detail, next) {
+            self.progress.leave(&gone.key(), gone.place());
+        }
+    }
+
     /// The list column's width beside a detail this frame.
     pub(in crate::workspace) fn list_width(&self) -> f32 {
         page_layout::list_width(self.content_width, self.list_width)
@@ -131,6 +142,7 @@ impl PullRequestsPage {
             snapshot: None,
             detail: None,
             detail_snapshot: None,
+            progress: detail::progress::ReviewProgress::new(),
             focus: cx.focus_handle(),
             cursor: None,
             row_bounds: navigation::RowBounds::default(),
@@ -267,6 +279,7 @@ impl Workspace {
                     lane,
                     sending: lane.is_some_and(|lane| self.is_sending_pr(lane.lane)),
                     creating: &self.pages.pull_requests.creating,
+                    progress: &self.pages.pull_requests.progress,
                     now: chrono::Utc::now(),
                 };
                 detail::view::view(state, &inputs)

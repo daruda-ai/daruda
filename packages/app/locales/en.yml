@@ -1218,6 +1218,52 @@ pull_requests:
   empty_no_repos: "No worktree in this window pushes to a GitHub repository."
   empty_disabled: "GitHub pull requests are turned off in Settings."
   state_open: "Open"
+  tab_files: "Files"
+  # Under a renamed file's path.
+  file_renamed_from: "renamed from %{path}"
+  file_copied_from: "copied from %{path}"
+  files_empty: "This pull request changes no files."
+  # How many files are listed, of GitHub's count of changed files.
+  files_progress: "%{read} of %{total} files listed"
+  files_progress_unknown: "%{read} files listed"
+  # %{listed} is the line above, which says how many are listed.
+  files_reading: "%{listed} · reading more…"
+  files_refreshing: "%{listed} · reading them again…"
+  files_refresh_failed: "%{listed} · couldn’t read them again: %{reason}"
+  # Reading stopped on its own: the pull request's diffs are large.
+  files_paused: "%{listed} · paused: this pull request's diffs are large."
+  files_read_rest: "Read the remaining files"
+  files_failed: "%{listed} · couldn’t read more: %{reason}"
+  # GitHub lists at most 3,000 files of a pull request.
+  files_truncated: "%{listed} · GitHub lists no more files of this pull request."
+  # The shown file's place among those listed.
+  file_position: "%{at} of %{of}"
+  file_previous: "Previous file"
+  file_next: "Next file"
+  diff_unified: "Unified"
+  diff_split: "Split"
+  diff_fold_unchanged: "Hide unchanged lines"
+  diff_show_unchanged: "Show unchanged lines"
+  # Copies the selected lines' path, numbers, side and commit.
+  lines_copy: "Copy reference"
+  lines_clear: "Clear selection"
+  # %{listed} is the files-listed line; %{viewed} of the files listed are marked viewed.
+  files_viewed: "%{listed} · %{viewed} viewed"
+  file_mark_viewed: "Mark as viewed"
+  file_unmark_viewed: "Mark as not viewed"
+  file_changed_since_viewed: "Changed since you viewed it: mark it again"
+  file_viewed: "Viewed"
+  file_recover: "Read the whole file from GitHub"
+  file_recovering: "Reading the whole file from GitHub…"
+  file_recover_binary: "One side of this file is not text: there are no lines to compare."
+  file_recover_too_large: "This file is too large to read here."
+  file_recover_failed: "Could not read the whole file: %{reason}"
+  # The diff's undrawn rows: the next step drawn, and all left.
+  diff_more_lines: "Show %{step} more (%{left} left)"
+  # Lines changed, but GitHub sends no diff for a file this large.
+  file_too_large: "GitHub shows no diff for this file: it is too large to diff here."
+  file_no_lines: "No line of this file changed: it is binary, or only its mode changed."
+  file_moved_only: "Moved without changes."
   back_to_list: "Back to the list"
   # The detail's button that goes to the worktree working on the pull request.
   open_in_lane: "Open in worktree · %{name}"

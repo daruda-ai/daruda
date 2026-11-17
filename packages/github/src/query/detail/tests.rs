@@ -4,6 +4,7 @@
 //! see (`requestedReviewer: null`) and five jobs run twice.
 //! `viewerDefaultMergeMethod` was added to the query afterwards; its value
 //! is GitHub's answer for `cli/cli` to that field alone, the same day.
+//! `changedFiles` was added likewise on 2026-11-17: GitHub answered 1.
 
 use serde_json::{Value, json};
 
@@ -272,6 +273,7 @@ fn the_detail_query_names_every_field_the_parser_reads() {
         "body",
         "headRefOid",
         "baseRefName",
+        "changedFiles",
         "author { login }",
         "mergeable",
         "mergeStateStatus",

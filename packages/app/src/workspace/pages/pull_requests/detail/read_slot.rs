@@ -54,6 +54,14 @@ impl<T> ReadSlot<T> {
         &self.load
     }
 
+    /// What was read, when no further read of it is out.
+    pub(super) fn current(&self) -> Option<&T> {
+        match (&self.load, self.waiting) {
+            (Load::Ready(value), None) => Some(value),
+            _ => None,
+        }
+    }
+
     /// Take `answer` if it is the read this slot waits on; `false` and
     /// nothing changed otherwise. Each read lands at most once.
     pub(super) fn land(&mut self, ticket: ReadTicket, answer: Result<T, String>) -> bool {

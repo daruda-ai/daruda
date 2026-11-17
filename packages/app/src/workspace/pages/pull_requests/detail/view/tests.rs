@@ -91,6 +91,7 @@ fn detail(failed: bool, open_threads: u32, cross_repo: bool) -> PrDetail {
         ],
         checks_truncated: false,
         open_threads,
+        changed_files: None,
     }
 }
 
@@ -113,6 +114,8 @@ fn lane() -> LaneFacts {
 }
 
 static NOTHING_CREATING: BTreeSet<PrKey> = BTreeSet::new();
+static NO_PROGRESS: super::super::progress::ReviewProgress =
+    super::super::progress::ReviewProgress::new();
 
 /// What the detail reads beside its state: worked on in `lane`, nothing
 /// being sent or made.
@@ -121,6 +124,7 @@ fn inputs(lane: Option<&LaneFacts>) -> DetailInputs<'_> {
         lane,
         sending: false,
         creating: &NOTHING_CREATING,
+        progress: &NO_PROGRESS,
         now: Utc::now(),
     }
 }
@@ -255,7 +259,7 @@ fn the_header_says_what_the_detail_knows_once_read() {
         .iter()
         .map(|(_, label)| label.as_str())
         .collect();
-    assert_eq!(labels, ["Checks", "Review threads", "Description"]);
+    assert_eq!(labels, ["Checks", "Files", "Review threads", "Description"]);
     assert_eq!(loading.meta, "fix → main · alice · Changes requested");
 
     let read = view(
@@ -263,7 +267,11 @@ fn the_header_says_what_the_detail_knows_once_read() {
         &inputs(None),
     );
     let labels: Vec<_> = read.tabs.iter().map(|(_, label)| label.as_str()).collect();
-    assert_eq!(labels, ["Checks 4", "Review threads 3", "Description"]);
+    assert_eq!(
+        labels,
+        ["Checks 4", "Files", "Review threads 3", "Description"],
+        "the files are counted once read"
+    );
     assert_eq!(
         read.meta,
         "fix → main · alice · Changes requested · Behind the base branch"

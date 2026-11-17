@@ -320,7 +320,7 @@ impl Workspace {
         self.mutate_durable(cx, |ws, _| match id.page() {
             Page::Tasks => ws.pages.tasks.detail = None,
             Page::Flows => ws.pages.flows.detail = None,
-            Page::PullRequests => ws.pages.pull_requests.detail = None,
+            Page::PullRequests => ws.pages.pull_requests.replace_detail(None),
         });
         cx.notify();
     }

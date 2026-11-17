@@ -80,6 +80,21 @@ through `GitHost`.
   lets through are asked; host-wide
   failures feed that same host state. Timing is GPUI-free in
   `app/src/github/list_schedule.rs`.
+- `pr_files_page` reads one page of changed files (`PR_FILES_PER_PAGE`, 100)
+  with plain `gh api ... ?per_page=100&page=N`. A full page leads to the next;
+  a full page 30 is `capped` at GitHub's `PR_FILES_MAX` (3,000). A missing
+  `patch` stays `None` (binary or too large); an empty one stays `Some("")`
+  (no line changed). The app reads pages in turn and keeps what arrived.
+  Each file's `blob` is the listing's `sha`, the content's blob id.
+- `merge_base` reads `compare/{base}...{head}?per_page=1` with
+  `--jq .merge_base_commit.sha` (the answer still carries the comparison's
+  files; only the commit is captured) for the commit a pull request's diff
+  starts from; `file_at` reads raw content
+  (`Accept: application/vnd.github.raw`) at a commit, `Absent` on HTTP 404
+  and `Binary` for a NUL byte or non-UTF-8. Path and ref segments are
+  percent-encoded. The app uses them to diff a file the listing sent no
+  patch for, on request only; output above the capture limit is a
+  too-large failure.
 - `search_prs_page` is the history/search boundary the page lists through;
   `search_prs` remains for compatibility. Each immutable request
   covers one host and up to 20 canonical repositories, with 1–50 results.

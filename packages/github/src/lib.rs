@@ -14,6 +14,7 @@ mod checks;
 mod error;
 #[cfg(any(test, feature = "test-support"))]
 pub mod fake;
+mod files;
 pub mod link;
 pub mod model;
 pub mod prompt;
@@ -26,6 +27,9 @@ pub use actions::MergeBlock;
 pub use backend::Gh;
 pub use checkout::PrCheckout;
 pub use error::{FailureKind, GhError};
+pub use files::{
+    FileChange, FileText, PR_FILES_MAX, PR_FILES_PER_PAGE, PrFile, PrFiles, PrFilesPage,
+};
 pub use model::{
     ActionsJob, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus,
     FailedCheck, GITHUB_HOST, MergeMethod, Mergeability, NewPr, PrDetail, PrFilter, PrListItem,

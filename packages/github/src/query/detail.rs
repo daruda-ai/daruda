@@ -16,7 +16,7 @@ pub(crate) fn pr_detail_query() -> String {
     format!(
         "query($owner: String!, $name: String!, $number: Int!) {{ \
          repository(owner: $owner, name: $name) {{ mergeCommitAllowed squashMergeAllowed \
-         rebaseMergeAllowed viewerDefaultMergeMethod pullRequest(number: $number) {{ ...pr body headRefOid baseRefName \
+         rebaseMergeAllowed viewerDefaultMergeMethod pullRequest(number: $number) {{ ...pr body headRefOid baseRefName changedFiles \
          author {{ login }} mergeable mergeStateStatus \
          latestReviews(first: {DETAIL_PAGE}) {{ nodes {{ author {{ login }} state }} }} \
          reviewRequests(first: {DETAIL_PAGE}) {{ nodes {{ requestedReviewer {{ __typename \
@@ -82,6 +82,7 @@ pub(crate) fn parse_pr_detail(json: &str) -> Result<PrDetail, GhError> {
         checks: entries(&runs),
         checks_truncated,
         open_threads,
+        changed_files: pr.changed_files,
     })
 }
 
@@ -181,6 +182,8 @@ struct DetailPr {
     body: String,
     head_ref_oid: String,
     base_ref_name: String,
+    #[serde(default)]
+    changed_files: Option<u32>,
     author: Option<Author>,
     mergeable: String,
     merge_state_status: String,

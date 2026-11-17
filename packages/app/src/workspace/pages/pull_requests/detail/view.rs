@@ -170,6 +170,8 @@ pub(in crate::workspace) struct ReadyView {
     pub rerun: Option<ActionSlot>,
     pub threads: ThreadsView,
     pub threads_send: SendSlot,
+    /// Only while the Files tab is shown: the listing can be long.
+    pub files: Option<super::files::FilesView>,
     /// `None` when the author wrote none.
     pub description: Option<String>,
     pub side: SideView,
@@ -210,6 +212,8 @@ pub(in crate::workspace) struct DetailInputs<'a> {
     pub sending: bool,
     /// Pull requests a worktree is being made for.
     pub creating: &'a BTreeSet<PrKey>,
+    /// Which files were marked viewed.
+    pub progress: &'a super::progress::ReviewProgress,
     pub now: DateTime<Utc>,
 }
 
@@ -247,7 +251,7 @@ pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_
         tab: state.tab(),
         tabs: PrTab::ALL
             .into_iter()
-            .map(|tab| (tab, tab_label(tab, loaded)))
+            .map(|tab| (tab, tab_label(tab, loaded, state)))
             .collect(),
         body: match state.load() {
             Load::Loading => DetailBody::Loading,
@@ -258,6 +262,7 @@ pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_
                 loaded,
                 row_lane,
                 inputs.sending,
+                inputs.progress,
             ))),
         },
     }
@@ -269,6 +274,7 @@ fn ready(
     loaded: &PrDetail,
     lane: Option<RowLane>,
     sending: bool,
+    progress: &super::progress::ReviewProgress,
 ) -> ReadyView {
     let send = |nothing: bool| match (&lane, sending, nothing) {
         (None, _, _) => SendSlot::NoLane,
@@ -292,6 +298,12 @@ fn ready(
             Some(Load::Ready(threads)) => threads_view(threads),
         },
         threads_send: send(loaded.open_threads == 0),
+        files: (state.tab() == PrTab::Files).then(|| {
+            let marks = progress.marks(&state.key());
+            super::files::files_view(state.files(), loaded.changed_files, |file| {
+                marks.viewed(&file.path, file.blob.as_deref())
+            })
+        }),
         description: Some(loaded.body.trim())
             .filter(|body| !body.is_empty())
             .map(str::to_owned),
@@ -361,9 +373,23 @@ fn meta(item: &PrListItem, loaded: Option<&PrDetail>, now: DateTime<Utc>) -> Str
     parts.join(" · ")
 }
 
-fn tab_label(tab: PrTab, loaded: Option<&PrDetail>) -> String {
+fn tab_label(tab: PrTab, loaded: Option<&PrDetail>, state: &PrDetailState) -> String {
     let (label, count) = match tab {
         PrTab::Checks => (s::tab_checks(), loaded.map(|l| l.checks.len())),
+        PrTab::Files => {
+            // GitHub lists at most so many: a capped listing says so.
+            // A listing still being read, or capped by GitHub, counts what
+            // is in so far and says there is more.
+            return match state.files() {
+                Some(files) if files.complete() && !files.capped() => {
+                    s::tab_count(s::tab_files(), files.len())
+                }
+                Some(files) if files.len() > 0 => {
+                    s::tab_count(s::tab_files(), s::count_capped(files.len()))
+                }
+                _ => s::tab_files(),
+            };
+        }
         PrTab::Threads => (s::tab_threads(), loaded.map(|l| l.open_threads as usize)),
         PrTab::Description => return s::tab_description(),
     };

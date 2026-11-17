@@ -321,6 +321,76 @@ impl Gh for SystemGh {
         parse_review_threads(&json)
     }
 
+    fn pr_files_page(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        page: u32,
+    ) -> Result<crate::PrFilesPage, GhError> {
+        let json = self.stdout([
+            "api".to_owned(),
+            "--hostname".to_owned(),
+            repo.host().to_owned(),
+            format!(
+                "repos/{}/{}/pulls/{number}/files?per_page={}&page={page}",
+                repo.owner(),
+                repo.name(),
+                crate::PR_FILES_PER_PAGE
+            ),
+        ])?;
+        crate::files::parse_pr_files_page(&json, page)
+    }
+
+    fn merge_base(&self, repo: &RepoId, base: &str, head: &str) -> Result<String, GhError> {
+        // GitHub has no merge-base endpoint; a comparison names it. Its
+        // files still come with the first page, so only the commit is kept
+        // from the answer rather than the whole of it captured.
+        let out = self.stdout([
+            "api".to_owned(),
+            "--hostname".to_owned(),
+            repo.host().to_owned(),
+            format!(
+                "repos/{}/{}/compare/{}...{}?per_page=1",
+                repo.owner(),
+                repo.name(),
+                crate::files::url_path(base),
+                crate::files::url_path(head),
+            ),
+            "--jq".to_owned(),
+            ".merge_base_commit.sha".to_owned(),
+        ])?;
+        crate::files::parse_merge_base(&out)
+    }
+
+    fn file_at(&self, repo: &RepoId, path: &str, commit: &str) -> Result<crate::FileText, GhError> {
+        let out = self.run([
+            "api".to_owned(),
+            "--hostname".to_owned(),
+            repo.host().to_owned(),
+            "-H".to_owned(),
+            "Accept: application/vnd.github.raw".to_owned(),
+            format!(
+                "repos/{}/{}/contents/{}?ref={}",
+                repo.owner(),
+                repo.name(),
+                crate::files::url_path(path),
+                crate::files::url_path(commit),
+            ),
+        ])?;
+        if out.status.success() {
+            return Ok(crate::FileText::of(out.stdout));
+        }
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        // gh says `HTTP 404` for a path the commit does not have.
+        if stderr.contains("HTTP 404") {
+            return Ok(crate::FileText::Absent);
+        }
+        Err(GhError::Exit {
+            code: out.status.code(),
+            stderr,
+        })
+    }
+
     fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError> {
         let json = self.stdout([
             "api".to_owned(),

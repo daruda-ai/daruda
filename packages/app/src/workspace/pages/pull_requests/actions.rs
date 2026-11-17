@@ -374,6 +374,7 @@ mod tests {
             checks: Vec::new(),
             checks_truncated: false,
             open_threads: 0,
+            changed_files: None,
         }
     }
 

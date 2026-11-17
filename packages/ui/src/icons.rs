@@ -58,6 +58,7 @@ pub const HISTORY: &str = "icons/ui/history.svg";
 pub const VISIBILITY: &str = "icons/ui/visibility.svg";
 pub const DIFFERENCE: &str = "icons/ui/difference.svg";
 pub const UNFOLD_LESS: &str = "icons/ui/unfold-less.svg";
+pub const UNFOLD_MORE: &str = "icons/ui/unfold-more.svg";
 pub const CHECK_CIRCLE: &str = "icons/ui/check-circle.svg";
 pub const OPEN_IN_NEW: &str = "icons/ui/open-in-new.svg";
 pub const KEEP_AWAKE: &str = "icons/ui/coffee.svg";

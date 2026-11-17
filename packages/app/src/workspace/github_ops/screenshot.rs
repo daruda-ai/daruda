@@ -62,6 +62,9 @@ pub(in crate::workspace) enum PrDetailShot {
     FailedLog,
     /// A mergeable pull request, its squash-merge confirmation up.
     MergeConfirm,
+    /// The Files tab: an edit, a rename, an added file and a binary one,
+    /// the edit's diff shown.
+    Files,
 }
 
 /// What the active lane's PR looks like in a capture.
@@ -453,8 +456,58 @@ impl Workspace {
             ],
             checks_truncated: !merge_ready,
             open_threads: 3,
+            changed_files: None,
         };
         gh.set_pr_detail(&row.repo, row.pr.number, detail.clone());
+        let file =
+            |path: &str, change, additions, deletions, patch: Option<&str>| daruda_github::PrFile {
+                path: path.into(),
+                change,
+                additions,
+                deletions,
+                patch: patch.map(str::to_owned),
+                blob: Some(format!("blob:{path}")),
+            };
+        gh.set_pr_files(
+            &row.repo,
+            row.pr.number,
+            daruda_github::PrFiles {
+                files: vec![
+                    file(
+                        "packages/app/src/workspace/left_dock/rail/lanes.rs",
+                        daruda_github::FileChange::Modified,
+                        4,
+                        2,
+                        Some(
+                            "@@ -61,9 +61,11 @@ fn lane_trigger(\n     let theme = theme::current(cx);\n-    let active = snap.active == target;\n+    let active = snap.active == target && snap.workspace_page.is_none();\n+    // Measured once per frame: the label is clipped otherwise.\n     div()\n-        .w(px(DOCK_RAIL_W))\n+        .w(px(snap.metrics.target(DOCK_RAIL_W)))\n+        .min_w_0()\n         .h(px(snap.metrics.row(theme::DOCK_RAIL_PANE_ROW_H)))",
+                        ),
+                    ),
+                    file(
+                        "packages/app/src/workspace/left_dock/rail/badge.rs",
+                        daruda_github::FileChange::Renamed {
+                            from: "packages/app/src/workspace/left_dock/badge.rs".into(),
+                        },
+                        0,
+                        0,
+                        Some(""),
+                    ),
+                    file(
+                        "packages/app/src/workspace/left_dock/rail/tests.rs",
+                        daruda_github::FileChange::Added,
+                        38,
+                        0,
+                        Some("@@ -0,0 +1,2 @@\n+use super::*;\n+"),
+                    ),
+                    file(
+                        "assets/icons/ui/rail-collapse.png",
+                        daruda_github::FileChange::Added,
+                        0,
+                        0,
+                        None,
+                    ),
+                ],
+            },
+        );
         gh.set_failed_log(
             test,
             "test (ubuntu-latest)\tRun tests\t2026-11-13T02:11:04.1Z ##[group]Run cargo test --locked -p daruda\n\
@@ -475,6 +528,20 @@ impl Workspace {
         {
             match shot {
                 PrDetailShot::FailedLog => self.toggle_pr_check_log(id, test, cx),
+                PrDetailShot::Files => {
+                    // One file viewed, one changed since it was.
+                    let key = (item.repo.clone(), item.pr.number);
+                    let progress = &mut self.pages.pull_requests.progress;
+                    let tests = "packages/app/src/workspace/left_dock/rail/tests.rs";
+                    progress.toggle_viewed(&key, tests, Some(&format!("blob:{tests}")));
+                    let badge = "packages/app/src/workspace/left_dock/rail/badge.rs";
+                    progress.toggle_viewed(&key, badge, Some("blob:earlier"));
+                    self.select_pr_detail_tab(
+                        id,
+                        crate::workspace::pages::pull_requests::detail::PrTab::Files,
+                        cx,
+                    );
+                }
                 PrDetailShot::MergeConfirm => {
                     // The dropdown's open state lives inside the widget, out
                     // of reach of a capture, so the shot is the dialog a

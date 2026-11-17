@@ -41,6 +41,20 @@ pub trait Gh: Send + Sync {
     fn failed_log(&self, repo: &RepoId, job: ActionsJob) -> Result<String, GhError>;
     /// The unresolved review threads of pull request `number`.
     fn review_threads(&self, repo: &RepoId, number: u64) -> Result<ReviewThreads, GhError>;
+    /// Page `page` (from 1) of the files pull request `number` changes, each
+    /// with its patch when GitHub sends one; GitHub lists at most
+    /// [`crate::PR_FILES_MAX`] in all.
+    fn pr_files_page(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        page: u32,
+    ) -> Result<crate::PrFilesPage, GhError>;
+    /// The commit a pull request's diff of `head` against `base` (a branch
+    /// or a commit) is taken from: their merge base.
+    fn merge_base(&self, repo: &RepoId, base: &str, head: &str) -> Result<String, GhError>;
+    /// What `path` holds at `commit`.
+    fn file_at(&self, repo: &RepoId, path: &str, commit: &str) -> Result<crate::FileText, GhError>;
     /// What pull request `number`'s page shows, in one request.
     fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError>;
     /// Merge pull request `number` with `method`, only if its head is still

@@ -104,9 +104,12 @@ pub(in crate::workspace) fn body(
             let layout = ws.pr_page_layout();
             let detail = |cx: &mut Context<Workspace>| -> Option<AnyElement> {
                 let view = pages.detail_snapshot.as_ref()?;
-                let scroll = pages.detail.as_ref()?.scroll();
+                let detail = pages.detail.as_ref()?;
                 Some(super::pull_requests::detail::render::render(
-                    view, scroll, cx,
+                    view,
+                    detail.scroll(),
+                    detail.files_scroll(),
+                    cx,
                 ))
             };
             if layout == PageLayout::Detail {

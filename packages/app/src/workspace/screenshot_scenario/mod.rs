@@ -128,6 +128,7 @@ pub(crate) enum ScreenshotScenario {
     PullRequestsGithubSearch,
     PullRequestsDetail,
     PullRequestsMerge,
+    PullRequestsFiles,
     /// Open the command palette (`CommandPaletteState::open`).
     CommandPalette,
     /// Open the Lane switcher with a real candidate whose label is
@@ -906,12 +907,14 @@ pub(crate) fn drive(
                 ws.seed_pr_rate_limit_for_shot(cx);
             });
         }
-        ScreenshotScenario::PullRequestsDetail | ScreenshotScenario::PullRequestsMerge => {
+        ScreenshotScenario::PullRequestsDetail
+        | ScreenshotScenario::PullRequestsMerge
+        | ScreenshotScenario::PullRequestsFiles => {
             use crate::workspace::github_ops::screenshot::PrDetailShot;
-            let shot = if scenario == ScreenshotScenario::PullRequestsMerge {
-                PrDetailShot::MergeConfirm
-            } else {
-                PrDetailShot::FailedLog
+            let shot = match scenario {
+                ScreenshotScenario::PullRequestsMerge => PrDetailShot::MergeConfirm,
+                ScreenshotScenario::PullRequestsFiles => PrDetailShot::Files,
+                _ => PrDetailShot::FailedLog,
             };
             workspace.update(cx, |ws, cx| {
                 ws.seed_left_dock_for_shot(false, true, false, window, cx);

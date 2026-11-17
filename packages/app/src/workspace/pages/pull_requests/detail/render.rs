@@ -22,6 +22,7 @@ use crate::workspace::Workspace;
 pub(in crate::workspace) fn render(
     view: &PrDetailView,
     scroll: &gpui::ScrollHandle,
+    files_scroll: &gpui::UniformListScrollHandle,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -47,7 +48,7 @@ pub(in crate::workspace) fn render(
                         .flex_1()
                         .flex_basis(px(theme::PR_DETAIL_CONTENT_BASIS))
                         .min_w_0()
-                        .child(tab_content(view.id, view.tab, ready, cx)),
+                        .child(tab_content(view.id, view.tab, ready, files_scroll, cx)),
                 )
                 .child(side(&ready.side, cx))
                 .into_any_element(),
@@ -86,6 +87,8 @@ pub(in crate::workspace) fn render(
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
+                        // A sideways swipe over a wide diff scrolls the diff.
+                        .restrict_scroll_to_axis()
                         .child(body),
                 )
                 .child(
@@ -304,10 +307,15 @@ fn tab_content(
     id: PrDetailId,
     tab: PrTab,
     ready: &ReadyView,
+    files_scroll: &gpui::UniformListScrollHandle,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     match tab {
         PrTab::Checks => checks(id, ready, cx),
+        PrTab::Files => match &ready.files {
+            Some(files) => super::files_render::files(id, files, files_scroll, cx),
+            None => div().into_any_element(),
+        },
         PrTab::Threads => threads(id, ready, cx),
         PrTab::Description => match &ready.description {
             Some(body) => {

@@ -329,6 +329,9 @@ pub struct PrDetail {
     pub checks_truncated: bool,
     /// Unresolved review threads among the first 100.
     pub open_threads: u32,
+    /// How many files GitHub says it changes; `None` from an answer that
+    /// did not say.
+    pub changed_files: Option<u32>,
 }
 
 impl PrSummary {

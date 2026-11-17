@@ -10,6 +10,9 @@
 //! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL |
 //! | `failed_log` | exit 1, as for a run that has no failed log |
 //! | `review_threads` | none |
+//! | `pr_files_page` | the `set_pr_files` list, paged as GitHub pages it |
+//! | `merge_base` | `merge-base:{base}...{head}` |
+//! | `file_at` | `Absent` |
 //! | `pr_detail` | exit 1, as for a pull request that does not exist |
 //! | `merge_pr` | `HeadMoved` if a scripted detail's head differs, else merged |
 //! | `set_ready` | the PR, if scripted, becomes open |
@@ -65,6 +68,21 @@ pub enum GhCall {
         repo: RepoId,
         number: u64,
     },
+    PrFiles {
+        repo: RepoId,
+        number: u64,
+        page: u32,
+    },
+    MergeBase {
+        repo: RepoId,
+        base: String,
+        head: String,
+    },
+    FileAt {
+        repo: RepoId,
+        path: String,
+        commit: String,
+    },
     PrDetail {
         repo: RepoId,
         number: u64,
@@ -102,6 +120,9 @@ pub enum GhOp {
     CreatePr,
     FailedLog,
     ReviewThreads,
+    PrFiles,
+    MergeBase,
+    FileAt,
     PrDetail,
     MergePr,
     SetReady,
@@ -153,6 +174,8 @@ struct FakeState {
     logs: HashMap<(u64, u64), String>,
     threads: HashMap<u64, ReviewThreads>,
     details: HashMap<(RepoId, u64), PrDetail>,
+    files: HashMap<(RepoId, u64), crate::PrFiles>,
+    file_texts: HashMap<(RepoId, String, String), crate::FileText>,
     failures: HashMap<GhOp, GhFailure>,
     resets: HashMap<String, i64>,
     calls: Vec<GhCall>,
@@ -205,6 +228,18 @@ impl FakeGh {
         self.lock().threads.insert(number, threads);
     }
 
+    /// What `pr_files` answers for PR `number` of `repo`.
+    pub fn set_pr_files(&self, repo: &RepoId, number: u64, files: crate::PrFiles) {
+        self.lock().files.insert((repo.clone(), number), files);
+    }
+
+    /// What `file_at` answers for `path` at `commit` of `repo`.
+    pub fn set_file_at(&self, repo: &RepoId, path: &str, commit: &str, text: crate::FileText) {
+        self.lock()
+            .file_texts
+            .insert((repo.clone(), path.to_owned(), commit.to_owned()), text);
+    }
+
     /// What `pr_detail` answers for PR `number` of `repo`.
     pub fn set_pr_detail(&self, repo: &RepoId, number: u64, detail: PrDetail) {
         self.lock().details.insert((repo.clone(), number), detail);
@@ -254,6 +289,9 @@ impl GhCall {
             Self::CreatePr { .. } => GhOp::CreatePr,
             Self::FailedLog { .. } => GhOp::FailedLog,
             Self::ReviewThreads { .. } => GhOp::ReviewThreads,
+            Self::PrFiles { .. } => GhOp::PrFiles,
+            Self::MergeBase { .. } => GhOp::MergeBase,
+            Self::FileAt { .. } => GhOp::FileAt,
             Self::PrDetail { .. } => GhOp::PrDetail,
             Self::MergePr { .. } => GhOp::MergePr,
             Self::SetReady { .. } => GhOp::SetReady,
@@ -419,6 +457,54 @@ impl Gh for FakeGh {
             return Err(failure.to_error());
         }
         Ok(state.threads.get(&number).cloned().unwrap_or_default())
+    }
+
+    fn pr_files_page(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        page: u32,
+    ) -> Result<crate::PrFilesPage, GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::PrFiles {
+            repo: repo.clone(),
+            number,
+            page,
+        })?;
+        let files = state
+            .files
+            .get(&(repo.clone(), number))
+            .map(|listed| listed.files.as_slice())
+            .unwrap_or_default();
+        let per = crate::PR_FILES_PER_PAGE;
+        let start = (page.max(1) as usize - 1) * per;
+        let slice = files
+            .get(start..(start + per).min(files.len()))
+            .unwrap_or_default();
+        Ok(crate::PrFilesPage::of(slice.to_vec(), page))
+    }
+
+    fn merge_base(&self, repo: &RepoId, base: &str, head: &str) -> Result<String, GhError> {
+        self.lock().record(GhCall::MergeBase {
+            repo: repo.clone(),
+            base: base.to_owned(),
+            head: head.to_owned(),
+        })?;
+        Ok(format!("merge-base:{base}...{head}"))
+    }
+
+    fn file_at(&self, repo: &RepoId, path: &str, commit: &str) -> Result<crate::FileText, GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::FileAt {
+            repo: repo.clone(),
+            path: path.to_owned(),
+            commit: commit.to_owned(),
+        })?;
+        Ok(state
+            .file_texts
+            .get(&(repo.clone(), path.to_owned(), commit.to_owned()))
+            .cloned()
+            .unwrap_or(crate::FileText::Absent))
     }
 
     fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError> {

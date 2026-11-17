@@ -20,7 +20,7 @@ use crate::workspace::tests::GitFixture;
 
 const JOB: ActionsJob = ActionsJob { run: 11, job: 22 };
 
-fn repo() -> RepoId {
+pub(in crate::workspace) fn repo() -> RepoId {
     RepoId::new("github.com", "o", "r")
 }
 
@@ -45,7 +45,7 @@ fn summary(number: u64, head: &str) -> PrSummary {
     }
 }
 
-fn item(number: u64, head: &str) -> PrListItem {
+pub(in crate::workspace) fn item(number: u64, head: &str) -> PrListItem {
     PrListItem {
         repo: repo(),
         pr: summary(number, head),
@@ -83,6 +83,7 @@ fn detail(number: u64, head: &str) -> PrDetail {
         }],
         checks_truncated: false,
         open_threads: 0,
+        changed_files: None,
     }
 }
 
@@ -120,7 +121,7 @@ fn window(cx: &mut TestAppContext) -> (GitFixture, FakeGh, LaneRef) {
 }
 
 /// Click a row, as the page does, without waiting for GitHub.
-fn open(f: &GitFixture, item: PrListItem, cx: &mut TestAppContext) {
+pub(in crate::workspace) fn open(f: &GitFixture, item: PrListItem, cx: &mut TestAppContext) {
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| ws.open_pr_detail(item, window, cx));
@@ -134,7 +135,7 @@ fn shown(f: &GitFixture, cx: &mut TestAppContext) -> Option<(PrDetailId, u64, Lo
     })
 }
 
-fn id(f: &GitFixture, cx: &mut TestAppContext) -> PrDetailId {
+pub(in crate::workspace) fn id(f: &GitFixture, cx: &mut TestAppContext) -> PrDetailId {
     shown(f, cx).expect("a detail is shown").0
 }
 
@@ -569,7 +570,7 @@ fn the_git_panels_send_closes_a_page_to_show_the_prompt(cx: &mut TestAppContext)
 
 /// A detail GitHub lets merge with a merge commit or a squash, whose failed
 /// checks are two jobs of run 11 and one of run 12.
-fn mergeable(number: u64, head: &str) -> PrDetail {
+pub(in crate::workspace) fn mergeable(number: u64, head: &str) -> PrDetail {
     let mut detail = detail(number, head);
     detail.methods = vec![MergeMethod::Merge, MergeMethod::Squash];
     let failed = |job: ActionsJob| {
@@ -586,7 +587,10 @@ fn mergeable(number: u64, head: &str) -> PrDetail {
 }
 
 /// The detail of #7, read, with `detail` as GitHub's answer.
-fn opened(cx: &mut TestAppContext, detail: PrDetail) -> (GitFixture, FakeGh, PrDetailId) {
+pub(in crate::workspace) fn opened(
+    cx: &mut TestAppContext,
+    detail: PrDetail,
+) -> (GitFixture, FakeGh, PrDetailId) {
     let (f, gh, _) = window(cx);
     gh.set_pr_detail(&repo(), 7, detail);
     open(&f, item(7, "feat"), cx);
