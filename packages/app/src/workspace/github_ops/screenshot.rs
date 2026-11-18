@@ -68,6 +68,9 @@ pub(in crate::workspace) enum PrDetailShot {
     /// The Threads tab: an open thread expanded with a reply and a reply
     /// box open, an outdated one folded.
     Threads,
+    /// The Threads tab with a reply that failed and could not be confirmed:
+    /// Post held, "It did not post" offered.
+    ReplyUnconfirmed,
 }
 
 /// What the active lane's PR looks like in a capture.
@@ -627,6 +630,31 @@ impl Workspace {
                     );
                     self.toggle_pr_thread(id, "shot-thread-1", cx);
                     self.open_pr_reply(id, "shot-thread-1", window, cx);
+                }
+                PrDetailShot::ReplyUnconfirmed => {
+                    use daruda_github::fake::{GhFailure, GhOp};
+                    // Posted before the tab's threads land, the reply has no
+                    // last comment to be looked for after, so every read
+                    // leaves it unconfirmed, whatever order they answer in.
+                    gh.fail(GhOp::ReplyToThread, GhFailure::Timeout);
+                    self.select_pr_detail_tab(
+                        id,
+                        crate::workspace::pages::pull_requests::detail::PrTab::Threads,
+                        cx,
+                    );
+                    self.toggle_pr_thread(id, "shot-thread-1", cx);
+                    self.open_pr_reply(id, "shot-thread-1", window, cx);
+                    let reply = self.pages.pull_requests.detail.as_ref().and_then(|d| {
+                        d.thread_work()
+                            .get("shot-thread-1")
+                            .and_then(|work| work.reply.clone())
+                    });
+                    if let Some(reply) = reply {
+                        reply.update(cx, |reply, cx| {
+                            reply.set_value("Renamed it in the next push.", window, cx)
+                        });
+                    }
+                    self.post_pr_reply(id, "shot-thread-1", cx);
                 }
                 PrDetailShot::MergeConfirm => {
                     // The dropdown's open state lives inside the widget, out

@@ -1382,6 +1382,7 @@ pull_requests:
   thread_reply: "Reply"
   thread_post_reply: "Post reply"
   thread_cancel_reply: "Cancel"
+  thread_reply_not_posted: "It did not post"
   thread_resolve: "Resolve"
   thread_unresolve: "Unresolve"
   thread_resolved: "Resolved"
@@ -1394,6 +1395,7 @@ pull_requests:
   # %{title} is one of the three lines above; %{reason} what gh said.
   thread_action_failed: "%{title}: %{reason}"
   thread_reply_checking: "The reply failed; checking whether it reached GitHub before it can be posted again…"
+  thread_reply_unconfirmed: "The reply failed, and whether it reached GitHub could not be confirmed. Look on GitHub and say if it did not post; a refresh checks again, but may not be able to tell."
   thread_outdated_context: "Written on code that has changed since; its lines are where it was."
   file_recover: "Read the whole file from GitHub"
   file_recovering: "Reading the whole file from GitHub…"

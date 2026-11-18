@@ -26,6 +26,18 @@ fn drafts_round_trip_and_a_missing_file_reads_as_none_in_draft() {
     entry.replies.push(ReplyDraft {
         thread: "PRRT_1".into(),
         text: "Fixed.".into(),
+        sent: None,
+    });
+    entry.replies.push(ReplyDraft {
+        thread: "PRRT_2".into(),
+        text: "Done.".into(),
+        sent: Some(SentReply {
+            body: "Done.".into(),
+            after: Some("PRRC_9".into()),
+            by: Some("me".into()),
+            reason: "gh timed out".into(),
+            cut_off: true,
+        }),
     });
     entry.comments.push(LineCommentDraft {
         id: entry.next_comment_id(),
@@ -48,6 +60,7 @@ fn drafts_are_per_account_and_emptied_ones_are_pruned() {
     drafts.entry(&owner("me")).replies.push(ReplyDraft {
         thread: "t".into(),
         text: "x".into(),
+        sent: None,
     });
     assert!(
         drafts.of(&owner("someone-else")).is_none(),
@@ -71,6 +84,16 @@ fn a_newer_or_damaged_file_is_not_read_as_empty() {
         (0, SCHEMA_VERSION),
         "upgraded on read"
     );
+    // A version-2 reply, from before a sent one was kept, reads as unsent.
+    std::fs::write(
+        &path,
+        r#"{"schema_version": 2, "prs": [{"of": {"host": "github.com", "account": "me",
+            "owner": "o", "name": "n", "number": 7},
+            "replies": [{"thread": "t", "text": "x"}]}]}"#,
+    )
+    .unwrap();
+    let old = load_review_drafts_in(dir.path()).unwrap();
+    assert_eq!(old.prs[0].replies[0].sent, None);
     std::fs::write(&path, r#"{"schema_version": 99, "prs": []}"#).unwrap();
     assert_eq!(load_review_drafts_in(dir.path()), None, "newer");
     std::fs::write(&path, "{ not json").unwrap();

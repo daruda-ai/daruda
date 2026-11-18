@@ -241,7 +241,11 @@ fn thread_actions(
     row: &ThreadRowView,
     cx: &Context<Workspace>,
 ) -> Vec<AnyElement> {
-    let running = matches!(row.op, Some(ThreadOp::Running(_)));
+    // A reply being checked holds the thread's other actions too (`begin`).
+    let running = matches!(
+        row.op,
+        Some(ThreadOp::Running(_) | ThreadOp::Checking(_) | ThreadOp::Unconfirmed(_))
+    );
     let thread = row.id.clone();
     let mut actions = Vec::new();
     if row.reply.is_none() && !row.resolved_here && row.may.reply {
@@ -284,7 +288,8 @@ fn thread_actions(
     actions
 }
 
-/// The reply being written, with Post and Cancel.
+/// The reply being written, with Post and Cancel, and, when whether it
+/// posted could not be confirmed, a way to say it did not.
 fn reply_box(
     id: PrDetailId,
     index: usize,
@@ -294,10 +299,14 @@ fn reply_box(
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let running = matches!(row.op, Some(ThreadOp::Running(_)));
-    let checking = matches!(row.op, Some(ThreadOp::Checking { .. }));
+    let checking = matches!(
+        row.op,
+        Some(ThreadOp::Checking(_) | ThreadOp::Unconfirmed(_))
+    );
+    let unconfirmed = matches!(row.op, Some(ThreadOp::Unconfirmed(_)));
     // The box notifies the detail as it is typed in, so this follows it.
     let empty = reply.read(cx).value().trim().is_empty();
-    let (post, cancel) = (row.id.clone(), row.id.clone());
+    let (post, cancel, not_posted) = (row.id.clone(), row.id.clone(), row.id.clone());
     div()
         .debug_selector(move || format!("pr-thread-reply-box-{index}"))
         .flex()
@@ -315,6 +324,18 @@ fn reply_box(
                         .disabled(running || checking || empty)
                         .on_click(cx.listener(move |ws, _, _, cx| ws.post_pr_reply(id, &post, cx))),
                 )
+                .when(unconfirmed, |buttons| {
+                    buttons.child(
+                        button_compact(
+                            ("pr-thread-not-posted", index),
+                            s::thread_reply_not_posted(),
+                        )
+                        .debug_selector(move || format!("pr-thread-not-posted-{index}"))
+                        .on_click(cx.listener(move |ws, _, _, cx| {
+                            ws.mark_pr_reply_not_posted(id, &not_posted, cx)
+                        })),
+                    )
+                })
                 .child(
                     button_compact(("pr-thread-cancel", index), s::thread_cancel_reply())
                         .disabled(running)
@@ -338,7 +359,8 @@ fn op_line(op: &ThreadOp, cx: &Context<Workspace>) -> AnyElement {
             },
             t.text_muted,
         ),
-        ThreadOp::Checking { .. } => (s::thread_reply_checking(), t.text_muted),
+        ThreadOp::Checking(_) => (s::thread_reply_checking(), t.text_muted),
+        ThreadOp::Unconfirmed(_) => (s::thread_reply_unconfirmed(), t.banner_error_text),
         ThreadOp::Failed(action, reason) => (
             s::thread_action_failed(action.failure_title(), reason),
             t.banner_error_text,

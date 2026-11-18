@@ -758,8 +758,8 @@ impl Workspace {
             return;
         };
         let (answer, error) = split(result);
-        // A failed refresh leaves the threads shown up; work waiting on it
-        // settles as unread, not against the threads read before.
+        // A failed refresh leaves the threads shown up; a reply waiting on it
+        // stays unconfirmed, not checked against the threads read before.
         if !slot.land_keeping_ready(ticket, answer) {
             return;
         }
@@ -779,13 +779,12 @@ impl Workspace {
                 .expanded_threads
                 .retain(|thread| open.contains(thread.as_str()));
         }
-        let posted = detail
-            .thread_work
-            .threads_read(ticket, read.as_ref(), |reply| {
-                reply.read(cx).value().to_string()
-            });
-        for thread in posted {
-            self.set_pr_reply_draft(id, &thread, None, cx);
+        let settled = detail.thread_work.threads_read(ticket, read.as_ref());
+        for (thread, how) in settled {
+            match how {
+                thread_actions::Settled::Posted => self.set_pr_reply_draft(id, &thread, None, cx),
+                thread_actions::Settled::NotPosted => self.let_go_pr_reply_sent(id, &thread, cx),
+            }
         }
         if let Some(e) = error {
             self.report_pr_read(&e, "github.pr_threads.read", cx);

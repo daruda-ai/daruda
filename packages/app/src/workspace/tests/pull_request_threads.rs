@@ -239,11 +239,12 @@ fn a_reply_posts_and_a_thread_resolves_each_on_its_own(cx: &mut TestAppContext) 
             });
         })
     });
+    // Refused outright: it did not post, so it may go again.
     gh.fail(
         GhOp::ReplyToThread,
         GhFailure::Exit {
             code: Some(1),
-            stderr: "HTTP 502".into(),
+            stderr: "gh: Validation Failed (HTTP 422)".into(),
         },
     );
     // Meanwhile the other thread resolves.
@@ -396,6 +397,49 @@ fn a_failed_reply_that_did_post_is_not_offered_again(cx: &mut TestAppContext) {
     assert!(vcx.debug_bounds("pr-thread-post-0").is_none());
 }
 
+/// A failed reply whose check cannot read the threads holds Post; the person
+/// looking on GitHub can say it did not post, and its text may go again.
+#[gpui::test]
+fn an_unconfirmed_reply_is_held_until_the_person_says_it_did_not_post(cx: &mut TestAppContext) {
+    use daruda_github::fake::{GhFailure, GhOp};
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    type_a_reply_github_takes_silently(&f, &gh, id, &mut vcx);
+    gh.fail(GhOp::ReviewThreads, GhFailure::Timeout);
+    let post = vcx.debug_bounds("pr-thread-post-0").unwrap().center();
+    vcx.simulate_click(post, Modifiers::default());
+    vcx.run_until_parked();
+    assert!(
+        matches!(
+            reply_work(&f, &vcx),
+            Some((true, Some(ThreadOp::Unconfirmed { .. })))
+        ),
+        "{:?}",
+        reply_work(&f, &vcx)
+    );
+    vcx.simulate_click(post, Modifiers::default());
+    vcx.run_until_parked();
+    assert_eq!(
+        gh.calls()
+            .iter()
+            .filter(|call| matches!(call, daruda_github::fake::GhCall::ReplyToThread { .. }))
+            .count(),
+        1,
+        "Post is held"
+    );
+    let not_posted = vcx.debug_bounds("pr-thread-not-posted-0").unwrap().center();
+    vcx.simulate_click(not_posted, Modifiers::default());
+    vcx.run_until_parked();
+    assert!(
+        matches!(
+            reply_work(&f, &vcx),
+            Some((true, Some(ThreadOp::Failed(..))))
+        ),
+        "the text kept, to go again"
+    );
+    assert!(vcx.debug_bounds("pr-thread-not-posted-0").is_none());
+}
+
 /// Threads dropped while hidden still settle a failed reply: the read made
 /// when they are shown again finds it posted.
 #[gpui::test]
@@ -428,6 +472,44 @@ fn a_failed_reply_is_checked_when_its_threads_are_shown_again(cx: &mut TestAppCo
         Some((false, None)),
         "found posted: the box closes, nothing to retry"
     );
+}
+
+/// A failed refresh keeps the threads shown, and with them the mark of one
+/// resolved here.
+#[gpui::test]
+fn a_resolve_stays_shown_when_the_threads_fail_to_read_again(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    gh.set_review_threads(&repo(), 7, threads());
+    f.ws.update(cx, |ws, cx| ws.select_pr_detail_tab(id, PrTab::Threads, cx));
+    cx.run_until_parked();
+    f.ws.update(cx, |ws, cx| ws.set_pr_thread_resolved(id, "t3", true, cx));
+    cx.run_until_parked();
+    let reads = gh.count(daruda_github::fake::GhOp::ReviewThreads);
+    gh.fail(
+        daruda_github::fake::GhOp::ReviewThreads,
+        daruda_github::fake::GhFailure::Exit {
+            code: Some(1),
+            stderr: "HTTP 502".into(),
+        },
+    );
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        gh.count(daruda_github::fake::GhOp::ReviewThreads),
+        reads + 1,
+        "read again"
+    );
+    f.ws.read_with(cx, |ws, _| {
+        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        // The threads read before the resolve stay up, so its mark does too.
+        assert!(matches!(
+            detail.threads(),
+            Some(crate::workspace::pages::pull_requests::detail::Load::Ready(
+                _
+            ))
+        ));
+        assert!(detail.thread_work().resolved_here("t3"));
+    });
 }
 
 /// A refresh reads the shown threads again in place: they stay up until the

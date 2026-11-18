@@ -1082,6 +1082,7 @@ pull_requests:
   thread_reply: "답글"
   thread_post_reply: "답글 올리기"
   thread_cancel_reply: "취소"
+  thread_reply_not_posted: "올라가지 않았음"
   thread_resolve: "해결"
   thread_unresolve: "해결 취소"
   thread_resolved: "해결됨"
@@ -1094,6 +1095,7 @@ pull_requests:
   # %{title}는 실패한 작업, %{reason}은 gh가 남긴 이유입니다.
   thread_action_failed: "%{title}: %{reason}"
   thread_reply_checking: "답글 올리기 실패: 다시 올리기 전에 GitHub에 올라갔는지 확인하는 중…"
+  thread_reply_unconfirmed: "답글 올리기 실패: GitHub에 올라갔는지 확인하지 못했습니다. GitHub에서 직접 보고 올라가지 않았으면 알려 주세요. 새로고침하면 다시 확인하지만 판단하지 못할 수도 있습니다."
   thread_outdated_context: "이후 바뀐 코드에 남긴 댓글입니다. 줄 번호는 작성 당시 위치입니다."
   file_recover: "GitHub에서 파일 전체 읽기"
   file_recovering: "GitHub에서 파일 전체를 읽는 중…"

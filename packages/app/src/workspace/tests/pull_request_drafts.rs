@@ -226,6 +226,125 @@ fn a_reply_draft_is_marked_continued_and_dropped_once_posted(cx: &mut TestAppCon
     );
 }
 
+/// A reply that fails after its detail is gone is held as sent with its
+/// draft, across a restart: reopened, it is checked rather than sent again,
+/// and the read that finds it posted drops the draft.
+#[gpui::test]
+fn a_reply_failed_with_its_detail_gone_is_checked_not_sent_again(cx: &mut TestAppContext) {
+    use daruda_github::fake::{GhCall, GhFailure, GhOp};
+    let dir = tempfile::tempdir().unwrap();
+    cx.update(|cx| DraftStore::install_at(dir.path().to_owned(), cx));
+    let (f, gh, id) = opened_signed_in(cx, mergeable(7, "feat"));
+    let threads = |comments: Vec<ReviewComment>| ReviewThreads {
+        threads: vec![ReviewThread {
+            id: "t1".into(),
+            path: "a.rs".into(),
+            comments,
+            ..Default::default()
+        }],
+        truncated: false,
+    };
+    let asked = ReviewComment {
+        id: "c1".into(),
+        body: "Why?".into(),
+        ..Default::default()
+    };
+    gh.set_review_threads(&repo(), 7, threads(vec![asked.clone()]));
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.simulate_resize(size(px(1400.), px(900.)));
+    f.ws.update(&mut vcx, |ws, cx| {
+        ws.select_pr_detail_tab(id, PrTab::Threads, cx)
+    });
+    vcx.run_until_parked();
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.open_pr_reply(id, "t1", window, cx);
+            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let input = detail
+                .thread_work()
+                .get("t1")
+                .unwrap()
+                .reply
+                .clone()
+                .unwrap();
+            input.update(cx, |input, cx| input.set_value("Because.", window, cx));
+        })
+    });
+    gh.fail(GhOp::ReplyToThread, GhFailure::Timeout);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.post_pr_reply(id, "t1", cx);
+            ws.back_to_pr_list(window, cx);
+        })
+    });
+    vcx.run_until_parked();
+    let saved = load_review_drafts_in(dir.path()).unwrap();
+    let sent = saved.prs[0].replies[0]
+        .sent
+        .clone()
+        .expect("held as sent, written at once");
+    assert_eq!(
+        (
+            sent.body.as_str(),
+            sent.after.as_deref(),
+            sent.by.as_deref(),
+            sent.cut_off
+        ),
+        ("Because.", Some("c1"), Some("me"), true)
+    );
+
+    // A restart reads it back; GitHub posted it after all.
+    cx.update(|cx| DraftStore::install_at(dir.path().to_owned(), cx));
+    gh.clear_failure(GhOp::ReplyToThread);
+    gh.set_review_threads(
+        &repo(),
+        7,
+        threads(vec![
+            asked,
+            ReviewComment {
+                id: "c2".into(),
+                author: Some("me".into()),
+                body: "Because.".into(),
+                ..Default::default()
+            },
+        ]),
+    );
+    open(&f, item(7, "feat"), &mut vcx);
+    vcx.run_until_parked();
+    let again = shown_id(&f, &mut vcx);
+    f.ws.update(&mut vcx, |ws, cx| {
+        ws.select_pr_detail_tab(again, PrTab::Threads, cx)
+    });
+    vcx.run_until_parked();
+    let calls = gh.calls().len();
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.open_pr_reply(again, "t1", window, cx);
+            ws.post_pr_reply(again, "t1", cx);
+        })
+    });
+    vcx.run_until_parked();
+    assert!(
+        !gh.calls()[calls..]
+            .iter()
+            .any(|call| matches!(call, GhCall::ReplyToThread { .. })),
+        "not sent again"
+    );
+    let closed = f.ws.read_with(&vcx, |ws, _| {
+        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        detail
+            .thread_work()
+            .get("t1")
+            .is_none_or(|work| work.reply.is_none() && work.op.is_none())
+    });
+    assert!(closed, "found posted: the box closes");
+    leave(&f, &mut vcx);
+    assert!(
+        load_review_drafts_in(dir.path()).unwrap().prs.is_empty(),
+        "and its draft is done with"
+    );
+}
+
 #[gpui::test]
 fn without_a_known_account_the_editor_says_its_text_is_not_kept(cx: &mut TestAppContext) {
     use crate::github::DraftKeeping;

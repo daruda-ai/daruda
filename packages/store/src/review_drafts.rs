@@ -21,8 +21,8 @@ use crate::persistence::{LoadOutcome, load_json_file, save_json_atomic};
 
 /// The file's layout version: a newer one is not loaded, so fields this
 /// build does not know are never written away. 2 added line comments, the
-/// review's text and creation drafts.
-pub const SCHEMA_VERSION: u32 = 2;
+/// review's text and creation drafts; 3, a reply sent but not confirmed.
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Whose drafts, on which pull request.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -48,6 +48,28 @@ pub struct ReplyDraft {
     /// GitHub's id of the thread.
     pub thread: String,
     pub text: String,
+    /// Sent, failed, and not yet known not to have posted: it is not sent
+    /// again, even from another detail or after a restart, until a read of
+    /// the thread or the person says it did not post.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent: Option<SentReply>,
+}
+
+/// A reply sent whose failure does not prove it did not post.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SentReply {
+    pub body: String,
+    /// The thread's last comment as it was sent: only a comment after it
+    /// can be this reply. `None` when the thread's end was not read.
+    pub after: Option<String>,
+    /// The account it went out as; `None` when not known.
+    pub by: Option<String>,
+    /// What `gh` said.
+    pub reason: String,
+    /// The request was cut off waiting: GitHub may post it yet, so a read
+    /// not finding it does not prove it did not post.
+    #[serde(default)]
+    pub cut_off: bool,
 }
 
 /// Which version of a file a line comment's lines count in.

@@ -3,23 +3,24 @@
 //! thread's failure never overwrites another's. A failed reply keeps its
 //! text, and every failure reads the threads again: `gh` failing does not
 //! prove GitHub did nothing, so a reply that may have posted cannot be
-//! posted again until that read says whether it did.
+//! posted again until a read says whether it did, or, when no read can, the
+//! person says it did not.
 
 use std::collections::HashMap;
 
-use daruda_github::{GhError, RepoId, ReviewComment, ReviewThreads};
+use daruda_github::{GhError, RepoId, ReviewComment, ReviewThread, ReviewThreads};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Entity, Subscription, Window};
 
 use super::read_slot::ReadTicket;
-use super::{PrDetailId, PrDetailState, TabRead};
+use super::{Load, PrDetailId, PrDetailState, TabRead};
 use crate::gh_host::GhHost;
 use crate::github::{DraftStore, PrPoller};
 use crate::surface::strings::pull_requests as s;
 use crate::ui::{InputEvent, TextareaState};
 use crate::workspace::Workspace;
 use crate::workspace::spawn_helpers::spawn_bg_work_and_mutate;
-use daruda_store::review_drafts::DraftOwner;
+use daruda_store::review_drafts::{DraftOwner, SentReply};
 
 /// An action on one thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,11 +47,127 @@ pub(in crate::workspace) enum ThreadOp {
     /// What failed and what `gh` said, until the next action on it.
     Failed(ThreadAction, String),
     /// A reply that failed may still have posted: the threads read under
-    /// ticket `after`, or a later one, say whether it did. Post waits.
-    Checking {
-        reason: String,
-        after: ReadTicket,
-    },
+    /// its ticket or a later one say whether it did. Post waits.
+    Checking(PendingReply),
+    /// No read under its ticket or later could say whether it posted (the
+    /// read failed, or could not tell): Post and other actions on the
+    /// thread wait for one that can, or for the person to say it did not.
+    Unconfirmed(PendingReply),
+}
+
+/// A reply being checked: the first threads read that can settle it, and
+/// what was sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct PendingReply {
+    pub after: ReadTicket,
+    pub sent: SentReply,
+}
+
+/// A reply going out: its text, who sends it, and the thread's last comment
+/// as it goes. Only a comment after that one can be it, so an earlier comment
+/// with the same text is never taken for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct Outgoing {
+    body: String,
+    /// `None` when the thread's end was not read (more replies than are
+    /// read, or not read yet), so no read can tell.
+    after: Option<String>,
+    /// The account it goes out as; `None` when not known, and then any
+    /// author's comment with its text counts.
+    by: Option<String>,
+}
+
+impl Outgoing {
+    /// What `by` sends to `thread` as shown.
+    pub(in crate::workspace) fn to(
+        thread: Option<&ReviewThread>,
+        body: String,
+        by: Option<String>,
+    ) -> Self {
+        let after = thread
+            .filter(|thread| !thread.more_comments)
+            .and_then(|thread| thread.comments.last())
+            .map(|comment| comment.id.clone());
+        Self { body, after, by }
+    }
+
+    /// It failed with `error`, which does not prove it did not post. A
+    /// request cut off waiting may still post: our own timeout, or GitHub
+    /// ending one past its 10 seconds with a 502 or 504, applied or not.
+    pub(in crate::workspace) fn failed(self, error: &GhError) -> SentReply {
+        let cut_off = match error {
+            GhError::Timeout(_) => true,
+            GhError::Exit { stderr, .. } => {
+                CUT_OFF_BY_GITHUB.iter().any(|said| stderr.contains(said))
+            }
+            _ => false,
+        };
+        SentReply {
+            body: self.body,
+            after: self.after,
+            by: self.by,
+            reason: error.to_string(),
+            cut_off,
+        }
+    }
+}
+
+/// What `gh` prints when GitHub ended the request unanswered: `gh: HTTP 502`
+/// for a body that is not JSON, `gh: <message> (HTTP 504)` for one that is.
+const CUT_OFF_BY_GITHUB: [&str; 3] = [
+    "HTTP 502",
+    "HTTP 504",
+    "couldn't respond to your request in time",
+];
+
+/// Whether `sent` is in `thread` as read; `None` when that read cannot say:
+/// the thread is not listed (resolved since, or gone), its end is not read,
+/// the comment it came after is no longer there, or it is missing but was
+/// cut off, so GitHub may post it yet.
+pub(in crate::workspace) fn arrived(
+    sent: &SentReply,
+    thread: Option<&ReviewThread>,
+) -> Option<bool> {
+    let thread = thread.filter(|thread| !thread.more_comments)?;
+    let after = sent.after.as_deref()?;
+    let start = thread
+        .comments
+        .iter()
+        .position(|comment| comment.id == after)?
+        + 1;
+    let body = reply_text(&sent.body);
+    let found = thread.comments[start..].iter().any(|comment| {
+        reply_text(&comment.body) == body
+            && sent
+                .by
+                .as_deref()
+                .is_none_or(|by| comment.author.as_deref() == Some(by))
+    });
+    match (found, sent.cut_off) {
+        (true, _) => Some(true),
+        (false, true) => None,
+        (false, false) => Some(false),
+    }
+}
+
+/// A reply's text as compared: GitHub may give it back with other line
+/// endings or without trailing spaces, which do not change it.
+fn reply_text(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_owned()
+}
+
+/// How a reply being checked turned out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum Settled {
+    Posted,
+    NotPosted,
 }
 
 /// One thread's reply box and action.
@@ -67,23 +184,52 @@ pub(in crate::workspace) struct ThreadWork {
 
 impl ThreadWork {
     /// A reply still being checked when its threads answer at `ticket`:
-    /// failed after all, unless they show it `posted`.
-    fn checked(&mut self, ticket: ReadTicket, posted: impl FnOnce(&Self) -> bool) -> bool {
-        let Some(ThreadOp::Checking { reason, after }) = &self.op else {
+    /// `arrived` says whether it posted, or `None` when that read cannot.
+    /// Posted, the box closes; not posted, it failed after all; unknown, it
+    /// stays unconfirmed.
+    fn checked(
+        &mut self,
+        ticket: ReadTicket,
+        arrived: impl FnOnce(&SentReply) -> Option<bool>,
+    ) -> Option<Settled> {
+        let Some(ThreadOp::Checking(pending) | ThreadOp::Unconfirmed(pending)) = &self.op else {
+            return None;
+        };
+        if ticket < pending.after {
+            return None;
+        }
+        let pending = pending.clone();
+        match arrived(&pending.sent) {
+            Some(true) => {
+                self.close_reply();
+                self.op = None;
+                Some(Settled::Posted)
+            }
+            Some(false) => {
+                self.op = Some(ThreadOp::Failed(
+                    ThreadAction::Replying,
+                    pending.sent.reason,
+                ));
+                Some(Settled::NotPosted)
+            }
+            None => {
+                self.op = Some(ThreadOp::Unconfirmed(pending));
+                None
+            }
+        }
+    }
+
+    /// The person says a reply that could not be confirmed did not post:
+    /// it failed, and its text can go again. `false` unless unconfirmed.
+    fn not_posted(&mut self) -> bool {
+        let Some(ThreadOp::Unconfirmed(pending)) = &self.op else {
             return false;
         };
-        if ticket < *after {
-            return false;
-        }
-        let reason = reason.clone();
-        if posted(self) {
-            self.close_reply();
-            self.op = None;
-            true
-        } else {
-            self.op = Some(ThreadOp::Failed(ThreadAction::Replying, reason));
-            false
-        }
+        self.op = Some(ThreadOp::Failed(
+            ThreadAction::Replying,
+            pending.sent.reason.clone(),
+        ));
+        true
     }
 
     fn close_reply(&mut self) {
@@ -132,7 +278,7 @@ impl ThreadsWork {
         let work = self.work.entry(thread.to_owned()).or_default();
         if matches!(
             work.op,
-            Some(ThreadOp::Running(_) | ThreadOp::Checking { .. })
+            Some(ThreadOp::Running(_) | ThreadOp::Checking(_) | ThreadOp::Unconfirmed(_))
         ) {
             return false;
         }
@@ -170,41 +316,31 @@ impl ThreadsWork {
     }
 
     /// The threads read under `ticket` landed, as `threads` when read.
-    /// Resolved marks older than the read go (it no longer lists them); a
-    /// failed reply it may have posted is checked against the thread's last
-    /// comment (`draft` reads its box); work on threads gone is let go,
-    /// unless it holds a reply still being written.
-    /// Answers the threads whose failed reply turned out posted.
+    /// Resolved marks older than a read that arrived go (it no longer lists
+    /// them); a failed reply it may have posted is looked for after the
+    /// comment it followed, and stays unconfirmed when the read failed or
+    /// cannot tell; work on threads gone is let go, unless it holds a reply
+    /// still being written.
+    /// Answers the threads whose failed reply this read settled, and how.
     pub(in crate::workspace) fn threads_read(
         &mut self,
         ticket: ReadTicket,
         threads: Option<&ReviewThreads>,
-        draft: impl Fn(&Entity<TextareaState>) -> String,
-    ) -> Vec<String> {
-        let mut posted_after_all = Vec::new();
-        self.resolved.retain(|_, stamp| *stamp > ticket);
+    ) -> Vec<(String, Settled)> {
+        // Unread, the threads shown are the older ones, which still need the
+        // marks.
         let Some(threads) = threads else {
             for work in self.work.values_mut() {
-                work.checked(ticket, |_| false);
+                work.checked(ticket, |_| None);
             }
-            return posted_after_all;
+            return Vec::new();
         };
-        let last = |thread: &str| {
-            threads
-                .threads
-                .iter()
-                .find(|held| held.id == thread)
-                .and_then(|held| held.comments.last())
-                .map(|comment| comment.body.trim().to_owned())
-        };
+        self.resolved.retain(|_, stamp| *stamp > ticket);
+        let mut settled = Vec::new();
         for (thread, work) in &mut self.work {
-            let posted = work.checked(ticket, |work| {
-                work.reply
-                    .as_ref()
-                    .is_some_and(|reply| last(thread).as_deref() == Some(draft(reply).trim()))
-            });
-            if posted {
-                posted_after_all.push(thread.clone());
+            let held = threads.threads.iter().find(|held| held.id == *thread);
+            if let Some(how) = work.checked(ticket, |sent| arrived(sent, held)) {
+                settled.push((thread.clone(), how));
             }
         }
         self.work.retain(|thread, work| {
@@ -212,12 +348,11 @@ impl ThreadsWork {
                 || matches!(work.op, Some(ThreadOp::Running(_)))
                 || threads.threads.iter().any(|held| held.id == *thread)
         });
-        posted_after_all
+        settled
     }
 }
 
 impl PrDetailState {
-    /// Read the threads again in place, keeping what is shown until then.
     /// Read the threads again in place. The ticket is issued even when they
     /// are not held, so a check waiting on it settles with whichever threads
     /// read comes next.
@@ -284,7 +419,39 @@ impl Workspace {
             .or_default();
         work.reply = Some(reply);
         work.typing = Some(typing);
-        work.owner = owner;
+        work.owner = owner.clone();
+        // Sent before, from another detail or before a restart, and never
+        // confirmed: it is checked again rather than offered for Post.
+        if work.op.is_none()
+            && let Some(sent) = owner.and_then(|owner| DraftStore::reply_sent(&owner, thread, cx))
+        {
+            self.hold_pr_reply(id, thread, sent, cx);
+        }
+        cx.notify();
+    }
+
+    /// Hold `thread`'s reply, sent and not confirmed, until a threads read
+    /// sent now says whether it posted.
+    fn hold_pr_reply(
+        &mut self,
+        id: PrDetailId,
+        thread: &str,
+        sent: SentReply,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(detail) = self.pr_detail_mut(id) else {
+            return;
+        };
+        let (after, read) = detail.reread_threads();
+        detail
+            .thread_work
+            .work
+            .entry(thread.to_owned())
+            .or_default()
+            .op = Some(ThreadOp::Checking(PendingReply { after, sent }));
+        if let Some(read) = read {
+            self.send_pr_tab_read(id, read, cx);
+        }
         cx.notify();
     }
 
@@ -307,6 +474,36 @@ impl Workspace {
         }
         self.set_pr_reply_draft(id, thread, None, cx);
         cx.notify();
+    }
+
+    /// The person looked on GitHub: the reply that could not be confirmed
+    /// did not post, so its text may go again.
+    pub(in crate::workspace) fn mark_pr_reply_not_posted(
+        &mut self,
+        id: PrDetailId,
+        thread: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(work) = self
+            .pr_detail_mut(id)
+            .and_then(|detail| detail.thread_work.work.get_mut(thread))
+            && work.not_posted()
+        {
+            self.let_go_pr_reply_sent(id, thread, cx);
+            cx.notify();
+        }
+    }
+
+    /// A reply held as sent turned out not posted: its draft is only text.
+    pub(super) fn let_go_pr_reply_sent(
+        &mut self,
+        id: PrDetailId,
+        thread: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(owner) = self.pr_draft_owner(id, cx) {
+            DraftStore::set_reply_sent(&owner, thread, None, cx);
+        }
     }
 
     /// Typing a reply: kept as typed, so leaving or quitting loses none.
@@ -367,19 +564,56 @@ impl Workspace {
         else {
             return;
         };
+        // Held as sent elsewhere (another detail, before a restart) and not
+        // confirmed: checked, not sent again.
+        if let Some(sent) = self
+            .pr_draft_owner(id, cx)
+            .and_then(|owner| DraftStore::reply_sent(&owner, thread, cx))
+        {
+            let held = self
+                .pr_detail_mut(id)
+                .and_then(|detail| detail.thread_work.work.get(thread))
+                .is_some_and(|work| {
+                    matches!(
+                        work.op,
+                        Some(ThreadOp::Checking(_) | ThreadOp::Unconfirmed(_))
+                    )
+                });
+            if !held {
+                self.hold_pr_reply(id, thread, sent, cx);
+            }
+            return;
+        }
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
         if !detail.thread_work.begin(thread, ThreadAction::Replying) {
             return;
         }
+        let shown = match detail.threads.as_ref().map(|slot| slot.load()) {
+            Some(Load::Ready(threads)) => threads.threads.iter().find(|held| held.id == thread),
+            _ => None,
+        };
         let (repo, number) = (detail.item.repo.clone(), detail.item.pr.number);
+        // The account gh posts as now; the box's own if that is not known.
+        let by = DraftStore::owner(&repo, number, cx)
+            .or_else(|| {
+                detail
+                    .thread_work
+                    .work
+                    .get(thread)
+                    .and_then(|work| work.owner.clone())
+            })
+            .map(|owner| owner.account);
+        let outgoing = Outgoing::to(shown, body.clone(), by);
         let (gh, thread) = (GhHost::global(cx), thread.to_owned());
         let bg = (repo.clone(), thread.clone());
         spawn_bg_work_and_mutate(
             cx,
             move || gh.reply_to_thread(&bg.0, &bg.1, &body),
-            move |ws, result, cx| ws.land_pr_reply(id, repo, number, thread, result, cx),
+            move |ws, result, cx| {
+                ws.land_pr_reply(id, (repo, number), thread, outgoing, result, cx)
+            },
         )
         .detach();
         cx.notify();
@@ -388,18 +622,21 @@ impl Workspace {
     fn land_pr_reply(
         &mut self,
         id: PrDetailId,
-        repo: RepoId,
-        number: u64,
+        (repo, number): (RepoId, u64),
         thread: String,
+        outgoing: Outgoing,
         result: Result<ReviewComment, GhError>,
         cx: &mut Context<Self>,
     ) {
         let failure = result.as_ref().err().map(ToString::to_string);
-        // Posted: the draft is done with, even if the detail is gone.
-        if result.is_ok()
-            && let Some(owner) = DraftStore::owner(&repo, number, cx)
-        {
-            DraftStore::set_reply(&owner, &thread, None, cx);
+        // Even if the detail is gone: posted, the draft is done with; failed,
+        // it is held as sent, so no detail sends it again unchecked.
+        let sent = result.as_ref().err().map(|e| outgoing.failed(e));
+        if let Some(owner) = DraftStore::owner(&repo, number, cx) {
+            match &sent {
+                None => DraftStore::set_reply(&owner, &thread, None, cx),
+                Some(sent) => DraftStore::set_reply_sent(&owner, &thread, Some(sent.clone()), cx),
+            }
         }
         if let Some(detail) = self.pr_detail_mut(id) {
             let stamp = detail.tickets.issue();
@@ -415,7 +652,17 @@ impl Workspace {
                 held.comments.push(comment.clone());
             }
         }
-        self.thread_action_landed(id, repo, &thread, ThreadAction::Replying, result.err(), cx);
+        let reread = self.thread_action_landed(id, repo, ThreadAction::Replying, result.err(), cx);
+        // It may have posted all the same: the threads read again say.
+        if let Some(after) = reread
+            && let Some(sent) = sent
+            && let Some(work) = self
+                .pr_detail_mut(id)
+                .and_then(|detail| detail.thread_work.work.get_mut(&thread))
+            && matches!(work.op, Some(ThreadOp::Failed(ThreadAction::Replying, _)))
+        {
+            work.op = Some(ThreadOp::Checking(PendingReply { after, sent }));
+        }
     }
 
     /// Resolve `thread`, or unresolve one resolved from here.
@@ -449,7 +696,7 @@ impl Workspace {
                     let stamp = detail.tickets.issue();
                     detail.thread_work.finish(&thread, action, failure, stamp);
                 }
-                ws.thread_action_landed(id, repo, &thread, action, result.err(), cx);
+                ws.thread_action_landed(id, repo, action, result.err(), cx);
             },
         )
         .detach();
@@ -458,17 +705,16 @@ impl Workspace {
 
     /// GitHub changed, or may have, whether or not the detail that asked is
     /// still shown: the list and lane badges are asked again and a failure
-    /// is reported. The detail, if still there, reads the threads again; a
-    /// failed reply waits on that read before it can be posted again.
+    /// is reported. The detail, if still there, reads the threads again
+    /// after a failure: the ticket of that read.
     fn thread_action_landed(
         &mut self,
         id: PrDetailId,
         repo: RepoId,
-        thread: &str,
         action: ThreadAction,
         error: Option<GhError>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<ReadTicket> {
         PrPoller::nudge(repo, cx);
         if let Some(e) = error {
             let report = ErrorReport::new(action.failure_title())
@@ -478,23 +724,15 @@ impl Workspace {
                 .dedup("github.pr_thread.action")
                 .build();
             self.report_error(report, cx);
-            let reread = self.pr_detail_mut(id).and_then(|detail| {
-                let (ticket, read) = detail.reread_threads();
-                if let Some(work) = detail.thread_work.work.get_mut(thread)
-                    && let Some(ThreadOp::Failed(ThreadAction::Replying, reason)) = &work.op
-                {
-                    work.op = Some(ThreadOp::Checking {
-                        reason: reason.clone(),
-                        after: ticket,
-                    });
-                }
-                read
-            });
-            if let Some(read) = reread {
-                self.send_pr_tab_read(id, read, cx);
+            let reread = self.pr_detail_mut(id).map(|detail| detail.reread_threads());
+            if let Some((_, Some(read))) = &reread {
+                self.send_pr_tab_read(id, *read, cx);
             }
+            cx.notify();
+            return reread.map(|(ticket, _)| ticket);
         }
         cx.notify();
+        None
     }
 }
 

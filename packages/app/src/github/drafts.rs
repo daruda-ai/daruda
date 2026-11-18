@@ -8,7 +8,8 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::review_drafts::{
     CreationDraft, CreationOwner, DescriptionDraft, DraftOwner, LineCommentDraft, PrDrafts,
-    ReplyDraft, ReviewDrafts, load_review_drafts_in, review_drafts_dir, save_review_drafts_in,
+    ReplyDraft, ReviewDrafts, SentReply, load_review_drafts_in, review_drafts_dir,
+    save_review_drafts_in,
 };
 use gpui::{App, Global};
 
@@ -139,18 +140,58 @@ impl DraftStore {
         Self::changed(cx);
     }
 
-    /// Set, or with `None` drop, the reply draft to `thread`.
+    /// Set the text of, or with `None` drop, the reply draft to `thread`.
+    /// A reply it holds as sent stays so while its text changes.
     pub(crate) fn set_reply(owner: &DraftOwner, thread: &str, text: Option<String>, cx: &mut App) {
         let store = Self::global_mut(cx);
         let replies = &mut store.drafts.entry(owner).replies;
-        replies.retain(|held| held.thread != thread);
-        if let Some(text) = text {
-            replies.push(ReplyDraft {
+        match (text, replies.iter_mut().find(|held| held.thread == thread)) {
+            (Some(text), Some(held)) => held.text = text,
+            (Some(text), None) => replies.push(ReplyDraft {
                 thread: thread.to_owned(),
                 text,
-            });
+                sent: None,
+            }),
+            (None, _) => replies.retain(|held| held.thread != thread),
         }
         Self::changed(cx);
+    }
+
+    /// Hold, or with `None` let go, a reply to `thread` sent but not
+    /// confirmed; held with no draft, its text becomes the draft.
+    pub(crate) fn set_reply_sent(
+        owner: &DraftOwner,
+        thread: &str,
+        sent: Option<SentReply>,
+        cx: &mut App,
+    ) {
+        let store = Self::global_mut(cx);
+        let replies = &mut store.drafts.entry(owner).replies;
+        match (sent, replies.iter_mut().find(|held| held.thread == thread)) {
+            (sent, Some(held)) => held.sent = sent,
+            (Some(sent), None) => replies.push(ReplyDraft {
+                thread: thread.to_owned(),
+                text: sent.body.clone(),
+                sent: Some(sent),
+            }),
+            (None, None) => return,
+        }
+        // Written now rather than when typing settles: it is what keeps the
+        // reply from going out twice should daruda stop before then.
+        Self::changed(cx);
+        Self::flush(cx);
+    }
+
+    /// The reply to `thread` held as sent but not confirmed.
+    pub(crate) fn reply_sent(owner: &DraftOwner, thread: &str, cx: &App) -> Option<SentReply> {
+        cx.try_global::<Self>()?
+            .drafts
+            .of(owner)?
+            .replies
+            .iter()
+            .find(|held| held.thread == thread)?
+            .sent
+            .clone()
     }
 
     /// Keep `comment` as comment `id`, or as a new one with `None`.
