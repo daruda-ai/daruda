@@ -1421,7 +1421,7 @@ fn a_reopened_log_does_not_take_an_earlier_reads_answer(cx: &mut TestAppContext)
     }
 }
 
-fn set_github_enabled(cx: &mut TestAppContext, enabled: bool) {
+pub(in crate::workspace) fn set_github_enabled(cx: &mut TestAppContext, enabled: bool) {
     cx.update(|cx| {
         let mut config = daruda_config::Config::default();
         config.github.enabled = enabled;

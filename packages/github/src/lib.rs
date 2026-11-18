@@ -7,6 +7,7 @@
 //! Tests use `FakeGh` (feature `test-support`) and never spawn `gh`.
 
 mod actions;
+pub mod address;
 pub mod availability;
 mod backend;
 mod checkout;

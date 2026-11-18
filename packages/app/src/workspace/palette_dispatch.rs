@@ -139,6 +139,9 @@ impl Workspace {
                 "run_flow" => self.on_run_flow(&RunFlow, window, cx),
                 "validate_flow" => self.on_validate_flow(&ValidateFlow, window, cx),
                 "show_flow_graph" => self.on_show_flow_graph(&ShowFlowGraph, window, cx),
+                "open_pull_request" => {
+                    self.on_open_pull_request(&crate::workspace::OpenPullRequest, window, cx)
+                }
                 "reload_flow_graph" => self.on_reload_flow_graph(&ReloadFlowGraph, window, cx),
                 "move_flow_to_repository" => {
                     self.on_move_flow_to_repository(&MoveFlowToRepository, window, cx)

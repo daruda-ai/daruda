@@ -338,6 +338,7 @@ impl Workspace {
             .on_action(cx.listener(Self::on_pull_requests_select_prev))
             .on_action(cx.listener(Self::on_pull_requests_open_selected))
             .on_action(cx.listener(Self::on_pull_requests_focus_search))
+            .on_action(cx.listener(Self::on_open_pull_request))
             .on_action(cx.listener(Self::on_switch_pane_account))
             .on_action(cx.listener(Self::on_open_project_config))
             .on_action(cx.listener(Self::on_install_agent_hooks))

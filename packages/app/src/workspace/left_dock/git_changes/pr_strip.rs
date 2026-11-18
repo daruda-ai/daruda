@@ -106,16 +106,42 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
         }
         PrStrip::Created(created) => {
             // Created, not listed yet: open it, never create a second one.
+            // In daruda when its number is known; on GitHub either way.
             let url = created.url.clone();
-            let label = match created.number {
-                Some(number) => s::pr_open_created(s::pr_number(number)),
-                None => s::pr_open_on_github(),
-            };
-            let open = crate::ui::button_compact_sized("pr-open-created", label, metrics).on_click(
-                cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
-                    cx.open_url(&url);
-                }),
-            );
+            // The repository and number named now, not looked up on click.
+            let named = daruda_github::address::parse_pr_address(&created.url)
+                .and_then(|address| address.repo.map(|repo| (repo, address.number)));
+            let in_daruda = named.map(|(repo, number)| {
+                let workspace = workspace.clone();
+                crate::ui::button_compact_sized(
+                    "pr-open-created",
+                    s::pr_open_created(s::pr_number(number)),
+                    metrics,
+                )
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| {
+                            ws.open_pr_in_daruda(repo.clone(), number, window, cx)
+                        });
+                    }
+                }))
+            });
+            let on_github = crate::ui::button_icon_sized(
+                "pr-open-created-on-github",
+                crate::ui::icons::OPEN_IN_NEW,
+                metrics,
+                cx,
+            )
+            .tooltip(s::pr_open_on_github())
+            .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                cx.open_url(&url);
+            }));
+            let open = div()
+                .flex()
+                .items_center()
+                .gap(px(metrics.space(theme::GIT_REMOTE_BTN_GAP)))
+                .children(in_daruda)
+                .child(on_github);
             Some(
                 row.child(
                     div()
@@ -165,11 +191,25 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                     ws.update(cx, |ws, cx| ws.open_pr_in_browser(cx));
                 }
             }));
+            // The title opens it in daruda; the icon on GitHub.
+            let in_daruda = snap.workspace.clone();
+            let (repo, number) = (link.repo.clone(), pr.number);
             let title = div()
+                .id("pr-open-in-daruda")
                 .flex_1()
                 .min_w_0()
                 .text_ellipsis()
                 .text_color(muted)
+                .cursor_pointer()
+                .tab_stop(true)
+                .tooltip(crate::ui::tooltip::text(s::pr_open_in_daruda()))
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
+                    if let Some(ws) = in_daruda.upgrade() {
+                        ws.update(cx, |ws, cx| {
+                            ws.open_pr_in_daruda(repo.clone(), number, window, cx)
+                        });
+                    }
+                }))
                 .child(format!("{} {}", s::pr_number(pr.number), pr.title));
             // The button counts what it sends: the failing checks in hand.
             let failing = matches!(pr.checks, CheckRollup::Failing { .. }) && pr.state.is_active();

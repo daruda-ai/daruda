@@ -299,6 +299,7 @@ actions!(
         PullRequestsOpenSelected,
         /// Show the Pull requests list and put the keyboard in its search.
         PullRequestsFocusSearch,
+        OpenPullRequest,
         OpenProjectConfig,
         InstallAgentHooks,
         UninstallAgentHooks,

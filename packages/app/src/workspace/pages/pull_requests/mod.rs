@@ -19,6 +19,7 @@ pub(in crate::workspace) mod actions;
 mod controls;
 mod counts;
 pub(in crate::workspace) mod detail;
+mod direct;
 mod lane;
 pub(in crate::workspace) use lane::CheckoutStage;
 pub(in crate::workspace) mod list;
