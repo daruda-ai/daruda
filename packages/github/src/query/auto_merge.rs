@@ -1,5 +1,6 @@
 //! Turning auto-merge on for a pull request, pinned to the head commit the
-//! user saw, and off; and the parsers for their answers.
+//! user saw, and off; taking one out of the merge queue; and the parsers
+//! for their answers.
 
 use serde::Deserialize;
 
@@ -18,6 +19,10 @@ pub(crate) const ENABLE_AUTO_MERGE_MUTATION: &str = "mutation($pr: ID!, \
 pub(crate) const DISABLE_AUTO_MERGE_MUTATION: &str = "mutation($pr: ID!) { \
     disablePullRequestAutoMerge(input: {pullRequestId: $pr}) { \
     pullRequest { autoMergeRequest { mergeMethod } mergeQueueEntry { position } } } }";
+
+/// Take pull request `$pr` out of its base branch's merge queue.
+pub(crate) const DEQUEUE_MUTATION: &str = "mutation($pr: ID!) { \
+    dequeuePullRequest(input: {id: $pr}) { mergeQueueEntry { position } } }";
 
 /// GitHub's name for `method`.
 pub(crate) fn method_name(method: MergeMethod) -> &'static str {
@@ -54,6 +59,42 @@ pub(crate) fn parse_auto_merge(json: &str, on: bool) -> Result<(), GhError> {
             api_messages(response.errors)
         ))),
     }
+}
+
+/// Check the answer to [`DEQUEUE_MUTATION`]: taken out when GitHub names
+/// the entry it removed.
+pub(crate) fn parse_dequeue(json: &str) -> Result<(), GhError> {
+    let response: DequeueResponse = serde_json::from_str(json).map_err(parse_error)?;
+    match response
+        .data
+        .and_then(|data| data.dequeue_pull_request)
+        .and_then(|payload| payload.merge_queue_entry)
+    {
+        Some(_) => Ok(()),
+        None => Err(GhError::Parse(format!(
+            "no queue entry in the answer: {}",
+            api_messages(response.errors)
+        ))),
+    }
+}
+
+#[derive(Deserialize)]
+struct DequeueResponse {
+    data: Option<DequeueData>,
+    errors: Option<Vec<ApiError>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DequeueData {
+    #[serde(default)]
+    dequeue_pull_request: Option<DequeuePayload>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DequeuePayload {
+    merge_queue_entry: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]

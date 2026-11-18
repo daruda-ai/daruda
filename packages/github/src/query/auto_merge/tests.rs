@@ -36,3 +36,15 @@ fn methods_have_githubs_names() {
     assert!(ENABLE_AUTO_MERGE_MUTATION.contains("expectedHeadOid: $head"));
     assert!(ENABLE_AUTO_MERGE_MUTATION.contains("includeStack: $stack"));
 }
+
+#[test]
+fn an_answer_says_whether_it_left_the_queue() {
+    let out = r#"{"data":{"dequeuePullRequest":{"mergeQueueEntry":{"position":2}}}}"#;
+    let refused = r#"{"data":{"dequeuePullRequest":null},"errors":[{"message":"Viewer does not have permission"}]}"#;
+    assert!(parse_dequeue(out).is_ok());
+    let Err(GhError::Parse(said)) = parse_dequeue(refused) else {
+        panic!("refused");
+    };
+    assert!(said.contains("permission"), "GitHub's words: {said}");
+    assert!(DEQUEUE_MUTATION.contains("dequeuePullRequest(input: {id: $pr})"));
+}

@@ -379,6 +379,15 @@ impl Gh for SystemGh {
         crate::query::parse_auto_merge(&json, false)
     }
 
+    fn dequeue_pr(&self, repo: &RepoId, pr: &str) -> Result<(), GhError> {
+        let json = self.stdout(
+            Graphql::on(repo, crate::query::DEQUEUE_MUTATION)
+                .string("pr", pr)
+                .args(),
+        )?;
+        crate::query::parse_dequeue(&json)
+    }
+
     fn rerun_failed(&self, repo: &RepoId, run: u64) -> Result<(), GhError> {
         self.stdout(rerun_failed_args(repo, run)).map(drop)
     }

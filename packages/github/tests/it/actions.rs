@@ -388,3 +388,33 @@ fn auto_merge_is_offered_only_where_github_would_take_it() {
         "merging now stays possible"
     );
 }
+
+/// A pull request in the merge queue, with or without auto-merge, can be
+/// taken out while open; one closed or merged since has left it.
+#[test]
+fn a_queued_pull_request_can_be_taken_out_of_the_queue() {
+    use daruda_github::{QueueEntry, QueueState};
+    let queued = |state: PrState| PrDetail {
+        viewer_can: ViewerCan::all(),
+        queue: Some(QueueEntry {
+            position: Some(2),
+            state: QueueState::AwaitingChecks,
+        }),
+        ..detail(state, Mergeability::Ready, vec![MergeMethod::Squash])
+    };
+    let unqueued = PrDetail {
+        queue: None,
+        ..queued(PrState::Open)
+    };
+    // (label, pull request, can take out)
+    let cases = [
+        ("queued, no auto-merge", queued(PrState::Open), true),
+        ("not queued", unqueued, false),
+        ("closed since", queued(PrState::Closed), false),
+        ("merged since", queued(PrState::Merged), false),
+    ];
+    for (label, pr, out) in cases {
+        assert_eq!(pr.can_dequeue_now(), out, "{label}");
+        assert!(!pr.can_disable_auto_merge_now(), "{label}: no auto-merge");
+    }
+}

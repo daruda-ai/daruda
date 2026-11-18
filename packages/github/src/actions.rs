@@ -108,6 +108,15 @@ impl PrDetail {
             && self.viewer_can.disable_auto_merge
     }
 
+    /// Whether taking it out of the merge queue may be asked of GitHub:
+    /// open and queued. GitHub names no permission for it, so whoever may
+    /// not is told by GitHub's refusal.
+    // ASSUMPTION: not measured — GitHub's docs say who may add to a queue
+    // (write access) but not who may remove from one.
+    pub fn can_dequeue_now(&self) -> bool {
+        self.summary.state.is_active() && self.queue.is_some()
+    }
+
     /// Whether merging with `method` may be asked of GitHub.
     pub fn can_merge(&self, method: MergeMethod) -> bool {
         self.merge_block().is_none() && self.methods.contains(&method)

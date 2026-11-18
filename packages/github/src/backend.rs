@@ -125,6 +125,8 @@ pub trait Gh: Send + Sync {
     ) -> Result<(), GhError>;
     /// Turn auto-merge off for pull request `pr` (its node id).
     fn disable_auto_merge(&self, repo: &RepoId, pr: &str) -> Result<(), GhError>;
+    /// Take pull request `pr` (its node id) out of the merge queue.
+    fn dequeue_pr(&self, repo: &RepoId, pr: &str) -> Result<(), GhError>;
     /// Rerun the failed jobs of Actions run `run`.
     fn rerun_failed(&self, repo: &RepoId, run: u64) -> Result<(), GhError>;
     /// When the spent GraphQL rate limit on `host` resets (Unix seconds);

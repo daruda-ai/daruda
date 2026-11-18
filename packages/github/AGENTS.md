@@ -40,8 +40,8 @@ through `GitHost`.
   prints the partial answer), so it never pauses the repository's poll.
 - `PrDetail`'s `is_draft`, `merge_block`, `can_merge`, `merge_menu`,
   `can_edit`, `can_close_now`, `can_reopen_now`, `auto_merge_menu`,
-  `can_enable_auto_merge_with`, `can_disable_auto_merge_now` and
-  `failed_runs` (`actions.rs`) decide what the detail may ask of GitHub;
+  `can_enable_auto_merge_with`, `can_disable_auto_merge_now`,
+  `can_dequeue_now` and `failed_runs` (`actions.rs`) decide what the detail may ask of GitHub;
   the app maps their answers to labels and buttons and never re-derives them.
   The `viewerCan*` permissions behind them are `ViewerCan`, readable only in
   this crate; tests and screenshot seeds build one with `all`/`with`.
@@ -55,7 +55,7 @@ through `GitHost`.
   quote or end a bracketed paste. The app sends it only to writable agent
   chats, inserted and never submitted.
 - Mutations (`merge_pr`, `set_ready`, `close_pr`, `reopen_pr`,
-  `enable_auto_merge`, `disable_auto_merge`, `rerun_failed`,
+  `enable_auto_merge`, `disable_auto_merge`, `dequeue_pr`, `rerun_failed`,
   `reply_to_thread`, `set_thread_resolved`, `edit_pr_body`,
   `edit_pr_reviewers`, `submit_review`) run only on the
   user's action and are never retried on their own; a failed thread reply is
@@ -75,7 +75,9 @@ through `GitHost`.
   `--admin`. Auto-merge is its own named action (GraphQL
   `enablePullRequestAutoMerge`, pinned with `expectedHeadOid`), offered by
   `auto_merge_menu` and turned off with `disablePullRequestAutoMerge`; a
-  merge queue entry is read as `PrDetail::queue`, accepted but not merged. A mutation's error is reported to the user who asked; it is
+  merge queue entry is read as `PrDetail::queue`, accepted but not merged,
+  and taken out with `dequeuePullRequest` whether or not auto-merge put it
+  there. A mutation's error is reported to the user who asked; it is
   not a poll failure and does not feed the poller's host state.
 - `pr_stack` reads a pull request's native stack (`PullRequest.stack`,
   `STACK_PAGE` entries, the rest counted in `PrStack::more`) apart from the

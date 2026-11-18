@@ -20,6 +20,7 @@
 //! | `reopen_pr` | the PR, if scripted, becomes open |
 //! | `enable_auto_merge` | exit 1 if the scripted detail's head differs (GitHub's wording is not known, so never `HeadMoved`), else its auto-merge is on |
 //! | `disable_auto_merge` | the scripted detail's auto-merge is off |
+//! | `dequeue_pr` | the scripted detail is out of the merge queue |
 //! | `rerun_failed` | done |
 //! | `reply_to_thread` | adds the reply to the scripted thread, answers it |
 //! | `pr_conversation` | the `set_conversation` comments, else none |
@@ -146,6 +147,10 @@ gh_calls! {
         include_stack: bool,
     },
     DisableAutoMerge {
+        repo: RepoId,
+        pr: String,
+    },
+    Dequeue {
         repo: RepoId,
         pr: String,
     },
@@ -884,6 +889,18 @@ impl Gh for FakeGh {
         })?;
         if let Some(detail) = state.detail_by_node(repo, pr) {
             detail.auto_merge = None;
+        }
+        Ok(())
+    }
+
+    fn dequeue_pr(&self, repo: &RepoId, pr: &str) -> Result<(), GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::Dequeue {
+            repo: repo.clone(),
+            pr: pr.to_owned(),
+        })?;
+        if let Some(detail) = state.detail_by_node(repo, pr) {
+            detail.queue = None;
         }
         Ok(())
     }

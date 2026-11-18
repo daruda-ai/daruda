@@ -27,7 +27,8 @@ mod thread_actions;
 mod threads;
 
 pub(crate) use auto_merge::{
-    DISABLE_AUTO_MERGE_MUTATION, ENABLE_AUTO_MERGE_MUTATION, method_name, parse_auto_merge,
+    DEQUEUE_MUTATION, DISABLE_AUTO_MERGE_MUTATION, ENABLE_AUTO_MERGE_MUTATION, method_name,
+    parse_auto_merge, parse_dequeue,
 };
 pub(crate) use conversation::{CONVERSATION_QUERY, read_conversation};
 pub(crate) use detail::{parse_pr_detail, pr_detail_query};

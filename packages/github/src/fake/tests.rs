@@ -291,6 +291,9 @@ fn a_merge_behind_a_queue_enqueues_and_merges_nothing() {
         read.queue.map(|entry| entry.state),
         Some(crate::QueueState::Queued)
     );
+    gh.dequeue_pr(&repo(), "PR_7").unwrap();
+    assert_eq!(gh.pr_detail(&repo(), 7).unwrap().queue, None, "taken out");
+    assert_eq!(gh.count(GhOp::Dequeue), 1);
 }
 
 #[test]
