@@ -79,9 +79,12 @@ pub(crate) enum PrSubject {
     /// The branch the lane pushes to: GitHub is asked which PR it heads.
     Branch(String),
     /// A pull request named by number: a review lane's, whose head is a
-    /// fork's branch the base repository cannot be asked about by name, or
-    /// one the user chose, whose head need not be the lane's branch.
+    /// fork's branch the base repository cannot be asked about by name.
     Number(u64),
+    /// A pull request the user chose, and the lane's branch when it pushes
+    /// to that repository: asked together, so the branch's own open pull
+    /// request takes over once the chosen one is closed or merged.
+    Chosen { number: u64, branch: Option<String> },
 }
 
 /// One lane's question for the poller: which PR in `repo` it works on.

@@ -67,14 +67,49 @@ fn lookup_subject(
                 _ => lookup,
             })
         }
-        PrSubject::Number(number) => Some(match prs.by_number.get(number)? {
-            Some(pr) => PrLookup::Linked(Box::new(PrLink {
-                repo: repo.clone(),
-                pr: pr.clone(),
-            })),
-            None => PrLookup::Unknown,
-        }),
+        PrSubject::Number(number) => Some(by_number(repo, prs, *number)?),
+        PrSubject::Chosen { number, branch } => {
+            let chosen = by_number(repo, prs, *number)?;
+            if matches!(&chosen, PrLookup::Linked(link) if link.pr.state.is_active()) {
+                return Some(chosen);
+            }
+            // Closed, merged or gone: an open one the branch heads, not
+            // untied from it, is the lane's now; else the chosen one stays.
+            let open = branch
+                .as_ref()
+                .and_then(|branch| Some((branch, prs.by_branch.get(branch)?)))
+                .and_then(|(branch, candidates)| {
+                    let kept: Vec<PrSummary> = candidates
+                        .iter()
+                        .filter(|pr| pr.number != *number && !untied(pr.number))
+                        .cloned()
+                        .collect();
+                    let default_branch = prs.default_branch.as_deref().unwrap_or_default();
+                    pick(branch, default_branch, &kept)
+                        .filter(|pr| pr.state.is_active())
+                        .cloned()
+                });
+            Some(match open {
+                Some(pr) => PrLookup::Linked(Box::new(PrLink {
+                    repo: repo.clone(),
+                    pr,
+                })),
+                None => chosen,
+            })
+        }
     }
+}
+
+/// What the answer says of pull request `number`; `None` when it was not
+/// asked. One GitHub has no record of is not known, never [`PrLookup::NoPr`].
+fn by_number(repo: &RepoId, prs: &RepoPrs, number: u64) -> Option<PrLookup> {
+    Some(match prs.by_number.get(&number)? {
+        Some(pr) => PrLookup::Linked(Box::new(PrLink {
+            repo: repo.clone(),
+            pr: pr.clone(),
+        })),
+        None => PrLookup::Unknown,
+    })
 }
 
 /// What a lane needs after its links change.
@@ -106,7 +141,8 @@ impl LaneScoped {
 
     /// Why the lane is tied to its pull request, once it is.
     pub(in crate::workspace) fn link_source(&self) -> Option<crate::github::links::Source> {
-        self.lane_link()?.source(self.pr.link().is_some())
+        self.lane_link()?
+            .source(self.pr.link().map(|link| link.pr.number))
     }
 
     /// Whether the user took `repo#number` away from this branch.
@@ -119,16 +155,14 @@ impl LaneScoped {
         })
     }
 
-    /// The pull request the lane works on: one named by number is known
-    /// before GitHub answers; one found by branch name once it is linked.
+    /// The pull request the lane works on: the one GitHub's answer tied it
+    /// to (a chosen one closed since may have given way to the branch's
+    /// own); before an answer, one named by number.
     pub(in crate::workspace) fn pr_key(&self) -> Option<(RepoId, u64)> {
-        self.lane_link()
-            .and_then(|link| link.known_key())
-            .or_else(|| {
-                self.pr
-                    .link()
-                    .map(|link| (link.repo.clone(), link.pr.number))
-            })
+        self.pr
+            .link()
+            .map(|link| (link.repo.clone(), link.pr.number))
+            .or_else(|| self.lane_link().and_then(|link| link.known_key()))
     }
 }
 
@@ -536,5 +570,86 @@ mod tests {
                 "{label}"
             );
         }
+    }
+
+    /// A chosen pull request stays the lane's while open; closed or merged,
+    /// an open one the branch heads (not untied) takes over, and without
+    /// one the chosen one stays shown as it ended.
+    #[test]
+    fn a_chosen_pull_request_gives_way_to_the_branchs_open_one_once_it_ends() {
+        let at = |number: u64, state: PrState| PrSummary {
+            number,
+            state,
+            ..pr("feat")
+        };
+        let linked = |pr: PrSummary| Some(PrLookup::Linked(Box::new(PrLink { repo: repo(), pr })));
+        let subject = |branch: Option<&str>| PrSubject::Chosen {
+            number: 9,
+            branch: branch.map(str::to_owned),
+        };
+        let answer = |chosen: Option<PrSummary>, branch: Vec<PrSummary>| {
+            let mut prs = RepoPrs {
+                default_branch: Some("main".into()),
+                ..RepoPrs::default()
+            };
+            prs.by_number.insert(9, chosen);
+            prs.by_branch.insert("feat".into(), branch);
+            prs
+        };
+        let (open, merged) = (at(9, PrState::Open), at(9, PrState::Merged));
+        let next = at(12, PrState::Open);
+        let untied_next = at(3, PrState::Open);
+        // (label, branch asked, answer, expected)
+        let cases = [
+            (
+                "open: the chosen one",
+                Some("feat"),
+                answer(Some(open.clone()), vec![next.clone()]),
+                linked(open),
+            ),
+            (
+                "merged, the branch has an open one: that one",
+                Some("feat"),
+                answer(Some(merged.clone()), vec![merged.clone(), next.clone()]),
+                linked(next.clone()),
+            ),
+            (
+                "merged, nothing else open: the chosen one as it ended",
+                Some("feat"),
+                answer(Some(merged.clone()), vec![merged.clone()]),
+                linked(merged.clone()),
+            ),
+            (
+                "merged, the open one was untied: the chosen one",
+                Some("feat"),
+                answer(Some(merged.clone()), vec![untied_next]),
+                linked(merged.clone()),
+            ),
+            (
+                "merged, the branch in another repository: never asked",
+                None,
+                answer(Some(merged.clone()), vec![next.clone()]),
+                linked(merged),
+            ),
+            (
+                "gone, the branch has an open one: that one",
+                Some("feat"),
+                answer(None, vec![next.clone()]),
+                linked(next),
+            ),
+        ];
+        for (label, branch, prs, expected) in cases {
+            assert_eq!(
+                lookup_subject(&repo(), &subject(branch), &prs, |n| n == 3),
+                expected,
+                "{label}"
+            );
+        }
+        let unasked = RepoPrs::default();
+        assert_eq!(
+            lookup_subject(&repo(), &subject(Some("feat")), &unasked, |_| false),
+            None,
+            "an answer that did not cover it"
+        );
     }
 }

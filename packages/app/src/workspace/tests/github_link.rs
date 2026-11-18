@@ -1443,6 +1443,38 @@ fn a_forks_pull_request_of_the_same_name_does_not_stop_creating(cx: &mut TestApp
     assert_eq!(gh.count(GhOp::CreatePr), 1);
 }
 
+/// A branch whose open pull request the user untied: creating finds that
+/// one before pushing, makes nothing, and the Git panel goes on offering to
+/// tie it again rather than open it as one just created.
+#[gpui::test]
+fn creating_on_a_branch_whose_open_pull_request_was_untied_makes_none(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    cx.update(|cx| crate::github::LinkStore::install_at(dir.path().to_owned(), cx));
+    let gh = crate::test_support::fake_gh(cx);
+    gh.set_prs(&repo(), vec![pr(7, PrState::Open, "2026-01-01")]);
+    let (f, id) = lane_with(cx, true);
+    tick(cx);
+    assert_eq!(linked(&f, id, cx), Some((7, PrState::Open)));
+    f.ws.update(cx, |ws, cx| ws.unlink_pr_lane(id, cx));
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(31));
+    tick(cx);
+    let untied = crate::workspace::github_ops::strip::PrStrip::Untied { number: 7 };
+    assert_eq!(f.ws.read_with(cx, |ws, cx| ws.pr_strip(cx)), untied);
+
+    assert_eq!(create(&f, id, cx), None, "told it exists, not failed");
+    assert_eq!(
+        (gh.count(GhOp::CreatePr), pushes(&f).len()),
+        (0, 0),
+        "neither pushed nor created"
+    );
+    assert_eq!(
+        f.ws.read_with(cx, |ws, cx| ws.pr_strip(cx)),
+        untied,
+        "still offered to tie again"
+    );
+}
+
 /// Whether the branch has one cannot be asked: nothing is pushed or made.
 #[gpui::test]
 fn a_failed_check_pushes_and_creates_nothing(cx: &mut TestAppContext) {

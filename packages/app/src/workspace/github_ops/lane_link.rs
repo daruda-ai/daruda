@@ -20,8 +20,15 @@ pub(in crate::workspace) enum LaneLink {
     UnreadableReview,
     /// A review branch: the pull request its mark names.
     Review { repo: RepoId, number: u64 },
-    /// The pull request the user chose for the worktree's branch.
-    Chosen { repo: RepoId, number: u64 },
+    /// The pull request the user chose for the worktree's branch, and
+    /// the branch's name when it pushes to that repository: once the
+    /// chosen one is closed or merged, an open one the branch heads there
+    /// is the lane's instead.
+    Chosen {
+        repo: RepoId,
+        number: u64,
+        branch: Option<String>,
+    },
     /// Whichever pull request the pushed branch heads in `repo`.
     Branch { repo: RepoId, branch: String },
 }
@@ -45,7 +52,14 @@ impl LaneLink {
         }
         if let Some(chosen) = links.and_then(|links| links.chosen.as_ref()) {
             let (repo, number) = pr_key(chosen);
-            return Some(Self::Chosen { repo, number });
+            // Another repository's branch of the same name is not this one.
+            let branch =
+                (parse_remote(&push.url).as_ref() == Some(&repo)).then(|| push.branch.clone());
+            return Some(Self::Chosen {
+                repo,
+                number,
+                branch,
+            });
         }
         Some(Self::Branch {
             repo: parse_remote(&push.url)?,
@@ -59,9 +73,18 @@ impl LaneLink {
     pub(in crate::workspace) fn subject(&self) -> Option<(RepoId, PrSubject)> {
         match self {
             Self::UnreadableReview => None,
-            Self::Review { repo, number } | Self::Chosen { repo, number } => {
-                Some((repo.clone(), PrSubject::Number(*number)))
-            }
+            Self::Review { repo, number } => Some((repo.clone(), PrSubject::Number(*number))),
+            Self::Chosen {
+                repo,
+                number,
+                branch,
+            } => Some((
+                repo.clone(),
+                PrSubject::Chosen {
+                    number: *number,
+                    branch: branch.clone(),
+                },
+            )),
             Self::Branch { repo, branch } => {
                 Some((repo.clone(), PrSubject::Branch(branch.clone())))
             }
@@ -71,19 +94,23 @@ impl LaneLink {
     /// The pull request known before GitHub answers: one named by number.
     pub(in crate::workspace) fn known_key(&self) -> Option<(RepoId, u64)> {
         match self {
-            Self::Review { repo, number } | Self::Chosen { repo, number } => {
+            Self::Review { repo, number } | Self::Chosen { repo, number, .. } => {
                 Some((repo.clone(), *number))
             }
             Self::UnreadableReview | Self::Branch { .. } => None,
         }
     }
 
-    /// Why the lane is tied, given whether its branch name found one.
-    pub(in crate::workspace) fn source(&self, found: bool) -> Option<Source> {
+    /// Why the lane is tied, given the pull request GitHub's answer tied
+    /// it to: a chosen one closed since gives way to the branch's own.
+    pub(in crate::workspace) fn source(&self, linked: Option<u64>) -> Option<Source> {
         match self {
             Self::UnreadableReview | Self::Review { .. } => Some(Source::Review),
-            Self::Chosen { .. } => Some(Source::Chosen),
-            Self::Branch { .. } => found.then_some(Source::Branch),
+            Self::Chosen { number, .. } if linked.is_none_or(|linked| linked == *number) => {
+                Some(Source::Chosen)
+            }
+            Self::Chosen { .. } => Some(Source::Branch),
+            Self::Branch { .. } => linked.map(|_| Source::Branch),
         }
     }
 
@@ -157,6 +184,23 @@ mod tests {
                 Some(LaneLink::Chosen {
                     repo: other.clone(),
                     number: 9,
+                    branch: None,
+                }),
+            ),
+            (
+                "a choice in the repository it pushes to also names the branch",
+                Some(push(None)),
+                Some(WorktreeLinks {
+                    chosen: Some(PrRef {
+                        name: "r".into(),
+                        ..chose(9).chosen.unwrap()
+                    }),
+                    ..chose(9)
+                }),
+                Some(LaneLink::Chosen {
+                    repo: repo.clone(),
+                    number: 9,
+                    branch: Some("feat".into()),
                 }),
             ),
             (
@@ -194,6 +238,7 @@ mod tests {
         let chosen = LaneLink::Chosen {
             repo: repo.clone(),
             number: 9,
+            branch: Some("feat".into()),
         };
         let branch = LaneLink::Branch {
             repo: repo.clone(),
@@ -201,17 +246,37 @@ mod tests {
         };
         assert_eq!(LaneLink::UnreadableReview.subject(), None, "nothing asked");
         assert_eq!(review.subject(), Some((repo.clone(), PrSubject::Number(4))));
-        assert_eq!(chosen.subject(), Some((repo.clone(), PrSubject::Number(9))));
+        assert_eq!(
+            chosen.subject(),
+            Some((
+                repo.clone(),
+                PrSubject::Chosen {
+                    number: 9,
+                    branch: Some("feat".into())
+                }
+            ))
+        );
         assert_eq!(
             branch.subject(),
             Some((repo.clone(), PrSubject::Branch("feat".into())))
         );
         assert_eq!(chosen.known_key(), Some((repo.clone(), 9)));
         assert_eq!(branch.known_key(), None, "known once GitHub answers");
-        assert_eq!(branch.source(false), None);
-        assert_eq!(branch.source(true), Some(Source::Branch));
+        assert_eq!(branch.source(None), None);
+        assert_eq!(branch.source(Some(3)), Some(Source::Branch));
         assert_eq!(
-            LaneLink::UnreadableReview.source(false),
+            chosen.source(None),
+            Some(Source::Chosen),
+            "before an answer"
+        );
+        assert_eq!(chosen.source(Some(9)), Some(Source::Chosen));
+        assert_eq!(
+            chosen.source(Some(12)),
+            Some(Source::Branch),
+            "the branch's own, once the chosen one closed"
+        );
+        assert_eq!(
+            LaneLink::UnreadableReview.source(None),
             Some(Source::Review)
         );
         assert!(review.is_review() && LaneLink::UnreadableReview.is_review());

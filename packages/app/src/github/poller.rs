@@ -136,9 +136,17 @@ impl PrPoller {
             {
                 let entry = wanted.entry(repo).or_default();
                 match subject {
-                    PrSubject::Branch(branch) => entry.branches.insert(branch),
-                    PrSubject::Number(number) => entry.numbers.insert(number),
-                };
+                    PrSubject::Branch(branch) => {
+                        entry.branches.insert(branch);
+                    }
+                    PrSubject::Number(number) => {
+                        entry.numbers.insert(number);
+                    }
+                    PrSubject::Chosen { number, branch } => {
+                        entry.numbers.insert(number);
+                        entry.branches.extend(branch);
+                    }
+                }
                 entry.focused |= focused;
             }
         });
