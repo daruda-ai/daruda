@@ -190,3 +190,68 @@ fn a_description_changed_on_github_meanwhile_is_not_overwritten_unasked(cx: &mut
     assert_eq!(edits(&gh), 1, "sent once asked");
     assert_eq!(state(&f, &mut vcx), None);
 }
+
+/// Edit is offered while a refresh is out, so it also works then: the
+/// screen and the action read the same description.
+#[gpui::test]
+fn the_description_can_be_edited_while_a_refresh_is_out(cx: &mut TestAppContext) {
+    let mut detail = mergeable(7, "feat");
+    detail.can_update = true;
+    detail.body = "Old text".into();
+    let (f, _gh, id) = opened(cx, detail);
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.refresh_pr_detail(id, cx);
+            ws.edit_pr_body(id, window, cx);
+        })
+    });
+    let editing = f.ws.read_with(cx, |ws, _| {
+        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        (detail.pr_waiting().is_some(), detail.body_edit().is_some())
+    });
+    assert_eq!(editing, (true, true), "editing began during the refresh");
+}
+
+/// Changed on GitHub after the detail last read it, and not read since:
+/// the save reads it again, sends nothing, and asks before replacing it.
+#[gpui::test]
+fn a_change_on_github_not_read_yet_still_stops_the_save(cx: &mut TestAppContext) {
+    let mut detail = mergeable(7, "feat");
+    detail.can_update = true;
+    detail.body = "Old text".into();
+    let (f, gh, id) = opened(cx, detail.clone());
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| f.ws.update(cx, |ws, cx| ws.edit_pr_body(id, window, cx)));
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            let edit = ws
+                .pages
+                .pull_requests
+                .detail
+                .as_ref()
+                .unwrap()
+                .body_edit()
+                .unwrap();
+            let input = edit.input.clone();
+            input.update(cx, |input, cx| {
+                input.set_value("Mine".to_owned(), window, cx)
+            });
+        })
+    });
+    let mut theirs = detail;
+    theirs.body = "Theirs".into();
+    gh.set_pr_detail(&repo(), 7, theirs);
+    f.ws.update(cx, |ws, cx| ws.save_pr_body(id, cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::EditPrBody), 0, "theirs is not replaced");
+    let state = f.ws.read_with(cx, |ws, _| {
+        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        detail.body_edit().map(|edit| edit.state.clone())
+    });
+    assert_eq!(state, Some(SaveState::Conflict));
+
+    f.ws.update(cx, |ws, cx| ws.overwrite_pr_body(id, cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::EditPrBody), 1, "replaced when asked");
+}

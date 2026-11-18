@@ -101,6 +101,23 @@ fn an_untied_pull_request_stays_untied_until_restored(cx: &mut TestAppContext) {
     assert_eq!(linked(&f, lane, cx), Some(7), "found by name again");
 }
 
+/// Untied and then merged: the branch has no pull request to tie again,
+/// so the Git panel offers creating one.
+#[gpui::test]
+fn an_untied_pull_request_merged_since_offers_creating(cx: &mut TestAppContext) {
+    let (_dir, f, gh, lane) = with_links(cx);
+    f.ws.update(cx, |ws, cx| ws.unlink_pr_lane(lane, cx));
+    poll(cx);
+    let mut merged = item(7, "feat").pr;
+    merged.state = daruda_github::PrState::Merged;
+    gh.set_prs(&repo(), vec![merged]);
+    poll(cx);
+    assert_eq!(
+        f.ws.read_with(cx, |ws, cx| ws.pr_strip(cx)),
+        crate::workspace::github_ops::strip::PrStrip::NoPr
+    );
+}
+
 #[gpui::test]
 fn a_worktree_can_be_tied_to_another_pull_request(cx: &mut TestAppContext) {
     let (_dir, f, gh, lane) = with_links(cx);

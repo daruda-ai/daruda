@@ -134,7 +134,7 @@ impl Workspace {
         {
             return;
         }
-        let Some(pr) = detail.pr.current().map(|pr| pr.summary.clone()) else {
+        let Some(pr) = detail.pr.last_known().map(|pr| pr.summary.clone()) else {
             return;
         };
         let lines = daruda_github::prompt::CodeLines {
@@ -362,23 +362,27 @@ impl Workspace {
         false
     }
 
+    #[track_caller]
     fn report_pr_handoff_unavailable(&mut self, cx: &mut Context<Self>) {
+        let at = std::panic::Location::caller();
         let report = daruda_store::observability::error_report::ErrorReport::new(
             crate::surface::strings::pull_requests::handoff_lane_unavailable(),
         )
         .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
-        .at(file!(), line!())
+        .at(at.file(), at.line())
         .dedup("github.handoff.unavailable")
         .build();
         self.report_error(report, cx);
     }
 
+    #[track_caller]
     fn report_pr_handoff_moved(&mut self, cx: &mut Context<Self>) {
+        let at = std::panic::Location::caller();
         let report = daruda_store::observability::error_report::ErrorReport::new(
             crate::surface::strings::pull_requests::handoff_lane_moved(),
         )
         .severity(daruda_store::observability::error_report::ErrorSeverity::Warning)
-        .at(file!(), line!())
+        .at(at.file(), at.line())
         .dedup("github.handoff.moved")
         .build();
         self.report_error(report, cx);

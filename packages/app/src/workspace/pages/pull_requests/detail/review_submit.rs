@@ -322,9 +322,11 @@ impl Workspace {
         let body = review.body.read(cx).value().to_string();
         let event = review.event;
         let viewer = review.owner.as_ref().map(|owner| owner.account.clone());
+        // At the head the person reviewed: the one shown, even while a
+        // refresh is out.
         let read = detail
             .pr
-            .current()
+            .last_known()
             .and_then(|pr| Some((pr.node_id.clone()?, pr.head_sha.clone(), pr.author.clone())));
         let outcome = match read {
             None => Err(SubmitBlock::NotRead),

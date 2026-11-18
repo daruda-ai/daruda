@@ -59,6 +59,7 @@ pub(crate) fn strip_for(
         GhAvailability::Ready | GhAvailability::Backoff { .. } => match lookup {
             PrLookup::Linked(link) => PrStrip::Linked(PrLink::clone(link)),
             PrLookup::NoPr => PrStrip::NoPr,
+            PrLookup::Untied(number) => PrStrip::Untied { number: *number },
             PrLookup::Unknown | PrLookup::DefaultBranch => PrStrip::Hidden,
         },
     }
@@ -83,18 +84,11 @@ impl Workspace {
         let created = state
             .and_then(|state| state.pr.created_pr())
             .filter(|created| Some(&created.head) == head.as_ref());
-        let untied = state
-            .and_then(|state| state.pr_links.as_ref())
-            .and_then(|links| links.suppressed.last())
-            .map(|pr| pr.number);
-        match (
-            strip_for(enabled, repo, availability, lookup),
-            created,
-            untied,
-        ) {
-            (PrStrip::NoPr, Some(created), _) => PrStrip::Created(created.clone()),
-            (PrStrip::NoPr, None, Some(number)) => PrStrip::Untied { number },
-            (strip, _, _) => strip,
+        match (strip_for(enabled, repo, availability, lookup), created) {
+            (PrStrip::NoPr | PrStrip::Untied { .. }, Some(created)) => {
+                PrStrip::Created(created.clone())
+            }
+            (strip, _) => strip,
         }
     }
 
@@ -230,6 +224,14 @@ mod tests {
                 Ready,
                 PrLookup::NoPr,
                 PrStrip::NoPr,
+            ),
+            (
+                "untied and still open: tie it again, no Create PR",
+                true,
+                repo(gh),
+                Ready,
+                PrLookup::Untied(7),
+                PrStrip::Untied { number: 7 },
             ),
             (
                 "not answered yet: no Create PR",

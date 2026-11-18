@@ -59,21 +59,34 @@ impl<T> ReadSlot<T> {
         self.waiting = Some(ticket);
     }
 
+    /// Wait in `slot` on read `ticket`: its first, or again keeping what it
+    /// shows.
+    pub(super) fn begin(slot: &mut Option<Self>, ticket: ReadTicket) {
+        match slot.as_mut() {
+            Some(existing) => existing.reread(ticket),
+            None => *slot = Some(Self::reading(ticket)),
+        }
+    }
+
     pub(in crate::workspace) fn load(&self) -> &Load<T> {
         &self.load
     }
 
-    /// What was read, when no further read of it is out.
-    pub(super) fn current(&self) -> Option<&T> {
+    /// What was read, only while no newer read is out: for matching other
+    /// answers against the read they belong to. What a person sees and acts
+    /// on is [`Self::last_known`].
+    pub(super) fn confirmed(&self) -> Option<&T> {
         match (&self.load, self.waiting) {
             (Load::Ready(value), None) => Some(value),
             _ => None,
         }
     }
 
-    /// What was last read, kept up while a reread is out: for what is only
-    /// shown, where the next answer replaces it.
-    pub(super) fn shown(&self) -> Option<&T> {
+    /// What was last read, kept while a reread is out: what is shown, and so
+    /// what a person's action is about. It may be old: an action that must
+    /// not undo a change made since checks GitHub's state when it is sent
+    /// (a pinned head, a description read again), not this.
+    pub(super) fn last_known(&self) -> Option<&T> {
         match &self.load {
             Load::Ready(value) => Some(value),
             Load::Loading | Load::Failed(_) => None,

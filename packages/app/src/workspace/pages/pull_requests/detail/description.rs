@@ -30,6 +30,14 @@ pub(in crate::workspace) enum SaveState {
     Failed(String),
 }
 
+/// What a save found on GitHub.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BodySave {
+    Saved,
+    /// Changed since editing began: not replaced.
+    Moved,
+}
+
 /// The description being edited.
 pub(in crate::workspace) struct BodyEdit {
     pub input: Entity<TextareaState>,
@@ -60,7 +68,7 @@ impl PrDetailState {
     /// The description as last read, for a test.
     #[cfg(test)]
     pub(in crate::workspace) fn idle_read_body(&self) -> Option<String> {
-        self.pr.current().map(|pr| pr.body.clone())
+        self.pr.last_known().map(|pr| pr.body.clone())
     }
 
     pub(in crate::workspace) fn body_edit(&self) -> Option<&BodyEdit> {
@@ -75,10 +83,7 @@ impl PrDetailState {
     /// Read it again, keeping what is shown until the answer.
     pub(super) fn reread_conversation(&mut self) -> ReadTicket {
         let ticket = self.tickets.issue();
-        match self.conversation.as_mut() {
-            Some(slot) => slot.reread(ticket),
-            None => self.conversation = Some(ReadSlot::reading(ticket)),
-        }
+        ReadSlot::begin(&mut self.conversation, ticket);
         ticket
     }
 
@@ -140,7 +145,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let Some(body) = self.pr_detail_mut(id).and_then(|detail| {
-            let loaded = detail.pr.current()?;
+            let loaded = detail.pr.last_known()?;
             (loaded.can_update && detail.body_edit.is_none()).then(|| loaded.body.clone())
         }) else {
             return;
@@ -252,7 +257,7 @@ impl Workspace {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        let on_github = detail.pr.current().map(|pr| pr.body.clone());
+        let on_github = detail.pr.last_known().map(|pr| pr.body.clone());
         let Some(edit) = detail.body_edit.as_mut() else {
             return;
         };
@@ -274,12 +279,22 @@ impl Workspace {
             return;
         }
         edit.state = SaveState::Saving;
+        let base = edit.base.clone();
         let (repo, number) = (detail.item.repo.clone(), detail.item.pr.number);
         let gh = GhHost::global(cx);
         let bg = repo.clone();
         spawn_bg_work_and_mutate(
             cx,
-            move || gh.edit_pr_body(&bg, number, &body),
+            move || {
+                // What was last read can be old, or a refresh out: GitHub's
+                // description is read again right before it is replaced.
+                // `gh pr edit` takes no expected body to compare for us.
+                if !overwrite && !same_text(&gh.pr_detail(&bg, number)?.body, &base) {
+                    return Ok(BodySave::Moved);
+                }
+                gh.edit_pr_body(&bg, number, &body)?;
+                Ok(BodySave::Saved)
+            },
             move |ws, result, cx| ws.land_pr_body(id, repo, number, result, cx),
         )
         .detach();
@@ -287,14 +302,15 @@ impl Workspace {
     }
 
     /// Saved: the editor closes and the pull request is read again, so
-    /// what shows is what GitHub holds. Failed: the text stays. Reported
-    /// even if the detail is gone.
+    /// what shows is what GitHub holds. Changed there meanwhile: nothing was
+    /// sent, the text stays, and the detail reads the change to show it.
+    /// Failed: the text stays. Reported even if the detail is gone.
     fn land_pr_body(
         &mut self,
         id: PrDetailId,
         repo: daruda_github::RepoId,
         number: u64,
-        result: Result<(), GhError>,
+        result: Result<BodySave, GhError>,
         cx: &mut Context<Self>,
     ) {
         let repo_for_draft = repo.clone();
@@ -304,7 +320,13 @@ impl Workspace {
             .and_then(|detail| detail.body_edit.as_mut())
             .filter(|edit| edit.state == SaveState::Saving);
         match result {
-            Ok(()) => {
+            Ok(BodySave::Moved) => {
+                if let Some(edit) = saving {
+                    edit.state = SaveState::Conflict;
+                }
+                self.refresh_pr_detail(id, cx);
+            }
+            Ok(BodySave::Saved) => {
                 if saving.is_some()
                     && let Some(detail) = self.pr_detail_mut(id)
                 {

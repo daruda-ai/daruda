@@ -74,7 +74,7 @@ impl PrDetailState {
 
     /// The viewer may change who is asked, and no change runs.
     fn reviewers_editable(&self) -> bool {
-        self.pr.current().is_some_and(|pr| pr.can_update)
+        self.pr.last_known().is_some_and(|pr| pr.can_update)
             && self.reviewer_requests.op != Some(ReviewerOp::Running)
     }
 }
@@ -150,7 +150,7 @@ impl Workspace {
         };
         let author = self
             .pr_detail_mut(id)
-            .and_then(|detail| detail.pr.current())
+            .and_then(|detail| detail.pr.last_known())
             .and_then(|pr| pr.author.clone());
         let refused = match reviewer_names(&text) {
             Ok(names) if names.is_empty() => return,

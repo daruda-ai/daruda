@@ -327,10 +327,12 @@ impl Workspace {
         }
     }
 
+    #[track_caller]
     fn report_pr_send(&mut self, title: String, severity: ErrorSeverity, cx: &mut Context<Self>) {
+        let at = std::panic::Location::caller();
         let report = ErrorReport::new(title)
             .severity(severity)
-            .at(file!(), line!())
+            .at(at.file(), at.line())
             .dedup("github.send")
             .build();
         self.report_error(report, cx);

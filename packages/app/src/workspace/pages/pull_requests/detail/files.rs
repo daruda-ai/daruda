@@ -674,6 +674,14 @@ impl FilesState {
 
     /// Come back to `file`, scrolled to `offset` if its content is the
     /// same: chosen now, shown once a page lists it.
+    /// Whether the detail is coming back to `path`, for a test.
+    #[cfg(test)]
+    pub(super) fn restoring_to(&self, path: &str) -> bool {
+        self.restore
+            .as_ref()
+            .is_some_and(|restore| restore.path == path)
+    }
+
     pub(super) fn restore_to(&mut self, file: &PlaceFile, offset: (f32, f32)) {
         self.chosen = Some(file.path.clone());
         self.restore = Some(Restore {
@@ -1104,7 +1112,7 @@ impl Workspace {
         };
         // The head as last read, unless a read of it is out: then the files
         // take it when that read lands.
-        let head = detail.pr.current().map(|pr| pr.head_sha.as_str());
+        let head = detail.pr.confirmed().map(|pr| pr.head_sha.as_str());
         let landed = state.land(ticket, page, answer, head, || tickets.issue());
         if landed == Landed::Stale {
             return;
@@ -1260,7 +1268,7 @@ impl Workspace {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        let Some(base_branch) = detail.pr.current().map(|pr| pr.base_branch.clone()) else {
+        let Some(base_branch) = detail.pr.last_known().map(|pr| pr.base_branch.clone()) else {
             return;
         };
         let ticket = detail.tickets.issue();

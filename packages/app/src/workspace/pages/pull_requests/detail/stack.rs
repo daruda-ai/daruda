@@ -15,15 +15,12 @@ impl PrDetailState {
     /// The stack as last read, kept up while a refresh reads it again: an
     /// auto-merge with the stack checks the range anew before it goes.
     pub(in crate::workspace) fn stack(&self) -> Option<&StackRead> {
-        self.stack.as_ref().and_then(ReadSlot::shown)
+        self.stack.as_ref().and_then(ReadSlot::last_known)
     }
 
     fn begin_stack_read(&mut self) -> ReadTicket {
         let ticket = self.tickets.issue();
-        match self.stack.as_mut() {
-            Some(slot) => slot.reread(ticket),
-            None => self.stack = Some(ReadSlot::reading(ticket)),
-        }
+        ReadSlot::begin(&mut self.stack, ticket);
         ticket
     }
 }

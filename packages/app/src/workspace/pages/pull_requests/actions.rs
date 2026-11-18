@@ -440,15 +440,17 @@ impl Workspace {
     /// What was shown is out of date and nothing was sent: a warning whose
     /// title already says it all, without `gh`'s words after. Returns the
     /// line said under the header.
+    #[track_caller]
     fn report_out_of_date(
         &mut self,
         title: String,
         dedup: &'static str,
         cx: &mut Context<Self>,
     ) -> String {
+        let at = std::panic::Location::caller();
         let report = ErrorReport::new(title.clone())
             .severity(ErrorSeverity::Warning)
-            .at(file!(), line!())
+            .at(at.file(), at.line())
             .dedup(dedup)
             .build();
         self.report_error(report, cx);

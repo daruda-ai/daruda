@@ -30,6 +30,7 @@ fn a_reference_is_placed_in_a_repository(cx: &mut TestAppContext) {
 fn a_url_opens_the_pull_request_on_its_tab_without_touching_worktrees(cx: &mut TestAppContext) {
     let (f, gh, _) = window(cx);
     let lanes = f.ws.read_with(cx, |ws, _| ws.projects.lanes().count());
+    let reads = gh.count(daruda_github::fake::GhOp::PrDetail);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| {
@@ -40,7 +41,11 @@ fn a_url_opens_the_pull_request_on_its_tab_without_touching_worktrees(cx: &mut T
         })
     });
     cx.run_until_parked();
-    assert!(gh.count(daruda_github::fake::GhOp::PrDetail) >= 1);
+    assert_eq!(
+        gh.count(daruda_github::fake::GhOp::PrDetail),
+        reads + 1,
+        "the read that found it is the one shown"
+    );
     f.ws.read_with(cx, |ws, _| {
         assert_eq!(ws.active_page(), Some(Page::PullRequests));
         let detail = ws.pages.pull_requests.detail.as_ref().expect("shown");
@@ -163,4 +168,29 @@ fn the_git_panel_opens_the_same_detail(cx: &mut TestAppContext) {
         f.ws.read_with(cx, |ws, _| ws.active_page()),
         Some(Page::PullRequests)
     );
+}
+
+/// A link into the pull request already shown moves it to the linked tab.
+#[gpui::test]
+fn a_url_into_the_shown_pull_request_moves_it_to_that_tab(cx: &mut TestAppContext) {
+    let (f, _gh, _) = window(cx);
+    let open = |url: &'static str, cx: &mut TestAppContext| {
+        let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+        vcx.update(|window, cx| {
+            f.ws.update(cx, |ws, cx| {
+                let (repo, address) = ws.resolve_pr_address(url, cx).unwrap();
+                ws.open_pr_by_address(repo, address, window, cx);
+            })
+        });
+        cx.run_until_parked();
+    };
+    let tab = |cx: &mut TestAppContext| {
+        f.ws.read_with(cx, |ws, _| {
+            ws.pages.pull_requests.detail.as_ref().map(|d| d.tab())
+        })
+    };
+    open("https://github.com/o/r/pull/7/files", cx);
+    assert_eq!(tab(cx), Some(PrTab::Files));
+    open("https://github.com/o/r/pull/7/checks", cx);
+    assert_eq!(tab(cx), Some(PrTab::Checks));
 }

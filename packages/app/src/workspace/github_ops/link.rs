@@ -181,12 +181,17 @@ impl Workspace {
                 continue;
             };
             // One the user took away from the branch is not shown as its
-            // pull request; it still exists, and still has its branch.
+            // pull request. Still open, it is offered to tie again; closed
+            // or merged, the branch has none to work on and may create one.
             if matches!(subject, PrSubject::Branch(_))
                 && let PrLookup::Linked(link) = &lookup
                 && state.suppresses(&link.repo, link.pr.number)
             {
-                lookup = PrLookup::NoPr;
+                lookup = if link.pr.state.is_active() {
+                    PrLookup::Untied(link.pr.number)
+                } else {
+                    PrLookup::NoPr
+                };
             }
             let newly = match &lookup {
                 PrLookup::Linked(link)

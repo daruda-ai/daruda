@@ -9,7 +9,7 @@ use daruda_github::{GhError, PrDetail, PrListItem, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
 
-use super::detail::PrTab;
+use super::detail::{PrOpening, PrTab};
 use crate::gh_host::GhHost;
 use crate::surface::strings::pull_requests as s;
 use crate::workspace::Workspace;
@@ -178,8 +178,6 @@ impl Workspace {
                 return;
             }
         };
-        // The detail reads it again as it opens: this read only checked it
-        // exists and named it for the list row.
         let item = PrListItem {
             repo,
             author: detail.author.clone(),
@@ -188,8 +186,6 @@ impl Workspace {
             comments: 0,
             pr: detail.summary.clone(),
         };
-        let key = (item.repo.clone(), item.pr.number);
-        self.open_pr_detail(item, window, cx);
         // Comment anchors open their tab; scrolling to the comment itself
         // is not done yet, and Commits has no tab of its own.
         let tab = match address.target {
@@ -199,18 +195,11 @@ impl Workspace {
             Some(PrTarget::Comment(_)) => Some(PrTab::Description),
             Some(PrTarget::Commits) | None => None,
         };
-        // Shown at once unless a detail with unsaved edits asked first.
-        if let (Some(tab), Some(id)) = (
+        let opening = PrOpening {
             tab,
-            self.pages
-                .pull_requests
-                .detail
-                .as_ref()
-                .filter(|detail| detail.key() == key)
-                .map(|detail| detail.id()),
-        ) {
-            self.select_pr_detail_tab(id, tab, cx);
-        }
+            read: Some(Box::new(detail)),
+        };
+        self.open_pr_detail_as(item, opening, window, cx);
     }
 }
 

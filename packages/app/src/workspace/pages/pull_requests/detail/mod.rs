@@ -147,6 +147,17 @@ pub(in crate::workspace) struct PrDetailState {
     handoff: Option<handoff::Handoff>,
 }
 
+/// How a detail opens, beyond which pull request.
+#[derive(Debug, Default)]
+pub(in crate::workspace) struct PrOpening {
+    /// The tab to show; `None` keeps where it was left.
+    pub(in crate::workspace) tab: Option<PrTab>,
+    /// The pull request read just now to open it, landed as the detail's
+    /// read. Fresh because a pull request detail never holds unsaved edits,
+    /// so its switch is never held behind a prompt. Boxed: a detail is large.
+    pub(in crate::workspace) read: Option<Box<PrDetail>>,
+}
+
 impl PrDetailState {
     /// A detail for `item`, its pull request not read yet.
     pub(super) fn new(id: PrDetailId, item: PrListItem) -> Self {
@@ -209,6 +220,17 @@ impl PrDetailState {
         }
     }
 
+    /// Where a detail opens: on `tab` when one was asked for, else where it
+    /// was left. A tab asked for that is the one left keeps its place.
+    fn open_at(&mut self, place: Option<&progress::Place>, tab: Option<PrTab>) -> Option<TabRead> {
+        match (tab, place) {
+            (Some(tab), Some(place)) if place.tab == tab => self.restore(place),
+            (Some(tab), _) => self.select_tab(tab),
+            (None, Some(place)) => self.restore(place),
+            (None, None) => None,
+        }
+    }
+
     /// Come back to `place`: its tab, and on the Files tab the file shown,
     /// with where the detail was scrolled if that file did not change.
     /// `Some` with the read the tab needs.
@@ -261,10 +283,10 @@ impl PrDetailState {
     /// The pull request as read, when no action is running on it: what an
     /// action may be asked about.
     pub(super) fn idle_read(&self) -> Option<&PrDetail> {
-        match (self.action.running(), self.pr.load()) {
-            (None, Load::Ready(loaded)) => Some(loaded),
-            _ => None,
+        if self.action.running().is_some() {
+            return None;
         }
+        self.pr.last_known()
     }
 
     pub(super) fn begin_action(&mut self, action: PrAction) {
@@ -336,7 +358,7 @@ impl PrDetailState {
     /// The head just read, told to the files: a listing read at another
     /// commit is read again when shown, and dropped when hidden.
     fn files_at_head(&mut self) -> Option<TabRead> {
-        let head = self.pr.current()?.head_sha.clone();
+        let head = self.pr.confirmed()?.head_sha.clone();
         if !self.files.as_mut()?.head_read(&head) {
             return None;
         }
@@ -451,6 +473,18 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_pr_detail_as(item, PrOpening::default(), window, cx);
+    }
+
+    /// Open `item`'s detail as `opening` asks. Applied as the detail is put
+    /// up, so a switch held for unsaved edits still lands on the tab asked.
+    pub(in crate::workspace) fn open_pr_detail_as(
+        &mut self,
+        item: PrListItem,
+        opening: PrOpening,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !crate::github::enabled(cx) {
             return;
         }
@@ -473,13 +507,20 @@ impl Workspace {
             .pull_requests
             .detail
             .as_ref()
-            .is_some_and(|d| d.item.repo == item.repo && d.item.pr.number == item.pr.number);
-        if open {
+            .filter(|d| d.item.repo == item.repo && d.item.pr.number == item.pr.number)
+            .map(|d| d.id);
+        if let Some(id) = open {
             self.show_page(Page::PullRequests, cx);
+            if let Some(read) = opening.read {
+                self.land_pr_read(id, *read, cx);
+            }
+            if let Some(tab) = opening.tab {
+                self.select_pr_detail_tab(id, tab, cx);
+            }
             return;
         }
         self.leave_page_detail_then(Page::PullRequests, window, cx, move |ws, window, cx| {
-            ws.install_pr_detail(item, cx);
+            ws.install_pr_detail(item, opening, cx);
             // The list that had the keyboard is no longer drawn.
             if ws.active_page() == Some(Page::PullRequests) {
                 ws.focus_shown_page(window, cx);
@@ -487,7 +528,7 @@ impl Workspace {
         });
     }
 
-    fn install_pr_detail(&mut self, item: PrListItem, cx: &mut Context<Self>) {
+    fn install_pr_detail(&mut self, item: PrListItem, opening: PrOpening, cx: &mut Context<Self>) {
         let id = PrDetailId(self.alloc_id());
         let mut detail = PrDetailState::new(id, item);
         let place = self
@@ -496,10 +537,14 @@ impl Workspace {
             .progress
             .place(&detail.key())
             .cloned();
-        let tab_read = place.and_then(|place| detail.restore(&place));
+        let tab_read = detail.open_at(place.as_ref(), opening.tab);
         self.pages.pull_requests.replace_detail(Some(detail));
         crate::github::DraftStore::flush(cx);
-        self.read_pr_detail(id, cx);
+        match opening.read {
+            // Read just now to open it: shown as is, not asked again.
+            Some(read) => self.land_pr_read(id, *read, cx),
+            None => self.read_pr_detail(id, cx),
+        }
         if let Some(read) = tab_read {
             self.send_pr_tab_read(id, read, cx);
         }
@@ -551,6 +596,15 @@ impl Workspace {
         }
         self.refresh_pr_list(cx);
         cx.notify();
+    }
+
+    /// Show `read`, made elsewhere just now, as the detail's latest read;
+    /// its stack is read beside it as with any read.
+    fn land_pr_read(&mut self, id: PrDetailId, read: PrDetail, cx: &mut Context<Self>) {
+        if let Some(ticket) = self.pr_detail_mut(id).map(PrDetailState::begin_read) {
+            self.land_pr_detail(id, ticket, Ok(read), cx);
+        }
+        self.read_pr_stack(id, cx);
     }
 
     fn read_pr_detail(&mut self, id: PrDetailId, cx: &mut Context<Self>) {
@@ -843,18 +897,77 @@ impl Workspace {
         }
     }
 
+    #[track_caller]
     pub(super) fn report_pr_read(
         &mut self,
         e: &GhError,
         dedup: &'static str,
         cx: &mut Context<Self>,
     ) {
+        let at = std::panic::Location::caller();
         let report = ErrorReport::new(error::github_read_failed())
             .severity(ErrorSeverity::Warning)
             .from_error(e)
-            .at(file!(), line!())
+            .at(at.file(), at.line())
             .dedup(dedup)
             .build();
         self.report_error(report, cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::progress::{Place, PlaceFile};
+    use super::{PrDetailId, PrDetailState, PrTab};
+
+    fn place(tab: PrTab) -> Place {
+        Place {
+            tab,
+            file: Some(PlaceFile {
+                path: "src/a.rs".into(),
+                blob: None,
+            }),
+            offset: (0.0, -40.0),
+        }
+    }
+
+    /// A tab asked for wins over where the detail was left; asked for the
+    /// tab it was left on, it comes back to the file there too.
+    #[test]
+    fn a_tab_asked_for_opens_and_keeps_the_place_only_on_its_own_tab() {
+        let item = crate::workspace::tests::pull_request_detail::item(7, "feat");
+        let cases = [
+            (
+                "no tab: where it was left",
+                None,
+                PrTab::Files,
+                PrTab::Files,
+                true,
+            ),
+            (
+                "another tab: that tab",
+                Some(PrTab::Checks),
+                PrTab::Files,
+                PrTab::Checks,
+                false,
+            ),
+            (
+                "the same tab: its place too",
+                Some(PrTab::Files),
+                PrTab::Files,
+                PrTab::Files,
+                true,
+            ),
+        ];
+        for (label, tab, left_on, shown, restored) in cases {
+            let mut state = PrDetailState::new(PrDetailId(1), item.clone());
+            state.open_at(Some(&place(left_on)), tab);
+            assert_eq!(state.tab, shown, "{label}");
+            let chosen = state
+                .files
+                .as_ref()
+                .is_some_and(|files| files.restoring_to("src/a.rs"));
+            assert_eq!(chosen, restored, "{label}");
+        }
     }
 }

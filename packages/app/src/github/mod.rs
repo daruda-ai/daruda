@@ -55,6 +55,9 @@ pub(crate) enum PrLookup {
     DefaultBranch,
     /// GitHub answered: this branch has no pull request.
     NoPr,
+    /// GitHub answered: the branch's open pull request is one the user
+    /// untied from it. Not one to create again; one to tie again.
+    Untied(u64),
     /// Boxed: a summary with its failed checks dwarfs the other variants,
     /// and every lane's state holds one of these.
     Linked(Box<PrLink>),
@@ -64,7 +67,7 @@ impl PrLookup {
     pub(crate) fn link(&self) -> Option<&PrLink> {
         match self {
             Self::Linked(link) => Some(link.as_ref()),
-            Self::Unknown | Self::DefaultBranch | Self::NoPr => None,
+            Self::Unknown | Self::DefaultBranch | Self::NoPr | Self::Untied(_) => None,
         }
     }
 }

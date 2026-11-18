@@ -431,10 +431,12 @@ impl Workspace {
         )
     }
 
+    #[track_caller]
     fn report_pr_lane_failure(&mut self, detail: String, cx: &mut Context<Self>) {
+        let at = std::panic::Location::caller();
         let report = ErrorReport::new(error::lane_create_failed())
             .severity(ErrorSeverity::Error)
-            .at(file!(), line!())
+            .at(at.file(), at.line())
             .with_context("detail", detail)
             .dedup("pull_requests.lane_create")
             .build();
