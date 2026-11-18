@@ -39,16 +39,33 @@ fn lookup_for(
 /// What an answer says about a lane asking about `subject`; `None` when the
 /// answer does not cover it (asked before the lane wanted it). A review
 /// lane's PR is never looked up by branch, so it never reads as having none.
-fn lookup_subject(repo: &RepoId, subject: &PrSubject, prs: &RepoPrs) -> Option<PrLookup> {
+/// Pull requests `untied` from the branch by the user are not its pull
+/// request; one still open, with no other open one, is offered to tie again.
+fn lookup_subject(
+    repo: &RepoId,
+    subject: &PrSubject,
+    prs: &RepoPrs,
+    untied: impl Fn(u64) -> bool,
+) -> Option<PrLookup> {
     match subject {
         PrSubject::Branch(branch) => {
-            let candidates = prs.by_branch.get(branch)?;
-            Some(lookup_for(
-                repo,
-                branch,
-                prs.default_branch.as_deref(),
-                candidates,
-            ))
+            let default_branch = prs.default_branch.as_deref();
+            let (untied, kept): (Vec<PrSummary>, Vec<PrSummary>) = prs
+                .by_branch
+                .get(branch)?
+                .iter()
+                .cloned()
+                .partition(|pr| untied(pr.number));
+            let lookup = lookup_for(repo, branch, default_branch, &kept);
+            let open = matches!(&lookup, PrLookup::Linked(link) if link.pr.state.is_active());
+            let reopenable = pick(branch, default_branch.unwrap_or_default(), &untied)
+                .filter(|pr| pr.state.is_active());
+            Some(match reopenable {
+                Some(pr) if !open && lookup != PrLookup::DefaultBranch => {
+                    PrLookup::Untied(pr.number)
+                }
+                _ => lookup,
+            })
         }
         PrSubject::Number(number) => Some(match prs.by_number.get(number)? {
             Some(pr) => PrLookup::Linked(Box::new(PrLink {
@@ -160,22 +177,11 @@ impl Workspace {
             if lane_repo != *repo {
                 continue;
             }
-            let Some(mut lookup) = lookup_subject(repo, &subject, prs) else {
+            let Some(lookup) =
+                lookup_subject(repo, &subject, prs, |number| state.suppresses(repo, number))
+            else {
                 continue;
             };
-            // One the user took away from the branch is not shown as its
-            // pull request. Still open, it is offered to tie again; closed
-            // or merged, the branch has none to work on and may create one.
-            if matches!(subject, PrSubject::Branch(_))
-                && let PrLookup::Linked(link) = &lookup
-                && state.suppresses(&link.repo, link.pr.number)
-            {
-                lookup = if link.pr.state.is_active() {
-                    PrLookup::Untied(link.pr.number)
-                } else {
-                    PrLookup::NoPr
-                };
-            }
             let newly = match &lookup {
                 PrLookup::Linked(link)
                     if state.pr.link().map(|held| held.pr.number) != Some(link.pr.number) =>
@@ -469,15 +475,66 @@ mod tests {
         ];
         for (label, number, expected) in cases {
             assert_eq!(
-                lookup_subject(&repo(), &PrSubject::Number(number), &prs),
+                lookup_subject(&repo(), &PrSubject::Number(number), &prs, |_| false),
                 expected,
                 "{label}"
             );
         }
         assert_eq!(
-            lookup_subject(&repo(), &PrSubject::Branch("x".into()), &prs),
+            lookup_subject(&repo(), &PrSubject::Branch("x".into()), &prs, |_| false),
             None,
             "a branch the answer did not cover"
         );
+    }
+
+    /// GitHub may list two open pull requests for one branch (another
+    /// base). One the user untied is not the branch's, even the newest.
+    #[test]
+    fn an_untied_pull_request_gives_way_to_the_branchs_other_one() {
+        let at = |number: u64, state: PrState, updated_at: &str| PrSummary {
+            number,
+            state,
+            updated_at: updated_at.into(),
+            ..pr("feat")
+        };
+        let linked = |pr: PrSummary| PrLookup::Linked(Box::new(PrLink { repo: repo(), pr }));
+        let untied = at(3, PrState::Open, "2026-11-02T00:00:00Z");
+        let other = at(10, PrState::Open, "2026-11-01T00:00:00Z");
+        let merged = at(5, PrState::Merged, "2026-11-03T00:00:00Z");
+        // (label, candidates, expected)
+        let cases = [
+            (
+                "another open one is the branch's",
+                vec![untied.clone(), other.clone()],
+                linked(other.clone()),
+            ),
+            (
+                "alone and open: tie it again",
+                vec![untied.clone()],
+                PrLookup::Untied(3),
+            ),
+            (
+                "open untied over a merged one: tie it again",
+                vec![untied.clone(), merged.clone()],
+                PrLookup::Untied(3),
+            ),
+            (
+                "closed untied: none to work on",
+                vec![at(3, PrState::Closed, "2026-11-02T00:00:00Z")],
+                PrLookup::NoPr,
+            ),
+        ];
+        for (label, candidates, expected) in cases {
+            let mut prs = RepoPrs {
+                default_branch: Some("main".into()),
+                ..RepoPrs::default()
+            };
+            prs.by_branch.insert("feat".into(), candidates);
+            assert_eq!(
+                lookup_subject(&repo(), &PrSubject::Branch("feat".into()), &prs, |n| n == 3),
+                Some(expected),
+                "{label}"
+            );
+        }
     }
 }

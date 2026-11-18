@@ -21,9 +21,11 @@ pub(crate) enum PendingPr {
     /// Its page is known: the strip opens it.
     Named(CreatedPr),
     /// GitHub answered with no page daruda opens: the strip holds Create PR
-    /// until the link arrives. Not tied to a branch; a move clears it, since
-    /// the moved lane's answer is forgotten.
-    Unnamed,
+    /// until the link arrives.
+    Unnamed {
+        /// The branch it is for, as pushed: another branch is not held.
+        head: String,
+    },
 }
 
 /// A pull request daruda created for the lane, kept until the poller
@@ -85,7 +87,7 @@ impl LanePr {
     pub(super) fn replace(&mut self, lookup: PrLookup) -> bool {
         match (&lookup, &self.pending) {
             (PrLookup::Linked(_) | PrLookup::DefaultBranch, _)
-            | (PrLookup::Unknown, Some(PendingPr::Unnamed)) => self.pending = None,
+            | (PrLookup::Unknown, Some(PendingPr::Unnamed { .. })) => self.pending = None,
             _ => {}
         }
         if self.lookup == lookup {
@@ -178,13 +180,17 @@ mod tests {
             ),
             (
                 "unnamed: an answer without it keeps the hold",
-                PendingPr::Unnamed,
+                PendingPr::Unnamed {
+                    head: "feat".into(),
+                },
                 vec![PrLookup::NoPr],
                 true,
             ),
             (
                 "unnamed: a forgotten answer ends it",
-                PendingPr::Unnamed,
+                PendingPr::Unnamed {
+                    head: "feat".into(),
+                },
                 vec![PrLookup::Unknown],
                 false,
             ),

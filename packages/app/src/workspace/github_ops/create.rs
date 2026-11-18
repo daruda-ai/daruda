@@ -300,7 +300,7 @@ impl Workspace {
                     let soon = PrPoller::availability(repo_id.host(), cx) == GhAvailability::Ready;
                     let pending = match super::lane_pr::CreatedPr::of(url, &head) {
                         Some(created) => Some(PendingPr::Named(created)),
-                        None => soon.then_some(PendingPr::Unnamed),
+                        None => soon.then(|| PendingPr::Unnamed { head: head.clone() }),
                     };
                     if let (Some(state), Some(pending)) = (ws.lane_scoped.get_mut(&lane), pending) {
                         state.pr.created(pending);

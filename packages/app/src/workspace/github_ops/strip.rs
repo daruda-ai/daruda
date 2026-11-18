@@ -57,12 +57,20 @@ pub(crate) fn strip_for(repo: Option<RepoId>, facts: StripFacts<'_>) -> PrStrip 
         answered_strip(facts.enabled, repo, facts.availability, facts.lookup),
         facts.pending,
     ) {
+        // The untied one itself, found again, is offered to tie again.
+        (PrStrip::Untied { number }, Some(PendingPr::Named(created)))
+            if created.number == Some(number) =>
+        {
+            PrStrip::Untied { number }
+        }
         (PrStrip::NoPr | PrStrip::Untied { .. }, Some(PendingPr::Named(created)))
             if facts.head == Some(created.head.as_str()) =>
         {
             PrStrip::Created(created.clone())
         }
-        (PrStrip::NoPr, Some(PendingPr::Unnamed)) => PrStrip::Awaiting,
+        (PrStrip::NoPr, Some(PendingPr::Unnamed { head })) if facts.head == Some(head.as_str()) => {
+            PrStrip::Awaiting
+        }
         (strip, _) => strip,
     }
 }
@@ -316,6 +324,9 @@ mod tests {
         )
         .unwrap();
         let named = PendingPr::Named(created.clone());
+        let unnamed = PendingPr::Unnamed {
+            head: "feat".into(),
+        };
         let ready = GhAvailability::Ready;
         // (label, lookup, pending, head, expected)
         let cases = [
@@ -343,9 +354,23 @@ mod tests {
             (
                 "unnamed: hold Create PR",
                 PrLookup::NoPr,
-                Some(&PendingPr::Unnamed),
+                Some(&unnamed),
                 Some("feat"),
                 PrStrip::Awaiting,
+            ),
+            (
+                "unnamed, another branch now: create there",
+                PrLookup::NoPr,
+                Some(&unnamed),
+                Some("other"),
+                PrStrip::NoPr,
+            ),
+            (
+                "named is the untied one: tie it again",
+                PrLookup::Untied(9),
+                Some(&named),
+                Some("feat"),
+                PrStrip::Untied { number: 9 },
             ),
             (
                 "linked: the link wins",
