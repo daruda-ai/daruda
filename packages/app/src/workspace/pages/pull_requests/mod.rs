@@ -5,7 +5,7 @@
 //! it draws.
 
 use crate::ui::InputState;
-use daruda_github::{PrFilter, PrSearchState};
+use daruda_github::{PrAudience, PrSearchState};
 use daruda_store::project::LaneKind;
 use gpui::{App, AppContext as _, Context, Entity, FocusHandle, WeakEntity, Window};
 
@@ -42,7 +42,7 @@ use list::{LaneFacts, PageInputs, PrKey, PrPageView};
 pub(in crate::workspace) struct PullRequestsPage {
     /// The filter the page shows, and shows again when reopened. The one
     /// place the selected tab lives; the cache holds every tab's answers.
-    filter: PrFilter,
+    filter: PrAudience,
     /// Which pull requests the tabs list: open (drafts too), merged,
     /// closed unmerged, or all. Shown again when the page reopens.
     state: PrSearchState,
@@ -51,9 +51,7 @@ pub(in crate::workspace) struct PullRequestsPage {
     search: Entity<InputState>,
     /// Pull requests a worktree is being made for, so their rows do not
     /// offer to make a second one.
-    creating: BTreeSet<PrKey>,
-    /// How far each worktree being made has got.
-    checkout_stages: std::collections::HashMap<PrKey, lane::CheckoutStage>,
+    creating: lane::Creating,
     /// Staged each frame while the page shows its list; `None` otherwise.
     pub(in crate::workspace) snapshot: Option<PrPageSnapshot>,
     /// The pull request shown over the list, if any.
@@ -138,11 +136,10 @@ impl PullRequestsPage {
             }
         });
         Self {
-            filter: PrFilter::Mine,
+            filter: PrAudience::Mine,
             state: PrSearchState::Open,
             search,
-            creating: BTreeSet::new(),
-            checkout_stages: std::collections::HashMap::new(),
+            creating: lane::Creating::new(),
             cache: PrListCache::default(),
             snapshot: None,
             detail: None,
@@ -205,7 +202,7 @@ impl Workspace {
     }
 
     /// The tab the page shows, and shows again when reopened.
-    pub(in crate::workspace) fn pr_page_filter(&self) -> PrFilter {
+    pub(in crate::workspace) fn pr_page_filter(&self) -> PrAudience {
         self.pages.pull_requests.filter
     }
 
@@ -234,7 +231,7 @@ impl Workspace {
     /// Every tab's answers are already held, so switching asks nothing.
     pub(in crate::workspace) fn set_pr_page_filter(
         &mut self,
-        filter: PrFilter,
+        filter: PrAudience,
         cx: &mut Context<Self>,
     ) {
         if self.pages.pull_requests.filter == filter {
@@ -293,9 +290,10 @@ impl Workspace {
                     checkout_stage: self
                         .pages
                         .pull_requests
-                        .checkout_stages
+                        .creating
                         .get(&(state.item().repo.clone(), state.item().pr.number))
-                        .copied(),
+                        .copied()
+                        .flatten(),
                     progress: &self.pages.pull_requests.progress,
                     drafts: draft_owner
                         .as_ref()

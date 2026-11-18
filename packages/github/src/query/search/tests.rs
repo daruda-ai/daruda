@@ -1,10 +1,14 @@
-//! `search_prs.json` answers `search_prs_query` (with `first: 3`) for
-//! `is:pr is:open archived:false sort:updated-desc repo:cli/cli`, 2026-11-13:
-//! fork PRs and a same-repository draft, 56 matches in all; recorded again
-//! the same day when the query began asking for `headRepositoryOwner`.
+//! `search_nodes.json` is a real answer to the search query with
+//! `first: 3` for `is:pr is:open archived:false sort:updated-desc
+//! repo:cli/cli`, 2026-11-13: fork PRs and a same-repository draft, 56
+//! matches in all; recorded again the same day when the query began asking
+//! for `headRepositoryOwner`. Its nodes carry the fields the paged search
+//! asks for each pull request.
 
-use super::{newest_first, parse_search_prs, search_prs_query, search_string};
-use crate::{CheckRollup, GhError, PrFilter, PrListItem, PrState, RepoId};
+use serde_json::Value;
+
+use super::{is_not_a_pull_request, parse_search_node, search_query};
+use crate::{CheckRollup, GhError, PrListItem, PrState, RepoId};
 
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -13,25 +17,32 @@ fn fixture(name: &str) -> String {
     std::fs::read_to_string(path).unwrap()
 }
 
+/// The list items of a search answer's nodes, those that are pull requests.
+fn parse_nodes(json: &str, host: &str) -> Result<Vec<PrListItem>, GhError> {
+    let answer: Value = serde_json::from_str(json).unwrap();
+    let Value::Array(nodes) = answer["data"]["search"]["nodes"].clone() else {
+        panic!("no nodes in {json}");
+    };
+    nodes
+        .into_iter()
+        .filter(|node| !is_not_a_pull_request(node))
+        .map(|node| parse_search_node(node, host))
+        .collect()
+}
+
 #[test]
-fn a_real_search_answer_parses_fork_and_same_repository_prs() {
-    let search = parse_search_prs(&fixture("search_prs.json"), "github.com").unwrap();
-    assert!(search.truncated, "56 matches, 3 answered");
+fn real_search_nodes_parse_fork_and_same_repository_prs() {
+    let items = parse_nodes(&fixture("search_nodes.json"), "github.com").unwrap();
     let cli = RepoId::new("github.com", "cli", "cli");
-    let numbers: Vec<u64> = search.items.iter().map(|i| i.pr.number).collect();
+    let numbers: Vec<u64> = items.iter().map(|i| i.pr.number).collect();
     assert_eq!(
         numbers,
         [15003, 13781, 14920],
         "GitHub's updated-desc order"
     );
-    assert!(
-        search
-            .items
-            .iter()
-            .all(|i| i.repo == cli && i.comments == 1)
-    );
+    assert!(items.iter().all(|i| i.repo == cli && i.comments == 1));
 
-    let fork = &search.items[0];
+    let fork = &items[0];
     assert!(fork.pr.cross_repo);
     assert_eq!(fork.pr.state, PrState::Open);
     assert_eq!(fork.pr.checks, CheckRollup::Passing);
@@ -39,12 +50,12 @@ fn a_real_search_answer_parses_fork_and_same_repository_prs() {
     assert_eq!(fork.head_owner.as_deref(), Some("pad895"));
     assert_eq!(fork.base_branch, "trunk");
 
-    let fork_draft = &search.items[1];
+    let fork_draft = &items[1];
     assert!(fork_draft.pr.cross_repo);
     assert_eq!(fork_draft.pr.state, PrState::Draft);
     assert_eq!(fork_draft.pr.checks, CheckRollup::None, "no checks ran");
 
-    let draft = &search.items[2];
+    let draft = &items[2];
     assert!(!draft.pr.cross_repo);
     assert_eq!(draft.pr.state, PrState::Draft);
     assert_eq!(draft.pr.checks, CheckRollup::Passing);
@@ -56,20 +67,16 @@ fn a_real_search_answer_parses_fork_and_same_repository_prs() {
     );
 }
 
-/// One search node of `count` matches; `repo`, `author` and `rollup` are
-/// raw JSON values.
-fn search_answer_of(count: u32, repo: &str, author: &str, rollup: &str) -> String {
+/// A search answer of one node; `repo`, `author` and `rollup` are raw JSON
+/// values.
+fn search_answer(repo: &str, author: &str, rollup: &str) -> String {
     format!(
-        r#"{{"data":{{"search":{{"issueCount":{count},"nodes":[{{"number":7,"url":"u","title":"t","state":"OPEN",
+        r#"{{"data":{{"search":{{"issueCount":1,"nodes":[{{"number":7,"url":"u","title":"t","state":"OPEN",
         "isDraft":false,"headRefName":"h","isCrossRepository":false,"reviewDecision":null,
         "updatedAt":"2026-01-01T00:00:00Z","statusCheckRollup":{rollup},
         "repository":{{"nameWithOwner":{repo}}},"headRepositoryOwner":null,"author":{author},"baseRefName":"main",
         "comments":{{"totalCount":3}}}}]}}}}}}"#
     )
-}
-
-fn search_answer(repo: &str, author: &str, rollup: &str) -> String {
-    search_answer_of(1, repo, author, rollup)
 }
 
 #[test]
@@ -113,10 +120,9 @@ fn search_nodes_parse_into_list_items() {
         ),
     ];
     for (label, json, host, repo, author, checks) in cases {
-        let search = parse_search_prs(&json, host).unwrap_or_else(|e| panic!("{label}: {e}"));
-        assert!(!search.truncated, "{label}");
-        assert_eq!(search.items.len(), 1, "{label}");
-        let item = &search.items[0];
+        let items = parse_nodes(&json, host).unwrap_or_else(|e| panic!("{label}: {e}"));
+        assert_eq!(items.len(), 1, "{label}");
+        let item = &items[0];
         assert_eq!(item.repo, repo, "{label}");
         assert_eq!(item.author.as_deref(), author, "{label}");
         assert_eq!(
@@ -133,51 +139,18 @@ fn search_nodes_parse_into_list_items() {
 }
 
 #[test]
-fn a_bad_search_answer_is_a_parse_error() {
-    let cases = [
-        (
-            "an error answer carries GitHub's message",
-            r#"{"data":null,"errors":[{"message":"Something went wrong"}]}"#.to_owned(),
-            "Something went wrong",
-        ),
-        (
-            "a repository that is not owner/name",
-            search_answer(r#""noslash""#, "null", "null"),
-            "noslash",
-        ),
-    ];
-    for (label, json, expected) in cases {
-        let error = parse_search_prs(&json, "github.com").unwrap_err();
-        assert!(
-            matches!(&error, GhError::Parse(m) if m.contains(expected)),
-            "{label}: {error}"
-        );
-    }
-}
-
-#[test]
-fn the_search_text_names_every_repository_and_the_filter() {
-    let repos = [
-        RepoId::new("github.com", "a", "b"),
-        RepoId::new("github.com", "C", "D"),
-    ];
-    let base = "is:pr is:open archived:false sort:updated-desc repo:a/b repo:c/d";
-    let cases = [
-        (PrFilter::Mine, format!("{base} author:@me")),
-        (
-            PrFilter::ReviewRequested,
-            format!("{base} review-requested:@me"),
-        ),
-        (PrFilter::AllOpen, base.to_owned()),
-    ];
-    for (filter, expected) in cases {
-        assert_eq!(search_string(&repos, filter), expected, "{filter:?}");
-    }
+fn a_repository_that_is_not_owner_name_is_a_parse_error() {
+    let json = search_answer(r#""noslash""#, "null", "null");
+    let error = parse_nodes(&json, "github.com").unwrap_err();
+    assert!(
+        matches!(&error, GhError::Parse(m) if m.contains("noslash")),
+        "{error}"
+    );
 }
 
 #[test]
 fn the_search_query_names_every_field_the_parser_reads() {
-    let query = search_prs_query();
+    let query = search_query("first: 1", "", "");
     for field in [
         "search(query: $q, type: ISSUE",
         "issueCount",
@@ -192,39 +165,4 @@ fn the_search_query_names_every_field_the_parser_reads() {
     ] {
         assert!(query.contains(field), "{field}");
     }
-}
-
-#[test]
-fn more_matches_than_nodes_is_truncated() {
-    let cases = [(1, false), (2, true)];
-    for (count, truncated) in cases {
-        let json = search_answer_of(count, r#""o/r""#, "null", "null");
-        let search = parse_search_prs(&json, "github.com").unwrap();
-        assert_eq!(search.truncated, truncated, "{count} matches");
-    }
-}
-
-#[test]
-fn list_items_sort_most_recently_updated_first() {
-    let json = search_answer(r#""o/r""#, "null", "null");
-    let template = parse_search_prs(&json, "github.com")
-        .unwrap()
-        .items
-        .remove(0);
-    let item = |number: u64, updated_at: &str| {
-        let mut item: PrListItem = template.clone();
-        item.pr.number = number;
-        item.pr.updated_at = updated_at.to_owned();
-        item
-    };
-    // Two chunks joined: each newest first, the whole not.
-    let mut items = vec![
-        item(1, "2026-11-02T00:00:00Z"),
-        item(2, "2026-11-01T00:00:00Z"),
-        item(3, "2026-11-03T00:00:00Z"),
-        item(4, "2026-11-02T00:00:00Z"),
-    ];
-    newest_first(&mut items);
-    let numbers: Vec<u64> = items.iter().map(|i| i.pr.number).collect();
-    assert_eq!(numbers, [3, 1, 4, 2], "ties keep their order");
 }

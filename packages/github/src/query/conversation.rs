@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 
-use super::{ApiError, Author, api_messages, parse_error};
+use super::Author;
 use crate::{Conversation, GhError, ReviewComment};
 
 /// Pages of comments read for one pull request: a thousand comments.
@@ -46,18 +46,7 @@ pub(crate) fn read_conversation(
 pub(crate) fn parse_conversation_page(
     json: &str,
 ) -> Result<(Vec<ReviewComment>, Option<String>), GhError> {
-    let response: Response = serde_json::from_str(json).map_err(parse_error)?;
-    let Some(comments) = response
-        .data
-        .and_then(|d| d.repository)
-        .and_then(|r| r.pull_request)
-        .map(|pr| pr.comments)
-    else {
-        return Err(GhError::Parse(format!(
-            "no pull request in the answer: {}",
-            api_messages(response.errors)
-        )));
-    };
+    let comments = super::pull_request::<Pr>(json)?.comments;
     let next = comments
         .page_info
         .has_next_page
@@ -74,23 +63,6 @@ pub(crate) fn parse_conversation_page(
         })
         .collect();
     Ok((read, next))
-}
-
-#[derive(Deserialize)]
-struct Response {
-    data: Option<Data>,
-    errors: Option<Vec<ApiError>>,
-}
-
-#[derive(Deserialize)]
-struct Data {
-    repository: Option<Repository>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Repository {
-    pull_request: Option<Pr>,
 }
 
 #[derive(Deserialize)]

@@ -14,7 +14,7 @@ use gpui::{AppContext as _, TestAppContext, VisualTestContext};
 use crate::lane::git::{FakeRepo, PushTarget};
 use crate::workspace::pages::Page;
 use crate::workspace::pages::pull_requests::detail::view::{
-    ActionSlot, DetailBody, LogSlot, SendSlot,
+    ActionSlot, DetailBody, HandoffBlock, LogSlot, SendSlot,
 };
 use crate::workspace::pages::pull_requests::detail::{Load, PrDetailId, PrTab};
 use crate::workspace::tests::GitFixture;
@@ -85,14 +85,12 @@ fn detail(number: u64, head: &str) -> PrDetail {
         checks_truncated: false,
         open_threads: 0,
         open_threads_more: false,
-        can_update: false,
-        can_close: true,
-        can_reopen: true,
+        viewer_can: daruda_github::ViewerCan::default()
+            .with(daruda_github::Permission::Close, true)
+            .with(daruda_github::Permission::Reopen, true),
         auto_merge: None,
         queue: None,
-        can_enable_auto_merge: false,
-        can_disable_auto_merge: false,
-        node_id: None,
+        node_id: format!("PR_{number}"),
         changed_files: None,
     }
 }
@@ -362,7 +360,7 @@ fn a_threads_read_outdated_by_a_refresh_does_not_land(cx: &mut TestAppContext) {
         }],
         truncated: false,
     };
-    gh.set_review_threads(7, thread("new.rs"));
+    gh.set_review_threads(&repo(), 7, thread("new.rs"));
     let threads = |f: &GitFixture, cx: &mut TestAppContext| {
         f.ws.read_with(cx, |ws, _| {
             let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
@@ -720,7 +718,7 @@ fn a_chosen_chat_closed_is_not_swapped_for_another(cx: &mut TestAppContext) {
     .unwrap();
     f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
     let shown = view(&f, cx).handoff.expect("still shown");
-    assert!(shown.chat_gone, "{shown:?}");
+    assert_eq!(shown.blocked, Some(HandoffBlock::ChatGone), "{shown:?}");
     assert_eq!(shown.chosen, None, "Insert is off until another is chosen");
     insert(&f, id, cx);
     assert_eq!(input(&f, cx), "", "nothing goes to a chat not chosen");
@@ -732,7 +730,10 @@ fn a_chosen_chat_closed_is_not_swapped_for_another(cx: &mut TestAppContext) {
     .unwrap();
     f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
     let shown = view(&f, cx).handoff.expect("still shown");
-    assert!(shown.chats.is_empty() && !shown.chat_gone, "{shown:?}");
+    assert!(
+        shown.chats.is_empty() && shown.blocked.is_none(),
+        "{shown:?}"
+    );
     assert_eq!(
         f.ws.read_with(cx, |ws, _| ws.active_page()),
         Some(Page::PullRequests)
@@ -753,7 +754,7 @@ fn a_worktree_unlinked_meanwhile_takes_nothing(cx: &mut TestAppContext) {
     cx.update(crate::github::PrPoller::tick);
     cx.run_until_parked();
     let shown = view(&f, cx).handoff.expect("still shown");
-    assert!(shown.moved, "{shown:?}");
+    assert_eq!(shown.blocked, Some(HandoffBlock::Moved), "{shown:?}");
     insert(&f, id, cx);
     assert_eq!(input(&f, cx), "");
 }
@@ -1120,7 +1121,9 @@ fn ready_close_and_rerun_each_ask_github_once(cx: &mut TestAppContext) {
 #[gpui::test]
 fn close_and_reopen_follow_the_viewers_permission(cx: &mut TestAppContext) {
     let mut open = mergeable(7, "feat");
-    open.can_close = false;
+    open.viewer_can = open
+        .viewer_can
+        .with(daruda_github::Permission::Close, false);
     let (f, gh, id) = opened(cx, open.clone());
     assert!(matches!(
         view(&f, cx).header.actions().cloned().expect("open").close,
@@ -1132,7 +1135,9 @@ fn close_and_reopen_follow_the_viewers_permission(cx: &mut TestAppContext) {
 
     let mut closed = open;
     closed.summary.state = PrState::Closed;
-    closed.can_reopen = false;
+    closed.viewer_can = closed
+        .viewer_can
+        .with(daruda_github::Permission::Reopen, false);
     gh.set_pr_detail(&repo(), 7, closed);
     f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
     cx.run_until_parked();
@@ -1515,9 +1520,12 @@ fn merge_facts(f: &GitFixture, cx: &mut TestAppContext) -> Vec<(String, String)>
 fn waiting(number: u64) -> PrDetail {
     let mut detail = mergeable(number, "feat");
     detail.mergeability = Mergeability::Blocked(daruda_github::BlockReason::Requirements);
-    detail.node_id = Some(format!("PR_{number}"));
-    detail.can_enable_auto_merge = true;
-    detail.can_disable_auto_merge = true;
+    detail.viewer_can = detail
+        .viewer_can
+        .with(daruda_github::Permission::EnableAutoMerge, true);
+    detail.viewer_can = detail
+        .viewer_can
+        .with(daruda_github::Permission::DisableAutoMerge, true);
     detail
 }
 
@@ -1765,4 +1773,23 @@ fn auto_merge_with_the_stack_below_names_and_rechecks_its_range(cx: &mut TestApp
         Some(changed),
         "said once, without gh's words after"
     );
+}
+
+/// A base behind a merge queue: `gh` answers the merge, nothing is merged
+/// yet, and the detail read again shows it queued, not merged.
+#[gpui::test]
+fn a_merge_into_a_queue_shows_it_queued(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    gh.set_merge_queued(&repo(), 7);
+    assert!(asks(&f, cx, |ws, window, cx| {
+        ws.ask_pr_merge(id, MergeMethod::Squash, window, cx)
+    }));
+    confirm(&f, cx);
+    assert_eq!(gh.count(GhOp::MergePr), 1);
+    let Some((_, _, Load::Ready(loaded))) = shown(&f, cx) else {
+        panic!("not read");
+    };
+    assert_eq!(loaded.summary.state, PrState::Open, "not merged");
+    assert!(loaded.queue.is_some(), "queued");
+    assert!(error_titles(&f, cx).is_empty(), "not a failure");
 }

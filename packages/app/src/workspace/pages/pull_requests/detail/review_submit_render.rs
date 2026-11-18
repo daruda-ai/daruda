@@ -29,7 +29,7 @@ pub(super) fn review(
 ) -> AnyElement {
     let t = theme::current(cx);
     let submitting = !view.state.editable();
-    let unknown = matches!(view.state, SubmitState::Unknown(_));
+    let unknown = matches!(view.state, SubmitState::Unknown { .. });
     let line = match &view.state {
         SubmitState::Writing => None,
         SubmitState::Submitting => Some((s::review_submitting(), t.text_muted)),
@@ -46,7 +46,9 @@ pub(super) fn review(
             s::review_failed_line(s::review_submit_failed(), reason),
             t.banner_error_text,
         )),
-        SubmitState::Unknown(reason) => Some((s::review_unknown(reason), t.banner_warning_text)),
+        SubmitState::Unknown { reason, .. } => {
+            Some((s::review_unknown(reason), t.banner_warning_text))
+        }
         SubmitState::Checking => Some((s::review_checking(), t.text_muted)),
     };
     let leave_out = matches!(view.state, SubmitState::Blocked(SubmitBlock::Unanchored(_)));

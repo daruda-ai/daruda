@@ -7,10 +7,13 @@ pub(crate) const SEARCH_PAGE_MAX: u8 = 50;
 pub(crate) const SEARCH_REPOS_MAX: usize = 20;
 const SEARCH_LIMIT: u32 = 1_000;
 
+/// Whose pull requests a search asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum PrAudience {
+    /// Authored by the logged-in user.
     #[default]
     Mine,
+    /// Waiting on the logged-in user's review.
     ReviewRequested,
     All,
 }

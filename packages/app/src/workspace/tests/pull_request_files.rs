@@ -891,10 +891,13 @@ fn a_changed_selection_is_not_inserted(cx: &mut TestAppContext) {
                 .and_then(|snap| snap.handoff.clone())
         })
     };
-    assert!(!chosen(&f, cx).unwrap().selection_changed);
+    assert_eq!(chosen(&f, cx).unwrap().blocked, None);
 
     f.ws.update(cx, |ws, cx| ws.select_pr_line(id, Side::New, 3, false, cx));
-    assert!(chosen(&f, cx).unwrap().selection_changed);
+    assert_eq!(
+        chosen(&f, cx).unwrap().blocked,
+        Some(crate::workspace::pages::pull_requests::detail::view::HandoffBlock::SelectionChanged)
+    );
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| ws.insert_pr_handoff(id, window, cx));

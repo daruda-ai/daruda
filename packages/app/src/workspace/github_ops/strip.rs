@@ -4,6 +4,7 @@ use daruda_github::RepoId;
 use daruda_github::availability::GhAvailability;
 use gpui::App;
 
+use super::lane_pr::PendingPr;
 use crate::github::{PrLink, PrLookup, PrPoller};
 use crate::workspace::Workspace;
 
@@ -21,6 +22,9 @@ pub(crate) enum PrStrip {
     },
     /// GitHub answers, and this branch has no pull request.
     NoPr,
+    /// One was created that GitHub named no page for: Create PR is held
+    /// until the poller links it.
+    Awaiting,
     /// daruda created one that GitHub's lists do not show yet: Open it,
     /// never Create another.
     Created(super::lane_pr::CreatedPr),
@@ -32,10 +36,39 @@ pub(crate) enum PrStrip {
     Linked(PrLink),
 }
 
+/// What is known about the active lane's pull request.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StripFacts<'a> {
+    pub enabled: bool,
+    pub availability: GhAvailability,
+    pub lookup: &'a PrLookup,
+    /// One created for the lane and not linked yet.
+    pub pending: Option<&'a PendingPr>,
+    /// The branch the lane pushes now.
+    pub head: Option<&'a str>,
+}
+
 /// Decide the strip from what is known. Pure, so every combination is
 /// testable without a window. Create PR is offered only once GitHub has
-/// answered that this branch, not the default one, has no PR.
-pub(crate) fn strip_for(
+/// answered that this branch, not the default one, has no PR, and never
+/// again for a branch daruda just created one for.
+pub(crate) fn strip_for(repo: Option<RepoId>, facts: StripFacts<'_>) -> PrStrip {
+    match (
+        answered_strip(facts.enabled, repo, facts.availability, facts.lookup),
+        facts.pending,
+    ) {
+        (PrStrip::NoPr | PrStrip::Untied { .. }, Some(PendingPr::Named(created)))
+            if facts.head == Some(created.head.as_str()) =>
+        {
+            PrStrip::Created(created.clone())
+        }
+        (PrStrip::NoPr, Some(PendingPr::Unnamed)) => PrStrip::Awaiting,
+        (strip, _) => strip,
+    }
+}
+
+/// The strip from GitHub's answer alone.
+fn answered_strip(
     enabled: bool,
     repo: Option<RepoId>,
     availability: GhAvailability,
@@ -77,19 +110,17 @@ impl Workspace {
             PrPoller::availability(repo.host(), cx)
         });
         let unknown = PrLookup::Unknown;
-        let lookup = state.map_or(&unknown, |state| state.pr.lookup());
-        // Only for the branch it was made for: Open it at once, not a
-        // spinner over a Create PR that must not be pressed again.
         let head = state.and_then(|state| state.github_push().map(|(_, push)| push.branch.clone()));
-        let created = state
-            .and_then(|state| state.pr.created_pr())
-            .filter(|created| Some(&created.head) == head.as_ref());
-        match (strip_for(enabled, repo, availability, lookup), created) {
-            (PrStrip::NoPr | PrStrip::Untied { .. }, Some(created)) => {
-                PrStrip::Created(created.clone())
-            }
-            (strip, _) => strip,
-        }
+        strip_for(
+            repo,
+            StripFacts {
+                enabled,
+                availability,
+                lookup: state.map_or(&unknown, |state| state.pr.lookup()),
+                pending: state.and_then(|state| state.pr.pending()),
+                head: head.as_deref(),
+            },
+        )
     }
 
     /// Open the active lane's pull request on GitHub.
@@ -268,10 +299,78 @@ mod tests {
         ];
         for (label, enabled, repo, availability, lookup, expected) in cases {
             assert_eq!(
-                strip_for(enabled, repo, availability, &lookup),
+                answered_strip(enabled, repo, availability, &lookup),
                 expected,
                 "{label}"
             );
+        }
+    }
+
+    /// A pull request created for the lane, not linked yet: opened rather
+    /// than created again, and only on the branch it was made for.
+    #[test]
+    fn a_created_pull_request_holds_create_until_linked() {
+        let created = crate::workspace::github_ops::lane_pr::CreatedPr::of(
+            "https://github.com/o/r/pull/9".into(),
+            "feat",
+        )
+        .unwrap();
+        let named = PendingPr::Named(created.clone());
+        let ready = GhAvailability::Ready;
+        // (label, lookup, pending, head, expected)
+        let cases = [
+            (
+                "named, unlisted: open it",
+                PrLookup::NoPr,
+                Some(&named),
+                Some("feat"),
+                PrStrip::Created(created.clone()),
+            ),
+            (
+                "named, untied one listed: open the new one",
+                PrLookup::Untied(3),
+                Some(&named),
+                Some("feat"),
+                PrStrip::Created(created.clone()),
+            ),
+            (
+                "named, another branch now: create there",
+                PrLookup::NoPr,
+                Some(&named),
+                Some("other"),
+                PrStrip::NoPr,
+            ),
+            (
+                "unnamed: hold Create PR",
+                PrLookup::NoPr,
+                Some(&PendingPr::Unnamed),
+                Some("feat"),
+                PrStrip::Awaiting,
+            ),
+            (
+                "linked: the link wins",
+                PrLookup::Linked(Box::new(link())),
+                Some(&named),
+                Some("feat"),
+                PrStrip::Linked(link()),
+            ),
+            (
+                "nothing created",
+                PrLookup::NoPr,
+                None,
+                Some("feat"),
+                PrStrip::NoPr,
+            ),
+        ];
+        for (label, lookup, pending, head, expected) in cases {
+            let facts = StripFacts {
+                enabled: true,
+                availability: ready,
+                lookup: &lookup,
+                pending,
+                head,
+            };
+            assert_eq!(strip_for(repo(GITHUB_HOST), facts), expected, "{label}");
         }
     }
 }

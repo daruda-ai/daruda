@@ -1,5 +1,5 @@
 use super::*;
-use crate::{CheckRollup, MergeMethod, Mergeability, PrSearch, PrState};
+use crate::{CheckRollup, MergeMethod, Mergeability, Permission, PrState, ViewerCan};
 
 fn repo() -> RepoId {
     RepoId::new("github.com", "o", "r")
@@ -88,47 +88,6 @@ fn an_injected_failure_lasts_until_cleared() {
 }
 
 #[test]
-fn a_scripted_list_answers_only_the_searched_repositories() {
-    let other = RepoId::new("github.com", "o", "other");
-    let item = |repo: &RepoId, number| PrListItem {
-        repo: repo.clone(),
-        pr: pr(number, "a"),
-        author: Some("me".into()),
-        head_owner: None,
-        base_branch: "main".into(),
-        comments: 0,
-    };
-    let gh = FakeGh::new();
-    gh.set_pr_list(
-        PrFilter::Mine,
-        vec![item(&repo(), 1), item(&other, 2), item(&repo(), 3)],
-    );
-    gh.set_search_truncated(PrFilter::Mine, true);
-    let found = gh
-        .search_prs("github.com", &[repo()], PrFilter::Mine)
-        .unwrap();
-    assert_eq!(
-        found,
-        PrSearch {
-            items: vec![item(&repo(), 3), item(&repo(), 1)],
-            truncated: true,
-        },
-        "own repositories, most recently updated first"
-    );
-    let unscripted = gh.search_prs("github.com", &[repo()], PrFilter::AllOpen);
-    assert_eq!(unscripted.unwrap(), PrSearch::default());
-    assert_eq!(gh.count(GhOp::SearchPrs), 2);
-    assert_eq!(
-        gh.calls()[0],
-        GhCall::SearchPrs {
-            host: "github.com".into(),
-            repos: vec![repo()],
-            filter: PrFilter::Mine,
-        }
-    );
-}
-
-#[test]
 fn a_scripted_detail_answers_its_repository_and_number_only() {
     let detail = PrDetail {
         summary: pr(7, "a"),
@@ -144,14 +103,10 @@ fn a_scripted_detail_answers_its_repository_and_number_only() {
         checks_truncated: false,
         open_threads: 0,
         open_threads_more: false,
-        can_update: false,
-        can_close: true,
-        can_reopen: true,
+        viewer_can: ViewerCan::all().with(Permission::Update, false),
         auto_merge: None,
         queue: None,
-        can_enable_auto_merge: true,
-        can_disable_auto_merge: true,
-        node_id: None,
+        node_id: "PR_7".into(),
         changed_files: None,
     };
     let other = RepoId::new("github.com", "o", "other");
@@ -194,14 +149,10 @@ fn detail(number: u64, state: PrState, head_sha: &str) -> PrDetail {
         checks_truncated: false,
         open_threads: 0,
         open_threads_more: false,
-        can_update: false,
-        can_close: true,
-        can_reopen: true,
+        viewer_can: ViewerCan::all().with(Permission::Update, false),
         auto_merge: None,
         queue: None,
-        can_enable_auto_merge: true,
-        can_disable_auto_merge: true,
-        node_id: None,
+        node_id: format!("PR_{number}"),
         changed_files: None,
     }
 }
@@ -311,8 +262,7 @@ fn rerun_is_logged_and_a_scripted_failure_answers_each_mutation() {
 #[test]
 fn auto_merge_follows_the_scripted_head() {
     let gh = FakeGh::new();
-    let mut scripted = detail(7, PrState::Open, "abc");
-    scripted.node_id = Some("PR_7".into());
+    let scripted = detail(7, PrState::Open, "abc");
     gh.set_pr_detail(&repo(), 7, scripted);
     assert!(matches!(
         gh.enable_auto_merge(&repo(), "PR_7", MergeMethod::Squash, "def", false),
@@ -327,4 +277,37 @@ fn auto_merge_follows_the_scripted_head() {
     assert_eq!(gh.pr_detail(&repo(), 7).unwrap().auto_merge, None);
     assert_eq!(gh.count(GhOp::EnableAutoMerge), 2);
     assert_eq!(gh.count(GhOp::DisableAutoMerge), 1);
+}
+
+#[test]
+fn a_merge_behind_a_queue_enqueues_and_merges_nothing() {
+    let gh = FakeGh::new();
+    gh.set_pr_detail(&repo(), 7, detail(7, PrState::Open, "abc"));
+    gh.set_merge_queued(&repo(), 7);
+    gh.merge_pr(&repo(), 7, MergeMethod::Squash, "abc").unwrap();
+    let read = gh.pr_detail(&repo(), 7).unwrap();
+    assert_eq!(read.summary.state, PrState::Open, "not merged");
+    assert_eq!(
+        read.queue.map(|entry| entry.state),
+        Some(crate::QueueState::Queued)
+    );
+}
+
+#[test]
+fn review_threads_belong_to_their_repository() {
+    let gh = FakeGh::new();
+    let other = RepoId::new("github.com", "o", "other");
+    let threads = ReviewThreads {
+        threads: vec![crate::ReviewThread {
+            id: "t1".into(),
+            ..crate::ReviewThread::default()
+        }],
+        ..ReviewThreads::default()
+    };
+    gh.set_review_threads(&repo(), 7, threads);
+    assert_eq!(gh.review_threads(&repo(), 7).unwrap().threads.len(), 1);
+    assert!(
+        gh.review_threads(&other, 7).unwrap().threads.is_empty(),
+        "the same number in another repository"
+    );
 }

@@ -4,7 +4,7 @@
 
 use serde::Deserialize;
 
-use super::{ApiError, api_messages, parse_error};
+use super::{Answer, api_messages, parse_error};
 use crate::{
     DiffSide, GhError, LatestReview, LatestReviewState, ReviewEvent, ReviewThreadDraft,
     SubmittedReview,
@@ -67,7 +67,7 @@ pub(crate) fn submit_request(
 }
 
 pub(crate) fn parse_submitted(json: &str) -> Result<SubmittedReview, GhError> {
-    let response: Response<SubmitData> = serde_json::from_str(json).map_err(parse_error)?;
+    let response: Answer<SubmitData> = serde_json::from_str(json).map_err(parse_error)?;
     let Some(review) = response
         .data
         .and_then(|data| data.add_pull_request_review)
@@ -85,17 +85,7 @@ pub(crate) fn parse_submitted(json: &str) -> Result<SubmittedReview, GhError> {
 }
 
 pub(crate) fn parse_latest_review(json: &str) -> Result<Option<LatestReview>, GhError> {
-    let response: Response<LatestData> = serde_json::from_str(json).map_err(parse_error)?;
-    let Some(pr) = response
-        .data
-        .and_then(|data| data.repository)
-        .and_then(|repository| repository.pull_request)
-    else {
-        return Err(GhError::Parse(format!(
-            "no pull request in the answer: {}",
-            api_messages(response.errors)
-        )));
-    };
+    let pr: LatestPr = super::pull_request(json)?;
     Ok(pr.viewer_latest_review.map(|review| LatestReview {
         id: review.id,
         body: review.body,
@@ -107,12 +97,6 @@ pub(crate) fn parse_latest_review(json: &str) -> Result<Option<LatestReview>, Gh
             _ => LatestReviewState::Other,
         },
     }))
-}
-
-#[derive(Deserialize)]
-struct Response<T> {
-    data: Option<T>,
-    errors: Option<Vec<ApiError>>,
 }
 
 #[derive(Deserialize)]
@@ -132,17 +116,6 @@ struct ReviewNode {
     id: String,
     #[serde(default)]
     url: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct LatestData {
-    repository: Option<LatestRepository>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LatestRepository {
-    pull_request: Option<LatestPr>,
 }
 
 #[derive(Deserialize)]

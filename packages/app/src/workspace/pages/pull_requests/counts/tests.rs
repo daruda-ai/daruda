@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use daruda_github::availability::{BackoffReason, GhAvailability};
-use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, PrSummary, RepoId};
+use daruda_github::{CheckRollup, PrAudience, PrListItem, PrSearch, PrState, PrSummary, RepoId};
 
 use super::labels;
 use crate::github::PrListAnswer;
@@ -63,7 +63,7 @@ fn shown(hosts: Vec<(&str, HostList)>) -> PrListCache {
             .map(|(host, list)| {
                 (
                     (
-                        PrFilter::Mine,
+                        PrAudience::Mine,
                         PrSearchState::Open,
                         crate::github::Refine::default(),
                         host.to_owned(),

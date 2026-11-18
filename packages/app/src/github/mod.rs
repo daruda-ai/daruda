@@ -7,14 +7,15 @@ mod list;
 mod list_schedule;
 mod poller;
 mod refine;
+mod saved_file;
 mod schedule;
 
 pub(crate) use drafts::{DraftKeeping, DraftStore};
 pub(crate) use links::LinkStore;
 pub(crate) use list::PrList;
-pub(crate) use list_schedule::audience;
 pub(crate) use poller::PrPoller;
 pub(crate) use refine::{Facet, NO_REFINE, Refine, RefineProblem};
+pub(crate) use saved_file::Keeping;
 pub(crate) use schedule::is_unusable;
 
 use std::collections::BTreeSet;
@@ -23,7 +24,7 @@ use std::time::Instant;
 
 use daruda_github::RepoPrs;
 use daruda_github::availability::GhAvailability;
-use daruda_github::{PrFilter, PrSearch, PrSearchState, PrSummary, RepoId};
+use daruda_github::{PrAudience, PrSearch, PrSearchState, PrSummary, RepoId};
 use gpui::App;
 
 /// `[github] enabled`: whether lanes look up their pull requests at all.
@@ -77,9 +78,10 @@ impl PrLookup {
 pub(crate) enum PrSubject {
     /// The branch the lane pushes to: GitHub is asked which PR it heads.
     Branch(String),
-    /// A review lane names its PR, whose head is a fork's branch that the
-    /// base repository cannot be asked about by name.
-    Review(u64),
+    /// A pull request named by number: a review lane's, whose head is a
+    /// fork's branch the base repository cannot be asked about by name, or
+    /// one the user chose, whose head need not be the lane's branch.
+    Number(u64),
 }
 
 /// One lane's question for the poller: which PR in `repo` it works on.
@@ -141,7 +143,7 @@ pub(crate) enum PrListUpdate<'a> {
     /// A fresh answer for `host` under `filter`.
     Answer {
         host: &'a str,
-        filter: PrFilter,
+        filter: PrAudience,
         state: PrSearchState,
         refine: &'a Refine,
         answer: &'a PrListAnswer,
@@ -150,7 +152,7 @@ pub(crate) enum PrListUpdate<'a> {
     /// that started showing `filter` after it arrived.
     Cached {
         host: &'a str,
-        filter: PrFilter,
+        filter: PrAudience,
         state: PrSearchState,
         refine: &'a Refine,
         answer: &'a PrListAnswer,
@@ -158,7 +160,7 @@ pub(crate) enum PrListUpdate<'a> {
     /// The search failed; the last answer stays on show.
     Failed {
         host: &'a str,
-        filter: PrFilter,
+        filter: PrAudience,
         state: PrSearchState,
         refine: &'a Refine,
     },

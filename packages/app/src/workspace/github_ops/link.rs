@@ -4,12 +4,13 @@
 //! becoming unusable, and the feature being switched off.
 
 use daruda_github::RepoPrs;
-use daruda_github::link::{ReviewMark, pick};
+use daruda_github::link::pick;
 use daruda_github::remote_parse::parse_remote;
 use daruda_github::{PrSummary, RepoId};
 use daruda_store::project::LaneRef;
 use gpui::Context;
 
+use super::lane_link::LaneLink;
 use crate::github::{PrDemand, PrLink, PrLookup, PrSubject, PrUpdate, is_unusable};
 use crate::lane::git::PushTarget;
 use crate::workspace::Workspace;
@@ -49,7 +50,7 @@ fn lookup_subject(repo: &RepoId, subject: &PrSubject, prs: &RepoPrs) -> Option<P
                 candidates,
             ))
         }
-        PrSubject::Review(number) => Some(match prs.by_number.get(number)? {
+        PrSubject::Number(number) => Some(match prs.by_number.get(number)? {
             Some(pr) => PrLookup::Linked(Box::new(PrLink {
                 repo: repo.clone(),
                 pr: pr.clone(),
@@ -57,6 +58,15 @@ fn lookup_subject(repo: &RepoId, subject: &PrSubject, prs: &RepoPrs) -> Option<P
             None => PrLookup::Unknown,
         }),
     }
+}
+
+/// What a lane needs after its links change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum AfterEdit {
+    /// Only its mirror: what changed is a record, not which pull request.
+    Mirror,
+    /// Its pull request asked again: the user changed which one it is.
+    Relink,
 }
 
 impl LaneScoped {
@@ -67,50 +77,23 @@ impl LaneScoped {
         Some((parse_remote(&push.url)?, push))
     }
 
-    /// Which pull request the lane works on, and in which repository: the
-    /// one a review branch's mark names, else whichever its push branch
-    /// heads. A mark daruda cannot read asks nothing, so such a lane is
-    /// never offered a pull request of its own either.
-    pub(in crate::workspace) fn pr_subject(&self) -> Option<(RepoId, PrSubject)> {
-        let push = self.git.push_target.as_ref()?;
-        match push.review.as_deref() {
-            Some(raw) => {
-                let mark = ReviewMark::parse(raw)?;
-                Some((mark.repo, PrSubject::Review(mark.number)))
-            }
-            // A pull request the user chose is asked for by number, like a
-            // review lane's: its head need not be this branch's name.
-            None => match self.chosen_pr() {
-                Some((repo, number)) => Some((repo, PrSubject::Review(number))),
-                None => Some((
-                    parse_remote(&push.url)?,
-                    PrSubject::Branch(push.branch.clone()),
-                )),
-            },
-        }
+    /// How the lane is tied to its pull request.
+    pub(in crate::workspace) fn lane_link(&self) -> Option<LaneLink> {
+        LaneLink::resolve(self.git.push_target.as_ref(), self.pr_links.as_ref())
     }
 
-    /// The pull request the user chose for this worktree's branch.
-    pub(in crate::workspace) fn chosen_pr(&self) -> Option<(RepoId, u64)> {
-        let chosen = self.pr_links.as_ref()?.chosen.as_ref()?;
-        Some(crate::github::links::pr_key(chosen))
+    /// Which pull request the lane works on, and in which repository.
+    pub(in crate::workspace) fn pr_subject(&self) -> Option<(RepoId, PrSubject)> {
+        self.lane_link()?.subject()
     }
 
     /// Why the lane is tied to its pull request, once it is.
     pub(in crate::workspace) fn link_source(&self) -> Option<crate::github::links::Source> {
-        use crate::github::links::Source;
-        let push = self.git.push_target.as_ref()?;
-        if push.review.is_some() {
-            return Some(Source::Review);
-        }
-        if self.chosen_pr().is_some() {
-            return Some(Source::Chosen);
-        }
-        self.pr.link().map(|_| Source::Branch)
+        self.lane_link()?.source(self.pr.link().is_some())
     }
 
     /// Whether the user took `repo#number` away from this branch.
-    fn suppresses(&self, repo: &RepoId, number: u64) -> bool {
+    pub(in crate::workspace) fn suppresses(&self, repo: &RepoId, number: u64) -> bool {
         self.pr_links.as_ref().is_some_and(|links| {
             links
                 .suppressed
@@ -119,16 +102,16 @@ impl LaneScoped {
         })
     }
 
-    /// The pull request the lane works on: a review lane's is known from its
-    /// mark before GitHub answers; any other's once its branch is linked.
+    /// The pull request the lane works on: one named by number is known
+    /// before GitHub answers; one found by branch name once it is linked.
     pub(in crate::workspace) fn pr_key(&self) -> Option<(RepoId, u64)> {
-        match self.pr_subject() {
-            Some((repo, PrSubject::Review(number))) => Some((repo, number)),
-            _ => self
-                .pr
-                .link()
-                .map(|link| (link.repo.clone(), link.pr.number)),
-        }
+        self.lane_link()
+            .and_then(|link| link.known_key())
+            .or_else(|| {
+                self.pr
+                    .link()
+                    .map(|link| (link.repo.clone(), link.pr.number))
+            })
     }
 }
 
@@ -340,13 +323,32 @@ impl Workspace {
         source: crate::github::links::Source,
         cx: &mut Context<Self>,
     ) {
+        let pr = crate::github::links::pr_ref(repo, number);
+        self.edit_lane_links(lane, AfterEdit::Mirror, cx, |links, path, branch, now| {
+            links.found(path, branch, pr, source, now)
+        });
+    }
+
+    /// Change what is kept for `lane`'s worktree and branch, then bring the
+    /// lane up to date: its mirror of the links, and with
+    /// [`AfterEdit::Relink`] its pull request too. Every change to the links
+    /// goes through here, so none leaves a lane showing what it replaced.
+    pub(in crate::workspace) fn edit_lane_links(
+        &mut self,
+        lane: LaneRef,
+        after: AfterEdit,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut daruda_store::pr_links::PrLinks, &std::path::Path, &str, i64),
+    ) {
         let Some((path, branch)) = self.lane_worktree_branch(lane) else {
             return;
         };
-        let pr = crate::github::links::pr_ref(repo, number);
         let now = chrono::Utc::now().timestamp();
-        crate::github::LinkStore::edit(cx, |links| links.found(&path, &branch, pr, source, now));
-        self.sync_lane_links(lane, cx);
+        crate::github::LinkStore::edit(cx, |links| edit(links, &path, &branch, now));
+        match after {
+            AfterEdit::Mirror => self.sync_lane_links(lane, cx),
+            AfterEdit::Relink => self.relink_lane(lane, cx),
+        }
     }
 
     /// The lane's worktree and the branch it pushes, the store's key.
@@ -467,7 +469,7 @@ mod tests {
         ];
         for (label, number, expected) in cases {
             assert_eq!(
-                lookup_subject(&repo(), &PrSubject::Review(number), &prs),
+                lookup_subject(&repo(), &PrSubject::Number(number), &prs),
                 expected,
                 "{label}"
             );

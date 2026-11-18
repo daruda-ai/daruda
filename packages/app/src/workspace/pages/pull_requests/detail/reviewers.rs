@@ -74,7 +74,7 @@ impl PrDetailState {
 
     /// The viewer may change who is asked, and no change runs.
     fn reviewers_editable(&self) -> bool {
-        self.pr.last_known().is_some_and(|pr| pr.can_update)
+        self.pr.last_known().is_some_and(|pr| pr.can_edit())
             && self.reviewer_requests.op != Some(ReviewerOp::Running)
     }
 }

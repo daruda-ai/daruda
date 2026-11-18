@@ -1,5 +1,5 @@
 use daruda_github::fake::{FakeGh, GhCall};
-use daruda_github::{PrAudience, PrFilter, PrSearchCriteria, PrSearchState};
+use daruda_github::{PrAudience, PrSearchCriteria, PrSearchState};
 use gpui::{TestAppContext, VisualTestContext};
 use std::time::Duration;
 
@@ -100,7 +100,7 @@ fn a_search_the_tab_cannot_take_is_not_sent_and_says_why(cx: &mut TestAppContext
         assert_eq!(snap.problem, Some(RefineProblem::NeedsAllTab));
     });
     f.ws.update(&mut vcx, |ws, cx| {
-        ws.set_pr_page_filter(PrFilter::AllOpen, cx)
+        ws.set_pr_page_filter(PrAudience::All, cx)
     });
     vcx.run_until_parked();
     let refined = refined(&gh);
@@ -130,7 +130,7 @@ fn removing_a_chip_rewrites_the_field_and_searches_at_once(cx: &mut TestAppConte
 fn reset_clears_the_search_and_keeps_the_tab_state_and_mode(cx: &mut TestAppContext) {
     let (f, _gh, mut vcx) = open(cx);
     f.ws.update(&mut vcx, |ws, cx| {
-        ws.set_pr_page_filter(PrFilter::ReviewRequested, cx);
+        ws.set_pr_page_filter(PrAudience::ReviewRequested, cx);
         ws.set_pr_page_state(PrSearchState::Merged, cx);
     });
     type_text(&f, &mut vcx, "fix label:ui");
@@ -143,7 +143,7 @@ fn reset_clears_the_search_and_keeps_the_tab_state_and_mode(cx: &mut TestAppCont
             ws.pr_page_refine().is_empty(),
             "applied at once, not after a pause"
         );
-        assert_eq!(ws.pr_page_filter(), PrFilter::ReviewRequested);
+        assert_eq!(ws.pr_page_filter(), PrAudience::ReviewRequested);
         assert_eq!(ws.pr_page_state(), PrSearchState::Merged);
         assert_eq!(ws.pr_search_mode(), SearchMode::GitHub);
     });
@@ -153,7 +153,7 @@ fn reset_clears_the_search_and_keeps_the_tab_state_and_mode(cx: &mut TestAppCont
 fn the_tab_state_and_mode_are_kept_with_the_window_but_not_the_text(cx: &mut TestAppContext) {
     let (f, _gh, mut vcx) = open(cx);
     f.ws.update(&mut vcx, |ws, cx| {
-        ws.set_pr_page_filter(PrFilter::AllOpen, cx);
+        ws.set_pr_page_filter(PrAudience::All, cx);
         ws.set_pr_page_state(PrSearchState::Closed, cx);
     });
     type_text(&f, &mut vcx, "fix");
@@ -180,7 +180,7 @@ fn the_tab_state_and_mode_are_kept_with_the_window_but_not_the_text(cx: &mut Tes
         });
     });
     f.ws.read_with(&vcx, |ws, _| {
-        assert_eq!(ws.pr_page_filter(), PrFilter::AllOpen);
+        assert_eq!(ws.pr_page_filter(), PrAudience::All);
         assert_eq!(ws.pr_page_state(), PrSearchState::Closed);
         assert_eq!(ws.pr_search_mode(), SearchMode::GitHub);
     });
@@ -204,7 +204,7 @@ fn a_github_search_finds_a_match_outside_the_loaded_rows(cx: &mut TestAppContext
     let (f, gh, _) = linked_window(cx);
     let mut items: Vec<_> = (11..=70).map(|n| titled(n, "routine")).collect();
     items.push(titled(3, "Needle in the haystack"));
-    gh.set_pr_list(PrFilter::Mine, items);
+    gh.set_pr_list(PrAudience::Mine, items);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| ws.open_page(Page::PullRequests, window, cx));
@@ -251,7 +251,7 @@ fn an_earlier_search_and_state_are_not_shown_again_from_old_rows(cx: &mut TestAp
     pause(&mut vcx);
     f.ws.read_with(&vcx, |ws, _| {
         let held = ws.pr_list().host_searched(
-            PrFilter::Mine,
+            PrAudience::Mine,
             PrSearchState::Open,
             &Refine::parse("first"),
             "github.com",
@@ -270,7 +270,7 @@ fn an_earlier_search_and_state_are_not_shown_again_from_old_rows(cx: &mut TestAp
     f.ws.update(&mut vcx, |ws, cx| {
         ws.set_pr_page_state(PrSearchState::Open, cx);
         let held = ws.pr_list().host_searched(
-            PrFilter::Mine,
+            PrAudience::Mine,
             PrSearchState::Open,
             ws.pr_page_refine(),
             "github.com",
@@ -284,7 +284,7 @@ fn an_earlier_search_and_state_are_not_shown_again_from_old_rows(cx: &mut TestAp
     vcx.run_until_parked();
     f.ws.read_with(&vcx, |ws, _| {
         let held = ws.pr_list().host_searched(
-            PrFilter::Mine,
+            PrAudience::Mine,
             PrSearchState::Open,
             ws.pr_page_refine(),
             "github.com",
@@ -296,7 +296,7 @@ fn an_earlier_search_and_state_are_not_shown_again_from_old_rows(cx: &mut TestAp
 #[gpui::test]
 fn a_search_not_sent_offers_nothing_of_the_bare_tab(cx: &mut TestAppContext) {
     let (f, gh, mut vcx) = open(cx);
-    gh.set_pr_list(PrFilter::Mine, (1..=60).map(|n| titled(n, "x")).collect());
+    gh.set_pr_list(PrAudience::Mine, (1..=60).map(|n| titled(n, "x")).collect());
     f.ws.update(&mut vcx, |ws, cx| ws.refresh_pr_list(cx));
     vcx.run_until_parked();
     f.ws.read_with(&vcx, |ws, _| {

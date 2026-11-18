@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use daruda_github::PrFilter;
+use daruda_github::PrAudience;
 use gpui::{Context, Window};
 
 use crate::github::{NO_REFINE, PrList, Refine, RefineProblem};
@@ -47,12 +47,10 @@ impl Workspace {
             SearchMode::Loaded => {
                 PageSearch::Loaded(page.search.read(cx).value().trim().to_owned())
             }
-            SearchMode::GitHub => {
-                match page.committed.problem(crate::github::audience(page.filter)) {
-                    Some(problem) => PageSearch::Blocked(problem),
-                    None => PageSearch::GitHub(&page.committed),
-                }
-            }
+            SearchMode::GitHub => match page.committed.problem(page.filter) {
+                Some(problem) => PageSearch::Blocked(problem),
+                None => PageSearch::GitHub(&page.committed),
+            },
         }
     }
 
@@ -60,12 +58,7 @@ impl Workspace {
     /// narrows loaded rows or cannot be sent.
     pub(in crate::workspace) fn pr_page_refine(&self) -> &Refine {
         let page = &self.pages.pull_requests;
-        if page.search_mode == SearchMode::GitHub
-            && page
-                .committed
-                .problem(crate::github::audience(page.filter))
-                .is_none()
-        {
+        if page.search_mode == SearchMode::GitHub && page.committed.problem(page.filter).is_none() {
             &page.committed
         } else {
             &NO_REFINE
@@ -74,8 +67,8 @@ impl Workspace {
 
     /// The searches a refresh reads again: every tab bare, for the badges,
     /// and the shown tab with its GitHub search.
-    pub(in crate::workspace) fn pr_refresh_searches(&self) -> Vec<(PrFilter, Refine)> {
-        let mut searches: Vec<(PrFilter, Refine)> = super::list::FILTERS
+    pub(in crate::workspace) fn pr_refresh_searches(&self) -> Vec<(PrAudience, Refine)> {
+        let mut searches: Vec<(PrAudience, Refine)> = super::list::FILTERS
             .into_iter()
             .map(|filter| (filter, Refine::default()))
             .collect();

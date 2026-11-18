@@ -3,28 +3,21 @@
 //! shortly after each change and at quit. Installed by the primary desktop
 //! instance; without it (tests) links are kept in memory only.
 
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::path::Path;
 
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::pr_links::{
     LinkSource, PrLinks, PrRef, WorktreeLinks, load_pr_links_in, pr_links_dir, save_pr_links_in,
 };
-use gpui::{App, Global, Task};
+use gpui::{App, Global};
 
-/// How long a burst of changes settles before the links are written.
-const SAVE_AFTER: Duration = Duration::from_millis(400);
+use super::saved_file::{SAVE_AFTER, SavedFile};
 
 #[derive(Default)]
 pub(crate) struct LinkStore {
     links: PrLinks,
-    /// Where they are saved; `None` keeps them in memory.
-    dir: Option<PathBuf>,
-    dirty: bool,
-    /// The last write failed.
-    failed: bool,
-    pending: Option<Task<()>>,
+    file: SavedFile,
 }
 
 impl Global for LinkStore {}
@@ -37,8 +30,7 @@ impl LinkStore {
         let store = match load_pr_links_in(&dir) {
             Some(links) => Self {
                 links,
-                dir: Some(dir),
-                ..Self::default()
+                file: SavedFile::at(Some(dir)),
             },
             None => Self::default(),
         };
@@ -46,13 +38,11 @@ impl LinkStore {
     }
 
     /// Whether what the user ties and unties is kept across restarts.
-    pub(crate) fn keeping(cx: &App) -> super::DraftKeeping {
+    pub(crate) fn keeping(cx: &App) -> super::Keeping {
         match cx.try_global::<Self>() {
             // No store installed: tests, where nothing is promised.
-            None => super::DraftKeeping::Saved,
-            Some(store) if store.dir.is_none() => super::DraftKeeping::MemoryOnly,
-            Some(store) if store.failed => super::DraftKeeping::SaveFailed,
-            Some(_) => super::DraftKeeping::Saved,
+            None => super::Keeping::Saved,
+            Some(store) => store.file.keeping(),
         }
     }
 
@@ -60,20 +50,21 @@ impl LinkStore {
         cx.try_global::<Self>()?.links.of(worktree, branch).cloned()
     }
 
-    /// Change the links with `edit`, then save them shortly.
+    /// Change the links with `edit`, then save them shortly. A lane's
+    /// links change through `Workspace::edit_lane_links`, which also brings
+    /// the lane up to date.
     pub(crate) fn edit(cx: &mut App, edit: impl FnOnce(&mut PrLinks)) {
         let store = cx.default_global::<Self>();
         edit(&mut store.links);
         store.links.prune();
-        store.dirty = true;
-        if store.dir.is_none() || store.pending.is_some() {
+        if !store.file.changed() {
             return;
         }
-        let pending = cx.spawn(async move |cx| {
+        let write = cx.spawn(async move |cx| {
             cx.background_executor().timer(SAVE_AFTER).await;
             cx.update(Self::flush);
         });
-        cx.default_global::<Self>().pending = Some(pending);
+        cx.default_global::<Self>().file.scheduled(write);
     }
 
     /// Write what changed now: when a burst settles, and at quit.
@@ -81,19 +72,14 @@ impl LinkStore {
         let Some(store) = cx.try_global::<Self>() else {
             return;
         };
-        let (Some(dir), true) = (store.dir.clone(), store.dirty) else {
+        let Some(dir) = store.file.due() else {
             return;
         };
-        let links = store.links.clone();
-        let store = cx.default_global::<Self>();
-        store.pending = None;
-        match save_pr_links_in(&dir, &links) {
-            Ok(()) => {
-                store.dirty = false;
-                store.failed = false;
-            }
+        let written = save_pr_links_in(&dir, &store.links);
+        cx.default_global::<Self>().file.written(&written);
+        match written {
+            Ok(()) => {}
             Err(e) => {
-                store.failed = true;
                 LogWriter::log(
                     ErrorReport::new(crate::surface::strings::pull_requests::links_save_failed())
                         .severity(ErrorSeverity::Error)
@@ -108,12 +94,11 @@ impl LinkStore {
 
     /// Point a test's store at `dir`.
     #[cfg(test)]
-    pub(crate) fn install_at(dir: PathBuf, cx: &mut App) {
+    pub(crate) fn install_at(dir: std::path::PathBuf, cx: &mut App) {
         let links = load_pr_links_in(&dir).unwrap_or_default();
         cx.set_global(Self {
             links,
-            dir: Some(dir),
-            ..Self::default()
+            file: SavedFile::at(Some(dir)),
         });
     }
 }

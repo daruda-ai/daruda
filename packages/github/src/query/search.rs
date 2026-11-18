@@ -1,33 +1,13 @@
-//! The search that lists open pull requests across repositories and the
-//! parser for its answer.
+//! The search query's shape and the parser for one of its nodes, which
+//! the paged search shares.
 
 use serde::Deserialize;
 
-use super::{ApiError, Author, PrNode, api_messages, parse_error, pr_fragment};
-use crate::search::SEARCH_PAGE_MAX;
-use crate::{GhError, PrFilter, PrListItem, PrSearch, RepoId};
+use super::{Author, PrNode, parse_error, pr_fragment};
+use crate::{GhError, PrListItem, RepoId};
 
-/// The search text for open pull requests of `repos` matching `filter`,
-/// most recently updated first so a truncated answer keeps the live ones.
-/// Archived repositories take no new work, so their PRs are left out.
-pub(crate) fn search_string(repos: &[RepoId], filter: PrFilter) -> String {
-    let mut text = String::from("is:pr is:open archived:false sort:updated-desc");
-    for repo in repos {
-        text.push_str(&format!(" repo:{}/{}", repo.owner(), repo.name()));
-    }
-    match filter {
-        PrFilter::Mine => text.push_str(" author:@me"),
-        PrFilter::ReviewRequested => text.push_str(" review-requested:@me"),
-        PrFilter::AllOpen => {}
-    }
-    text
-}
-
-/// The search for open pull requests, bound to `$q` ([`search_string`]).
-pub(crate) fn search_prs_query() -> String {
-    search_query(&format!("first: {SEARCH_PAGE_MAX}"), "", "")
-}
-
+/// The search query for pull requests bound to `$q`, with the connection
+/// `arguments`, their variable `declarations` and extra connection `fields`.
 pub(super) fn search_query(arguments: &str, declarations: &str, fields: &str) -> String {
     format!(
         "query($q: String!{declarations}) {{ search(query: $q, type: ISSUE, {arguments}) {{ \
@@ -36,25 +16,6 @@ pub(super) fn search_query(arguments: &str, declarations: &str, fields: &str) ->
          comments {{ totalCount }} }} }} }} }} {}",
         pr_fragment()
     )
-}
-
-/// Parse the answer to [`search_prs_query`] asked of `host`.
-pub(crate) fn parse_search_prs(json: &str, host: &str) -> Result<PrSearch, GhError> {
-    let response: SearchResponse = serde_json::from_str(json).map_err(parse_error)?;
-    let Some(search) = response.data.and_then(|d| d.search) else {
-        return Err(GhError::Parse(format!(
-            "no search in the answer: {}",
-            api_messages(response.errors)
-        )));
-    };
-    let truncated = search.issue_count as usize > search.nodes.len();
-    let items = search
-        .nodes
-        .into_iter()
-        .filter(|node| !is_not_a_pull_request(node))
-        .map(|node| parse_search_node(node, host))
-        .collect::<Result<Vec<_>, GhError>>()?;
-    Ok(PrSearch { items, truncated })
 }
 
 /// A search node that carries no pull request: `null`, or the empty object
@@ -91,31 +52,6 @@ pub(super) fn parse_search_node(
         comments: node.comments.total_count,
         pr: node.pr.into_summary()?,
     })
-}
-
-/// Order list items most recently updated first. `updated_at` is RFC 3339
-/// in UTC, so string order is time order; the sort is stable for ties.
-pub(crate) fn newest_first(items: &mut [PrListItem]) {
-    items.sort_by(|a, b| b.pr.updated_at.cmp(&a.pr.updated_at));
-}
-
-#[derive(Deserialize)]
-struct SearchResponse {
-    data: Option<SearchData>,
-    errors: Option<Vec<ApiError>>,
-}
-
-#[derive(Deserialize)]
-struct SearchData {
-    search: Option<SearchConnection>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SearchConnection {
-    issue_count: u32,
-    /// Parsed one by one, so an entry that is not a pull request is skipped.
-    nodes: Vec<serde_json::Value>,
 }
 
 #[derive(Deserialize)]

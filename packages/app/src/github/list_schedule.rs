@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use daruda_github::{
-    FailureKind, PrAudience, PrFilter, PrListItem, PrSearch, PrSearchContinuation,
-    PrSearchCriteria, PrSearchPage, PrSearchRequest, PrSearchState, RepoId,
+    FailureKind, PrAudience, PrListItem, PrSearch, PrSearchContinuation, PrSearchCriteria,
+    PrSearchPage, PrSearchRequest, PrSearchState, RepoId,
 };
 
 use super::PrListAnswer;
@@ -28,7 +28,7 @@ const REPOS_PER_REQUEST: usize = 20;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct ListKey {
     pub host: String,
-    pub filter: PrFilter,
+    pub filter: PrAudience,
     pub state: PrSearchState,
     pub refine: Refine,
 }
@@ -36,7 +36,7 @@ pub(super) struct ListKey {
 impl ListKey {
     fn criteria(&self) -> PrSearchCriteria {
         let mut criteria = PrSearchCriteria {
-            audience: audience(self.filter),
+            audience: self.filter,
             state: self.state,
             ..PrSearchCriteria::default()
         };
@@ -52,15 +52,6 @@ impl ListKey {
             .map(|chunk| PrSearchRequest::new(&self.host, chunk, self.criteria(), PAGE_SIZE))
             .collect::<Result<_, _>>()
             .map_err(|e| e.kind())
-    }
-}
-
-/// The provider audience a tab lists.
-pub(crate) fn audience(filter: PrFilter) -> PrAudience {
-    match filter {
-        PrFilter::Mine => PrAudience::Mine,
-        PrFilter::ReviewRequested => PrAudience::ReviewRequested,
-        PrFilter::AllOpen => PrAudience::All,
     }
 }
 

@@ -8,6 +8,7 @@
 
 mod actions;
 pub mod address;
+mod auto_merge;
 pub mod availability;
 mod backend;
 mod checkout;
@@ -25,6 +26,7 @@ mod search;
 mod system;
 
 pub use actions::MergeBlock;
+pub use auto_merge::enable_auto_merge_shown;
 pub use backend::Gh;
 pub use checkout::PrCheckout;
 pub use error::{FailureKind, GhError};
@@ -34,10 +36,10 @@ pub use files::{
 pub use model::{
     ActionsJob, AutoMergeOn, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun,
     CheckStatus, Conversation, DiffSide, FailedCheck, GITHUB_HOST, LatestReview, LatestReviewState,
-    MergeMethod, Mergeability, NewPr, PrDetail, PrFilter, PrListItem, PrSearch, PrState, PrSummary,
-    QueueEntry, QueueState, RepoId, ReviewComment, ReviewDecision, ReviewEvent, ReviewThread,
-    ReviewThreadDraft, ReviewThreads, ReviewerState, SubmittedReview, ThreadPermissions,
-    reviewer_name_ok,
+    MergeMethod, Mergeability, NewPr, Permission, PrDetail, PrListItem, PrSearch, PrState,
+    PrSummary, QueueEntry, QueueState, RepoId, ReviewComment, ReviewDecision, ReviewEvent,
+    ReviewThread, ReviewThreadDraft, ReviewThreads, ReviewerState, SubmittedReview,
+    ThreadPermissions, ViewerCan, reviewer_name_ok,
 };
 pub use query::{PrStack, RepoPrs, StackEntry, StackRead};
 pub use search::{

@@ -1,6 +1,6 @@
 use daruda_github::{
     ActionsJob, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus, MergeBlock,
-    MergeMethod, Mergeability, PrDetail, PrState, PrSummary,
+    MergeMethod, Mergeability, Permission, PrDetail, PrState, PrSummary, ViewerCan,
 };
 
 fn detail(state: PrState, mergeability: Mergeability, methods: Vec<MergeMethod>) -> PrDetail {
@@ -29,14 +29,10 @@ fn detail(state: PrState, mergeability: Mergeability, methods: Vec<MergeMethod>)
         checks_truncated: false,
         open_threads: 0,
         open_threads_more: false,
-        can_update: false,
-        can_close: true,
-        can_reopen: true,
+        viewer_can: ViewerCan::all().with(Permission::Update, false),
         auto_merge: None,
         queue: None,
-        can_enable_auto_merge: true,
-        can_disable_auto_merge: true,
-        node_id: None,
+        node_id: "PR_1".into(),
         changed_files: None,
     }
 }
@@ -246,11 +242,10 @@ fn close_and_reopen_follow_state_and_permission() {
         ),
     ];
     for (label, state, may_close, may_reopen, close, reopen) in cases {
-        let pr = PrDetail {
-            can_close: may_close,
-            can_reopen: may_reopen,
-            ..detail(state, open, Vec::new())
-        };
+        let mut pr = detail(state, open, Vec::new());
+        pr.viewer_can = ViewerCan::default()
+            .with(Permission::Close, may_close)
+            .with(Permission::Reopen, may_reopen);
         assert_eq!(pr.can_close_now(), close, "{label}: close");
         assert_eq!(pr.can_reopen_now(), reopen, "{label}: reopen");
     }
@@ -260,8 +255,7 @@ fn close_and_reopen_follow_state_and_permission() {
 fn auto_merge_is_offered_only_where_github_would_take_it() {
     use daruda_github::{AutoMergeOn, QueueEntry, QueueState};
     let base = || PrDetail {
-        can_enable_auto_merge: true,
-        can_disable_auto_merge: true,
+        viewer_can: ViewerCan::all(),
         ..detail(
             PrState::Open,
             Mergeability::Blocked(BlockReason::Requirements),
@@ -282,7 +276,7 @@ fn auto_merge_is_offered_only_where_github_would_take_it() {
         (
             "not permitted",
             PrDetail {
-                can_enable_auto_merge: false,
+                viewer_can: ViewerCan::all().with(Permission::EnableAutoMerge, false),
                 ..base()
             },
             false,
@@ -340,7 +334,7 @@ fn auto_merge_is_offered_only_where_github_would_take_it() {
             "on, not the viewer's to turn off",
             PrDetail {
                 auto_merge: on.clone(),
-                can_disable_auto_merge: false,
+                viewer_can: ViewerCan::all().with(Permission::DisableAutoMerge, false),
                 ..base()
             },
             false,

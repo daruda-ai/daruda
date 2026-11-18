@@ -146,7 +146,7 @@ impl Workspace {
     ) {
         let Some(body) = self.pr_detail_mut(id).and_then(|detail| {
             let loaded = detail.pr.last_known()?;
-            (loaded.can_update && detail.body_edit.is_none()).then(|| loaded.body.clone())
+            (loaded.can_edit() && detail.body_edit.is_none()).then(|| loaded.body.clone())
         }) else {
             return;
         };

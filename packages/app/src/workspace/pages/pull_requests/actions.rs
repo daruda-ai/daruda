@@ -152,12 +152,9 @@ impl Request {
             Self::Reopen => pr.can_reopen_now(),
             Self::AutoMergeOn {
                 pr: node, method, ..
-            } => {
-                pr.node_id.as_deref() == Some(node.as_str())
-                    && pr.can_enable_auto_merge_with(*method)
-            }
+            } => pr.node_id == *node && pr.can_enable_auto_merge_with(*method),
             Self::AutoMergeOff { pr: node } => {
-                pr.node_id.as_deref() == Some(node.as_str()) && pr.can_disable_auto_merge_now()
+                pr.node_id == *node && pr.can_disable_auto_merge_now()
             }
             Self::Ready => pr.is_draft(),
             // Only runs with a failed job: a rerun reruns those jobs.
@@ -179,21 +176,15 @@ impl Request {
                 method,
                 head_sha,
                 stack,
-            } => {
-                // The range shown must still be the stack's: an edit to it
-                // since is not merged on a guess.
-                if let Some(shown) = &stack {
-                    let now = match gh.pr_stack(repo, number)? {
-                        daruda_github::StackRead::Stacked(read) => read.range_below(number),
-                        daruda_github::StackRead::NotStacked
-                        | daruda_github::StackRead::Unsupported => None,
-                    };
-                    if now.as_ref() != Some(shown) {
-                        return Err(GhError::StackChanged);
-                    }
-                }
-                gh.enable_auto_merge(repo, &pr, method, &head_sha, stack.is_some())
-            }
+            } => daruda_github::enable_auto_merge_shown(
+                gh,
+                repo,
+                number,
+                &pr,
+                method,
+                &head_sha,
+                stack.as_deref(),
+            ),
             Self::AutoMergeOff { pr } => gh.disable_auto_merge(repo, &pr),
             Self::Ready => gh.set_ready(repo, number),
             // Every run is asked even after one fails; the first failure
@@ -284,11 +275,8 @@ impl Workspace {
         let Some(target) = self.pr_action_target(id) else {
             return;
         };
-        let Some(pr) = target.loaded.node_id.clone() else {
-            return;
-        };
         let request = Request::AutoMergeOn {
-            pr,
+            pr: target.loaded.node_id.clone(),
             method,
             head_sha: target.loaded.head_sha.clone(),
             stack: stack.clone(),
@@ -336,7 +324,7 @@ impl Workspace {
     ) {
         let Some(pr) = self
             .pr_action_target(id)
-            .and_then(|target| target.loaded.node_id)
+            .map(|target| target.loaded.node_id)
         else {
             return;
         };
@@ -525,6 +513,8 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
+    use daruda_github::{Permission, ViewerCan};
+
     use super::*;
 
     fn pr(state: daruda_github::PrState, mergeability: daruda_github::Mergeability) -> PrDetail {
@@ -554,14 +544,10 @@ mod tests {
             checks_truncated: false,
             open_threads: 0,
             open_threads_more: false,
-            can_update: false,
-            can_close: true,
-            can_reopen: true,
+            viewer_can: ViewerCan::all().with(Permission::Update, false),
             auto_merge: None,
             queue: None,
-            can_enable_auto_merge: true,
-            can_disable_auto_merge: true,
-            node_id: Some("PR_7".into()),
+            node_id: "PR_7".into(),
             changed_files: None,
         }
     }
@@ -600,12 +586,16 @@ mod tests {
         };
         let merged = pr(S::Merged, M::Unknown);
         let not_mine = PrDetail {
-            can_close: false,
-            can_reopen: false,
+            viewer_can: ViewerCan::all()
+                .with(Permission::Update, false)
+                .with(Permission::Close, false)
+                .with(Permission::Reopen, false),
             ..pr(S::Closed, M::Unknown)
         };
         let open_not_mine = PrDetail {
-            can_close: false,
+            viewer_can: ViewerCan::all()
+                .with(Permission::Update, false)
+                .with(Permission::Close, false),
             ..pr(S::Open, M::Ready)
         };
         // (label, request, pull request, applies)

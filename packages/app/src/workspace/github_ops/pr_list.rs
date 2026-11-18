@@ -8,7 +8,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
-use daruda_github::{PrFilter, PrSearchState, RepoId};
+use daruda_github::{PrAudience, PrSearchState, RepoId};
 use daruda_store::project::{LaneRef, ProjectId};
 use gpui::{Context, Task};
 
@@ -66,7 +66,7 @@ pub(crate) struct PrListCache {
 }
 
 /// One audience, state and GitHub search of one host.
-type ListSlot = (PrFilter, PrSearchState, Refine, String);
+type ListSlot = (PrAudience, PrSearchState, Refine, String);
 
 #[derive(Debug)]
 struct Shown {
@@ -82,7 +82,7 @@ impl PrListCache {
 
     /// What `host` has under `filter` and `state`, without a GitHub
     /// search: what the tab badges count. `Loading` while hidden.
-    pub(crate) fn host(&self, filter: PrFilter, state: PrSearchState, host: &str) -> &HostList {
+    pub(crate) fn host(&self, filter: PrAudience, state: PrSearchState, host: &str) -> &HostList {
         self.host_searched(filter, state, &NO_REFINE, host)
     }
 
@@ -90,7 +90,7 @@ impl PrListCache {
     /// `refine`; `Loading` while hidden.
     pub(crate) fn host_searched(
         &self,
-        filter: PrFilter,
+        filter: PrAudience,
         state: PrSearchState,
         refine: &Refine,
         host: &str,
@@ -120,7 +120,7 @@ impl PrListCache {
     /// stays through a failed search, as the answer's rows do.
     pub(crate) fn answered_at(
         &self,
-        filter: PrFilter,
+        filter: PrAudience,
         state: PrSearchState,
         refine: &Refine,
         host: &str,
@@ -267,7 +267,7 @@ impl Workspace {
     /// alone: typing does not search every tab.
     pub(crate) fn pr_list_demands(
         &self,
-    ) -> Vec<(PrFilter, PrSearchState, Refine, BTreeSet<RepoId>)> {
+    ) -> Vec<(PrAudience, PrSearchState, Refine, BTreeSet<RepoId>)> {
         if !self.pr_list().is_shown() {
             return Vec::new();
         }
@@ -282,7 +282,7 @@ impl Workspace {
     /// Let go of what this window holds for searches it no longer shows:
     /// another state, another tab's GitHub search, an earlier typed one.
     pub(crate) fn prune_pr_list(&mut self) {
-        let wanted: Vec<(PrFilter, PrSearchState, Refine)> = self
+        let wanted: Vec<(PrAudience, PrSearchState, Refine)> = self
             .pr_list_demands()
             .into_iter()
             .map(|(filter, state, refine, _)| (filter, state, refine))

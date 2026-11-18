@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use daruda_github::fake::{FakeGh, GhFailure, GhOp};
-use daruda_github::{CheckRollup, PrFilter, PrListItem, PrState, PrSummary, RepoId};
+use daruda_github::{CheckRollup, PrAudience, PrListItem, PrState, PrSummary, RepoId};
 use daruda_store::project::LaneRef;
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 
@@ -57,8 +57,8 @@ pub(in crate::workspace) fn linked_window(
 ) -> (GitFixture, FakeGh, LaneRef) {
     let gh = crate::test_support::fake_gh(cx);
     gh.set_prs(&repo(), vec![summary(7, "feat")]);
-    gh.set_pr_list(PrFilter::Mine, vec![item(7), item(8)]);
-    gh.set_pr_list(PrFilter::ReviewRequested, vec![item(8)]);
+    gh.set_pr_list(PrAudience::Mine, vec![item(7), item(8)]);
+    gh.set_pr_list(PrAudience::ReviewRequested, vec![item(8)]);
     let f = GitFixture::open(cx, &daruda_config::Config::default(), |repo: FakeRepo| {
         repo.push_target(PushTarget {
             remote: "origin".into(),
@@ -83,7 +83,7 @@ pub(in crate::workspace) fn show_page(f: &GitFixture, cx: &mut TestAppContext) {
     cx.run_until_parked();
 }
 
-fn searches(gh: &FakeGh) -> Vec<PrFilter> {
+fn searches(gh: &FakeGh) -> Vec<PrAudience> {
     gh.calls()
         .into_iter()
         .filter_map(|call| crate::test_support::list_search(&call).map(|(filter, _)| filter))
@@ -159,7 +159,7 @@ fn pull_request_rows_scroll_vertically_and_fit_narrow_and_wide_sizes(cx: &mut Te
     use gpui::{ScrollDelta, ScrollEvent, ScrollSource, TouchPhase, point, px, size};
 
     let (f, gh, _) = linked_window(cx);
-    gh.set_pr_list(PrFilter::Mine, (1..=60).map(item).collect());
+    gh.set_pr_list(PrAudience::Mine, (1..=60).map(item).collect());
     show_page(&f, cx);
     let scroll = f.ws.read_with(cx, |ws, _| {
         ws.workspace_page.state().unwrap().scroll.clone()
@@ -308,7 +308,7 @@ fn a_failed_search_keeps_its_rows_and_try_again_searches_now(cx: &mut TestAppCon
     assert_eq!(trouble(&f, cx), Some(Trouble::SearchFailed));
 
     gh.clear_failure(GhOp::SearchPrsPage);
-    gh.set_pr_list(PrFilter::Mine, vec![item(7)]);
+    gh.set_pr_list(PrAudience::Mine, vec![item(7)]);
     let searched = search_totals(&gh);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, _| window.refresh());
@@ -378,7 +378,7 @@ fn switching_the_filter_reuses_answers_and_counts_share_the_cadence(cx: &mut Tes
     let (f, gh, _) = linked_window(cx);
     show_page(&f, cx);
     f.ws.update(cx, |ws, cx| {
-        ws.set_pr_page_filter(PrFilter::ReviewRequested, cx)
+        ws.set_pr_page_filter(PrAudience::ReviewRequested, cx)
     });
     cx.run_until_parked();
     assert_eq!(
@@ -399,7 +399,7 @@ fn switching_the_filter_reuses_answers_and_counts_share_the_cadence(cx: &mut Tes
     f.ws.update(cx, |ws, cx| ws.close_page(cx));
     show_page(&f, cx);
     let filter = f.ws.read_with(cx, |ws, _| ws.pr_page_filter());
-    assert_eq!(filter, PrFilter::ReviewRequested);
+    assert_eq!(filter, PrAudience::ReviewRequested);
 }
 
 #[gpui::test]
@@ -420,8 +420,8 @@ fn refreshing_searches_every_tab_so_counts_do_not_lag(cx: &mut TestAppContext) {
     };
     assert_eq!(counts(&f, cx), ["2", "1", "0"]);
     // #8 closed on GitHub: every tab that held it must drop it.
-    gh.set_pr_list(PrFilter::Mine, vec![item(7)]);
-    gh.set_pr_list(PrFilter::ReviewRequested, Vec::new());
+    gh.set_pr_list(PrAudience::Mine, vec![item(7)]);
+    gh.set_pr_list(PrAudience::ReviewRequested, Vec::new());
     f.ws.update(cx, |ws, cx| ws.refresh_pr_list(cx));
     cx.run_until_parked();
     assert_eq!(search_totals(&gh), [2, 2, 2]);
@@ -584,13 +584,13 @@ fn the_dock_counts_the_open_pull_requests_lanes_are_on(cx: &mut TestAppContext) 
 #[gpui::test]
 fn clearing_search_keeps_the_selected_pull_request_tab_and_its_counts(cx: &mut TestAppContext) {
     let (f, gh, _) = linked_window(cx);
-    gh.set_pr_list(PrFilter::AllOpen, vec![item(7), item(8), item(9)]);
+    gh.set_pr_list(PrAudience::All, vec![item(7), item(8), item(9)]);
     show_page(&f, cx);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     for (filter, total) in [
-        (PrFilter::Mine, 2),
-        (PrFilter::ReviewRequested, 1),
-        (PrFilter::AllOpen, 3),
+        (PrAudience::Mine, 2),
+        (PrAudience::ReviewRequested, 1),
+        (PrAudience::All, 3),
     ] {
         f.ws.update_in(&mut vcx, |ws, window, cx| {
             ws.set_pr_page_filter(filter, cx);

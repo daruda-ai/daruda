@@ -9,7 +9,7 @@ use daruda_github::availability::{GhAuth, GhAvailability};
 use daruda_github::fake::FakeGh;
 use daruda_github::{
     ActionsJob, BlockReason, CheckEntry, CheckKind, CheckRollup, CheckRun, CheckStatus,
-    FailedCheck, GITHUB_HOST, MergeMethod, Mergeability, PrDetail, PrFilter, PrListItem, PrState,
+    FailedCheck, GITHUB_HOST, MergeMethod, Mergeability, PrAudience, PrDetail, PrListItem, PrState,
     PrSummary, RepoId, ReviewDecision, ReviewerState,
 };
 use daruda_store::project::LaneRef;
@@ -344,11 +344,11 @@ impl Workspace {
             list_item(unreviewed, "hanji", 2),
         ];
         gh.set_pr_list(
-            PrFilter::ReviewRequested,
+            PrAudience::ReviewRequested,
             vec![rows[1].clone(), rows[3].clone()],
         );
-        gh.set_pr_list(PrFilter::AllOpen, rows.clone());
-        gh.set_pr_list(PrFilter::Mine, rows);
+        gh.set_pr_list(PrAudience::All, rows.clone());
+        gh.set_pr_list(PrAudience::Mine, rows);
         GhHost::set_global(Arc::new(gh.clone()), cx);
         PrPoller::seed_for_shot(GITHUB_HOST, GhAvailability::Ready, cx);
         PrPoller::seed_account_for_shot(
@@ -460,14 +460,12 @@ impl Workspace {
             checks_truncated: !merge_ready,
             open_threads: 3,
             open_threads_more: false,
-            can_update: false,
-            can_close: true,
-            can_reopen: true,
+            viewer_can: daruda_github::ViewerCan::default()
+            .with(daruda_github::Permission::Close, true)
+            .with(daruda_github::Permission::Reopen, true),
             auto_merge: None,
             queue: None,
-            can_enable_auto_merge: false,
-            can_disable_auto_merge: false,
-            node_id: None,
+            node_id: format!("PR_{}", row.pr.number),
             changed_files: None,
         };
         gh.set_pr_detail(&row.repo, row.pr.number, detail.clone());
@@ -544,6 +542,7 @@ impl Workspace {
             },
         );
         gh.set_review_threads(
+            &row.repo,
             row.pr.number,
             daruda_github::ReviewThreads {
                 threads: vec![

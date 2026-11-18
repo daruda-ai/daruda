@@ -79,6 +79,9 @@ impl PrTab {
 }
 
 /// A read a tab starts when it is shown.
+/// The tabs read when first shown rather than with the pull request.
+const LAZY_TABS: [PrTab; 3] = [PrTab::Threads, PrTab::Files, PrTab::Description];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TabRead {
     Threads(ReadTicket),
@@ -324,34 +327,15 @@ impl PrDetailState {
         if matches!(self.action, ActionState::Failed(_) | ActionState::Done(_)) {
             self.action = ActionState::Idle;
         }
-        let threads = self.threads.take().is_some() && self.tab == PrTab::Threads;
-        // Shown, the conversation is read again in place; hidden, dropped
-        // and read when shown again.
-        let conversation = if self.tab == PrTab::Description {
-            self.conversation.is_some()
-        } else {
-            self.conversation = None;
-            false
-        };
-        // Shown, the files are read again in place: the listing and the
-        // chosen file stay up until the new answer. Hidden, they are dropped
-        // and read when shown again.
-        let files = if self.tab == PrTab::Files {
-            self.files.is_some()
-        } else {
-            self.files = None;
-            false
-        };
+        // Shown, a tab is read again in place: what it shows stays up until
+        // the new answer. Hidden, it is dropped and read when shown again.
+        for tab in LAZY_TABS {
+            if tab != self.tab {
+                self.drop_tab(tab);
+            }
+        }
         let read = self.begin_read();
-        let tab = if threads {
-            Some(TabRead::Threads(self.begin_threads_read()))
-        } else if conversation {
-            Some(TabRead::Conversation(self.reread_conversation()))
-        } else if files {
-            Some(TabRead::Files(self.reread_files()))
-        } else {
-            None
-        };
+        let tab = self.reread_tab(self.tab);
         (read, tab)
     }
 
@@ -383,26 +367,58 @@ impl PrDetailState {
         ticket
     }
 
-    /// Show `tab`. `Some` with its read when the threads or the files are
-    /// shown for the first time, or again after a failed read.
+    /// Show `tab`. `Some` with its read when a tab read on demand is shown
+    /// for the first time, or again after a failed read.
     fn select_tab(&mut self, tab: PrTab) -> Option<TabRead> {
         self.tab = tab;
+        if !self.tab_wants_read(tab) {
+            return None;
+        }
         match tab {
-            PrTab::Threads if matches!(self.threads(), None | Some(Load::Failed(_))) => {
-                Some(TabRead::Threads(self.begin_threads_read()))
-            }
-            PrTab::Files
-                if self
-                    .files
-                    .as_ref()
-                    .is_none_or(files::FilesState::wants_read) =>
-            {
-                Some(TabRead::Files(self.begin_files_read()))
-            }
-            PrTab::Description if self.conversation_wanted() => {
-                Some(TabRead::Conversation(self.begin_conversation_read()))
-            }
-            PrTab::Checks | PrTab::Files | PrTab::Threads | PrTab::Description => None,
+            PrTab::Threads => Some(TabRead::Threads(self.begin_threads_read())),
+            PrTab::Files => Some(TabRead::Files(self.begin_files_read())),
+            PrTab::Description => Some(TabRead::Conversation(self.begin_conversation_read())),
+            PrTab::Checks => None,
+        }
+    }
+
+    /// Whether `tab` has nothing to show yet, or only a failed read.
+    fn tab_wants_read(&self, tab: PrTab) -> bool {
+        match tab {
+            PrTab::Threads => matches!(self.threads(), None | Some(Load::Failed(_))),
+            PrTab::Files => self
+                .files
+                .as_ref()
+                .is_none_or(files::FilesState::wants_read),
+            PrTab::Description => self.conversation_wanted(),
+            PrTab::Checks => false,
+        }
+    }
+
+    /// Read `tab` again in place, if it holds anything; what it shows stays
+    /// until the answer.
+    fn reread_tab(&mut self, tab: PrTab) -> Option<TabRead> {
+        match tab {
+            PrTab::Threads => self.reread_threads().map(|(_, read)| read),
+            PrTab::Files => self
+                .files
+                .is_some()
+                .then(|| TabRead::Files(self.reread_files())),
+            PrTab::Description => self
+                .conversation
+                .is_some()
+                .then(|| TabRead::Conversation(self.reread_conversation())),
+            PrTab::Checks => None,
+        }
+    }
+
+    /// Let go of what `tab` read; shown again, it is read again.
+    fn drop_tab(&mut self, tab: PrTab) {
+        match tab {
+            PrTab::Threads => self.threads = None,
+            PrTab::Files => self.files = None,
+            PrTab::Description => self.conversation = None,
+            PrTab::Checks => {}
         }
     }
 

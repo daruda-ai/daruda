@@ -228,7 +228,7 @@ fn expanded(
                 .as_ref()
                 .map(|reply| reply_box(id, index, row, reply, keeping, cx)),
         )
-        .children(row.op.as_ref().map(|op| op_line(op, row.checking, cx)))
+        .children(row.op.as_ref().map(|op| op_line(op, cx)))
         .child(actions)
         .into_any_element()
 }
@@ -294,6 +294,7 @@ fn reply_box(
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let running = matches!(row.op, Some(ThreadOp::Running(_)));
+    let checking = matches!(row.op, Some(ThreadOp::Checking { .. }));
     // The box notifies the detail as it is typed in, so this follows it.
     let empty = reply.read(cx).value().trim().is_empty();
     let (post, cancel) = (row.id.clone(), row.id.clone());
@@ -311,7 +312,7 @@ fn reply_box(
                 .child(
                     button_compact(("pr-thread-post", index), s::thread_post_reply())
                         .debug_selector(move || format!("pr-thread-post-{index}"))
-                        .disabled(running || row.checking || empty)
+                        .disabled(running || checking || empty)
                         .on_click(cx.listener(move |ws, _, _, cx| ws.post_pr_reply(id, &post, cx))),
                 )
                 .child(
@@ -326,7 +327,7 @@ fn reply_box(
 }
 
 /// What the thread's action is doing, or why it failed.
-fn op_line(op: &ThreadOp, checking: bool, cx: &Context<Workspace>) -> AnyElement {
+fn op_line(op: &ThreadOp, cx: &Context<Workspace>) -> AnyElement {
     let t = theme::current(cx);
     let (text, color) = match op {
         ThreadOp::Running(action) => (
@@ -337,7 +338,7 @@ fn op_line(op: &ThreadOp, checking: bool, cx: &Context<Workspace>) -> AnyElement
             },
             t.text_muted,
         ),
-        ThreadOp::Failed(_, _) if checking => (s::thread_reply_checking(), t.text_muted),
+        ThreadOp::Checking { .. } => (s::thread_reply_checking(), t.text_muted),
         ThreadOp::Failed(action, reason) => (
             s::thread_action_failed(action.failure_title(), reason),
             t.banner_error_text,

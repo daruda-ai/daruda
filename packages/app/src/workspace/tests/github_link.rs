@@ -515,6 +515,7 @@ fn send_reviews_with_a_chat(f: &GitFixture, cx: &mut TestAppContext) -> String {
 fn open_review_threads_land_in_the_agent_input(cx: &mut TestAppContext) {
     let (f, gh) = linked_failing_lane(cx);
     gh.set_review_threads(
+        &repo(),
         7,
         daruda_github::ReviewThreads {
             threads: vec![daruda_github::ReviewThread {
@@ -662,6 +663,7 @@ fn a_poll_that_finds_no_login_is_not_rechecked_at_once(cx: &mut TestAppContext) 
 
 #[gpui::test]
 fn moving_the_branch_ends_the_wait_after_create(cx: &mut TestAppContext) {
+    use crate::workspace::github_ops::strip::PrStrip;
     let gh = crate::test_support::fake_gh(cx);
     let (f, id) = lane_with(cx, true);
     tick(cx);
@@ -676,12 +678,10 @@ fn moving_the_branch_ends_the_wait_after_create(cx: &mut TestAppContext) {
         },
     );
     assert_eq!(create(&f, id, cx), None);
-    let work = |cx: &mut TestAppContext| {
-        f.ws.read_with(cx, |ws, _| ws.lane_scoped.get(&id).map(|s| s.pr.work()))
-    };
-    assert_eq!(
-        work(cx),
-        Some(crate::workspace::github_ops::lane_pr::PrWork::AwaitingNewPr)
+    let strip = |cx: &mut TestAppContext| f.ws.read_with(cx, |ws, cx| ws.pr_strip(cx));
+    assert!(
+        matches!(strip(cx), PrStrip::Created(_)),
+        "opened, not created again"
     );
 
     f.fake.add_repo(
@@ -691,10 +691,15 @@ fn moving_the_branch_ends_the_wait_after_create(cx: &mut TestAppContext) {
     );
     f.ws.update(cx, |ws, cx| ws.refresh_git_status(id, cx));
     cx.run_until_parked();
+    // GitHub reachable again: the new branch's answer comes in.
+    gh.clear_failure(GhOp::PrsForBranches);
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(10 * 60));
+    tick(cx);
     assert_eq!(
-        work(cx),
-        Some(crate::workspace::github_ops::lane_pr::PrWork::Idle),
-        "Create works on the new branch"
+        strip(cx),
+        PrStrip::NoPr,
+        "Create works on the new branch, not held by the other's pull request"
     );
 }
 
@@ -901,7 +906,7 @@ fn list_item(number: u64) -> daruda_github::PrListItem {
     }
 }
 
-fn show_list(f: &GitFixture, filter: daruda_github::PrFilter, cx: &mut TestAppContext) {
+fn show_list(f: &GitFixture, filter: daruda_github::PrAudience, cx: &mut TestAppContext) {
     f.ws.update(cx, |ws, cx| {
         ws.set_pr_page_filter(filter, cx);
         ws.show_pr_list(cx);
@@ -932,13 +937,13 @@ fn listed(f: &GitFixture, cx: &mut TestAppContext) -> Vec<u64> {
 
 #[gpui::test]
 fn a_shown_page_shares_each_filter_search_across_windows(cx: &mut TestAppContext) {
-    use daruda_github::PrFilter;
+    use daruda_github::PrAudience;
     let gh = gh_with_open_pr(cx);
-    gh.set_pr_list(PrFilter::Mine, vec![list_item(7)]);
+    gh.set_pr_list(PrAudience::Mine, vec![list_item(7)]);
     let (first, _) = lane_pushing_feat(cx);
     let (second, _) = lane_pushing_feat(cx);
-    show_list(&first, PrFilter::Mine, cx);
-    show_list(&second, PrFilter::Mine, cx);
+    show_list(&first, PrAudience::Mine, cx);
+    show_list(&second, PrAudience::Mine, cx);
     tick(cx);
     assert_eq!(listed(&first, cx), vec![7]);
     assert_eq!(listed(&second, cx), vec![7]);
@@ -976,13 +981,13 @@ fn a_shown_page_shares_each_filter_search_across_windows(cx: &mut TestAppContext
 
 #[gpui::test]
 fn a_hidden_page_is_not_searched(cx: &mut TestAppContext) {
-    use daruda_github::PrFilter;
+    use daruda_github::PrAudience;
     let gh = gh_with_open_pr(cx);
     let (f, _) = lane_pushing_feat(cx);
     tick(cx);
     assert_eq!(gh.count(GhOp::SearchPrsPage), 0, "never shown");
 
-    show_list(&f, PrFilter::AllOpen, cx);
+    show_list(&f, PrAudience::All, cx);
     assert_eq!(
         gh.count(GhOp::SearchPrsPage),
         3,
@@ -998,14 +1003,14 @@ fn a_hidden_page_is_not_searched(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn another_filter_is_searched_and_only_its_page_shows_it(cx: &mut TestAppContext) {
-    use daruda_github::PrFilter;
+    use daruda_github::PrAudience;
     let gh = gh_with_open_pr(cx);
-    gh.set_pr_list(PrFilter::Mine, vec![list_item(7)]);
-    gh.set_pr_list(PrFilter::AllOpen, vec![list_item(7), list_item(8)]);
+    gh.set_pr_list(PrAudience::Mine, vec![list_item(7)]);
+    gh.set_pr_list(PrAudience::All, vec![list_item(7), list_item(8)]);
     let (mine, _) = lane_pushing_feat(cx);
     let (all, _) = lane_pushing_feat(cx);
-    show_list(&mine, PrFilter::Mine, cx);
-    show_list(&all, PrFilter::AllOpen, cx);
+    show_list(&mine, PrAudience::Mine, cx);
+    show_list(&all, PrAudience::All, cx);
     tick(cx);
     assert_eq!(listed(&mine, cx), vec![7]);
     assert_eq!(listed(&all, cx).len(), 2);
@@ -1014,11 +1019,11 @@ fn another_filter_is_searched_and_only_its_page_shows_it(cx: &mut TestAppContext
 
 #[gpui::test]
 fn a_logged_out_search_blocks_the_host_for_the_lane_polls_too(cx: &mut TestAppContext) {
-    use daruda_github::PrFilter;
+    use daruda_github::PrAudience;
     let gh = gh_with_open_pr(cx);
-    gh.set_pr_list(PrFilter::Mine, vec![list_item(7)]);
+    gh.set_pr_list(PrAudience::Mine, vec![list_item(7)]);
     let (f, id) = lane_pushing_feat(cx);
-    show_list(&f, PrFilter::Mine, cx);
+    show_list(&f, PrAudience::Mine, cx);
     tick(cx);
     assert_eq!(listed(&f, cx), vec![7]);
     let polls = gh.count(GhOp::PrsForBranches);
@@ -1056,11 +1061,11 @@ fn a_logged_out_search_blocks_the_host_for_the_lane_polls_too(cx: &mut TestAppCo
 #[gpui::test]
 fn a_transient_search_failure_keeps_the_list_on_show(cx: &mut TestAppContext) {
     use crate::workspace::github_ops::pr_list::HostList;
-    use daruda_github::PrFilter;
+    use daruda_github::PrAudience;
     let gh = gh_with_open_pr(cx);
-    gh.set_pr_list(PrFilter::Mine, vec![list_item(7)]);
+    gh.set_pr_list(PrAudience::Mine, vec![list_item(7)]);
     let (f, _) = lane_pushing_feat(cx);
-    show_list(&f, PrFilter::Mine, cx);
+    show_list(&f, PrAudience::Mine, cx);
     tick(cx);
     gh.fail(
         GhOp::SearchPrsPage,
@@ -1085,11 +1090,11 @@ fn a_transient_search_failure_keeps_the_list_on_show(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn turning_the_feature_off_clears_the_list(cx: &mut TestAppContext) {
-    use daruda_github::PrFilter;
+    use daruda_github::PrAudience;
     let gh = gh_with_open_pr(cx);
-    gh.set_pr_list(PrFilter::Mine, vec![list_item(7)]);
+    gh.set_pr_list(PrAudience::Mine, vec![list_item(7)]);
     let (f, _) = lane_pushing_feat(cx);
-    show_list(&f, PrFilter::Mine, cx);
+    show_list(&f, PrAudience::Mine, cx);
     tick(cx);
     assert_eq!(listed(&f, cx), vec![7]);
     set_enabled(cx, false);

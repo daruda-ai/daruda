@@ -60,17 +60,11 @@ pub(crate) fn fake_gh(cx: &mut TestAppContext) -> daruda_github::fake::FakeGh {
 /// audience and the repositories of the request. One per page read.
 pub(crate) fn list_search(
     call: &daruda_github::fake::GhCall,
-) -> Option<(daruda_github::PrFilter, Vec<daruda_github::RepoId>)> {
-    use daruda_github::{PrAudience, PrFilter};
+) -> Option<(daruda_github::PrAudience, Vec<daruda_github::RepoId>)> {
     let daruda_github::fake::GhCall::SearchPrsPage { request } = call else {
         return None;
     };
-    let filter = match request.criteria().audience {
-        PrAudience::Mine => PrFilter::Mine,
-        PrAudience::ReviewRequested => PrFilter::ReviewRequested,
-        PrAudience::All => PrFilter::AllOpen,
-    };
-    Some((filter, request.repos().to_vec()))
+    Some((request.criteria().audience, request.repos().to_vec()))
 }
 
 /// The one `git worktree add` the code under test asked for.

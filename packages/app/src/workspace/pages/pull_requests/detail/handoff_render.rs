@@ -6,7 +6,7 @@ use gpui::{AnyElement, Context, div, prelude::*, px};
 use super::PrDetailId;
 use super::handoff::{Payload, Prepared};
 use super::render::note;
-use super::view::HandoffView;
+use super::view::{HandoffBlock, HandoffView};
 use crate::surface::strings::{common, pull_requests as s};
 use crate::ui::{Disableable as _, button_compact, button_primary, icons, theme};
 use crate::workspace::Workspace;
@@ -115,12 +115,16 @@ pub(super) fn handoff(id: PrDetailId, view: &HandoffView, cx: &Context<Workspace
                 .child(s::handoff_heading(what, &view.lane)),
         )
         .child(chats)
-        .children(view.moved.then(|| note(s::handoff_lane_moved(), cx)))
-        .children(view.chat_gone.then(|| note(s::handoff_chat_gone(), cx)))
-        .children(
-            view.selection_changed
-                .then(|| note(s::handoff_selection_changed(), cx)),
-        )
+        .children(view.blocked.map(|block| {
+            note(
+                match block {
+                    HandoffBlock::Moved => s::handoff_lane_moved(),
+                    HandoffBlock::SelectionChanged => s::handoff_selection_changed(),
+                    HandoffBlock::ChatGone => s::handoff_chat_gone(),
+                },
+                cx,
+            )
+        }))
         .child(preview)
         .child(
             div()
@@ -130,20 +134,14 @@ pub(super) fn handoff(id: PrDetailId, view: &HandoffView, cx: &Context<Workspace
                     // No chat there: one is opened to take it.
                     button_primary("pr-handoff-new-chat", s::handoff_new_chat())
                         .debug_selector(|| "pr-handoff-new-chat".into())
-                        .disabled(!ready || view.moved || view.selection_changed)
+                        .disabled(!ready || view.blocked.is_some())
                         .on_click(cx.listener(move |ws, _, window, cx| {
                             ws.insert_pr_handoff_in_new_chat(id, window, cx)
                         }))
                 } else {
                     button_primary("pr-handoff-insert", s::handoff_insert())
                         .debug_selector(|| "pr-handoff-insert".into())
-                        .disabled(
-                            !ready
-                                || view.chosen.is_none()
-                                || view.moved
-                                || view.chat_gone
-                                || view.selection_changed,
-                        )
+                        .disabled(!ready || view.chosen.is_none() || view.blocked.is_some())
                         .on_click(cx.listener(move |ws, _, window, cx| {
                             ws.insert_pr_handoff(id, window, cx)
                         }))

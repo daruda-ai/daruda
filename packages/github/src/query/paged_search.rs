@@ -104,22 +104,13 @@ pub(crate) fn paged_search_args(request: &PrSearchRequest) -> Result<Vec<String>
         ", $first: Int!, $after: String",
         "pageInfo { hasNextPage endCursor }",
     );
-    let mut args = vec![
-        "api".into(),
-        "graphql".into(),
-        "--hostname".into(),
-        request.host().into(),
-        "-f".into(),
-        format!("query={query}"),
-        "-f".into(),
-        format!("q={}", paged_search_string(request)?),
-        "-F".into(),
-        format!("first={}", request.page_size()),
-    ];
+    let mut call = crate::system::Graphql::new(request.host(), &query)
+        .string("q", &paged_search_string(request)?)
+        .int("first", u64::from(request.page_size()));
     if let Some(cursor) = request.after() {
-        args.extend(["-f".into(), format!("after={cursor}")]);
+        call = call.string("after", cursor);
     }
-    Ok(args)
+    Ok(call.args())
 }
 
 pub(crate) fn parse_search_page(

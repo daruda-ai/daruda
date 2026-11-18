@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use daruda_github::fake::{FakeGh, GhOp};
-use daruda_github::{CheckRollup, PrFilter, PrListItem, PrState, PrSummary, RepoId};
+use daruda_github::{CheckRollup, PrAudience, PrListItem, PrState, PrSummary, RepoId};
 use daruda_store::project::ProjectUuid;
 use gpui::TestAppContext;
 
@@ -54,7 +54,11 @@ fn item(name: &str, number: u64) -> PrListItem {
 
 fn cold_window(cx: &mut TestAppContext) -> (GitFixture, FakeGh) {
     let gh = crate::test_support::fake_gh(cx);
-    for filter in [PrFilter::Mine, PrFilter::ReviewRequested, PrFilter::AllOpen] {
+    for filter in [
+        PrAudience::Mine,
+        PrAudience::ReviewRequested,
+        PrAudience::All,
+    ] {
         gh.set_pr_list(filter, vec![item("r", 7), item("s", 8), item("t", 9)]);
     }
     let f = GitFixture::open(cx, &daruda_config::Config::default(), |git| {
@@ -95,7 +99,11 @@ fn pull_request_page_discovers_repositories_without_a_pane_visit(cx: &mut TestAp
         assert_eq!(ws.pr_page_list(cx).body, PageBody::Discovering);
     });
     cx.run_until_parked();
-    for filter in [PrFilter::Mine, PrFilter::ReviewRequested, PrFilter::AllOpen] {
+    for filter in [
+        PrAudience::Mine,
+        PrAudience::ReviewRequested,
+        PrAudience::All,
+    ] {
         f.ws.update(cx, |ws, cx| ws.set_pr_page_filter(filter, cx));
         cx.run_until_parked();
         assert_eq!(listed(&f, cx), BTreeMap::from([(repo("r"), vec![7])]));
@@ -191,7 +199,7 @@ fn pull_request_page_follows_late_worktree_discovery(cx: &mut TestAppContext) {
     let temp = tempfile::tempdir().unwrap();
     let fake = crate::test_support::fake_git(cx);
     let gh = crate::test_support::fake_gh(cx);
-    gh.set_pr_list(PrFilter::Mine, vec![item("r", 7)]);
+    gh.set_pr_list(PrAudience::Mine, vec![item("r", 7)]);
     let root = fake_repo_with(&fake, temp.path(), |git| pushing_to(git, "r"));
     let (window, workspace) = build_workspace_with(
         cx,

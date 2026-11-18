@@ -32,7 +32,9 @@ fn reviewers(f: &super::GitFixture, vcx: &mut VisualTestContext) -> Vec<(String,
 #[gpui::test]
 fn reviewers_are_asked_and_unasked_and_bad_names_never_reach_gh(cx: &mut TestAppContext) {
     let mut detail = mergeable(7, "feat");
-    detail.can_update = true;
+    detail.viewer_can = detail
+        .viewer_can
+        .with(daruda_github::Permission::Update, true);
     detail.reviewers = vec![
         ("bob".into(), ReviewerState::Requested),
         ("carol".into(), ReviewerState::Approved),
@@ -126,7 +128,9 @@ fn reviewers_cannot_be_changed_without_permission(cx: &mut TestAppContext) {
 fn the_author_is_not_asked_and_a_failed_request_keeps_the_text(cx: &mut TestAppContext) {
     use daruda_github::fake::{GhFailure, GhOp};
     let mut detail = mergeable(7, "feat");
-    detail.can_update = true;
+    detail.viewer_can = detail
+        .viewer_can
+        .with(daruda_github::Permission::Update, true);
     detail.author = Some("alice".into());
     let (f, gh, _) = opened(cx, detail);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);

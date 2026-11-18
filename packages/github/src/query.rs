@@ -1,7 +1,8 @@
 //! The GraphQL request that finds the pull requests of several branches at
 //! once and the parser for its answer, plus the pull request fragment and
-//! node the other requests share: `search` lists active work, `paged_search`
-//! adds history and cursors, `detail` reads one, `threads` reads its review threads.
+//! node the other requests share: `search` holds the search query's shape and
+//! node parser that `paged_search` pages with cursors, `detail` reads one,
+//! `threads` reads its review threads.
 //!
 //! One aliased field per branch (`b0`, `b1`, ...) and per pull request number
 //! (`n0`, ...) keeps the request count per repository, not per lane. Branch
@@ -35,7 +36,6 @@ pub(crate) use rate_limit::parse_graphql_reset;
 pub(crate) use review::{
     LATEST_REVIEW_QUERY, parse_latest_review, parse_submitted, submit_request,
 };
-pub(crate) use search::{newest_first, parse_search_prs, search_prs_query, search_string};
 pub use stack::{PrStack, StackEntry, StackRead};
 pub(crate) use stack::{lacks_stacks, parse_stack, stack_query};
 pub(crate) use thread_actions::{
@@ -186,6 +186,42 @@ fn api_messages(errors: Option<Vec<ApiError>>) -> String {
 struct Response {
     data: Option<Data>,
     errors: Option<Vec<ApiError>>,
+}
+
+/// A GraphQL answer: what it found, and any errors GitHub reported.
+#[derive(Deserialize)]
+struct Answer<T> {
+    data: Option<T>,
+    errors: Option<Vec<ApiError>>,
+}
+
+/// `repository { pullRequest { .. } }`: the shape a question about one
+/// pull request is answered in.
+#[derive(Deserialize)]
+struct RepoPr<T> {
+    repository: Option<PrOf<T>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrOf<T> {
+    pull_request: Option<T>,
+}
+
+/// The pull request `json` answers about, or GitHub's errors saying why
+/// there is none.
+fn pull_request<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, GhError> {
+    let answer: Answer<RepoPr<T>> = serde_json::from_str(json).map_err(parse_error)?;
+    answer
+        .data
+        .and_then(|data| data.repository)
+        .and_then(|repository| repository.pull_request)
+        .ok_or_else(|| {
+            GhError::Parse(format!(
+                "no pull request in the answer: {}",
+                api_messages(answer.errors)
+            ))
+        })
 }
 
 #[derive(Deserialize)]

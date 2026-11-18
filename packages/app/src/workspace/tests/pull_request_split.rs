@@ -3,7 +3,7 @@
 //! its keyboard, selection and place; where it does not, the detail is shown
 //! alone as before.
 
-use daruda_github::PrFilter;
+use daruda_github::PrAudience;
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px, size};
 
 use super::pull_request_page::{item, linked_window, rows};
@@ -32,7 +32,7 @@ fn list_focused(f: &super::GitFixture, vcx: &mut VisualTestContext) -> bool {
 #[gpui::test]
 fn a_wide_page_opens_details_beside_the_list(cx: &mut TestAppContext) {
     let (f, gh, _) = linked_window(cx);
-    gh.set_pr_list(PrFilter::Mine, (1..=40).map(item).collect());
+    gh.set_pr_list(PrAudience::Mine, (1..=40).map(item).collect());
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.cx.update(crate::bind_keys::register_static_bindings);
     vcx.simulate_resize(size(px(1400.), px(700.)));
@@ -185,7 +185,7 @@ fn dragging_the_divider_widens_the_list(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_opened_row_stays_in_view_when_the_list_reflows(cx: &mut TestAppContext) {
     let (f, gh, _) = linked_window(cx);
-    gh.set_pr_list(PrFilter::Mine, (1..=40).map(item).collect());
+    gh.set_pr_list(PrAudience::Mine, (1..=40).map(item).collect());
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.cx.update(crate::bind_keys::register_static_bindings);
     vcx.simulate_resize(size(px(1400.), px(700.)));

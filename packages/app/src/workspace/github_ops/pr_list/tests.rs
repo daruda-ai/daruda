@@ -55,7 +55,7 @@ fn idle() -> Task<()> {
 /// The cache as one tab reads it.
 struct Viewed {
     cache: PrListCache,
-    filter: PrFilter,
+    filter: PrAudience,
 }
 
 impl Viewed {
@@ -73,7 +73,7 @@ impl Viewed {
     }
 }
 
-fn shown(filter: PrFilter, host: Option<HostList>) -> Viewed {
+fn shown(filter: PrAudience, host: Option<HostList>) -> Viewed {
     let mut cache = PrListCache::default();
     cache.show(idle);
     if let (Some(shown), Some(list)) = (&mut cache.shown, host) {
@@ -107,38 +107,38 @@ fn updates_change_only_the_shown_filter() {
     type Row<'a> = (&'static str, Viewed, PrListUpdate<'a>, HostList, bool);
     let fresh = PrListUpdate::Answer {
         host: HOST,
-        filter: PrFilter::Mine,
+        filter: PrAudience::Mine,
         state: PrSearchState::Open,
         refine: &NO_REFINE,
         answer: &both,
     };
     let cached = PrListUpdate::Cached {
         host: HOST,
-        filter: PrFilter::Mine,
+        filter: PrAudience::Mine,
         state: PrSearchState::Open,
         refine: &NO_REFINE,
         answer: &both,
     };
     let failed = PrListUpdate::Failed {
         host: HOST,
-        filter: PrFilter::Mine,
+        filter: PrAudience::Mine,
         state: PrSearchState::Open,
         refine: &NO_REFINE,
     };
     let cases: Vec<Row> = vec![
         (
             "an answer is kept whole, with what it asked about",
-            shown(PrFilter::Mine, None),
+            shown(PrAudience::Mine, None),
             fresh,
             HostList::Ready(both.clone()),
             true,
         ),
         (
             "the same answer at a new time moves only the time",
-            shown(PrFilter::Mine, ready(&old)),
+            shown(PrAudience::Mine, ready(&old)),
             PrListUpdate::Answer {
                 host: HOST,
-                filter: PrFilter::Mine,
+                filter: PrAudience::Mine,
                 state: PrSearchState::Open,
                 refine: &NO_REFINE,
                 answer: &again,
@@ -148,14 +148,14 @@ fn updates_change_only_the_shown_filter() {
         ),
         (
             "the answer already held changes nothing",
-            shown(PrFilter::Mine, ready(&both)),
+            shown(PrAudience::Mine, ready(&both)),
             fresh,
             HostList::Ready(both.clone()),
             false,
         ),
         (
             "another filter fills counts without changing this tab",
-            shown(PrFilter::AllOpen, None),
+            shown(PrAudience::All, None),
             fresh,
             HostList::Loading,
             true,
@@ -164,7 +164,7 @@ fn updates_change_only_the_shown_filter() {
             "hidden ignores answers",
             Viewed {
                 cache: PrListCache::default(),
-                filter: PrFilter::Mine,
+                filter: PrAudience::Mine,
             },
             fresh,
             HostList::Loading,
@@ -172,38 +172,38 @@ fn updates_change_only_the_shown_filter() {
         ),
         (
             "a cached answer fills a loading host",
-            shown(PrFilter::Mine, None),
+            shown(PrAudience::Mine, None),
             cached,
             HostList::Ready(both.clone()),
             true,
         ),
         (
             "a cached answer already held repaints nothing",
-            shown(PrFilter::Mine, ready(&both)),
+            shown(PrAudience::Mine, ready(&both)),
             cached,
             HostList::Ready(both.clone()),
             false,
         ),
         (
             "a cached answer that covers more replaces a narrower one",
-            shown(PrFilter::Mine, ready(&narrow)),
+            shown(PrAudience::Mine, ready(&narrow)),
             cached,
             HostList::Ready(both.clone()),
             true,
         ),
         (
             "a newer cached answer replaces an older one",
-            shown(PrFilter::Mine, ready(&old)),
+            shown(PrAudience::Mine, ready(&old)),
             cached,
             HostList::Ready(both.clone()),
             true,
         ),
         (
             "an older cached answer that covers no more is not taken",
-            shown(PrFilter::Mine, ready(&both)),
+            shown(PrAudience::Mine, ready(&both)),
             PrListUpdate::Cached {
                 host: HOST,
-                filter: PrFilter::Mine,
+                filter: PrAudience::Mine,
                 state: PrSearchState::Open,
                 refine: &NO_REFINE,
                 answer: &old,
@@ -213,56 +213,56 @@ fn updates_change_only_the_shown_filter() {
         ),
         (
             "a cached answer does not hide a failure, but gives it rows",
-            shown(PrFilter::Mine, Some(HostList::Failed { last: None })),
+            shown(PrAudience::Mine, Some(HostList::Failed { last: None })),
             cached,
             failed_over(&both),
             true,
         ),
         (
             "a failure over the cached answer stays as it is",
-            shown(PrFilter::Mine, Some(failed_over(&both))),
+            shown(PrAudience::Mine, Some(failed_over(&both))),
             cached,
             failed_over(&both),
             false,
         ),
         (
             "another filter fills its count from cache",
-            shown(PrFilter::AllOpen, None),
+            shown(PrAudience::All, None),
             cached,
             HostList::Loading,
             true,
         ),
         (
             "a failure keeps the last answer on show",
-            shown(PrFilter::Mine, ready(&both)),
+            shown(PrAudience::Mine, ready(&both)),
             failed,
             failed_over(&both),
             true,
         ),
         (
             "a repeated failure changes nothing",
-            shown(PrFilter::Mine, Some(failed_over(&both))),
+            shown(PrAudience::Mine, Some(failed_over(&both))),
             failed,
             failed_over(&both),
             false,
         ),
         (
             "a failure before any answer has no rows",
-            shown(PrFilter::Mine, None),
+            shown(PrAudience::Mine, None),
             failed,
             HostList::Failed { last: None },
             true,
         ),
         (
             "a blocked host drops its list",
-            shown(PrFilter::Mine, ready(&both)),
+            shown(PrAudience::Mine, ready(&both)),
             PrListUpdate::HostBlocked { host: HOST },
             HostList::Loading,
             true,
         ),
         (
             "switching the feature off drops every list",
-            shown(PrFilter::Mine, ready(&both)),
+            shown(PrAudience::Mine, ready(&both)),
             PrListUpdate::Disabled,
             HostList::Loading,
             true,
@@ -296,12 +296,12 @@ fn each_hosts_answer_time_follows_its_answers() {
     let (early, late) = (arrived(first), arrived(later));
     let at = |answer| PrListUpdate::Answer {
         host: HOST,
-        filter: PrFilter::Mine,
+        filter: PrAudience::Mine,
         state: PrSearchState::Open,
         refine: &NO_REFINE,
         answer,
     };
-    let mut state = shown(PrFilter::Mine, None);
+    let mut state = shown(PrAudience::Mine, None);
     assert_eq!(state.answered_at(HOST), None, "nothing arrived yet");
     assert!(state.apply(at(&early)));
     assert_eq!(state.answered_at(HOST), Some(first));
@@ -311,7 +311,7 @@ fn each_hosts_answer_time_follows_its_answers() {
 
     let failed = PrListUpdate::Failed {
         host: HOST,
-        filter: PrFilter::Mine,
+        filter: PrAudience::Mine,
         state: PrSearchState::Open,
         refine: &NO_REFINE,
     };
@@ -320,7 +320,7 @@ fn each_hosts_answer_time_follows_its_answers() {
     state.apply(PrListUpdate::HostBlocked { host: HOST });
     assert_eq!(state.answered_at(HOST), None, "a blocked host drops it");
     state.apply(at(&late));
-    state.filter = PrFilter::AllOpen;
+    state.filter = PrAudience::All;
     assert_eq!(state.answered_at(HOST), None, "another filter has its own");
 }
 
@@ -331,25 +331,25 @@ fn show_and_hide_report_changes() {
     assert!(!state.show(idle), "already shown");
     state.apply(PrListUpdate::Answer {
         host: HOST,
-        filter: PrFilter::Mine,
+        filter: PrAudience::Mine,
         state: PrSearchState::Open,
         refine: &NO_REFINE,
         answer: &answer(vec![item("r", 1)], &["r"], Instant::now()),
     });
     assert_eq!(
-        state.host(PrFilter::AllOpen, PrSearchState::Open, HOST),
+        state.host(PrAudience::All, PrSearchState::Open, HOST),
         &HostList::Loading,
         "each tab holds its own answer"
     );
     assert!(matches!(
-        state.host(PrFilter::Mine, PrSearchState::Open, HOST),
+        state.host(PrAudience::Mine, PrSearchState::Open, HOST),
         HostList::Ready(_)
     ));
     assert!(state.hide());
     assert!(!state.hide(), "already hidden");
     assert!(!state.is_shown());
     assert_eq!(
-        state.host(PrFilter::Mine, PrSearchState::Open, HOST),
+        state.host(PrAudience::Mine, PrSearchState::Open, HOST),
         &HostList::Loading
     );
 }

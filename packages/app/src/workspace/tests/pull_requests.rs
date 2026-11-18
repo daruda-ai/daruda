@@ -2,7 +2,7 @@
 //! what order, and what is left when it fails.
 
 use daruda_github::fake::FakeGh;
-use daruda_github::{CheckRollup, PrFilter, PrListItem, PrState, PrSummary, RepoId};
+use daruda_github::{CheckRollup, PrAudience, PrListItem, PrState, PrSummary, RepoId};
 use daruda_store::project::{LaneKind, LaneRef};
 use gpui::{TestAppContext, VisualTestContext};
 
@@ -350,7 +350,7 @@ fn a_failed_fetch_is_reported_and_releases_the_row_and_the_lock(cx: &mut TestApp
     let main = f.ws.read_with(cx, |ws, _| ws.active_ref());
     let lanes_before = f.ws.read_with(cx, |ws, _| ws.projects.lanes().count());
     // The page lists the PR, so the in-flight row can be read.
-    gh.set_pr_list(PrFilter::Mine, vec![gh_list.clone()]);
+    gh.set_pr_list(PrAudience::Mine, vec![gh_list.clone()]);
     let (window, ws) = (f.window, f.ws.downgrade());
     cx.update(|cx| crate::window_registry::WindowRegistry::register(window.into(), ws, cx));
     f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
@@ -424,7 +424,7 @@ fn the_details_button_makes_the_worktree_its_row_would(cx: &mut TestAppContext) 
         },
     );
     let pr = item(8, "fix/scroll", false);
-    gh.set_pr_list(PrFilter::Mine, vec![pr.clone()]);
+    gh.set_pr_list(PrAudience::Mine, vec![pr.clone()]);
     let (window, ws) = (f.window, f.ws.downgrade());
     cx.update(|cx| crate::window_registry::WindowRegistry::register(window.into(), ws, cx));
     f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));

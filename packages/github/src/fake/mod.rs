@@ -5,17 +5,16 @@
 //! |---|---|
 //! | `auth` | `Ready`, no account |
 //! | `prs_for_branches` | default branch `main`, no PRs for any branch or number |
-//! | `search_prs` | none, not truncated |
 //! | `search_prs_page` | the `set_pr_list` list of its audience, narrowed to its repositories, state and title words (not facets), paged |
 //! | `create_pr` | adds an open PR numbered after the repo's last, answers its URL; a scripted failure creates nothing unless `set_pr_created_anyway` |
 //! | `failed_log` | exit 1, as for a run that has no failed log |
-//! | `review_threads` | none |
+//! | `review_threads` | the `set_review_threads` threads of that repository's PR, else none |
 //! | `pr_files_page` | the `set_pr_files` list, paged as GitHub pages it |
 //! | `merge_base` | `merge-base:{base}...{head}` |
 //! | `file_at` | `Absent` |
 //! | `pr_detail` | exit 1, as for a pull request that does not exist |
 //! | `pr_stack` | the `set_pr_stack` answer, else not stacked |
-//! | `merge_pr` | `HeadMoved` if a scripted detail's head differs, else merged |
+//! | `merge_pr` | `HeadMoved` if a scripted detail's head differs; queued, not merged, after `set_merge_queued`; else merged |
 //! | `set_ready` | the PR, if scripted, becomes open |
 //! | `close_pr` | the PR, if scripted, becomes closed |
 //! | `reopen_pr` | the PR, if scripted, becomes open |
@@ -39,18 +38,42 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::availability::{AuthStatus, GhAccount, GhAuth};
 use crate::backend::Gh;
-use crate::query::{RepoPrs, newest_first};
+use crate::query::RepoPrs;
 use crate::system::check_head_sha;
 use crate::{
-    ActionsJob, CheckRollup, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrListItem, PrSearch,
+    ActionsJob, CheckRollup, GhError, MergeMethod, NewPr, PrAudience, PrDetail, PrListItem,
     PrSearchPage, PrSearchRequest, PrState, PrSummary, RepoId, ReviewComment, ReviewThreads,
 };
 
 mod search;
 
-/// A request the code under test made.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GhCall {
+/// `GhCall`, `GhOp` and `GhCall::op` from one list, so a new question is
+/// named once and every operation keeps its call and its failure handle.
+macro_rules! gh_calls {
+    ($($name:ident { $($field:ident: $ty:ty),* $(,)? }),* $(,)?) => {
+        /// A request the code under test made.
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub enum GhCall {
+            $($name { $($field: $ty),* }),*
+        }
+
+        /// One [`Gh`] method, for aiming failures.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum GhOp {
+            $($name),*
+        }
+
+        impl GhCall {
+            fn op(&self) -> GhOp {
+                match self {
+                    $(Self::$name { .. } => GhOp::$name),*
+                }
+            }
+        }
+    };
+}
+
+gh_calls! {
     Auth {
         host: String,
     },
@@ -58,11 +81,6 @@ pub enum GhCall {
         repo: RepoId,
         branches: Vec<String>,
         numbers: Vec<u64>,
-    },
-    SearchPrs {
-        host: String,
-        repos: Vec<RepoId>,
-        filter: PrFilter,
     },
     SearchPrsPage {
         request: Box<PrSearchRequest>,
@@ -177,38 +195,6 @@ pub enum GhCall {
     },
 }
 
-/// One [`Gh`] method, for aiming failures.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum GhOp {
-    Auth,
-    PrsForBranches,
-    SearchPrs,
-    SearchPrsPage,
-    CreatePr,
-    FailedLog,
-    ReviewThreads,
-    PrFiles,
-    MergeBase,
-    FileAt,
-    PrDetail,
-    PrStack,
-    MergePr,
-    SetReady,
-    ClosePr,
-    ReopenPr,
-    EnableAutoMerge,
-    DisableAutoMerge,
-    ReplyToThread,
-    SetThreadResolved,
-    Conversation,
-    EditPrBody,
-    SubmitReview,
-    LatestReview,
-    EditPrReviewers,
-    RerunFailed,
-    RateLimitReset,
-}
-
 /// A cloneable description of a [`GhError`], turned into a fresh error on
 /// every call it fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,11 +238,11 @@ struct FakeState {
     accounts: HashMap<String, GhAccount>,
     default_branches: HashMap<RepoId, String>,
     prs: HashMap<RepoId, Vec<PrSummary>>,
-    lists: HashMap<PrFilter, Vec<PrListItem>>,
-    truncated: HashMap<PrFilter, bool>,
+    lists: HashMap<PrAudience, Vec<PrListItem>>,
+    truncated: HashMap<PrAudience, bool>,
     search_pages: HashMap<PrSearchRequest, String>,
     logs: HashMap<(u64, u64), String>,
-    threads: HashMap<u64, ReviewThreads>,
+    threads: HashMap<(RepoId, u64), ReviewThreads>,
     resolved_threads: std::collections::HashSet<String>,
     conversations: HashMap<(RepoId, u64), crate::Conversation>,
     latest_review: Option<crate::LatestReview>,
@@ -264,6 +250,8 @@ struct FakeState {
     /// out after GitHub took the review.
     review_lands_anyway: bool,
     pr_created_anyway: bool,
+    /// Pull requests whose base requires a merge queue: a merge enqueues.
+    merge_queued: std::collections::HashSet<(RepoId, u64)>,
     stacks: HashMap<(RepoId, u64), crate::StackRead>,
     details: HashMap<(RepoId, u64), PrDetail>,
     files: HashMap<(RepoId, u64), crate::PrFiles>,
@@ -301,15 +289,16 @@ impl FakeGh {
         self.lock().prs.insert(repo.clone(), prs);
     }
 
-    /// What `search_prs` with `filter` finds; each search answers those of
-    /// its repositories.
-    pub fn set_pr_list(&self, filter: PrFilter, items: Vec<PrListItem>) {
-        self.lock().lists.insert(filter, items);
+    /// What `search_prs_page` for `audience` finds; each search answers
+    /// those of its repositories.
+    pub fn set_pr_list(&self, audience: PrAudience, items: Vec<PrListItem>) {
+        self.lock().lists.insert(audience, items);
     }
 
-    /// Whether `search_prs` with `filter` reports more than it answered.
-    pub fn set_search_truncated(&self, filter: PrFilter, truncated: bool) {
-        self.lock().truncated.insert(filter, truncated);
+    /// Whether `search_prs_page` for `audience` reports more matches than
+    /// the list holds.
+    pub fn set_search_truncated(&self, audience: PrAudience, truncated: bool) {
+        self.lock().truncated.insert(audience, truncated);
     }
 
     /// What `failed_log` prints for `job`.
@@ -317,9 +306,15 @@ impl FakeGh {
         self.lock().logs.insert((job.run, job.job), log.to_owned());
     }
 
-    /// The unresolved threads of PR `number`, whatever its repository.
-    pub fn set_review_threads(&self, number: u64, threads: ReviewThreads) {
-        self.lock().threads.insert(number, threads);
+    /// Merging PR `number` of `repo` enqueues it, as on a base that
+    /// requires a merge queue.
+    pub fn set_merge_queued(&self, repo: &RepoId, number: u64) {
+        self.lock().merge_queued.insert((repo.clone(), number));
+    }
+
+    /// The unresolved threads of PR `number` of `repo`.
+    pub fn set_review_threads(&self, repo: &RepoId, number: u64, threads: ReviewThreads) {
+        self.lock().threads.insert((repo.clone(), number), threads);
     }
 
     /// What `pr_files` answers for PR `number` of `repo`.
@@ -411,40 +406,6 @@ impl FakeGh {
     }
 }
 
-impl GhCall {
-    fn op(&self) -> GhOp {
-        match self {
-            Self::Auth { .. } => GhOp::Auth,
-            Self::PrsForBranches { .. } => GhOp::PrsForBranches,
-            Self::SearchPrs { .. } => GhOp::SearchPrs,
-            Self::SearchPrsPage { .. } => GhOp::SearchPrsPage,
-            Self::CreatePr { .. } => GhOp::CreatePr,
-            Self::FailedLog { .. } => GhOp::FailedLog,
-            Self::ReviewThreads { .. } => GhOp::ReviewThreads,
-            Self::PrFiles { .. } => GhOp::PrFiles,
-            Self::MergeBase { .. } => GhOp::MergeBase,
-            Self::FileAt { .. } => GhOp::FileAt,
-            Self::PrDetail { .. } => GhOp::PrDetail,
-            Self::PrStack { .. } => GhOp::PrStack,
-            Self::MergePr { .. } => GhOp::MergePr,
-            Self::SetReady { .. } => GhOp::SetReady,
-            Self::ClosePr { .. } => GhOp::ClosePr,
-            Self::ReopenPr { .. } => GhOp::ReopenPr,
-            Self::EnableAutoMerge { .. } => GhOp::EnableAutoMerge,
-            Self::DisableAutoMerge { .. } => GhOp::DisableAutoMerge,
-            Self::ReplyToThread { .. } => GhOp::ReplyToThread,
-            Self::SetThreadResolved { .. } => GhOp::SetThreadResolved,
-            Self::Conversation { .. } => GhOp::Conversation,
-            Self::EditPrBody { .. } => GhOp::EditPrBody,
-            Self::SubmitReview { .. } => GhOp::SubmitReview,
-            Self::LatestReview { .. } => GhOp::LatestReview,
-            Self::EditPrReviewers { .. } => GhOp::EditPrReviewers,
-            Self::RerunFailed { .. } => GhOp::RerunFailed,
-            Self::RateLimitReset { .. } => GhOp::RateLimitReset,
-        }
-    }
-}
-
 impl FakeState {
     /// Log `call`, then answer the failure scripted for it, if any.
     fn record(&mut self, call: GhCall) -> Result<(), GhError> {
@@ -471,7 +432,7 @@ impl FakeState {
     fn detail_by_node(&mut self, repo: &RepoId, pr: &str) -> Option<&mut PrDetail> {
         self.details
             .iter_mut()
-            .find(|((held, _), detail)| held == repo && detail.node_id.as_deref() == Some(pr))
+            .find(|((held, _), detail)| held == repo && detail.node_id == pr)
             .map(|(_, detail)| detail)
     }
 
@@ -491,12 +452,9 @@ impl FakeState {
 impl Gh for FakeGh {
     fn auth(&self, host: &str) -> Result<AuthStatus, GhError> {
         let mut state = self.lock();
-        state.calls.push(GhCall::Auth {
+        state.record(GhCall::Auth {
             host: host.to_owned(),
-        });
-        if let Some(failure) = state.failure(GhOp::Auth) {
-            return Err(failure.to_error());
-        }
+        })?;
         let auth = state.auth.get(host).copied().unwrap_or(GhAuth::Ready);
         Ok(AuthStatus {
             auth,
@@ -513,14 +471,11 @@ impl Gh for FakeGh {
         numbers: &[u64],
     ) -> Result<RepoPrs, GhError> {
         let mut state = self.lock();
-        state.calls.push(GhCall::PrsForBranches {
+        state.record(GhCall::PrsForBranches {
             repo: repo.clone(),
             branches: branches.to_vec(),
             numbers: numbers.to_vec(),
-        });
-        if let Some(failure) = state.failure(GhOp::PrsForBranches) {
-            return Err(failure.to_error());
-        }
+        })?;
         let prs = state.prs.get(repo).cloned().unwrap_or_default();
         let by_branch = branches
             .iter()
@@ -554,51 +509,16 @@ impl Gh for FakeGh {
         })
     }
 
-    fn search_prs(
-        &self,
-        host: &str,
-        repos: &[RepoId],
-        filter: PrFilter,
-    ) -> Result<PrSearch, GhError> {
-        let mut state = self.lock();
-        state.calls.push(GhCall::SearchPrs {
-            host: host.to_owned(),
-            repos: repos.to_vec(),
-            filter,
-        });
-        if let Some(failure) = state.failure(GhOp::SearchPrs) {
-            return Err(failure.to_error());
-        }
-        let mut items: Vec<PrListItem> = state
-            .lists
-            .get(&filter)
-            .into_iter()
-            .flatten()
-            .filter(|item| {
-                item.repo.host().eq_ignore_ascii_case(host) && repos.contains(&item.repo)
-            })
-            .cloned()
-            .collect();
-        newest_first(&mut items);
-        Ok(PrSearch {
-            items,
-            truncated: state.truncated.get(&filter).copied().unwrap_or(false),
-        })
-    }
-
     fn search_prs_page(&self, request: &PrSearchRequest) -> Result<PrSearchPage, GhError> {
         self.search_page(request)
     }
 
     fn failed_log(&self, repo: &RepoId, job: ActionsJob) -> Result<String, GhError> {
         let mut state = self.lock();
-        state.calls.push(GhCall::FailedLog {
+        state.record(GhCall::FailedLog {
             repo: repo.clone(),
             job,
-        });
-        if let Some(failure) = state.failure(GhOp::FailedLog) {
-            return Err(failure.to_error());
-        }
+        })?;
         state
             .logs
             .get(&(job.run, job.job))
@@ -611,14 +531,15 @@ impl Gh for FakeGh {
 
     fn review_threads(&self, repo: &RepoId, number: u64) -> Result<ReviewThreads, GhError> {
         let mut state = self.lock();
-        state.calls.push(GhCall::ReviewThreads {
+        state.record(GhCall::ReviewThreads {
             repo: repo.clone(),
             number,
-        });
-        if let Some(failure) = state.failure(GhOp::ReviewThreads) {
-            return Err(failure.to_error());
-        }
-        let mut threads = state.threads.get(&number).cloned().unwrap_or_default();
+        })?;
+        let mut threads = state
+            .threads
+            .get(&(repo.clone(), number))
+            .cloned()
+            .unwrap_or_default();
         threads
             .threads
             .retain(|thread| !state.resolved_threads.contains(&thread.id));
@@ -688,13 +609,10 @@ impl Gh for FakeGh {
 
     fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError> {
         let mut state = self.lock();
-        state.calls.push(GhCall::PrDetail {
+        state.record(GhCall::PrDetail {
             repo: repo.clone(),
             number,
-        });
-        if let Some(failure) = state.failure(GhOp::PrDetail) {
-            return Err(failure.to_error());
-        }
+        })?;
         state
             .details
             .get(&(repo.clone(), number))
@@ -726,6 +644,17 @@ impl Gh for FakeGh {
             .map(|detail| detail.head_sha.as_str());
         if scripted_head.is_some_and(|head| head != head_sha) {
             return Err(GhError::HeadMoved);
+        }
+        // A base behind a merge queue takes the pull request into the queue,
+        // `gh` exiting 0 with nothing merged yet.
+        if state.merge_queued.contains(&(repo.clone(), number)) {
+            if let Some(detail) = state.details.get_mut(&(repo.clone(), number)) {
+                detail.queue = Some(crate::QueueEntry {
+                    position: Some(1),
+                    state: crate::QueueState::Queued,
+                });
+            }
+            return Ok(());
         }
         state.set_state(repo, number, PrState::Merged);
         Ok(())

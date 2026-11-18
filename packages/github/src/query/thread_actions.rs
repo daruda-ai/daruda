@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 
-use super::{ApiError, Author, api_messages, parse_error};
+use super::{Answer, Author, api_messages, parse_error};
 use crate::{GhError, ReviewComment};
 
 /// Reply `$body` to thread `$thread`.
@@ -21,7 +21,7 @@ pub(crate) const UNRESOLVE_MUTATION: &str = "mutation($thread: ID!) { \
 
 /// The comment a reply posted.
 pub(crate) fn parse_reply(json: &str) -> Result<ReviewComment, GhError> {
-    let response: Response<ReplyData> = serde_json::from_str(json).map_err(parse_error)?;
+    let response: Answer<ReplyData> = serde_json::from_str(json).map_err(parse_error)?;
     let Some(comment) = response
         .data
         .and_then(|data| data.add_pull_request_review_thread_reply)
@@ -43,7 +43,7 @@ pub(crate) fn parse_reply(json: &str) -> Result<ReviewComment, GhError> {
 /// That the thread now stands `resolved`, as resolving or unresolving it
 /// answered.
 pub(crate) fn parse_resolved(json: &str, resolved: bool) -> Result<(), GhError> {
-    let response: Response<ResolveData> = serde_json::from_str(json).map_err(parse_error)?;
+    let response: Answer<ResolveData> = serde_json::from_str(json).map_err(parse_error)?;
     let thread = response.data.and_then(|data| {
         data.resolve_review_thread
             .or(data.unresolve_review_thread)
@@ -60,12 +60,6 @@ pub(crate) fn parse_resolved(json: &str, resolved: bool) -> Result<(), GhError> 
             api_messages(response.errors)
         ))),
     }
-}
-
-#[derive(Deserialize)]
-struct Response<T> {
-    data: Option<T>,
-    errors: Option<Vec<ApiError>>,
 }
 
 #[derive(Deserialize)]

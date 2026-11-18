@@ -57,11 +57,6 @@ fn scripted_pages_keep_the_full_request_identity_and_failure_boundary() {
     );
     gh.fail(GhOp::SearchPrsPage, GhFailure::Parse("offline".into()));
     assert!(gh.search_prs_page(&request).is_err());
-    assert!(
-        gh.search_prs("github.com", request.repos(), crate::PrFilter::AllOpen)
-            .is_ok(),
-        "failure does not affect the legacy method"
-    );
     gh.clear_failure(GhOp::SearchPrsPage);
     assert_eq!(gh.search_prs_page(&request).unwrap().items, first.items);
 }
@@ -118,7 +113,7 @@ fn a_fifty_first_match_is_reachable_and_refresh_starts_at_page_one() {
 
 #[test]
 fn listed_pages_narrow_by_state_and_scope_and_page_through_the_list() {
-    use crate::{CheckRollup, PrFilter, PrListItem, PrState, PrSummary};
+    use crate::{CheckRollup, PrAudience, PrListItem, PrState, PrSummary};
 
     let repo = RepoId::new("github.com", "o", "r");
     let other = RepoId::new("github.com", "o", "other");
@@ -145,7 +140,7 @@ fn listed_pages_narrow_by_state_and_scope_and_page_through_the_list() {
     let mut items: Vec<PrListItem> = (1..=55).map(|n| item(&repo, n, PrState::Open)).collect();
     items.push(item(&repo, 90, PrState::Merged));
     items.push(item(&other, 91, PrState::Open));
-    gh.set_pr_list(PrFilter::AllOpen, items);
+    gh.set_pr_list(PrAudience::All, items);
     let request = |state| {
         PrSearchRequest::new(
             "github.com",
@@ -179,7 +174,41 @@ fn listed_pages_narrow_by_state_and_scope_and_page_through_the_list() {
         "state narrows, scope excludes the other repository"
     );
 
-    gh.set_search_truncated(PrFilter::AllOpen, true);
+    gh.set_search_truncated(PrAudience::All, true);
     let merged = gh.search_prs_page(&request(PrSearchState::Merged)).unwrap();
     assert_eq!(merged.continuation, PrSearchContinuation::Incomplete);
+}
+
+#[test]
+fn list_items_sort_most_recently_updated_first() {
+    use crate::{CheckRollup, PrListItem, PrState, PrSummary};
+
+    let item = |number: u64, updated_at: &str| PrListItem {
+        repo: RepoId::new("github.com", "o", "r"),
+        pr: PrSummary {
+            number,
+            url: String::new(),
+            title: String::new(),
+            state: PrState::Open,
+            head_branch: "h".into(),
+            cross_repo: false,
+            checks: CheckRollup::None,
+            failed: Vec::new(),
+            review: None,
+            updated_at: updated_at.to_owned(),
+        },
+        author: None,
+        head_owner: None,
+        base_branch: "main".into(),
+        comments: 0,
+    };
+    let mut items = vec![
+        item(1, "2026-11-02T00:00:00Z"),
+        item(2, "2026-11-01T00:00:00Z"),
+        item(3, "2026-11-03T00:00:00Z"),
+        item(4, "2026-11-02T00:00:00Z"),
+    ];
+    super::newest_first(&mut items);
+    let numbers: Vec<u64> = items.iter().map(|i| i.pr.number).collect();
+    assert_eq!(numbers, [3, 1, 4, 2], "ties keep their order");
 }

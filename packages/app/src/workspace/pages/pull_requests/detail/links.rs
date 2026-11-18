@@ -4,6 +4,7 @@
 //! worktree for it. What the user decides is kept in `LinkStore` per
 //! worktree and branch; the lane mirror follows through `sync_lane_links`.
 
+use crate::workspace::github_ops::link::AfterEdit;
 use daruda_github::{PrListItem, RepoId};
 use daruda_store::project::LaneRef;
 use gpui::Context;
@@ -23,7 +24,7 @@ pub(in crate::workspace) struct LinkInputs {
     /// Worktrees whose branch name finds it but were untied from it.
     pub unlinked: Vec<RowLane>,
     /// Whether what is tied and untied is kept across restarts.
-    pub keeping: crate::github::DraftKeeping,
+    pub keeping: crate::github::Keeping,
 }
 
 impl Workspace {
@@ -46,22 +47,19 @@ impl Workspace {
         // A fork review worktree belongs to the pull request it reviews:
         // tying it to another would change nothing.
         let pushes_to = |lane: &LaneFacts| {
-            self.lane_scoped
-                .get(&lane.lane)
-                .and_then(|state| state.github_push())
-                .is_some_and(|(repo, push)| repo == item.repo && push.review.is_none())
+            self.lane_scoped.get(&lane.lane).is_some_and(|state| {
+                state
+                    .github_push()
+                    .is_some_and(|(repo, _)| repo == item.repo)
+                    && !state.lane_link().is_some_and(|link| link.is_review())
+            })
         };
         let unlinked: Vec<RowLane> = lanes
             .iter()
             .filter(|lane| {
-                self.lane_scoped.get(&lane.lane).is_some_and(|state| {
-                    state.pr_links.as_ref().is_some_and(|links| {
-                        links
-                            .suppressed
-                            .iter()
-                            .any(|pr| crate::github::links::pr_key(pr) == key)
-                    })
-                })
+                self.lane_scoped
+                    .get(&lane.lane)
+                    .is_some_and(|state| state.suppresses(&key.0, key.1))
             })
             .map(row)
             .collect();
@@ -94,18 +92,15 @@ impl Workspace {
         let review = self
             .lane_scoped
             .get(&lane)
-            .and_then(|state| state.git.push_target.as_ref())
-            .is_some_and(|push| push.review.is_some());
+            .and_then(|state| state.lane_link())
+            .is_some_and(|link| link.is_review());
         if review {
             return;
         }
-        let Some((path, branch)) = self.lane_worktree_branch(lane) else {
-            return;
-        };
         let pr = pr_ref(repo, number);
-        let now = chrono::Utc::now().timestamp();
-        LinkStore::edit(cx, |links| links.choose(&path, &branch, pr, now));
-        self.relink_lane(lane, cx);
+        self.edit_lane_links(lane, AfterEdit::Relink, cx, |links, path, branch, now| {
+            links.choose(path, branch, pr, now)
+        });
     }
 
     /// Untie `lane` from its pull request: a chosen one is dropped, one its
@@ -117,43 +112,24 @@ impl Workspace {
         };
         // The branch name would find it: then it is kept away from it.
         let named = state.pr.link().is_some_and(|link| {
-            !link.pr.cross_repo
-                && state
-                    .git
-                    .push_target
-                    .as_ref()
-                    .is_some_and(|push| push.branch == link.pr.head_branch)
+            state
+                .git
+                .push_target
+                .as_ref()
+                .is_some_and(|push| daruda_github::link::heads(&push.branch, &link.pr))
         });
-        let (Some(source), Some((repo, number))) = (
-            state.link_source(),
-            state.chosen_pr().or_else(|| {
-                state
-                    .pr
-                    .link()
-                    .map(|link| (link.repo.clone(), link.pr.number))
-            }),
-        ) else {
+        let (Some(source), Some((repo, number))) = (state.link_source(), state.pr_key()) else {
             return;
         };
+        // A review worktree stays with its pull request (`LaneLink::is_review`).
         if source == Source::Review {
             return;
         }
-        let Some((path, branch)) = self.lane_worktree_branch(lane) else {
-            return;
-        };
         let pr = pr_ref(&repo, number);
-        let now = chrono::Utc::now().timestamp();
-        LinkStore::edit(cx, |links| {
-            links.unlink(
-                &path,
-                &branch,
-                pr,
-                source,
-                named || source == Source::Branch,
-                now,
-            )
+        let keep_away = named || source == Source::Branch;
+        self.edit_lane_links(lane, AfterEdit::Relink, cx, |links, path, branch, now| {
+            links.unlink(path, branch, pr, source, keep_away, now)
         });
-        self.relink_lane(lane, cx);
     }
 
     /// The Git panel's Tie again, for the active lane.
@@ -163,11 +139,9 @@ impl Workspace {
 
     /// Let `lane`'s branch name find its pull requests again.
     pub(in crate::workspace) fn restore_pr_lane(&mut self, lane: LaneRef, cx: &mut Context<Self>) {
-        let Some((path, branch)) = self.lane_worktree_branch(lane) else {
-            return;
-        };
-        LinkStore::edit(cx, |links| links.restore(&path, &branch));
-        self.relink_lane(lane, cx);
+        self.edit_lane_links(lane, AfterEdit::Relink, cx, |links, path, branch, _| {
+            links.restore(path, branch)
+        });
     }
 }
 

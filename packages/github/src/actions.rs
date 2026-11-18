@@ -57,14 +57,20 @@ impl PrDetail {
     /// Whether closing may be asked of GitHub: open or draft, and the
     /// viewer may close it.
     pub fn can_close_now(&self) -> bool {
-        self.summary.state.is_active() && self.can_close
+        self.summary.state.is_active() && self.viewer_can.close
+    }
+
+    /// Whether the viewer may edit the pull request: its description, and
+    /// who is asked to review it.
+    pub fn can_edit(&self) -> bool {
+        self.viewer_can.update
     }
 
     /// Whether reopening may be asked of GitHub: closed unmerged, and the
     /// viewer may reopen it. GitHub can still refuse (a deleted head
     /// branch); that comes back as the reopen's error.
     pub fn can_reopen_now(&self) -> bool {
-        self.summary.state == PrState::Closed && self.can_reopen
+        self.summary.state == PrState::Closed && self.viewer_can.reopen
     }
 
     /// The methods auto-merge may be turned on with: open (not a draft),
@@ -80,7 +86,7 @@ impl PrDetail {
                 self.mergeability,
                 Mergeability::Conflicting | Mergeability::Ready
             )
-            && self.can_enable_auto_merge
+            && self.viewer_can.enable_auto_merge
             && self.auto_merge.is_none()
             && self.queue.is_none();
         if possible {
@@ -97,7 +103,9 @@ impl PrDetail {
 
     /// Whether turning auto-merge off may be asked of GitHub.
     pub fn can_disable_auto_merge_now(&self) -> bool {
-        self.summary.state.is_active() && self.auto_merge.is_some() && self.can_disable_auto_merge
+        self.summary.state.is_active()
+            && self.auto_merge.is_some()
+            && self.viewer_can.disable_auto_merge
     }
 
     /// Whether merging with `method` may be asked of GitHub.

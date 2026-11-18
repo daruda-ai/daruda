@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use daruda_github::{FailureKind, GhError, PrFilter, PrSearchPage, PrSearchState, RepoId};
+use daruda_github::{FailureKind, GhError, PrAudience, PrSearchPage, PrSearchState, RepoId};
 use gpui::{App, Global};
 
 use super::PrListUpdate;
@@ -24,7 +24,7 @@ impl Global for PrList {}
 impl PrList {
     /// Read the shared scheduler rather than maintaining a UI refresh flag.
     pub(crate) fn is_refreshing(
-        filter: PrFilter,
+        filter: PrAudience,
         state: PrSearchState,
         refine: &Refine,
         repos: &BTreeSet<RepoId>,
@@ -47,7 +47,7 @@ impl PrList {
 
     /// Whether a later page is being read for any of `repos`' hosts.
     pub(crate) fn is_loading_more(
-        filter: PrFilter,
+        filter: PrAudience,
         state: PrSearchState,
         refine: &Refine,
         repos: &BTreeSet<RepoId>,
@@ -71,7 +71,7 @@ impl PrList {
     /// arriving within it would not reach that window.
     pub(crate) fn load_more(
         hosts: impl IntoIterator<Item = String>,
-        filter: PrFilter,
+        filter: PrAudience,
         state: PrSearchState,
         refine: Refine,
         cx: &mut App,
@@ -113,7 +113,7 @@ impl PrList {
     /// user pressed refresh, or changed GitHub in a way every tab may show.
     pub(crate) fn refresh(
         hosts: impl IntoIterator<Item = String>,
-        searches: &[(PrFilter, Refine)],
+        searches: &[(PrAudience, Refine)],
         state: PrSearchState,
         cx: &mut App,
     ) {
@@ -330,7 +330,7 @@ mod tests {
             SettingsStore::init(cx);
             PrList::refresh(
                 ["github.com".to_owned()],
-                &[(PrFilter::Mine, Refine::default())],
+                &[(PrAudience::Mine, Refine::default())],
                 PrSearchState::Open,
                 cx,
             );

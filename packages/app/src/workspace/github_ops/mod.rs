@@ -4,6 +4,7 @@
 
 pub(crate) mod create;
 pub(crate) mod create_modal;
+pub(in crate::workspace) mod lane_link;
 pub(in crate::workspace) mod lane_pr;
 pub(crate) mod link;
 pub(crate) mod pr_list;

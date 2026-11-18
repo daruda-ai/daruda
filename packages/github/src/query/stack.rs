@@ -4,7 +4,6 @@
 
 use serde::Deserialize;
 
-use super::{ApiError, api_messages, parse_error};
 use crate::{GhError, PrState};
 
 /// Pull requests of a stack read at once; more are counted, not listed.
@@ -78,19 +77,19 @@ pub enum StackRead {
     Unsupported,
 }
 
+impl StackRead {
+    /// [`PrStack::range_below`] of a stacked pull request; `None` otherwise.
+    pub fn range_below(&self, number: u64) -> Option<Vec<u64>> {
+        match self {
+            Self::Stacked(stack) => stack.range_below(number),
+            Self::NotStacked | Self::Unsupported => None,
+        }
+    }
+}
+
 /// Parse the answer to [`stack_query`].
 pub(crate) fn parse_stack(json: &str) -> Result<StackRead, GhError> {
-    let response: Response = serde_json::from_str(json).map_err(parse_error)?;
-    let Some(pr) = response
-        .data
-        .and_then(|data| data.repository)
-        .and_then(|repository| repository.pull_request)
-    else {
-        return Err(GhError::Parse(format!(
-            "no pull request in the answer: {}",
-            api_messages(response.errors)
-        )));
-    };
+    let pr: PrNode = super::pull_request(json)?;
     let Some(stack) = pr.stack else {
         return Ok(StackRead::NotStacked);
     };
@@ -122,23 +121,6 @@ pub(crate) fn parse_stack(json: &str) -> Result<StackRead, GhError> {
 // with GraphQL's usual "Field 'stack' doesn't exist on type 'PullRequest'".
 pub(crate) fn lacks_stacks(stderr: &str) -> bool {
     stderr.contains("Field 'stack' doesn't exist on type 'PullRequest'")
-}
-
-#[derive(Deserialize)]
-struct Response {
-    data: Option<Data>,
-    errors: Option<Vec<ApiError>>,
-}
-
-#[derive(Deserialize)]
-struct Data {
-    repository: Option<Repository>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Repository {
-    pull_request: Option<PrNode>,
 }
 
 #[derive(Deserialize)]

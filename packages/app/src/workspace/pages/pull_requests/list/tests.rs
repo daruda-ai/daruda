@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use daruda_github::availability::{BackoffReason, GhAvailability, Resume};
-use daruda_github::{CheckRollup, PrFilter, PrListItem, PrSearch, PrState, PrSummary, RepoId};
+use daruda_github::{CheckRollup, PrAudience, PrListItem, PrSearch, PrState, PrSummary, RepoId};
 use daruda_store::project::LaneRef;
 
 use super::{
@@ -136,7 +136,7 @@ fn shown(host_list: Option<HostList>) -> PrListCache {
             .map(|list| {
                 HashMap::from([(
                     (
-                        PrFilter::Mine,
+                        PrAudience::Mine,
                         PrSearchState::Open,
                         crate::github::Refine::default(),
                         HOST.to_owned(),
@@ -173,13 +173,13 @@ fn page_for(repo: RepoId, availability: GhAvailability, state: &PrListCache) -> 
         discovering: false,
         refreshing: false,
         loading_more: false,
-        filter: PrFilter::Mine,
+        filter: PrAudience::Mine,
         state: PrSearchState::Open,
         refine: &crate::github::NO_REFINE,
         repos: &repos,
         list: state,
         lanes: &[],
-        creating: &BTreeSet::new(),
+        creating: &Default::default(),
         now: chrono::Utc::now(),
         clock: std::time::Instant::now(),
         accounts: &std::collections::BTreeMap::new(),
@@ -360,13 +360,13 @@ fn a_group_lists_only_its_own_repository() {
         discovering: false,
         refreshing: false,
         loading_more: false,
-        filter: PrFilter::Mine,
+        filter: PrAudience::Mine,
         state: PrSearchState::Open,
         refine: &crate::github::NO_REFINE,
         repos: &repos,
         list: &state,
         lanes: &[],
-        creating: &BTreeSet::new(),
+        creating: &Default::default(),
         now: chrono::Utc::now(),
         clock: std::time::Instant::now(),
         accounts: &std::collections::BTreeMap::new(),
@@ -437,7 +437,7 @@ fn the_header_says_how_old_the_newest_answer_is() {
                     let list = HostList::Ready(answer_at(Vec::new(), &[], at));
                     (
                         (
-                            PrFilter::Mine,
+                            PrAudience::Mine,
                             PrSearchState::Open,
                             crate::github::Refine::default(),
                             host.to_owned(),
@@ -452,13 +452,13 @@ fn the_header_says_how_old_the_newest_answer_is() {
             discovering: false,
             refreshing: false,
             loading_more: false,
-            filter: PrFilter::Mine,
+            filter: PrAudience::Mine,
             state: PrSearchState::Open,
             refine: &crate::github::NO_REFINE,
             repos: &repos,
             list: &state,
             lanes: &[],
-            creating: &BTreeSet::new(),
+            creating: &Default::default(),
             now: chrono::Utc::now(),
             clock,
             accounts: &std::collections::BTreeMap::new(),
@@ -482,13 +482,13 @@ fn a_page_with_nothing_to_search_says_why() {
             discovering: false,
             refreshing: false,
             loading_more: false,
-            filter: PrFilter::Mine,
+            filter: PrAudience::Mine,
             state: PrSearchState::Open,
             refine: &crate::github::NO_REFINE,
             repos,
             list: &state,
             lanes: &[],
-            creating: &BTreeSet::new(),
+            creating: &Default::default(),
             now: chrono::Utc::now(),
             clock: std::time::Instant::now(),
             accounts: &std::collections::BTreeMap::new(),

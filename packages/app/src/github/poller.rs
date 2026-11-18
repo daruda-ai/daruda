@@ -137,7 +137,7 @@ impl PrPoller {
                 let entry = wanted.entry(repo).or_default();
                 match subject {
                     PrSubject::Branch(branch) => entry.branches.insert(branch),
-                    PrSubject::Review(number) => entry.numbers.insert(number),
+                    PrSubject::Number(number) => entry.numbers.insert(number),
                 };
                 entry.focused |= focused;
             }

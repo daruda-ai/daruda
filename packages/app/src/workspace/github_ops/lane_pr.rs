@@ -1,5 +1,6 @@
-//! One lane's pull request: what GitHub said about its branch and what the
-//! strip's buttons have under way. Fields are private so every change goes
+//! One lane's pull request: what GitHub said about its branch, one created
+//! for it that GitHub does not list yet, and what the strip's buttons have
+//! under way. Fields are private so every change goes
 //! through a transition here; `github_ops` is the only writer.
 
 use crate::github::{PrLink, PrLookup};
@@ -11,8 +12,18 @@ pub(in crate::workspace) enum PrWork {
     Idle,
     /// Logs or comments are being read for the agent.
     Sending,
-    /// A PR was created and the poller has not linked it yet.
-    AwaitingNewPr,
+}
+
+/// A pull request created for the lane that the poller has not linked yet:
+/// Create PR is not offered again meanwhile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PendingPr {
+    /// Its page is known: the strip opens it.
+    Named(CreatedPr),
+    /// GitHub answered with no page daruda opens: the strip holds Create PR
+    /// until the link arrives. Not tied to a branch; a move clears it, since
+    /// the moved lane's answer is forgotten.
+    Unnamed,
 }
 
 /// A pull request daruda created for the lane, kept until the poller
@@ -51,7 +62,7 @@ impl CreatedPr {
 pub(in crate::workspace) struct LanePr {
     lookup: PrLookup,
     work: PrWork,
-    created: Option<CreatedPr>,
+    pending: Option<PendingPr>,
 }
 
 impl LanePr {
@@ -67,18 +78,15 @@ impl LanePr {
         self.work
     }
 
-    /// Record what is known now, reporting whether it changed. A link
-    /// arriving ends the wait after Create PR; so does forgetting the answer,
-    /// since the branch or the means to ask about it is gone.
+    /// Record what is known now, reporting whether it changed. A link, or
+    /// the default branch (which has none), is done with the new pull
+    /// request. Forgetting the answer (the branch or the means to ask is
+    /// gone) ends an unnamed one's hold; a named one stays for its branch.
     pub(super) fn replace(&mut self, lookup: PrLookup) -> bool {
-        if matches!(lookup, PrLookup::Linked(_) | PrLookup::Unknown)
-            && self.work == PrWork::AwaitingNewPr
-        {
-            self.work = PrWork::Idle;
-        }
-        // Linked, or on the default branch (which has none): done with.
-        if matches!(lookup, PrLookup::Linked(_) | PrLookup::DefaultBranch) {
-            self.created = None;
+        match (&lookup, &self.pending) {
+            (PrLookup::Linked(_) | PrLookup::DefaultBranch, _)
+            | (PrLookup::Unknown, Some(PendingPr::Unnamed)) => self.pending = None,
+            _ => {}
         }
         if self.lookup == lookup {
             return false;
@@ -91,8 +99,8 @@ impl LanePr {
         self.work == PrWork::Sending
     }
 
-    /// Start reading logs or comments for the agent. Sending needs a linked
-    /// PR, and a link has already ended any wait after Create PR.
+    /// Start reading logs or comments for the agent; offered only for a
+    /// linked pull request.
     pub(super) fn begin_send(&mut self) {
         self.work = PrWork::Sending;
     }
@@ -104,24 +112,20 @@ impl LanePr {
         }
     }
 
-    /// A PR was created; hold Create PR until the poller links it.
-    pub(super) fn await_new_pr(&mut self) {
-        self.work = PrWork::AwaitingNewPr;
-    }
-
-    /// Remember the pull request created for the lane until it is linked.
-    pub(super) fn created(&mut self, created: CreatedPr) {
-        self.created = Some(created);
+    /// A pull request was created, or found, for the lane: kept until the
+    /// poller links it. The latest creation replaces an earlier one.
+    pub(super) fn created(&mut self, pending: PendingPr) {
+        self.pending = Some(pending);
     }
 
     /// [`Self::created`] for a window test.
     #[cfg(test)]
     pub(in crate::workspace) fn created_for_test(&mut self, created: CreatedPr) {
-        self.created(created);
+        self.created(PendingPr::Named(created));
     }
 
-    pub(in crate::workspace) fn created_pr(&self) -> Option<&CreatedPr> {
-        self.created.as_ref()
+    pub(in crate::workspace) fn pending(&self) -> Option<&PendingPr> {
+        self.pending.as_ref()
     }
 }
 
@@ -162,27 +166,43 @@ mod tests {
     }
 
     #[test]
-    fn a_created_pr_is_held_until_linked() {
+    fn a_pending_pr_is_held_until_linked() {
         let created = CreatedPr::of("https://github.com/o/r/pull/12".into(), "feat").unwrap();
-        let mut pr = LanePr::default();
-        pr.created(created.clone());
-        pr.replace(PrLookup::NoPr);
-        pr.replace(PrLookup::Unknown);
-        assert_eq!(pr.created_pr(), Some(&created), "not linked yet");
-    }
-
-    #[test]
-    fn a_link_or_a_forgotten_answer_ends_the_wait_after_create() {
-        let mut pr = LanePr::default();
-        pr.await_new_pr();
-        pr.replace(PrLookup::NoPr);
-        assert_eq!(
-            pr.work(),
-            PrWork::AwaitingNewPr,
-            "an answer without it yet keeps waiting"
-        );
-        pr.replace(PrLookup::Unknown);
-        assert_eq!(pr.work(), PrWork::Idle);
+        // (label, held, answers, still held)
+        let cases = [
+            (
+                "named: not linked yet",
+                PendingPr::Named(created.clone()),
+                vec![PrLookup::NoPr, PrLookup::Unknown],
+                true,
+            ),
+            (
+                "unnamed: an answer without it keeps the hold",
+                PendingPr::Unnamed,
+                vec![PrLookup::NoPr],
+                true,
+            ),
+            (
+                "unnamed: a forgotten answer ends it",
+                PendingPr::Unnamed,
+                vec![PrLookup::Unknown],
+                false,
+            ),
+            (
+                "the default branch ends it",
+                PendingPr::Named(created.clone()),
+                vec![PrLookup::DefaultBranch],
+                false,
+            ),
+        ];
+        for (label, held, answers, kept) in cases {
+            let mut pr = LanePr::default();
+            pr.created(held.clone());
+            for answer in answers {
+                pr.replace(answer);
+            }
+            assert_eq!(pr.pending() == Some(&held), kept, "{label}");
+        }
     }
 
     #[test]
@@ -192,13 +212,5 @@ mod tests {
         assert!(pr.is_sending());
         pr.end_send();
         assert_eq!(pr.work(), PrWork::Idle);
-    }
-
-    #[test]
-    fn ending_a_send_leaves_a_create_wait_alone() {
-        let mut pr = LanePr::default();
-        pr.await_new_pr();
-        pr.end_send();
-        assert_eq!(pr.work(), PrWork::AwaitingNewPr);
     }
 }

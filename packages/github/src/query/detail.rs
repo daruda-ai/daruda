@@ -6,7 +6,7 @@ use super::{ApiError, Author, PrNode, api_messages, parse_error, pr_fragment};
 use crate::checks::entries;
 use crate::{
     AutoMergeOn, BlockReason, GhError, MergeMethod, Mergeability, PrDetail, QueueEntry, QueueState,
-    ReviewerState,
+    ReviewerState, ViewerCan,
 };
 
 /// Reviews, review requests and review threads one detail request reads.
@@ -96,9 +96,13 @@ pub(crate) fn parse_pr_detail(json: &str) -> Result<PrDetail, GhError> {
             .as_ref()
             .is_some_and(|page| page.has_next_page),
         changed_files: pr.changed_files,
-        can_update: pr.viewer_can_update,
-        can_close: pr.viewer_can_close,
-        can_reopen: pr.viewer_can_reopen,
+        viewer_can: ViewerCan {
+            update: pr.viewer_can_update,
+            close: pr.viewer_can_close,
+            reopen: pr.viewer_can_reopen,
+            enable_auto_merge: pr.viewer_can_enable_auto_merge,
+            disable_auto_merge: pr.viewer_can_disable_auto_merge,
+        },
         auto_merge: pr.auto_merge_request.map(|request| AutoMergeOn {
             method: request.merge_method.as_deref().and_then(merge_method),
             by: request.enabled_by.map(|actor| actor.login),
@@ -107,8 +111,6 @@ pub(crate) fn parse_pr_detail(json: &str) -> Result<PrDetail, GhError> {
             position: entry.position,
             state: queue_state(&entry.state),
         }),
-        can_enable_auto_merge: pr.viewer_can_enable_auto_merge,
-        can_disable_auto_merge: pr.viewer_can_disable_auto_merge,
         node_id: pr.id,
     })
 }
@@ -232,8 +234,7 @@ struct DetailPr {
     viewer_can_disable_auto_merge: bool,
     auto_merge_request: Option<AutoMergeNode>,
     merge_queue_entry: Option<QueueNode>,
-    #[serde(default)]
-    id: Option<String>,
+    id: String,
     author: Option<Author>,
     mergeable: String,
     merge_state_status: String,

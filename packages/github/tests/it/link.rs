@@ -1,4 +1,4 @@
-use daruda_github::link::pick;
+use daruda_github::link::{open_for, pick};
 use daruda_github::{CheckRollup, PrState, PrSummary};
 
 fn pr(number: u64, head: &str, state: PrState, cross_repo: bool, updated: &str) -> PrSummary {
@@ -76,6 +76,35 @@ fn a_branch_links_to_its_own_pull_request() {
     for (label, branch, candidates, expected) in cases {
         assert_eq!(
             pick(branch, "main", &candidates).map(|p| p.number),
+            expected,
+            "{label}"
+        );
+    }
+}
+
+/// The open pull request a second one from the branch would duplicate:
+/// its own repository's, open or draft, never a fork's or a closed one.
+#[test]
+fn a_branch_has_an_open_pull_request_only_of_its_own() {
+    use PrState::*;
+    let cases: Vec<(&str, Vec<PrSummary>, Option<u64>)> = vec![
+        ("none", vec![], None),
+        ("open", vec![pr(1, "feat", Open, false, "")], Some(1)),
+        ("draft", vec![pr(1, "feat", Draft, false, "")], Some(1)),
+        (
+            "closed or merged",
+            vec![
+                pr(1, "feat", Closed, false, ""),
+                pr(2, "feat", Merged, false, ""),
+            ],
+            None,
+        ),
+        ("a fork's", vec![pr(1, "feat", Open, true, "")], None),
+        ("another head", vec![pr(1, "other", Open, false, "")], None),
+    ];
+    for (label, candidates, expected) in cases {
+        assert_eq!(
+            open_for("feat", &candidates).map(|p| p.number),
             expected,
             "{label}"
         );

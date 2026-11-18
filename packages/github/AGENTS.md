@@ -17,17 +17,21 @@ through `GitHost`.
 - `Gh` methods are whole questions (`prs_for_branches`, `failed_log`, ...),
   never a passthrough to `gh api`, so a fake answers each one directly.
   A new question adds a method to `Gh`, `SystemGh` and `FakeGh` together.
-- `SystemGh` runs through `daruda_core::process::run_captured` with argv only,
-  `GH_PROMPT_DISABLED=1`, and `-f` for every GraphQL string variable (`-F`
-  would turn a branch named like a number into one).
+- `SystemGh` runs through `daruda_core::process::run_captured` with argv only
+  and `GH_PROMPT_DISABLED=1`. GraphQL argv is built with `system::Graphql`,
+  whose typed setters send a string as `-f` and only an Int or Boolean as
+  `-F` (`-F` would turn a branch named like a number into one); text too
+  long for an argument goes on stdin (`--input -`).
 - Parsers are tested against recorded `gh` output in `tests/fixtures/`.
   Record a new fixture with the exact query the code sends.
 
 ## Rules that live here
 
 - `checks::summarize` is the only place that decides what checks add up to.
-- `link::pick` decides which PR a branch belongs to: same repository only;
-  a lane on the default branch has none. A fork PR's review branch is not
+- `link::pick` decides which PR a branch belongs to: same repository only
+  (`link::heads`); a lane on the default branch has none. `link::open_for`
+  is the open one a second PR from the branch would duplicate; callers use
+  these rather than re-filter candidates. A fork PR's review branch is not
   looked up by name: it carries a `link::ReviewMark` (the one format of the
   mark, kept in the branch's git config), and the poller asks for its PR by
   number in the same per-repository request. Such a lane never reads as
@@ -35,10 +39,12 @@ through `GitHost`.
   resolve fails only that alias (`NOT_FOUND`; `gh` exits non-zero but
   prints the partial answer), so it never pauses the repository's poll.
 - `PrDetail`'s `is_draft`, `merge_block`, `can_merge`, `merge_menu`,
-  `can_close_now`, `can_reopen_now`, `auto_merge_menu`,
+  `can_edit`, `can_close_now`, `can_reopen_now`, `auto_merge_menu`,
   `can_enable_auto_merge_with`, `can_disable_auto_merge_now` and
   `failed_runs` (`actions.rs`) decide what the detail may ask of GitHub;
   the app maps their answers to labels and buttons and never re-derives them.
+  The `viewerCan*` permissions behind them are `ViewerCan`, readable only in
+  this crate; tests and screenshot seeds build one with `all`/`with`.
 - `PrCheckout::of` decides how a pull request's head reaches a worktree:
   a same-repository PR's own branch, or a fork's `pr-<N>` review branch
   fetched from `refs/pull/<N>/head` and marked with its `ReviewMark`.
@@ -77,9 +83,10 @@ through `GitHost`.
   the field reads as `StackRead::Unsupported`, a pull request in none as
   `NotStacked`. No mutation creates or edits a stack. `PrStack::range_below`
   decides what auto-merge with the stack below takes;
-  `enable_auto_merge(.., include_stack)` sends it as `includeStack`, and the
-  app reads the stack again just before and sends nothing
-  (`GhError::StackChanged`) when that range is no longer the one shown.
+  `enable_auto_merge(.., include_stack)` sends it as `includeStack`.
+  `enable_auto_merge_shown` reads the stack again just before and sends
+  nothing (`GhError::StackChanged`) when that range is no longer the one shown;
+  the app goes through it rather than call `enable_auto_merge` itself.
 - `auth` answers the active account and where gh keeps its token
   (`CredentialSource`), parsed from `gh auth status` output, which gh
   writes to stdout or stderr. The token itself is never read or kept.
@@ -124,8 +131,8 @@ through `GitHost`.
   percent-encoded. The app uses them to diff a file the listing sent no
   patch for, on request only; output above the capture limit is a
   too-large failure.
-- `search_prs_page` is the history/search boundary the page lists through;
-  `search_prs` remains for compatibility. Each immutable request
+- `search_prs_page` is the history/search boundary the page lists through.
+  Each immutable request
   covers one host and up to 20 canonical repositories, with 1–50 results.
   Its continuation retains criteria, chunk and cursor history; a new refresh
   starts a new request. The caller owns account/generation and refresh epochs,
@@ -136,4 +143,4 @@ through `GitHost`.
   Criteria use typed qualifiers and literal words/phrases (AND); quotes,
   backslashes and controls are rejected rather than interpreted as raw syntax.
   `commit_status` is GitHub's search qualifier, not `checks::summarize`.
-  Unlike the active-work legacy search, history includes archived repositories.
+  The search includes archived repositories.

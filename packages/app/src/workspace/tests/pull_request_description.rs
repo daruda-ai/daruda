@@ -64,7 +64,9 @@ fn the_conversation_is_read_once_the_tab_is_shown(cx: &mut TestAppContext) {
 #[gpui::test]
 fn an_edited_description_saves_and_a_failure_keeps_the_text(cx: &mut TestAppContext) {
     let mut detail = mergeable(7, "feat");
-    detail.can_update = true;
+    detail.viewer_can = detail
+        .viewer_can
+        .with(daruda_github::Permission::Update, true);
     detail.body = "Old text".into();
     let (f, gh, id) = opened(cx, detail);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
@@ -129,7 +131,9 @@ fn an_edited_description_saves_and_a_failure_keeps_the_text(cx: &mut TestAppCont
 #[gpui::test]
 fn a_description_changed_on_github_meanwhile_is_not_overwritten_unasked(cx: &mut TestAppContext) {
     let mut detail = mergeable(7, "feat");
-    detail.can_update = true;
+    detail.viewer_can = detail
+        .viewer_can
+        .with(daruda_github::Permission::Update, true);
     detail.body = "Theirs v1".into();
     let (f, gh, id) = opened(cx, detail.clone());
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
@@ -196,7 +200,9 @@ fn a_description_changed_on_github_meanwhile_is_not_overwritten_unasked(cx: &mut
 #[gpui::test]
 fn the_description_can_be_edited_while_a_refresh_is_out(cx: &mut TestAppContext) {
     let mut detail = mergeable(7, "feat");
-    detail.can_update = true;
+    detail.viewer_can = detail
+        .viewer_can
+        .with(daruda_github::Permission::Update, true);
     detail.body = "Old text".into();
     let (f, _gh, id) = opened(cx, detail);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
@@ -218,7 +224,9 @@ fn the_description_can_be_edited_while_a_refresh_is_out(cx: &mut TestAppContext)
 #[gpui::test]
 fn a_change_on_github_not_read_yet_still_stops_the_save(cx: &mut TestAppContext) {
     let mut detail = mergeable(7, "feat");
-    detail.can_update = true;
+    detail.viewer_can = detail
+        .viewer_can
+        .with(daruda_github::Permission::Update, true);
     detail.body = "Old text".into();
     let (f, gh, id) = opened(cx, detail.clone());
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);

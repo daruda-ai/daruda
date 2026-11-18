@@ -33,8 +33,12 @@ pub(in crate::workspace) enum SubmitState {
     /// stay to submit again.
     Failed(String),
     /// The submission failed and whether GitHub took it could not be
-    /// read: only checking again is offered, never another submit.
-    Unknown(String),
+    /// read: only checking again, against what was `sent`, is offered,
+    /// never another submit.
+    Unknown {
+        reason: String,
+        sent: Sent,
+    },
     /// Reading GitHub again for an unknown outcome.
     Checking,
 }
@@ -50,7 +54,7 @@ pub(in crate::workspace) enum SubmitBlock {
     /// The author cannot approve or request changes on their own pull
     /// request.
     OwnPullRequest,
-    /// The pull request is not read, or GitHub named no id for it.
+    /// The pull request is not read yet.
     NotRead,
 }
 
@@ -60,8 +64,6 @@ pub(in crate::workspace) struct ReviewSubmit {
     pub event: ReviewEvent,
     pub state: SubmitState,
     owner: Option<DraftOwner>,
-    /// What an unknown outcome is checked against.
-    sent: Option<Sent>,
     _typing: Subscription,
 }
 
@@ -75,8 +77,8 @@ impl std::fmt::Debug for ReviewSubmit {
 }
 
 /// What was sent, to tell it among the viewer's reviews later.
-#[derive(Debug, Clone)]
-struct Sent {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct Sent {
     repo: RepoId,
     number: u64,
     /// The viewer's latest review before it was sent; `None` when there
@@ -103,6 +105,13 @@ impl Sent {
 struct Unsettled(std::collections::HashMap<DraftOwner, Sent>);
 
 impl gpui::Global for Unsettled {}
+
+/// Pull requests whose review is being submitted, whichever detail or
+/// window asked: one submission at a time each, even across a reopen.
+#[derive(Default)]
+struct Submitting(std::collections::HashSet<DraftOwner>);
+
+impl gpui::Global for Submitting {}
 
 /// What a submission sends, and the pending comments it publishes.
 struct Submission {
@@ -210,7 +219,6 @@ impl Workspace {
                 event: ReviewEvent::Comment,
                 state: SubmitState::Writing,
                 owner,
-                sent: None,
                 _typing: typing,
             });
         }
@@ -327,7 +335,7 @@ impl Workspace {
         let read = detail
             .pr
             .last_known()
-            .and_then(|pr| Some((pr.node_id.clone()?, pr.head_sha.clone(), pr.author.clone())));
+            .map(|pr| (pr.node_id.clone(), pr.head_sha.clone(), pr.author.clone()));
         let outcome = match read {
             None => Err(SubmitBlock::NotRead),
             Some((pr, head, author)) => {
@@ -379,8 +387,10 @@ impl Workspace {
             .and_then(|owner| cx.try_global::<Unsettled>()?.0.get(owner).cloned());
         if let Some(sent) = unsettled {
             if let Some(review) = self.pr_detail_mut(id).and_then(|d| d.review.as_mut()) {
-                review.state = SubmitState::Unknown(s::review_unsettled());
-                review.sent = Some(sent);
+                review.state = SubmitState::Unknown {
+                    reason: s::review_unsettled(),
+                    sent,
+                };
             }
             cx.notify();
             return;
@@ -388,7 +398,7 @@ impl Workspace {
         // One submission per pull request in the whole app: a detail
         // reopened meanwhile must not send the same review again.
         if let Some(owner) = &owner
-            && !DraftStore::begin_submit(owner, cx)
+            && !cx.default_global::<Submitting>().0.insert(owner.clone())
         {
             return;
         }
@@ -410,9 +420,10 @@ impl Workspace {
         let Some(review) = self.pr_detail_mut(id).and_then(|d| d.review.as_mut()) else {
             return;
         };
-        let (SubmitState::Unknown(_), Some(sent)) = (&review.state, review.sent.clone()) else {
+        let SubmitState::Unknown { sent, .. } = &review.state else {
             return;
         };
+        let sent = sent.clone();
         review.state = SubmitState::Checking;
         let owner = review.owner.clone();
         let gh = GhHost::global(cx);
@@ -452,7 +463,7 @@ impl Workspace {
         // An unknown outcome is remembered app-wide: nothing may be sent
         // again until a check settles it.
         if let Some(owner) = &owner {
-            DraftStore::end_submit(owner, cx);
+            cx.default_global::<Submitting>().0.remove(owner);
             let unsettled = &mut cx.default_global::<Unsettled>().0;
             if unknown {
                 unsettled.insert(owner.clone(), sent.clone());
@@ -482,13 +493,12 @@ impl Workspace {
             match &failure {
                 None => detail.review = None,
                 Some(e) if unknown => {
-                    review.state = SubmitState::Unknown(e.to_string());
-                    review.sent = Some(sent);
+                    review.state = SubmitState::Unknown {
+                        reason: e.to_string(),
+                        sent,
+                    };
                 }
-                Some(e) => {
-                    review.state = SubmitState::Failed(e.to_string());
-                    review.sent = None;
-                }
+                Some(e) => review.state = SubmitState::Failed(e.to_string()),
             }
         }
         match failure {
@@ -548,7 +558,10 @@ impl SubmitState {
     /// Whether the review can be changed or sent: nothing in flight, and no
     /// outcome left unknown.
     pub(in crate::workspace) fn editable(&self) -> bool {
-        !matches!(self, Self::Submitting | Self::Checking | Self::Unknown(_))
+        !matches!(
+            self,
+            Self::Submitting | Self::Checking | Self::Unknown { .. }
+        )
     }
 }
 

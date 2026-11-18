@@ -72,11 +72,11 @@ pub(super) fn links(view: &SideView, cx: &Context<Workspace>) -> AnyElement {
                     }))
             }))
     });
-    use crate::github::DraftKeeping;
+    use crate::github::Keeping;
     let keeping = match link.keeping {
-        DraftKeeping::Saved | DraftKeeping::NoAccount => None,
-        DraftKeeping::MemoryOnly => Some(s::links_memory_only()),
-        DraftKeeping::SaveFailed => Some(s::links_save_failing()),
+        Keeping::Saved => None,
+        Keeping::MemoryOnly => Some(s::links_memory_only()),
+        Keeping::SaveFailed => Some(s::links_save_failing()),
     };
     div()
         .flex()

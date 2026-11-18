@@ -67,7 +67,9 @@ fn a_description_draft_survives_leaving_and_a_restart(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
     cx.update(|cx| DraftStore::install_at(dir.path().to_owned(), cx));
     let mut detail = mergeable(7, "feat");
-    detail.can_update = true;
+    detail.viewer_can = detail
+        .viewer_can
+        .with(daruda_github::Permission::Update, true);
     detail.body = "Before".into();
     let (f, _, id) = opened_signed_in(cx, detail);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
@@ -144,6 +146,7 @@ fn a_reply_draft_is_marked_continued_and_dropped_once_posted(cx: &mut TestAppCon
     cx.update(|cx| DraftStore::install_at(dir.path().to_owned(), cx));
     let (f, gh, id) = opened_signed_in(cx, mergeable(7, "feat"));
     gh.set_review_threads(
+        &repo(),
         7,
         ReviewThreads {
             threads: vec![ReviewThread {
@@ -229,7 +232,9 @@ fn without_a_known_account_the_editor_says_its_text_is_not_kept(cx: &mut TestApp
     let dir = tempfile::tempdir().unwrap();
     cx.update(|cx| DraftStore::install_at(dir.path().to_owned(), cx));
     let mut detail = mergeable(7, "feat");
-    detail.can_update = true;
+    detail.viewer_can = detail
+        .viewer_can
+        .with(daruda_github::Permission::Update, true);
     let (f, _, id) = super::pull_request_detail::opened(cx, detail);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     f.ws.update(&mut vcx, |ws, cx| {
@@ -266,6 +271,7 @@ fn drafts_for_unlisted_threads_are_not_called_orphans_when_the_list_is_cut_short
     cx.update(|cx| DraftStore::set_reply(&owner, "far-thread", Some("Kept".into()), cx));
     let orphans = |truncated: bool, f: &super::GitFixture, cx: &mut TestAppContext| {
         gh.set_review_threads(
+            &repo(),
             7,
             ReviewThreads {
                 threads: Vec::new(),

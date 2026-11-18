@@ -8,7 +8,8 @@
 //! `viewerCanClose` and `viewerCanReopen` likewise on 2026-11-18, read
 //! from the PR as it was then (closed) and spliced into this open snapshot:
 //! both false. The auto-merge fields likewise, the same day: no auto-merge,
-//! no queue entry, neither permission.
+//! no queue entry, neither permission. The pull request's node `id`
+//! likewise, the same day, read alone for #15003.
 
 use serde_json::{Value, json};
 
@@ -36,9 +37,10 @@ fn a_real_detail_answer_parses() {
         "### Description\n\nTrimmed from the recorded answer.\n"
     );
     assert_eq!(detail.head_sha, "38aef55a786788888bd90ddaeaac0bf6b0b98bb1");
+    assert_eq!(detail.node_id, "PR_kwDODKw3uc8AAAABN-b3EQ");
     assert_eq!(detail.base_branch, "trunk");
     assert!(
-        !detail.can_close && !detail.can_reopen,
+        !detail.viewer_can.close && !detail.viewer_can.reopen,
         "as GitHub answered once the PR was closed"
     );
     assert_eq!(detail.author.as_deref(), Some("pad895"));
@@ -278,7 +280,7 @@ fn the_detail_query_names_every_field_the_parser_reads() {
         "viewerDefaultMergeMethod",
         "...pr",
         "fragment pr on PullRequest",
-        "body",
+        "...pr id body",
         "headRefOid",
         "baseRefName",
         "changedFiles",
@@ -303,7 +305,7 @@ fn the_viewers_close_and_reopen_permissions_are_read() {
         repo["pullRequest"]["viewerCanReopen"] = json!(true);
     });
     let loaded = parse_pr_detail(&answer).unwrap();
-    assert!(loaded.can_close && loaded.can_reopen);
+    assert!(loaded.viewer_can.close && loaded.viewer_can.reopen);
     assert!(pr_detail_query().contains("viewerCanClose viewerCanReopen"));
 }
 
@@ -333,7 +335,7 @@ fn auto_merge_and_the_merge_queue_are_read() {
             state: QueueState::AwaitingChecks,
         })
     );
-    assert!(loaded.can_disable_auto_merge && !loaded.can_enable_auto_merge);
+    assert!(loaded.viewer_can.disable_auto_merge && !loaded.viewer_can.enable_auto_merge);
     let unknown = detail_answer(|repo| {
         repo["pullRequest"]["mergeQueueEntry"] = json!({"position": null, "state": "NEW_STATE"});
     });

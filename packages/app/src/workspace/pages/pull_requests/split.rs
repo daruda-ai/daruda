@@ -3,7 +3,7 @@
 use gpui::{Context, Window};
 
 use super::page_layout::{ListColumn, list_width};
-use daruda_github::{PrFilter, PrSearchState};
+use daruda_github::{PrAudience, PrSearchState};
 use daruda_store::project::{PullRequestsAudience, PullRequestsLayout, PullRequestsState};
 
 use crate::workspace::Workspace;
@@ -96,10 +96,10 @@ impl super::PullRequestsPage {
     /// The layout and list choices a window's saved state keeps.
     pub(in crate::workspace) fn layout_record(&self) -> PullRequestsLayout {
         PullRequestsLayout {
-            audience: (self.filter != PrFilter::Mine).then_some(match self.filter {
-                PrFilter::Mine => PullRequestsAudience::Mine,
-                PrFilter::ReviewRequested => PullRequestsAudience::ReviewRequested,
-                PrFilter::AllOpen => PullRequestsAudience::All,
+            audience: (self.filter != PrAudience::Mine).then_some(match self.filter {
+                PrAudience::Mine => PullRequestsAudience::Mine,
+                PrAudience::ReviewRequested => PullRequestsAudience::ReviewRequested,
+                PrAudience::All => PullRequestsAudience::All,
             }),
             state: (self.state != PrSearchState::Open).then_some(match self.state {
                 PrSearchState::Open => PullRequestsState::Open,
@@ -118,9 +118,9 @@ impl super::PullRequestsPage {
     /// The search field starts empty, so a GitHub search starts bare.
     pub(in crate::workspace) fn restore_layout(&mut self, record: &PullRequestsLayout) {
         self.filter = match record.audience {
-            None | Some(PullRequestsAudience::Mine) => PrFilter::Mine,
-            Some(PullRequestsAudience::ReviewRequested) => PrFilter::ReviewRequested,
-            Some(PullRequestsAudience::All) => PrFilter::AllOpen,
+            None | Some(PullRequestsAudience::Mine) => PrAudience::Mine,
+            Some(PullRequestsAudience::ReviewRequested) => PrAudience::ReviewRequested,
+            Some(PullRequestsAudience::All) => PrAudience::All,
         };
         self.state = match record.state {
             None | Some(PullRequestsState::Open) => PrSearchState::Open,

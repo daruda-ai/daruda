@@ -37,7 +37,6 @@ fn reviewing(cx: &mut TestAppContext) -> Fixture {
     cx.run_until_parked();
     let mut detail = mergeable(7, "feat");
     detail.head_sha = "h1".into();
-    detail.node_id = Some("PR_7".into());
     detail.author = Some("alice".into());
     gh.set_pr_detail(&repo(), 7, detail);
     gh.set_pr_files(
@@ -208,7 +207,6 @@ fn an_author_cannot_approve_their_own_pull_request(cx: &mut TestAppContext) {
     let t = reviewing(cx);
     let mut detail = mergeable(7, "feat");
     detail.head_sha = "h1".into();
-    detail.node_id = Some("PR_7".into());
     detail.author = Some("ME".into());
     t.gh.set_pr_detail(&repo(), 7, detail);
     let mut vcx = VisualTestContext::from_window(t.f.window.into(), cx);
@@ -248,7 +246,10 @@ fn an_outcome_that_cannot_be_read_is_checked_never_sent_again(cx: &mut TestAppCo
         ws.submit_pr_review_without_unanchored(t.id, cx)
     });
     vcx.run_until_parked();
-    assert!(matches!(state(&t, &mut vcx), Some(SubmitState::Unknown(_))));
+    assert!(matches!(
+        state(&t, &mut vcx),
+        Some(SubmitState::Unknown { .. })
+    ));
     t.f.ws.update(&mut vcx, |ws, cx| {
         ws.submit_pr_review_without_unanchored(t.id, cx)
     });
@@ -278,7 +279,10 @@ fn an_outcome_that_cannot_be_read_is_checked_never_sent_again(cx: &mut TestAppCo
         "still unsettled in the whole app"
     );
     assert!(
-        matches!(state(&reopened, &mut vcx), Some(SubmitState::Unknown(_))),
+        matches!(
+            state(&reopened, &mut vcx),
+            Some(SubmitState::Unknown { .. })
+        ),
         "said, with a check to run"
     );
     reopened.gh.clear_failure(GhOp::LatestReview);

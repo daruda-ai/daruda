@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use daruda_core::age::{self, AgeBucket};
 use daruda_github::availability::{BackoffReason, GhAccount, GhAvailability, Resume};
 use daruda_github::{
-    CheckRollup, PrFilter, PrListItem, PrSearch, PrSearchState, PrState, RepoId, ReviewDecision,
+    CheckRollup, PrAudience, PrListItem, PrSearch, PrSearchState, PrState, RepoId, ReviewDecision,
 };
 use daruda_store::project::{LaneRef, ProjectId};
 
@@ -159,7 +159,7 @@ impl LaneSlot {
     pub(in crate::workspace) fn of(
         item: &PrListItem,
         linked: Option<&LaneFacts>,
-        creating: &BTreeSet<PrKey>,
+        creating: &super::lane::Creating,
     ) -> Self {
         if let Some(lane) = linked {
             return Self::Linked(RowLane {
@@ -168,7 +168,7 @@ impl LaneSlot {
             });
         }
         let review = item.pr.cross_repo;
-        if creating.contains(&(item.repo.clone(), item.pr.number)) {
+        if creating.contains_key(&(item.repo.clone(), item.pr.number)) {
             Self::Creating { review }
         } else {
             Self::Absent { review }
@@ -233,7 +233,7 @@ pub(in crate::workspace) enum PageBody {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct PrPageView {
-    pub filter: PrFilter,
+    pub filter: PrAudience,
     pub state: PrSearchState,
     /// Some host's list has a later page to read, offered below the rows.
     pub more: More,
@@ -260,7 +260,7 @@ pub(in crate::workspace) struct PageInputs<'a> {
     pub refreshing: bool,
     /// A later page is being read.
     pub loading_more: bool,
-    pub filter: PrFilter,
+    pub filter: PrAudience,
     pub state: PrSearchState,
     /// The shown tab's GitHub search; empty for the bare tab.
     pub refine: &'a crate::github::Refine,
@@ -268,7 +268,7 @@ pub(in crate::workspace) struct PageInputs<'a> {
     pub list: &'a PrListCache,
     pub lanes: &'a [LaneFacts],
     /// Pull requests a worktree is being made for.
-    pub creating: &'a BTreeSet<PrKey>,
+    pub creating: &'a super::lane::Creating,
     pub now: DateTime<Utc>,
     /// Now on the executor's clock, which answer times are read on.
     pub clock: Instant,
@@ -590,8 +590,11 @@ pub(in crate::workspace) fn review_label(review: ReviewDecision) -> String {
 }
 
 /// The filters the page offers, in the order the strip shows them.
-pub(in crate::workspace) const FILTERS: [PrFilter; 3] =
-    [PrFilter::Mine, PrFilter::ReviewRequested, PrFilter::AllOpen];
+pub(in crate::workspace) const FILTERS: [PrAudience; 3] = [
+    PrAudience::Mine,
+    PrAudience::ReviewRequested,
+    PrAudience::All,
+];
 
 /// The states the page lists, in the order the control shows them.
 pub(in crate::workspace) const STATES: [PrSearchState; 4] = [
@@ -610,11 +613,11 @@ pub(in crate::workspace) fn state_label(state: PrSearchState) -> String {
     }
 }
 
-pub(in crate::workspace) fn filter_label(filter: PrFilter) -> String {
+pub(in crate::workspace) fn filter_label(filter: PrAudience) -> String {
     match filter {
-        PrFilter::Mine => s::filter_mine(),
-        PrFilter::ReviewRequested => s::filter_review_requested(),
-        PrFilter::AllOpen => s::filter_all(),
+        PrAudience::Mine => s::filter_mine(),
+        PrAudience::ReviewRequested => s::filter_review_requested(),
+        PrAudience::All => s::filter_all(),
     }
 }
 

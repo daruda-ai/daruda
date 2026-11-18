@@ -45,6 +45,12 @@ pub(in crate::workspace) enum ThreadOp {
     Running(ThreadAction),
     /// What failed and what `gh` said, until the next action on it.
     Failed(ThreadAction, String),
+    /// A reply that failed may still have posted: the threads read under
+    /// ticket `after`, or a later one, say whether it did. Post waits.
+    Checking {
+        reason: String,
+        after: ReadTicket,
+    },
 }
 
 /// One thread's reply box and action.
@@ -55,22 +61,34 @@ pub(in crate::workspace) struct ThreadWork {
     /// Redraws the detail as the reply is typed, so Post follows it.
     typing: Option<Subscription>,
     pub op: Option<ThreadOp>,
-    /// A reply that failed may still have posted: the threads read under
-    /// this ticket, or a later one, say whether it did. Post waits.
-    checking: Option<ReadTicket>,
     /// Whose draft the reply is, fixed when the box opened.
     owner: Option<DraftOwner>,
 }
 
 impl ThreadWork {
-    pub(in crate::workspace) fn checking(&self) -> bool {
-        self.checking.is_some()
+    /// A reply still being checked when its threads answer at `ticket`:
+    /// failed after all, unless they show it `posted`.
+    fn checked(&mut self, ticket: ReadTicket, posted: impl FnOnce(&Self) -> bool) -> bool {
+        let Some(ThreadOp::Checking { reason, after }) = &self.op else {
+            return false;
+        };
+        if ticket < *after {
+            return false;
+        }
+        let reason = reason.clone();
+        if posted(self) {
+            self.close_reply();
+            self.op = None;
+            true
+        } else {
+            self.op = Some(ThreadOp::Failed(ThreadAction::Replying, reason));
+            false
+        }
     }
 
     fn close_reply(&mut self) {
         self.reply = None;
         self.typing = None;
-        self.checking = None;
     }
 }
 
@@ -79,7 +97,6 @@ impl std::fmt::Debug for ThreadWork {
         f.debug_struct("ThreadWork")
             .field("reply", &self.reply.as_ref().map(Entity::entity_id))
             .field("op", &self.op)
-            .field("checking", &self.checking)
             .finish()
     }
 }
@@ -113,7 +130,10 @@ impl ThreadsWork {
     /// failed reply's outcome is still being checked.
     fn begin(&mut self, thread: &str, action: ThreadAction) -> bool {
         let work = self.work.entry(thread.to_owned()).or_default();
-        if matches!(work.op, Some(ThreadOp::Running(_))) || work.checking.is_some() {
+        if matches!(
+            work.op,
+            Some(ThreadOp::Running(_) | ThreadOp::Checking { .. })
+        ) {
             return false;
         }
         work.op = Some(ThreadOp::Running(action));
@@ -165,9 +185,7 @@ impl ThreadsWork {
         self.resolved.retain(|_, stamp| *stamp > ticket);
         let Some(threads) = threads else {
             for work in self.work.values_mut() {
-                if work.checking.is_some_and(|asked| ticket >= asked) {
-                    work.checking = None;
-                }
+                work.checked(ticket, |_| false);
             }
             return posted_after_all;
         };
@@ -180,17 +198,12 @@ impl ThreadsWork {
                 .map(|comment| comment.body.trim().to_owned())
         };
         for (thread, work) in &mut self.work {
-            if !work.checking.is_some_and(|asked| ticket >= asked) {
-                continue;
-            }
-            work.checking = None;
-            let posted = work
-                .reply
-                .as_ref()
-                .is_some_and(|reply| last(thread).as_deref() == Some(draft(reply).trim()));
+            let posted = work.checked(ticket, |work| {
+                work.reply
+                    .as_ref()
+                    .is_some_and(|reply| last(thread).as_deref() == Some(draft(reply).trim()))
+            });
             if posted {
-                work.close_reply();
-                work.op = None;
                 posted_after_all.push(thread.clone());
             }
         }
@@ -205,7 +218,7 @@ impl ThreadsWork {
 
 impl PrDetailState {
     /// Read the threads again in place, keeping what is shown until then.
-    fn reread_threads(&mut self) -> Option<(ReadTicket, TabRead)> {
+    pub(super) fn reread_threads(&mut self) -> Option<(ReadTicket, TabRead)> {
         let ticket = self.tickets.issue();
         self.threads.as_mut()?.reread(ticket);
         Some((ticket, TabRead::Threads(ticket)))
@@ -461,10 +474,13 @@ impl Workspace {
             self.report_error(report, cx);
             let reread = self.pr_detail_mut(id).and_then(|detail| {
                 let (ticket, read) = detail.reread_threads()?;
-                if action == ThreadAction::Replying
-                    && let Some(work) = detail.thread_work.work.get_mut(thread)
+                if let Some(work) = detail.thread_work.work.get_mut(thread)
+                    && let Some(ThreadOp::Failed(ThreadAction::Replying, reason)) = &work.op
                 {
-                    work.checking = Some(ticket);
+                    work.op = Some(ThreadOp::Checking {
+                        reason: reason.clone(),
+                        after: ticket,
+                    });
                 }
                 Some(read)
             });

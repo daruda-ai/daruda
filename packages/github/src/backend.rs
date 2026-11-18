@@ -6,8 +6,8 @@
 use crate::availability::AuthStatus;
 use crate::query::RepoPrs;
 use crate::{
-    ActionsJob, GhError, MergeMethod, NewPr, PrDetail, PrFilter, PrSearch, PrSearchPage,
-    PrSearchRequest, RepoId, ReviewThreads,
+    ActionsJob, GhError, MergeMethod, NewPr, PrDetail, PrSearchPage, PrSearchRequest, RepoId,
+    ReviewThreads,
 };
 
 pub trait Gh: Send + Sync {
@@ -22,16 +22,6 @@ pub trait Gh: Send + Sync {
         branches: &[String],
         numbers: &[u64],
     ) -> Result<RepoPrs, GhError>;
-    /// The open pull requests of `repos`, all on `host`, that match
-    /// `filter`, most recently updated first; at most 50 per 20
-    /// repositories, the rest left out and marked `truncated`. No
-    /// repositories sends no request.
-    fn search_prs(
-        &self,
-        host: &str,
-        repos: &[RepoId],
-        filter: PrFilter,
-    ) -> Result<PrSearch, GhError>;
     /// One bounded provider-search page. Follow its scoped continuation to
     /// read later pages; empty repository scope sends no request.
     fn search_prs_page(&self, request: &PrSearchRequest) -> Result<PrSearchPage, GhError>;

@@ -5,7 +5,7 @@
 use crate::surface::strings::pull_requests as s;
 use crate::workspace::github_ops::pr_list::PrListCache;
 use daruda_github::availability::GhAvailability;
-use daruda_github::{PrFilter, PrSearchState, RepoId};
+use daruda_github::{PrAudience, PrSearchState, RepoId};
 use std::collections::BTreeSet;
 
 use super::list::{RepoStatus, repo_status};
@@ -48,7 +48,7 @@ pub(super) fn labels(
 fn tally(
     list: &PrListCache,
     repos: &BTreeSet<RepoId>,
-    filter: PrFilter,
+    filter: PrAudience,
     state: PrSearchState,
     availability: &impl Fn(&str) -> GhAvailability,
 ) -> Tally {

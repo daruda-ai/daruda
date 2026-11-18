@@ -64,8 +64,8 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
     let sending = snap.pr_work == PrWork::Sending;
     match &snap.pr_strip {
         PrStrip::Hidden => None,
-        PrStrip::NoPr => {
-            let waiting = snap.pr_work == PrWork::AwaitingNewPr;
+        PrStrip::NoPr | PrStrip::Awaiting => {
+            let waiting = matches!(snap.pr_strip, PrStrip::Awaiting);
             let create = crate::ui::button_compact_sized("pr-create", s::pr_create_btn(), metrics)
                 .loading(waiting)
                 .disabled(snap.git_op_in_flight || waiting)

@@ -3,9 +3,6 @@
 //! primary desktop instance; without it (tests) drafts are kept in memory
 //! only, so no test touches the real profile.
 
-use std::path::PathBuf;
-use std::time::Duration;
-
 use daruda_github::RepoId;
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
@@ -13,12 +10,11 @@ use daruda_store::review_drafts::{
     CreationDraft, CreationOwner, DescriptionDraft, DraftOwner, LineCommentDraft, PrDrafts,
     ReplyDraft, ReviewDrafts, load_review_drafts_in, review_drafts_dir, save_review_drafts_in,
 };
-use gpui::{App, Global, Task};
+use gpui::{App, Global};
 
 use super::PrPoller;
 
-/// How long typing settles before the drafts are written.
-const SAVE_AFTER: Duration = Duration::from_millis(400);
+use super::saved_file::{Keeping, SAVE_AFTER, SavedFile};
 
 /// Whether what is typed is kept across restarts, as the editor says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -37,19 +33,20 @@ pub(crate) enum DraftKeeping {
     NoAccount,
 }
 
+impl From<Keeping> for DraftKeeping {
+    fn from(keeping: Keeping) -> Self {
+        match keeping {
+            Keeping::Saved => Self::Saved,
+            Keeping::MemoryOnly => Self::MemoryOnly,
+            Keeping::SaveFailed => Self::SaveFailed,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct DraftStore {
     drafts: ReviewDrafts,
-    /// Where they are saved; `None` keeps them in memory.
-    dir: Option<PathBuf>,
-    /// Changed since last written.
-    dirty: bool,
-    /// The last write failed.
-    failed: bool,
-    /// Pull requests whose review is being submitted, whichever detail or
-    /// window asked: one submission at a time each, even across a reopen.
-    submitting: std::collections::HashSet<DraftOwner>,
-    pending: Option<Task<()>>,
+    file: SavedFile,
 }
 
 impl Global for DraftStore {}
@@ -63,8 +60,7 @@ impl DraftStore {
         let store = match load_review_drafts_in(&dir) {
             Some(drafts) => Self {
                 drafts,
-                dir: Some(dir),
-                ..Self::default()
+                file: SavedFile::at(Some(dir)),
             },
             None => Self::default(),
         };
@@ -122,11 +118,9 @@ impl DraftStore {
                 DraftKeeping::NoAccount
             };
         };
-        match (owner, store.dir.is_some(), store.failed) {
-            (None, _, _) => DraftKeeping::NoAccount,
-            (Some(_), false, _) => DraftKeeping::MemoryOnly,
-            (Some(_), true, true) => DraftKeeping::SaveFailed,
-            (Some(_), true, false) => DraftKeeping::Saved,
+        match owner {
+            None => DraftKeeping::NoAccount,
+            Some(_) => store.file.keeping().into(),
         }
     }
 
@@ -179,15 +173,6 @@ impl DraftStore {
         id
     }
 
-    /// Mark `owner`'s review as being submitted; `false` if it already is.
-    pub(crate) fn begin_submit(owner: &DraftOwner, cx: &mut App) -> bool {
-        Self::global_mut(cx).submitting.insert(owner.clone())
-    }
-
-    pub(crate) fn end_submit(owner: &DraftOwner, cx: &mut App) {
-        Self::global_mut(cx).submitting.remove(owner);
-    }
-
     /// Set, or with `None` drop, the review's text.
     pub(crate) fn set_review_body(owner: &DraftOwner, body: Option<String>, cx: &mut App) {
         Self::global_mut(cx).drafts.entry(owner).review_body = body;
@@ -207,15 +192,14 @@ impl DraftStore {
     fn changed(cx: &mut App) {
         let store = Self::global_mut(cx);
         store.drafts.prune();
-        store.dirty = true;
-        if store.dir.is_none() || store.pending.is_some() {
+        if !store.file.changed() {
             return;
         }
-        let pending = cx.spawn(async move |cx| {
+        let write = cx.spawn(async move |cx| {
             cx.background_executor().timer(SAVE_AFTER).await;
             cx.update(Self::flush);
         });
-        Self::global_mut(cx).pending = Some(pending);
+        Self::global_mut(cx).file.scheduled(write);
     }
 
     /// Write what changed now: when typing settles, on leaving a detail
@@ -224,19 +208,14 @@ impl DraftStore {
         let Some(store) = cx.try_global::<Self>() else {
             return;
         };
-        let (Some(dir), true) = (store.dir.clone(), store.dirty) else {
+        let Some(dir) = store.file.due() else {
             return;
         };
-        let drafts = store.drafts.clone();
-        let store = Self::global_mut(cx);
-        store.pending = None;
-        match save_review_drafts_in(&dir, &drafts) {
-            Ok(()) => {
-                store.dirty = false;
-                store.failed = false;
-            }
+        let written = save_review_drafts_in(&dir, &store.drafts);
+        Self::global_mut(cx).file.written(&written);
+        match written {
+            Ok(()) => {}
             Err(e) => {
-                store.failed = true;
                 LogWriter::log(
                     ErrorReport::new(crate::surface::strings::pull_requests::drafts_save_failed())
                         .severity(ErrorSeverity::Error)
@@ -251,12 +230,11 @@ impl DraftStore {
 
     /// Point a test's store at `dir`.
     #[cfg(test)]
-    pub(crate) fn install_at(dir: PathBuf, cx: &mut App) {
+    pub(crate) fn install_at(dir: std::path::PathBuf, cx: &mut App) {
         let drafts = load_review_drafts_in(&dir).unwrap_or_default();
         cx.set_global(Self {
             drafts,
-            dir: Some(dir),
-            ..Self::default()
+            file: SavedFile::at(Some(dir)),
         });
     }
 }

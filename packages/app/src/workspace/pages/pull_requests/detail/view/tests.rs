@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::time::Duration;
 
 use daruda_github::{
@@ -92,14 +91,12 @@ fn detail(failed: bool, open_threads: u32, cross_repo: bool) -> PrDetail {
         checks_truncated: false,
         open_threads,
         open_threads_more: false,
-        can_update: false,
-        can_close: true,
-        can_reopen: true,
+        viewer_can: daruda_github::ViewerCan::default()
+            .with(daruda_github::Permission::Close, true)
+            .with(daruda_github::Permission::Reopen, true),
         auto_merge: None,
         queue: None,
-        can_enable_auto_merge: false,
-        can_disable_auto_merge: false,
-        node_id: None,
+        node_id: "PR_7".into(),
         changed_files: None,
     }
 }
@@ -122,7 +119,8 @@ fn lane() -> LaneFacts {
     }
 }
 
-static NOTHING_CREATING: BTreeSet<PrKey> = BTreeSet::new();
+static NOTHING_CREATING: crate::workspace::pages::pull_requests::lane::Creating =
+    std::collections::BTreeMap::new();
 static NO_PROGRESS: super::super::progress::ReviewProgress =
     super::super::progress::ReviewProgress::new();
 
@@ -501,8 +499,8 @@ fn without_a_worktree_the_header_offers_to_make_one() {
     ];
     for (label, cross_repo, linked, creating, slot) in cases {
         let state = state(Load::Loading, cross_repo);
-        let made: BTreeSet<PrKey> = creating
-            .then(|| (state.item.repo.clone(), state.item.pr.number))
+        let made: crate::workspace::pages::pull_requests::lane::Creating = creating
+            .then(|| ((state.item.repo.clone(), state.item.pr.number), None))
             .into_iter()
             .collect();
         let read = DetailInputs {
@@ -553,4 +551,24 @@ fn a_thread_reads_as_its_place_first_words_and_replies() {
     assert_eq!(row.author, "bob");
     assert_eq!(row.replies.as_deref(), Some("1 replies"));
     assert!(row.outdated);
+}
+
+#[test]
+fn a_handoff_names_one_block_the_first_to_fix() {
+    use super::HandoffBlock as B;
+    use super::discussion::handoff_block;
+    // (moved, selection changed, chat gone, shown)
+    let cases = [
+        (false, false, false, None),
+        (true, true, true, Some(B::Moved)),
+        (false, true, true, Some(B::SelectionChanged)),
+        (false, false, true, Some(B::ChatGone)),
+    ];
+    for (moved, selection, gone, shown) in cases {
+        assert_eq!(
+            handoff_block(moved, selection, gone),
+            shown,
+            "{moved} {selection} {gone}"
+        );
+    }
 }

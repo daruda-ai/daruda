@@ -107,18 +107,7 @@ pub(crate) struct ThreadsPage {
 /// threads. An outdated thread has no current line; where it was written is
 /// used instead.
 pub(crate) fn parse_threads_page(json: &str) -> Result<ThreadsPage, GhError> {
-    let response: ThreadsResponse = serde_json::from_str(json).map_err(parse_error)?;
-    let Some(connection) = response
-        .data
-        .and_then(|d| d.repository)
-        .and_then(|r| r.pull_request)
-        .map(|pr| pr.review_threads)
-    else {
-        return Err(GhError::Parse(format!(
-            "no pull request in the answer: {}",
-            api_messages(response.errors)
-        )));
-    };
+    let connection = super::pull_request::<ThreadsPr>(json)?.review_threads;
     let threads = connection
         .nodes
         .into_iter()
@@ -218,23 +207,6 @@ struct PageInfo {
     has_next_page: bool,
     #[serde(default)]
     end_cursor: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ThreadsResponse {
-    data: Option<ThreadsData>,
-    errors: Option<Vec<ApiError>>,
-}
-
-#[derive(Deserialize)]
-struct ThreadsData {
-    repository: Option<ThreadsRepository>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ThreadsRepository {
-    pull_request: Option<ThreadsPr>,
 }
 
 #[derive(Deserialize)]

@@ -30,6 +30,20 @@ impl ReviewMark {
     }
 }
 
+/// Whether `pr` is one of `branch`'s own: from this repository, with
+/// `branch` as its head. A fork's `main` is not this repository's `main`.
+pub fn heads(branch: &str, pr: &PrSummary) -> bool {
+    !pr.cross_repo && pr.head_branch == branch
+}
+
+/// The open or draft pull request `branch` heads, among `candidates`: the
+/// one a second pull request from it would duplicate.
+pub fn open_for<'a>(branch: &str, candidates: &'a [PrSummary]) -> Option<&'a PrSummary> {
+    candidates
+        .iter()
+        .find(|pr| heads(branch, pr) && pr.state.is_active())
+}
+
 /// The pull request `branch` belongs to, among `candidates` whose head
 /// branch GitHub matched by name.
 ///
@@ -46,7 +60,7 @@ pub fn pick<'a>(
     }
     candidates
         .iter()
-        .filter(|pr| !pr.cross_repo && pr.head_branch == branch)
+        .filter(|pr| heads(branch, pr))
         .max_by(|a, b| {
             (a.state.is_active(), &a.updated_at).cmp(&(b.state.is_active(), &b.updated_at))
         })

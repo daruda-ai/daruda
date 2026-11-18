@@ -2,7 +2,7 @@
 //! opens, Back returns to the same row and place, and the search keeps its
 //! own keys.
 
-use daruda_github::PrFilter;
+use daruda_github::PrAudience;
 use gpui::{TestAppContext, VisualTestContext, px, size};
 
 use super::pull_request_page::{item, linked_window, repo, rows};
@@ -20,7 +20,7 @@ fn number(key: &str) -> u64 {
 #[gpui::test]
 fn the_keyboard_browses_opens_and_returns_to_the_selected_row(cx: &mut TestAppContext) {
     let (f, gh, _) = linked_window(cx);
-    gh.set_pr_list(PrFilter::Mine, (1..=60).map(item).collect());
+    gh.set_pr_list(PrAudience::Mine, (1..=60).map(item).collect());
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.cx.update(crate::bind_keys::register_static_bindings);
     vcx.simulate_resize(size(px(1280.), px(500.)));

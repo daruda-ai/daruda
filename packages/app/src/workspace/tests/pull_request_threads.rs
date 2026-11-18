@@ -58,7 +58,7 @@ fn a_thread_expands_in_full_and_leads_to_its_lines(cx: &mut TestAppContext) {
     let mut detail = mergeable(7, "feat");
     detail.head_sha = "4f9c2e1".into();
     let (f, gh, id) = opened(cx, detail);
-    gh.set_review_threads(7, threads());
+    gh.set_review_threads(&repo(), 7, threads());
     gh.set_pr_files(
         &repo(),
         7,
@@ -127,7 +127,7 @@ fn a_thread_expands_in_full_and_leads_to_its_lines(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_thread_folds_back_and_lines_in_an_unlisted_file_are_given_up(cx: &mut TestAppContext) {
     let (f, gh, id) = opened(cx, mergeable(7, "feat"));
-    gh.set_review_threads(7, threads());
+    gh.set_review_threads(&repo(), 7, threads());
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.simulate_resize(size(px(1400.), px(900.)));
     f.ws.update(&mut vcx, |ws, cx| {
@@ -203,7 +203,7 @@ fn a_thread_folds_back_and_lines_in_an_unlisted_file_are_given_up(cx: &mut TestA
 fn a_reply_posts_and_a_thread_resolves_each_on_its_own(cx: &mut TestAppContext) {
     use daruda_github::fake::{GhCall, GhFailure, GhOp};
     let (f, gh, id) = opened(cx, mergeable(7, "feat"));
-    gh.set_review_threads(7, threads());
+    gh.set_review_threads(&repo(), 7, threads());
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.simulate_resize(size(px(1400.), px(900.)));
     f.ws.update(&mut vcx, |ws, cx| {
@@ -319,7 +319,7 @@ fn a_reply_posts_and_a_thread_resolves_each_on_its_own(cx: &mut TestAppContext) 
 fn a_failed_reply_that_did_post_is_not_offered_again(cx: &mut TestAppContext) {
     use daruda_github::fake::{GhFailure, GhOp};
     let (f, gh, id) = opened(cx, mergeable(7, "feat"));
-    gh.set_review_threads(7, threads());
+    gh.set_review_threads(&repo(), 7, threads());
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.simulate_resize(size(px(1400.), px(900.)));
     f.ws.update(&mut vcx, |ws, cx| {
@@ -359,7 +359,7 @@ fn a_failed_reply_that_did_post_is_not_offered_again(cx: &mut TestAppContext) {
     posted.threads[0]
         .comments
         .push(comment("c9", "fake-viewer", "Posted after all."));
-    gh.set_review_threads(7, posted);
+    gh.set_review_threads(&repo(), 7, posted);
     let post = vcx.debug_bounds("pr-thread-post-0").unwrap().center();
     vcx.simulate_click(post, Modifiers::default());
     vcx.run_until_parked();
@@ -368,12 +368,38 @@ fn a_failed_reply_that_did_post_is_not_offered_again(cx: &mut TestAppContext) {
         detail
             .thread_work()
             .get("t1")
-            .map(|work| (work.reply.is_some(), work.op.clone(), work.checking()))
+            .map(|work| (work.reply.is_some(), work.op.clone()))
     });
     assert_eq!(
         work,
-        Some((false, None, false)),
+        Some((false, None)),
         "found posted: the box closes, nothing to retry"
     );
     assert!(vcx.debug_bounds("pr-thread-post-0").is_none());
+}
+
+/// A refresh reads the shown threads again in place: they stay up until the
+/// answer, as every tab read on demand does.
+#[gpui::test]
+fn a_refresh_keeps_the_shown_threads_up(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    gh.set_review_threads(&repo(), 7, threads());
+    f.ws.update(cx, |ws, cx| ws.select_pr_detail_tab(id, PrTab::Threads, cx));
+    cx.run_until_parked();
+    let shown = |cx: &mut TestAppContext| {
+        f.ws.read_with(cx, |ws, _| {
+            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            matches!(
+                detail.threads(),
+                Some(crate::workspace::pages::pull_requests::detail::Load::Ready(
+                    _
+                ))
+            )
+        })
+    };
+    assert!(shown(cx));
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    assert!(shown(cx), "still shown while read again");
+    cx.run_until_parked();
+    assert!(shown(cx));
 }

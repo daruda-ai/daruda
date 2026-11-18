@@ -3,7 +3,7 @@
 //! until an answer that asked about it arrives.
 
 use daruda_github::fake::FakeGh;
-use daruda_github::{CheckRollup, PrFilter, PrListItem, PrState, PrSummary, RepoId};
+use daruda_github::{CheckRollup, PrAudience, PrListItem, PrState, PrSummary, RepoId};
 use gpui::TestAppContext;
 
 use crate::github::PrPoller;
@@ -68,7 +68,7 @@ fn window(name: &str, cx: &mut TestAppContext) -> GitFixture {
 /// `gh` listing #7 in o/r and #8 in o/s as the user's.
 fn gh(cx: &mut TestAppContext) -> FakeGh {
     let gh = crate::test_support::fake_gh(cx);
-    gh.set_pr_list(PrFilter::Mine, vec![item("r", 7), item("s", 8)]);
+    gh.set_pr_list(PrAudience::Mine, vec![item("r", 7), item("s", 8)]);
     gh
 }
 
@@ -107,7 +107,7 @@ fn searched(gh: &FakeGh) -> Vec<Vec<RepoId>> {
     gh.calls()
         .into_iter()
         .filter_map(|call| match crate::test_support::list_search(&call)? {
-            (PrFilter::Mine, repos) => Some(repos),
+            (PrAudience::Mine, repos) => Some(repos),
             _ => None,
         })
         .collect()

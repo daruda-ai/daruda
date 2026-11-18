@@ -2,7 +2,7 @@
 //! tabs list, later pages on request, and what replaces them.
 
 use daruda_github::availability::{CredentialSource, GhAccount};
-use daruda_github::{PrFilter, PrSearchState, PrState};
+use daruda_github::{PrAudience, PrSearchState, PrState};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, px, size};
 
 use super::pull_request_page::{item, linked_window, rows, show_page};
@@ -31,7 +31,7 @@ fn requested_states(gh: &daruda_github::fake::FakeGh) -> Vec<PrSearchState> {
 fn choosing_a_state_lists_merged_and_closed_pull_requests(cx: &mut TestAppContext) {
     let (f, gh, _) = linked_window(cx);
     gh.set_pr_list(
-        PrFilter::Mine,
+        PrAudience::Mine,
         vec![
             item(7),
             ended(5, PrState::Merged),
@@ -72,7 +72,7 @@ fn choosing_a_state_lists_merged_and_closed_pull_requests(cx: &mut TestAppContex
 #[gpui::test]
 fn a_later_page_is_read_on_request_and_a_refresh_starts_over(cx: &mut TestAppContext) {
     let (f, gh, _) = linked_window(cx);
-    gh.set_pr_list(PrFilter::Mine, (1..=60).map(item).collect());
+    gh.set_pr_list(PrAudience::Mine, (1..=60).map(item).collect());
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.simulate_resize(size(px(1400.), px(800.)));
     vcx.update(|window, cx| {
@@ -135,7 +135,7 @@ fn another_account_drops_what_the_last_one_listed(cx: &mut TestAppContext) {
 
     // The next list answers as the second account; until it arrives the
     // first account's rows must not be shown under it.
-    gh.set_pr_list(PrFilter::Mine, vec![item(9)]);
+    gh.set_pr_list(PrAudience::Mine, vec![item(9)]);
     gh.set_account("github.com", account("second"));
     f.ws.update(cx, |ws, cx| ws.recheck_gh("github.com", cx));
     cx.update(PrPoller::tick);

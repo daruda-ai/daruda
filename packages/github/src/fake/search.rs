@@ -2,8 +2,8 @@
 //! rules. The full request keys each answer, so scopes cannot share pages.
 
 use super::{FakeGh, GhCall, PrSearchPage, PrSearchRequest};
-use crate::query::{newest_first, parse_search_page};
-use crate::{GhError, PrAudience, PrFilter, PrListItem, PrSearchState, PrState};
+use crate::query::parse_search_page;
+use crate::{GhError, PrListItem, PrSearchState, PrState};
 
 impl FakeGh {
     /// Script the GraphQL JSON that this exact request answers. Parsing is
@@ -39,14 +39,9 @@ impl super::FakeState {
     /// reports matches the list left out.
     fn listed_page(&self, request: &PrSearchRequest) -> Result<PrSearchPage, GhError> {
         let criteria = request.criteria();
-        let filter = match criteria.audience {
-            PrAudience::Mine => PrFilter::Mine,
-            PrAudience::ReviewRequested => PrFilter::ReviewRequested,
-            PrAudience::All => PrFilter::AllOpen,
-        };
         let mut items: Vec<PrListItem> = self
             .lists
-            .get(&filter)
+            .get(&criteria.audience)
             .into_iter()
             .flatten()
             .filter(|item| request.repos().contains(&item.repo))
@@ -78,7 +73,12 @@ impl super::FakeState {
         let total = items.len();
         let end = (offset + usize::from(request.page_size())).min(total);
         let page: Vec<PrListItem> = items.get(offset..end).unwrap_or_default().to_vec();
-        let omitted = u32::from(self.truncated.get(&filter).copied().unwrap_or(false));
+        let omitted = u32::from(
+            self.truncated
+                .get(&criteria.audience)
+                .copied()
+                .unwrap_or(false),
+        );
         let count = page.len() as u32;
         request.finish_page(
             page,
@@ -88,6 +88,12 @@ impl super::FakeState {
             Some(format!("{CURSOR_PREFIX}{end}")),
         )
     }
+}
+
+/// Order list items most recently updated first. `updated_at` is RFC 3339
+/// in UTC, so string order is time order; the sort is stable for ties.
+fn newest_first(items: &mut [PrListItem]) {
+    items.sort_by(|a, b| b.pr.updated_at.cmp(&a.pr.updated_at));
 }
 
 #[cfg(test)]
