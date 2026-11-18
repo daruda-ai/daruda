@@ -78,10 +78,10 @@ impl PrTab {
         [Self::Checks, Self::Files, Self::Threads, Self::Description];
 }
 
-/// A read a tab starts when it is shown.
 /// The tabs read when first shown rather than with the pull request.
 const LAZY_TABS: [PrTab; 3] = [PrTab::Threads, PrTab::Files, PrTab::Description];
 
+/// A read a tab starts when it is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TabRead {
     Threads(ReadTicket),
@@ -155,7 +155,7 @@ pub(in crate::workspace) struct PrDetailState {
 pub(in crate::workspace) struct PrOpening {
     /// The tab to show; `None` keeps where it was left.
     pub(in crate::workspace) tab: Option<PrTab>,
-    /// The pull request read just now to open it, landed as the detail's
+    /// The pull request read just now to open it, landed as a new detail's
     /// read. Fresh because a pull request detail never holds unsaved edits,
     /// so its switch is never held behind a prompt. Boxed: a detail is large.
     pub(in crate::workspace) read: Option<Box<PrDetail>>,
@@ -399,7 +399,7 @@ impl PrDetailState {
     /// until the answer.
     fn reread_tab(&mut self, tab: PrTab) -> Option<TabRead> {
         match tab {
-            PrTab::Threads => self.reread_threads().map(|(_, read)| read),
+            PrTab::Threads => self.reread_threads().1,
             PrTab::Files => self
                 .files
                 .is_some()
@@ -492,8 +492,7 @@ impl Workspace {
         self.open_pr_detail_as(item, PrOpening::default(), window, cx);
     }
 
-    /// Open `item`'s detail as `opening` asks. Applied as the detail is put
-    /// up, so a switch held for unsaved edits still lands on the tab asked.
+    /// Open `item`'s detail as `opening` asks, applied as the detail is put up.
     pub(in crate::workspace) fn open_pr_detail_as(
         &mut self,
         item: PrListItem,
@@ -527,9 +526,8 @@ impl Workspace {
             .map(|d| d.id);
         if let Some(id) = open {
             self.show_page(Page::PullRequests, cx);
-            if let Some(read) = opening.read {
-                self.land_pr_read(id, *read, cx);
-            }
+            // The open detail keeps its own reads: `opening.read` started
+            // before them could be older than one already landed.
             if let Some(tab) = opening.tab {
                 self.select_pr_detail_tab(id, tab, cx);
             }
@@ -760,14 +758,16 @@ impl Workspace {
             return;
         };
         let (answer, error) = split(result);
-        if !slot.land(ticket, answer) {
+        // A failed refresh leaves the threads shown up; work waiting on it
+        // settles as unread, not against the threads read before.
+        if !slot.land_keeping_ready(ticket, answer) {
             return;
         }
         // Threads resolved since are no longer expanded, and work on them
         // settles against what was read.
         let read = match slot.load() {
-            Load::Ready(threads) => Some(threads.clone()),
-            Load::Loading | Load::Failed(_) => None,
+            Load::Ready(threads) if error.is_none() => Some(threads.clone()),
+            Load::Ready(_) | Load::Loading | Load::Failed(_) => None,
         };
         if let Some(threads) = &read {
             let open: std::collections::HashSet<&str> = threads

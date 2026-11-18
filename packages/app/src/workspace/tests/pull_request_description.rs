@@ -212,11 +212,20 @@ fn the_description_can_be_edited_while_a_refresh_is_out(cx: &mut TestAppContext)
             ws.edit_pr_body(id, window, cx);
         })
     });
-    let editing = f.ws.read_with(cx, |ws, _| {
+    let editing = f.ws.read_with(cx, |ws, cx| {
         let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
-        (detail.pr_waiting().is_some(), detail.body_edit().is_some())
+        (
+            detail.pr_waiting().is_some(),
+            detail
+                .body_edit()
+                .map(|edit| edit.input.read(cx).value().to_string()),
+        )
     });
-    assert_eq!(editing, (true, true), "editing began during the refresh");
+    assert_eq!(
+        editing,
+        (true, Some("Old text".to_owned())),
+        "editing began during the refresh, on the body shown"
+    );
 }
 
 /// Changed on GitHub after the detail last read it, and not read since:

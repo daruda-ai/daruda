@@ -194,3 +194,40 @@ fn a_url_into_the_shown_pull_request_moves_it_to_that_tab(cx: &mut TestAppContex
     open("https://github.com/o/r/pull/7/checks", cx);
     assert_eq!(tab(cx), Some(PrTab::Checks));
 }
+
+/// A read made to open a link does not replace what the detail already
+/// shown read for itself: started before, it may be the older of the two.
+#[gpui::test]
+fn a_link_read_leaves_the_shown_details_own_read(cx: &mut TestAppContext) {
+    use crate::workspace::pages::pull_requests::detail::Load;
+    use crate::workspace::pages::pull_requests::detail::PrOpening;
+    let (f, _gh, _) = window(cx);
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| ws.open_pr_in_daruda(repo(), 7, window, cx));
+    });
+    cx.run_until_parked();
+    let (item, shown) = f.ws.read_with(cx, |ws, _| {
+        let detail = ws.pages.pull_requests.detail.as_ref().expect("shown");
+        let Load::Ready(pr) = detail.load() else {
+            panic!("read");
+        };
+        (detail.item().clone(), pr.clone())
+    });
+    let mut older = shown.clone();
+    older.summary.state = daruda_github::PrState::Closed;
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            let opening = PrOpening {
+                tab: None,
+                read: Some(Box::new(older)),
+            };
+            ws.open_pr_detail_as(item, opening, window, cx);
+        })
+    });
+    cx.run_until_parked();
+    f.ws.read_with(cx, |ws, _| {
+        let detail = ws.pages.pull_requests.detail.as_ref().expect("shown");
+        assert!(matches!(detail.load(), Load::Ready(pr) if *pr == shown));
+    });
+}

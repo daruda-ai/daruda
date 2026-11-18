@@ -4,9 +4,13 @@
 use daruda_github::{DiffSide, PrFile, PrFiles, ReviewComment, ReviewThread, ReviewThreads};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, px, size};
 
+use daruda_github::fake::FakeGh;
+
 use super::pull_request_detail::{mergeable, opened, repo};
-use crate::workspace::pages::pull_requests::detail::PrTab;
 use crate::workspace::pages::pull_requests::detail::diff_layout::Side;
+use crate::workspace::pages::pull_requests::detail::thread_actions::ThreadOp;
+use crate::workspace::pages::pull_requests::detail::{PrDetailId, PrTab};
+use crate::workspace::tests::GitFixture;
 
 fn comment(id: &str, author: &str, body: &str) -> ReviewComment {
     ReviewComment {
@@ -315,14 +319,18 @@ fn a_reply_posts_and_a_thread_resolves_each_on_its_own(cx: &mut TestAppContext) 
     assert_eq!(replies, Some(3), "two comments, then the reply");
 }
 
-#[gpui::test]
-fn a_failed_reply_that_did_post_is_not_offered_again(cx: &mut TestAppContext) {
+/// A reply typed under the first thread whose post times out although
+/// GitHub took it: the next threads read has it.
+fn type_a_reply_github_takes_silently(
+    f: &GitFixture,
+    gh: &FakeGh,
+    id: PrDetailId,
+    vcx: &mut VisualTestContext,
+) {
     use daruda_github::fake::{GhFailure, GhOp};
-    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
     gh.set_review_threads(&repo(), 7, threads());
-    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.simulate_resize(size(px(1400.), px(900.)));
-    f.ws.update(&mut vcx, |ws, cx| {
+    f.ws.update(vcx, |ws, cx| {
         ws.select_pr_detail_tab(id, PrTab::Threads, cx)
     });
     vcx.run_until_parked();
@@ -347,7 +355,6 @@ fn a_failed_reply_that_did_post_is_not_offered_again(cx: &mut TestAppContext) {
             });
         })
     });
-    // gh times out, but GitHub took the reply: the next read has it.
     gh.fail(
         GhOp::ReplyToThread,
         GhFailure::Exit {
@@ -360,22 +367,67 @@ fn a_failed_reply_that_did_post_is_not_offered_again(cx: &mut TestAppContext) {
         .comments
         .push(comment("c9", "fake-viewer", "Posted after all."));
     gh.set_review_threads(&repo(), 7, posted);
-    let post = vcx.debug_bounds("pr-thread-post-0").unwrap().center();
-    vcx.simulate_click(post, Modifiers::default());
-    vcx.run_until_parked();
-    let work = f.ws.read_with(&vcx, |ws, _| {
+}
+
+/// The reply's box and what is still to do with it.
+fn reply_work(f: &GitFixture, vcx: &VisualTestContext) -> Option<(bool, Option<ThreadOp>)> {
+    f.ws.read_with(vcx, |ws, _| {
         let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
         detail
             .thread_work()
             .get("t1")
             .map(|work| (work.reply.is_some(), work.op.clone()))
-    });
+    })
+}
+
+#[gpui::test]
+fn a_failed_reply_that_did_post_is_not_offered_again(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    type_a_reply_github_takes_silently(&f, &gh, id, &mut vcx);
+    let post = vcx.debug_bounds("pr-thread-post-0").unwrap().center();
+    vcx.simulate_click(post, Modifiers::default());
+    vcx.run_until_parked();
     assert_eq!(
-        work,
+        reply_work(&f, &vcx),
         Some((false, None)),
         "found posted: the box closes, nothing to retry"
     );
     assert!(vcx.debug_bounds("pr-thread-post-0").is_none());
+}
+
+/// Threads dropped while hidden still settle a failed reply: the read made
+/// when they are shown again finds it posted.
+#[gpui::test]
+fn a_failed_reply_is_checked_when_its_threads_are_shown_again(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    type_a_reply_github_takes_silently(&f, &gh, id, &mut vcx);
+    f.ws.update(&mut vcx, |ws, cx| {
+        ws.post_pr_reply(id, "t1", cx);
+        ws.select_pr_detail_tab(id, PrTab::Description, cx);
+        ws.refresh_pr_detail(id, cx);
+    });
+    vcx.run_until_parked();
+    let held = f.ws.read_with(&vcx, |ws, _| {
+        ws.pages
+            .pull_requests
+            .detail
+            .as_ref()
+            .unwrap()
+            .threads()
+            .is_some()
+    });
+    assert!(!held, "hidden threads are dropped by the refresh");
+    f.ws.update(&mut vcx, |ws, cx| {
+        ws.select_pr_detail_tab(id, PrTab::Threads, cx)
+    });
+    vcx.run_until_parked();
+    assert_eq!(
+        reply_work(&f, &vcx),
+        Some((false, None)),
+        "found posted: the box closes, nothing to retry"
+    );
 }
 
 /// A refresh reads the shown threads again in place: they stay up until the
@@ -398,8 +450,14 @@ fn a_refresh_keeps_the_shown_threads_up(cx: &mut TestAppContext) {
         })
     };
     assert!(shown(cx));
+    let reads = gh.count(daruda_github::fake::GhOp::ReviewThreads);
     f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
     assert!(shown(cx), "still shown while read again");
     cx.run_until_parked();
     assert!(shown(cx));
+    assert_eq!(
+        gh.count(daruda_github::fake::GhOp::ReviewThreads),
+        reads + 1,
+        "read again"
+    );
 }

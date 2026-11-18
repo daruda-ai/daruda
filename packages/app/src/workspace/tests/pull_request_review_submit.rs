@@ -202,6 +202,30 @@ fn a_review_whose_answer_was_lost_is_found_taken_and_not_offered_again(cx: &mut 
     assert_eq!(kept.prs[0].review_body.as_deref(), Some("Second look."));
 }
 
+/// Sent while a refresh is out, the review goes at the head shown, not
+/// one GitHub has moved to since.
+#[gpui::test]
+fn a_review_sent_while_a_refresh_is_out_goes_at_the_head_shown(cx: &mut TestAppContext) {
+    let t = reviewing(cx);
+    let mut vcx = VisualTestContext::from_window(t.f.window.into(), cx);
+    vcx.simulate_resize(size(px(1400.), px(900.)));
+    begin(&t, &mut vcx, "Ship it.");
+    let mut moved = mergeable(7, "feat");
+    moved.head_sha = "h2".into();
+    moved.author = Some("alice".into());
+    t.gh.set_pr_detail(&repo(), 7, moved);
+    t.f.ws.update(&mut vcx, |ws, cx| {
+        ws.refresh_pr_detail(t.id, cx);
+        ws.submit_pr_review_without_unanchored(t.id, cx);
+    });
+    vcx.run_until_parked();
+    let commits: Vec<String> = submits(&t.gh)
+        .into_iter()
+        .map(|(commit, ..)| commit)
+        .collect();
+    assert_eq!(commits, ["h1"]);
+}
+
 #[gpui::test]
 fn an_author_cannot_approve_their_own_pull_request(cx: &mut TestAppContext) {
     let t = reviewing(cx);

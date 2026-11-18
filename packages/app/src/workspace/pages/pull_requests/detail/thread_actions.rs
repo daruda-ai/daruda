@@ -218,10 +218,16 @@ impl ThreadsWork {
 
 impl PrDetailState {
     /// Read the threads again in place, keeping what is shown until then.
-    pub(super) fn reread_threads(&mut self) -> Option<(ReadTicket, TabRead)> {
+    /// Read the threads again in place. The ticket is issued even when they
+    /// are not held, so a check waiting on it settles with whichever threads
+    /// read comes next.
+    pub(super) fn reread_threads(&mut self) -> (ReadTicket, Option<TabRead>) {
         let ticket = self.tickets.issue();
-        self.threads.as_mut()?.reread(ticket);
-        Some((ticket, TabRead::Threads(ticket)))
+        let read = self.threads.as_mut().map(|threads| {
+            threads.reread(ticket);
+            TabRead::Threads(ticket)
+        });
+        (ticket, read)
     }
 }
 
@@ -473,7 +479,7 @@ impl Workspace {
                 .build();
             self.report_error(report, cx);
             let reread = self.pr_detail_mut(id).and_then(|detail| {
-                let (ticket, read) = detail.reread_threads()?;
+                let (ticket, read) = detail.reread_threads();
                 if let Some(work) = detail.thread_work.work.get_mut(thread)
                     && let Some(ThreadOp::Failed(ThreadAction::Replying, reason)) = &work.op
                 {
@@ -482,7 +488,7 @@ impl Workspace {
                         after: ticket,
                     });
                 }
-                Some(read)
+                read
             });
             if let Some(read) = reread {
                 self.send_pr_tab_read(id, read, cx);
