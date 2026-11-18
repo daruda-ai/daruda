@@ -572,3 +572,29 @@ fn a_handoff_names_one_block_the_first_to_fix() {
         );
     }
 }
+
+/// Auto-merge and a queue place are told only while the pull request is
+/// open: one closed or merged has left both, whatever GitHub still says.
+#[test]
+fn auto_merge_and_the_queue_are_told_only_while_open() {
+    let mut pr = detail(false, 0, false);
+    pr.auto_merge = Some(daruda_github::AutoMergeOn {
+        method: Some(daruda_github::MergeMethod::Squash),
+        by: None,
+    });
+    pr.queue = Some(daruda_github::QueueEntry {
+        position: Some(1),
+        state: daruda_github::QueueState::Queued,
+    });
+    // (label, state, told)
+    let cases = [
+        ("open", daruda_github::PrState::Open, true),
+        ("closed", daruda_github::PrState::Closed, false),
+        ("merged", daruda_github::PrState::Merged, false),
+    ];
+    for (label, state, told) in cases {
+        pr.summary.state = state;
+        assert_eq!(auto_merge_fact(&pr).is_some(), told, "{label}: auto-merge");
+        assert_eq!(queue_fact(&pr).is_some(), told, "{label}: queue");
+    }
+}

@@ -89,12 +89,7 @@ pub(in crate::workspace) struct HandoffView {
     pub lane: String,
     /// Why nothing can be inserted as prepared, if so.
     pub blocked: Option<HandoffBlock>,
-    /// Chat, title and tab number.
-    pub chats: Vec<(
-        crate::workspace::main_area::pane_tree::PaneId,
-        gpui::SharedString,
-        usize,
-    )>,
+    pub chats: Vec<crate::workspace::github_ops::review_send::WritableChat>,
     pub chosen: Option<crate::workspace::main_area::pane_tree::PaneId>,
     pub prompt: super::super::handoff::Prepared,
 }
@@ -135,12 +130,12 @@ pub(super) fn handoff_view(
     inputs: &DetailInputs<'_>,
 ) -> HandoffView {
     let chats = &inputs.handoff_chats;
-    let listed = |pane| chats.iter().any(|(held, _, _)| *held == pane);
+    let listed = |pane| chats.iter().any(|chat| chat.pane == pane);
     // Nothing chosen yet: the first listed, as Insert would take. A chosen
     // chat gone is never swapped for another.
     let chosen = match handoff.chat {
         Some(chat) => listed(chat).then_some(chat),
-        None => chats.first().map(|(pane, _, _)| *pane),
+        None => chats.first().map(|chat| chat.pane),
     };
     let selection_changed = match &handoff.payload {
         super::super::handoff::Payload::SelectedCode(range) => !state

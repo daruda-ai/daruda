@@ -608,6 +608,7 @@ impl Workspace {
         if let Some(tab) = tab {
             self.send_pr_tab_read(id, tab, cx);
         }
+        self.reprepare_pr_handoff(id, cx);
         self.refresh_pr_list(cx);
         cx.notify();
     }
@@ -641,7 +642,12 @@ impl Workspace {
         .detach();
         // Its stack with it: apart, so a server without stacks still reads
         // the detail.
-        self.read_pr_stack(id, cx);
+        if self
+            .pr_detail_mut(id)
+            .is_some_and(|detail| detail.stack_worth_reading())
+        {
+            self.read_pr_stack(id, cx);
+        }
     }
 
     /// A refresh that fails keeps what an earlier read showed.
@@ -660,6 +666,7 @@ impl Workspace {
             return;
         }
         detail.come_back();
+        detail.drop_handoff_to_fix();
         if let Some(read) = detail.files_at_head() {
             self.send_pr_tab_read(id, read, cx);
         }

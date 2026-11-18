@@ -29,6 +29,18 @@ pub(in crate::workspace) enum Payload {
     SelectedCode(LineRange),
 }
 
+impl Payload {
+    /// What is read through `gh` to prepare it; `None` when it is quoted
+    /// from the page as it is.
+    fn read(&self) -> Option<Read> {
+        match self {
+            Self::FailedChecks => Some(Read::FailedChecks),
+            Self::OpenThreads => Some(Read::OpenThreads),
+            Self::SelectedCode(_) => None,
+        }
+    }
+}
+
 /// What is read through `gh` to prepare a handoff.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::workspace) enum Read {
@@ -71,6 +83,23 @@ impl PrDetailState {
     pub(in crate::workspace) fn handoff(&self) -> Option<&Handoff> {
         self.handoff.as_ref()
     }
+
+    /// Read closed or merged: a handoff of its failing checks or open
+    /// threads is closed, as nobody is left to fix them.
+    pub(super) fn drop_handoff_to_fix(&mut self) {
+        let open = self
+            .pr
+            .confirmed()
+            .is_none_or(|pr| pr.summary.state.is_active());
+        if !open
+            && self
+                .handoff
+                .as_ref()
+                .is_some_and(|handoff| handoff.payload.read().is_some())
+        {
+            self.handoff = None;
+        }
+    }
 }
 
 impl Workspace {
@@ -99,7 +128,41 @@ impl Workspace {
         let Some(target) = self.begin_pr_handoff(id, payload, Prepared::Reading(ticket), cx) else {
             return;
         };
-        let link = target.link;
+        self.send_pr_handoff_read(id, read, ticket, target.link, cx);
+    }
+
+    /// The pull request was read again: a handoff of what is read through
+    /// `gh` is prepared again with it, keeping the chat chosen, so what goes
+    /// in is never older than the page. Quoted lines are checked as they go.
+    pub(super) fn reprepare_pr_handoff(&mut self, id: PrDetailId, cx: &mut Context<Self>) {
+        let Some(read) = self
+            .pr_detail_mut(id)
+            .and_then(|detail| detail.handoff.as_ref())
+            .and_then(|handoff| handoff.payload.read())
+        else {
+            return;
+        };
+        let Some(link) = self.pr_detail_send_target(id).map(|target| target.link) else {
+            return;
+        };
+        let Some(detail) = self.pr_detail_mut(id) else {
+            return;
+        };
+        let ticket = detail.tickets.issue();
+        if let Some(handoff) = detail.handoff.as_mut() {
+            handoff.prompt = Prepared::Reading(ticket);
+        }
+        self.send_pr_handoff_read(id, read, ticket, link, cx);
+    }
+
+    fn send_pr_handoff_read(
+        &mut self,
+        id: PrDetailId,
+        read: Read,
+        ticket: ReadTicket,
+        link: PrLink,
+        cx: &mut Context<Self>,
+    ) {
         let gh = GhHost::global(cx);
         spawn_bg_work_and_mutate(
             cx,
@@ -107,6 +170,7 @@ impl Workspace {
             move |ws, built, cx| ws.land_pr_handoff(id, ticket, built, cx),
         )
         .detach();
+        cx.notify();
     }
 
     /// Prepare the lines selected in the Files tab for an agent in the
@@ -171,7 +235,7 @@ impl Workspace {
         let chat = self
             .writable_chats(target.lane, cx)
             .first()
-            .map(|(pane, _, _)| *pane);
+            .map(|chat| chat.pane);
         let detail = self.pr_detail_mut(id)?;
         detail.handoff = Some(Handoff {
             payload,
@@ -256,7 +320,7 @@ impl Workspace {
         let Some(chat) = handoff.chat.or_else(|| {
             self.writable_chats(handoff.lane, cx)
                 .first()
-                .map(|(pane, _, _)| *pane)
+                .map(|chat| chat.pane)
         }) else {
             return;
         };
@@ -305,16 +369,29 @@ impl Workspace {
             self.report_pr_handoff_unavailable(cx);
             return;
         }
+        let back = (self.active_ref(), self.active_page());
         self.activate_lane(handoff.lane, window, cx);
-        let agent = self.open_agent_id(None);
-        let cwds = self.active_lane_cwds();
-        let Some(chat) = self.insert_agent_chat_pane(
-            agent,
-            cwds,
-            daruda_config::ModeChoice::FollowDefault,
-            window,
-            cx,
-        ) else {
+        // Only in that worktree: a chat opened wherever is shown instead
+        // would take a prompt about another pull request.
+        let chat = if self.active_ref() == handoff.lane {
+            let agent = self.open_agent_id(None);
+            let cwds = self.active_lane_cwds();
+            self.insert_agent_chat_pane(
+                agent,
+                cwds,
+                daruda_config::ModeChoice::FollowDefault,
+                window,
+                cx,
+            )
+        } else {
+            None
+        };
+        let Some(chat) = chat else {
+            // Nothing opened: back where the person asked from.
+            self.activate_lane(back.0, window, cx);
+            if let Some(page) = back.1 {
+                self.show_page(page, cx);
+            }
             self.report_pr_handoff_unavailable(cx);
             return;
         };

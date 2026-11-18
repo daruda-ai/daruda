@@ -40,7 +40,6 @@ pub(in crate::workspace) struct SideView {
 /// A native stack beside the detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct StackView {
-    pub number: u64,
     pub base: String,
     pub size: u32,
     /// Bottom first.
@@ -193,7 +192,6 @@ pub(super) fn side(
         item: (item.repo.clone(), item.pr.number),
         stack: match state.stack() {
             Some(daruda_github::StackRead::Stacked(stack)) => Some(StackView {
-                number: stack.number,
                 base: stack.base.clone(),
                 size: stack.size,
                 entries: stack

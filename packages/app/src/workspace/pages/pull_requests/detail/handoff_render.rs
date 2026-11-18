@@ -26,52 +26,47 @@ pub(super) fn handoff(id: PrDetailId, view: &HandoffView, cx: &Context<Workspace
             .flex()
             .flex_col()
             .gap(px(theme::GAP_XS))
-            .children(
-                view.chats
-                    .iter()
-                    .enumerate()
-                    .map(|(index, (pane, title, tab))| {
-                        let (pane, chosen) = (*pane, view.chosen == Some(*pane));
+            .children(view.chats.iter().enumerate().map(|(index, chat)| {
+                let (pane, chosen) = (chat.pane, view.chosen == Some(chat.pane));
+                div()
+                    .id(("pr-handoff-chat", index))
+                    .debug_selector(move || format!("pr-handoff-chat-{index}"))
+                    .flex()
+                    .items_center()
+                    .gap(px(theme::GAP_SM))
+                    .px(px(theme::PAD_SM))
+                    .py(px(theme::PAD_XS))
+                    .rounded(px(theme::RADIUS_SM))
+                    .cursor_pointer()
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .when(chosen, |row| row.bg(t.lane_card_active_bg))
+                    .when(!chosen, |row| row.hover(|style| style.bg(t.overlay_hover)))
+                    .child(
+                        icons::icon(if chosen {
+                            icons::RADIO_ON
+                        } else {
+                            icons::RADIO_OFF
+                        })
+                        .text_color(t.text_muted),
+                    )
+                    .child(
                         div()
-                            .id(("pr-handoff-chat", index))
-                            .debug_selector(move || format!("pr-handoff-chat-{index}"))
-                            .flex()
-                            .items_center()
-                            .gap(px(theme::GAP_SM))
-                            .px(px(theme::PAD_SM))
-                            .py(px(theme::PAD_XS))
-                            .rounded(px(theme::RADIUS_SM))
-                            .cursor_pointer()
-                            .text_size(px(theme::FONT_SIZE_SM))
-                            .when(chosen, |row| row.bg(t.lane_card_active_bg))
-                            .when(!chosen, |row| row.hover(|style| style.bg(t.overlay_hover)))
-                            .child(
-                                icons::icon(if chosen {
-                                    icons::RADIO_ON
-                                } else {
-                                    icons::RADIO_OFF
-                                })
-                                .text_color(t.text_muted),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_color(t.text_body)
-                                    .child(title.clone()),
-                            )
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .text_color(t.text_subtle)
-                                    .child(s::handoff_tab(*tab)),
-                            )
-                            .on_click(cx.listener(move |ws, _, _, cx| {
-                                ws.choose_pr_handoff_chat(id, pane, cx)
-                            }))
-                    }),
-            )
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(t.text_body)
+                            .child(chat.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(t.text_subtle)
+                            .child(s::handoff_tab(chat.tab)),
+                    )
+                    .on_click(
+                        cx.listener(move |ws, _, _, cx| ws.choose_pr_handoff_chat(id, pane, cx)),
+                    )
+            }))
             .into_any_element()
     };
     let (preview, ready) = match &view.prompt {

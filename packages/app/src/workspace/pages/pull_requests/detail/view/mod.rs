@@ -123,11 +123,7 @@ pub(in crate::workspace) struct DetailInputs<'a> {
     pub keeping: crate::github::DraftKeeping,
     /// The writable agent chats of the worktree a handoff goes to, the one
     /// it would pick first; staged only while a handoff is open.
-    pub handoff_chats: Vec<(
-        crate::workspace::main_area::pane_tree::PaneId,
-        gpui::SharedString,
-        usize,
-    )>,
+    pub handoff_chats: Vec<crate::workspace::github_ops::review_send::WritableChat>,
     pub now: DateTime<Utc>,
 }
 
@@ -204,6 +200,15 @@ fn ready(
         (Some(_), false, true) => SendSlot::Nothing,
         (Some(_), false, false) => SendSlot::Ready,
     };
+    // What there is to fix, only while it can still be fixed; the lines
+    // selected stay sendable, as code to read.
+    let to_fix = |nothing: bool| {
+        if loaded.summary.state.is_active() {
+            send(nothing)
+        } else {
+            SendSlot::NotOpen
+        }
+    };
     ReadyView {
         checks_summary: checks_summary(loaded),
         checks: loaded
@@ -211,7 +216,7 @@ fn ready(
             .iter()
             .map(|entry| check_row(entry, state))
             .collect(),
-        checks_send: send(loaded.summary.failed.is_empty()),
+        checks_send: to_fix(loaded.summary.failed.is_empty()),
         rerun: (!loaded.failed_runs().is_empty())
             .then(|| ActionSlot::of(&state.action, PrAction::Rerunning, None)),
         threads: match state.threads() {
@@ -219,7 +224,7 @@ fn ready(
             Some(Load::Failed(reason)) => ThreadsView::Failed(reason.clone()),
             Some(Load::Ready(threads)) => threads_view(threads, state, drafts, keeping),
         },
-        threads_send: send(open_threads(state, loaded) == (0, false)),
+        threads_send: to_fix(open_threads(state, loaded) == (0, false)),
         code_send: send(false),
         review_comments: (state.tab() == PrTab::Files)
             .then(|| review_comments(state, drafts, keeping)),

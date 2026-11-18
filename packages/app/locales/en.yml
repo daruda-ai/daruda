@@ -1428,6 +1428,7 @@ pull_requests:
   send_to_agent: "Send to agent"
   send_no_lane: "Create a worktree for this pull request first to send it to an agent"
   send_nothing_checks: "No failing check to send"
+  send_not_open: "Closed or merged: nothing left for an agent to fix"
   send_nothing_threads: "No open thread to send"
   show_log: "Show the failed step's log"
   hide_log: "Hide the log"
@@ -1491,6 +1492,7 @@ pull_requests:
   auto_merge_stack_item: "Auto-merge with the stack below: %{method}"
   auto_merge_stack_confirm_body: "“%{title}” and the open (not draft) pull requests below it in its stack go in with %{method} on their own once their requirements pass: %{range}. Only if the stack is still these when sent."
   auto_merge_off: "Turn off auto-merge"
+  dequeue: "Remove from merge queue"
   auto_merge_confirm_title: "Turn on auto-merge for #%{number}?"
   auto_merge_confirm_body: "“%{title}” goes into %{base} with %{method} on its own once its requirements pass, only if its head is still the commit shown here."
   auto_merge_confirm_ok: "Turn on auto-merge"
@@ -1527,6 +1529,9 @@ pull_requests:
   close_confirm_title: "Close #%{number}?"
   close_confirm_body: "“%{title}” is closed without merging. Its branch stays, and it can be reopened."
   close_confirm_ok: "Close pull request"
+  dequeue_confirm_title: "Remove #%{number} from the merge queue?"
+  dequeue_confirm_body: "“%{title}” leaves the merge queue and loses its place in it. It is not closed."
+  dequeue_confirm_ok: "Remove from queue"
 
 # Settings panel
 settings:
@@ -2014,6 +2019,7 @@ error:
   github_pr_reopen_failed: "Reopening #%{number} failed"
   github_pr_auto_merge_failed: "Turning on auto-merge for #%{number} failed"
   github_pr_auto_merge_off_failed: "Turning off auto-merge for #%{number} failed"
+  github_pr_dequeue_failed: "Removing #%{number} from the merge queue failed"
   github_pr_ready_failed: "Marking #%{number} ready for review failed"
   github_pr_rerun_failed: "Rerunning the failed checks of #%{number} failed"
   # A merge pinned to the shown head commit found the branch moved on.

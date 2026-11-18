@@ -71,6 +71,9 @@ pub(in crate::workspace) enum PrDetailShot {
     /// The Threads tab with a reply that failed and could not be confirmed:
     /// Post held, "It did not post" offered.
     ReplyUnconfirmed,
+    /// In the merge queue without auto-merge: merge held, Remove from
+    /// merge queue offered.
+    Queued,
 }
 
 /// What the active lane's PR looks like in a capture.
@@ -430,7 +433,7 @@ impl Workspace {
             failed("test (ubuntu-latest)", test),
             failed("clippy", clippy),
         ];
-        let merge_ready = shot == PrDetailShot::MergeConfirm;
+        let merge_ready = matches!(shot, PrDetailShot::MergeConfirm | PrDetailShot::Queued);
         if !merge_ready {
             summary.checks = CheckRollup::Failing { failed: None };
         }
@@ -467,7 +470,10 @@ impl Workspace {
             .with(daruda_github::Permission::Close, true)
             .with(daruda_github::Permission::Reopen, true),
             auto_merge: None,
-            queue: None,
+            queue: (shot == PrDetailShot::Queued).then_some(daruda_github::QueueEntry {
+                position: Some(2),
+                state: daruda_github::QueueState::AwaitingChecks,
+            }),
             node_id: format!("PR_{}", row.pr.number),
             changed_files: None,
         };
@@ -665,6 +671,7 @@ impl Workspace {
                     }
                     self.ask_pr_merge(id, MergeMethod::Squash, window, cx);
                 }
+                PrDetailShot::Queued => {}
             }
         }
     }

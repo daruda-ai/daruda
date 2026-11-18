@@ -17,6 +17,15 @@ use crate::surface::strings::error as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
 
+/// A writable agent chat a prompt can go into.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct WritableChat {
+    pub pane: PaneId,
+    pub title: gpui::SharedString,
+    /// Its tab's number, from 1: chats often share a title.
+    pub tab: usize,
+}
+
 /// Among writable chats as `(pane, tab)`: the focused one, then one in the
 /// active tab, then the first by tab order.
 fn best_target(
@@ -115,20 +124,24 @@ impl Workspace {
         &self,
         lane: LaneRef,
         cx: &App,
-    ) -> Vec<(PaneId, gpui::SharedString, usize)> {
+    ) -> Vec<WritableChat> {
         let Some(runtime) = self.main_area.runtimes.get(&lane) else {
             return Vec::new();
         };
         let best = self.pr_send_target(lane, cx);
-        let mut chats: Vec<(PaneId, gpui::SharedString, usize)> = self
+        let mut chats: Vec<WritableChat> = self
             .lane_chats(lane, cx)
             .into_iter()
             .filter_map(|(pane, tab)| {
                 let title = runtime.panes.iter().find(|held| held.id == pane)?.title(cx);
-                Some((pane, title, tab + 1))
+                Some(WritableChat {
+                    pane,
+                    title,
+                    tab: tab + 1,
+                })
             })
             .collect();
-        chats.sort_by_key(|(pane, _, tab)| (Some(*pane) != best, *tab));
+        chats.sort_by_key(|chat| (Some(chat.pane) != best, chat.tab));
         chats
     }
 

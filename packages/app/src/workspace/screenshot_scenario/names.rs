@@ -50,6 +50,8 @@ const NAME_PULL_REQUESTS_FILES: &str = "pull-requests-files";
 const NAME_PULL_REQUESTS_THREADS: &str = "pull-requests-threads";
 /// The Threads tab with a failed reply whose posting could not be confirmed.
 const NAME_PULL_REQUESTS_REPLY_UNCONFIRMED: &str = "pull-requests-reply-unconfirmed";
+/// A pull request in the merge queue, offered to be taken out.
+const NAME_PULL_REQUESTS_QUEUED: &str = "pull-requests-queued";
 const NAME_SETTINGS_ERROR: &str = "settings-error";
 /// CLI token for Settings with a search query typed: the results page.
 const NAME_SETTINGS_SEARCH: &str = "settings-search";
@@ -321,6 +323,7 @@ impl ScreenshotScenario {
             NAME_PULL_REQUESTS_FILES => Some(Self::PullRequestsFiles),
             NAME_PULL_REQUESTS_THREADS => Some(Self::PullRequestsThreads),
             NAME_PULL_REQUESTS_REPLY_UNCONFIRMED => Some(Self::PullRequestsReplyUnconfirmed),
+            NAME_PULL_REQUESTS_QUEUED => Some(Self::PullRequestsQueued),
             NAME_LEFT_DOCK_WORKTREES => Some(Self::LeftDockWorktrees),
             NAME_LEFT_DOCK_RAIL => Some(Self::LeftDockRail),
             NAME_LEFT_DOCK_EXPANDED => Some(Self::LeftDockExpanded),

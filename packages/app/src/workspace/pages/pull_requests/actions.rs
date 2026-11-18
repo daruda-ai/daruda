@@ -23,6 +23,7 @@ pub(in crate::workspace) enum PrAction {
     Reopening,
     EnablingAutoMerge,
     DisablingAutoMerge,
+    Dequeuing,
     MarkingReady,
     Rerunning,
 }
@@ -74,6 +75,7 @@ impl PrAction {
             (_, Self::Reopening) => error::github_pr_reopen_failed(number),
             (_, Self::EnablingAutoMerge) => error::github_pr_auto_merge_failed(number),
             (_, Self::DisablingAutoMerge) => error::github_pr_auto_merge_off_failed(number),
+            (_, Self::Dequeuing) => error::github_pr_dequeue_failed(number),
             (_, Self::MarkingReady) => error::github_pr_ready_failed(number),
             (_, Self::Rerunning) => error::github_pr_rerun_failed(number),
         }
@@ -126,6 +128,10 @@ enum Request {
     AutoMergeOff {
         pr: String,
     },
+    /// Out of the merge queue, pull request `pr` (its node id).
+    Dequeue {
+        pr: String,
+    },
     Ready,
     Rerun(Vec<u64>),
 }
@@ -138,6 +144,7 @@ impl Request {
             Self::Reopen => PrAction::Reopening,
             Self::AutoMergeOn { .. } => PrAction::EnablingAutoMerge,
             Self::AutoMergeOff { .. } => PrAction::DisablingAutoMerge,
+            Self::Dequeue { .. } => PrAction::Dequeuing,
             Self::Ready => PrAction::MarkingReady,
             Self::Rerun(_) => PrAction::Rerunning,
         }
@@ -156,6 +163,7 @@ impl Request {
             Self::AutoMergeOff { pr: node } => {
                 pr.node_id == *node && pr.can_disable_auto_merge_now()
             }
+            Self::Dequeue { pr: node } => pr.node_id == *node && pr.can_dequeue_now(),
             Self::Ready => pr.is_draft(),
             // Only runs with a failed job: a rerun reruns those jobs.
             Self::Rerun(runs) => {
@@ -186,6 +194,7 @@ impl Request {
                 stack.as_deref(),
             ),
             Self::AutoMergeOff { pr } => gh.disable_auto_merge(repo, &pr),
+            Self::Dequeue { pr } => gh.dequeue_pr(repo, &pr),
             Self::Ready => gh.set_ready(repo, number),
             // Every run is asked even after one fails; the first failure
             // is what is reported.
@@ -329,6 +338,35 @@ impl Workspace {
             return;
         };
         self.run_pr_action(id, Request::AutoMergeOff { pr }, cx);
+    }
+
+    /// The header's Remove from merge queue: ask, as its place in the queue
+    /// is lost, then take it out. Offered whether or not auto-merge put it
+    /// there, so one queued without auto-merge can leave too.
+    pub(in crate::workspace) fn ask_pr_dequeue(
+        &mut self,
+        id: PrDetailId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(target) = self.pr_action_target(id) else {
+            return;
+        };
+        let request = Request::Dequeue {
+            pr: target.loaded.node_id.clone(),
+        };
+        if !request.applies(&target.loaded) {
+            return;
+        }
+        confirm_destructive(
+            cx.weak_entity(),
+            s::dequeue_confirm_title(target.number),
+            s::dequeue_confirm_body(&target.title),
+            s::dequeue_confirm_ok(),
+            move |ws, _window, cx| ws.run_pr_action(id, request.clone(), cx),
+            window,
+            cx,
+        );
     }
 
     /// The header's Close: ask, then close without merging.

@@ -10,6 +10,9 @@ pub(in crate::workspace) enum SendSlot {
     NoLane,
     /// Nothing failing, or no open thread.
     Nothing,
+    /// Closed or merged: its failing checks and open threads are no
+    /// longer anyone's to fix.
+    NotOpen,
     Sending,
     Ready,
 }
@@ -77,8 +80,8 @@ pub(in crate::workspace) struct MergeView {
 pub(in crate::workspace) enum HeaderControls {
     /// Not read yet, or merged: nothing.
     None,
-    /// Open or a draft.
-    Active(HeaderActions),
+    /// Open or a draft. Boxed: its slots dwarf the other variants.
+    Active(Box<HeaderActions>),
     /// Closed unmerged.
     Reopen(ActionSlot),
 }
@@ -87,7 +90,7 @@ pub(in crate::workspace) enum HeaderControls {
 impl HeaderControls {
     pub(in crate::workspace) fn actions(&self) -> Option<&HeaderActions> {
         match self {
-            Self::Active(actions) => Some(actions),
+            Self::Active(actions) => Some(actions.as_ref()),
             Self::None | Self::Reopen(_) => None,
         }
     }
@@ -109,6 +112,8 @@ pub(in crate::workspace) struct HeaderActions {
     pub ready: Option<ActionSlot>,
     /// Only while auto-merge is on and the viewer may turn it off.
     pub auto_merge_off: Option<ActionSlot>,
+    /// Only while it is in the merge queue.
+    pub dequeue: Option<ActionSlot>,
 }
 
 /// The open pull requests of the shown one's stack up to it, when there
@@ -126,7 +131,7 @@ pub(super) fn header_controls(
 ) -> HeaderControls {
     match loaded.summary.state {
         PrState::Open | PrState::Draft => {
-            HeaderControls::Active(header_actions(loaded, running, stack))
+            HeaderControls::Active(Box::new(header_actions(loaded, running, stack)))
         }
         PrState::Closed => {
             let refused = (!loaded.can_reopen_now()).then(s::reopen_not_allowed);
@@ -190,6 +195,9 @@ pub(super) fn header_actions(
         auto_merge_off: loaded
             .can_disable_auto_merge_now()
             .then(|| ActionSlot::of(running, PrAction::DisablingAutoMerge, None)),
+        dequeue: loaded
+            .can_dequeue_now()
+            .then(|| ActionSlot::of(running, PrAction::Dequeuing, None)),
         close: ActionSlot::of(
             running,
             PrAction::Closing,
@@ -200,9 +208,13 @@ pub(super) fn header_actions(
 }
 
 /// Auto-merge, while on: with which method and who turned it on. Not a
-/// merge: GitHub merges (or queues) it once its requirements pass.
+/// merge: GitHub merges (or queues) it once its requirements pass. Closed
+/// or merged, there is nothing left for it to do, whatever was read.
 pub(super) fn auto_merge_fact(loaded: &PrDetail) -> Option<Fact> {
-    let on = loaded.auto_merge.as_ref()?;
+    let on = loaded
+        .auto_merge
+        .as_ref()
+        .filter(|_| loaded.summary.state.is_active())?;
     let method = on.method.map_or_else(s::method_unknown, method_label);
     Some(Fact {
         label: s::side_auto_merge(),
@@ -214,9 +226,10 @@ pub(super) fn auto_merge_fact(loaded: &PrDetail) -> Option<Fact> {
     })
 }
 
-/// Its place in the merge queue: accepted, not merged yet.
+/// Its place in the merge queue: accepted, not merged yet; never for one
+/// closed or merged, which has left the queue.
 pub(super) fn queue_fact(loaded: &PrDetail) -> Option<Fact> {
-    let entry = loaded.queue?;
+    let entry = loaded.queue.filter(|_| loaded.summary.state.is_active())?;
     let (state, mood) = match entry.state {
         QueueState::Queued => (s::queue_queued(), Mood::Quiet),
         QueueState::AwaitingChecks => (s::queue_awaiting_checks(), Mood::Quiet),

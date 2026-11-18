@@ -57,7 +57,7 @@ pub(in crate::workspace) fn item(number: u64, head: &str) -> PrListItem {
     }
 }
 
-fn detail(number: u64, head: &str) -> PrDetail {
+pub(in crate::workspace) fn detail(number: u64, head: &str) -> PrDetail {
     PrDetail {
         summary: summary(number, head),
         body: "Body".into(),
@@ -444,7 +444,7 @@ fn send_to_agent_goes_to_the_linked_worktrees_chat(cx: &mut TestAppContext) {
     assert_eq!(gh.count(GhOp::FailedLog), 1);
     let handoff = view(&f, cx).handoff.expect("the handoff is shown");
     assert_eq!(handoff.chats.len(), 1, "the linked worktree's one chat");
-    assert_eq!(handoff.chosen, Some(handoff.chats[0].0));
+    assert_eq!(handoff.chosen, Some(handoff.chats[0].pane));
     let Prepared::Ready(prompt) = &handoff.prompt else {
         panic!("prepared: {:?}", handoff.prompt);
     };
@@ -658,6 +658,71 @@ fn a_missing_worktree_folder_opens_no_chat(cx: &mut TestAppContext) {
     });
 }
 
+/// The pull request read again while a handoff is open: the failing
+/// checks are prepared again with it, the chat chosen kept, so the prompt
+/// is never older than the page and nothing goes in while it is read.
+#[gpui::test]
+fn a_refresh_prepares_an_open_handoff_again(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let id = read_detail(&f, cx);
+    handoff(&f, id, cx);
+    let chosen = view(&f, cx).handoff.expect("shown").chosen;
+    assert_eq!(gh.count(GhOp::FailedLog), 1);
+    gh.set_failed_log(
+        JOB,
+        "job\tstep\t2026-01-02T00:00:00.0000000Z test lex ... FAILED",
+    );
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    assert!(
+        matches!(
+            view(&f, cx).handoff.expect("still shown").prompt,
+            Prepared::Reading(_)
+        ),
+        "read again before anything goes in"
+    );
+    insert(&f, id, cx);
+    assert_eq!(input(&f, cx), "", "nothing inserted while it is read");
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::FailedLog), 2, "the log is read again");
+    let shown = view(&f, cx).handoff.expect("still shown");
+    assert_eq!(shown.chosen, chosen, "the chat chosen stays");
+    let Prepared::Ready(prompt) = &shown.prompt else {
+        panic!("prepared: {:?}", shown.prompt);
+    };
+    assert!(prompt.contains("test lex ... FAILED"), "{prompt}");
+    assert!(
+        !prompt.contains("test parse"),
+        "the old log is gone: {prompt}"
+    );
+}
+
+/// Read closed or merged since: the handoff of its failing checks closes,
+/// and none is offered, as nobody is left to fix them.
+#[gpui::test]
+fn a_pull_request_closed_since_takes_its_handoff_away(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let id = read_detail(&f, cx);
+    handoff(&f, id, cx);
+    assert!(view(&f, cx).handoff.is_some());
+    let mut closed = detail(7, "feat");
+    closed.summary.state = PrState::Closed;
+    gh.set_pr_detail(&repo(), 7, closed);
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    cx.run_until_parked();
+    assert!(view_handoff_closed(&f, cx), "closed with it");
+    insert(&f, id, cx);
+    assert_eq!(input(&f, cx), "");
+    let DetailBody::Ready(ready) = view(&f, cx).body else {
+        panic!("not read");
+    };
+    assert_eq!(ready.checks_send, SendSlot::NotOpen);
+    assert_eq!(ready.threads_send, SendSlot::NotOpen);
+}
+
 /// A chat appearing while the panel was open is chosen among, not
 /// joined by another.
 #[gpui::test]
@@ -691,7 +756,7 @@ fn the_chat_chosen_takes_the_prompt(cx: &mut TestAppContext) {
     handoff(&f, id, cx);
     let shown = view(&f, cx).handoff.expect("shown");
     assert_eq!(shown.chats.len(), 2, "both chats are offered");
-    let second = shown.chats[1].0;
+    let second = shown.chats[1].pane;
     f.ws.update(cx, |ws, cx| ws.choose_pr_handoff_chat(id, second, cx));
     assert_eq!(view(&f, cx).handoff.unwrap().chosen, Some(second));
     insert(&f, id, cx);
@@ -723,7 +788,7 @@ fn a_chosen_chat_closed_is_not_swapped_for_another(cx: &mut TestAppContext) {
     insert(&f, id, cx);
     assert_eq!(input(&f, cx), "", "nothing goes to a chat not chosen");
     // The last chat closed too: a new one is offered, not another choice.
-    let last = view(&f, cx).handoff.unwrap().chats[0].0;
+    let last = view(&f, cx).handoff.unwrap().chats[0].pane;
     cx.update_window(f.window.into(), |_, window, cx| {
         f.ws.update(cx, |ws, cx| ws.close_pane_by_id(last, window, cx));
     })
@@ -1614,7 +1679,8 @@ fn auto_merge_on_a_moved_head_is_refused(cx: &mut TestAppContext) {
     );
 }
 
-/// In the merge queue: accepted, not merged; the merge button says so.
+/// In the merge queue: accepted, not merged; the merge button says so,
+/// and it can be taken out of the queue.
 #[gpui::test]
 fn a_queued_pull_request_is_shown_queued_not_merged(cx: &mut TestAppContext) {
     use crate::surface::strings::pull_requests as s;
@@ -1623,7 +1689,7 @@ fn a_queued_pull_request_is_shown_queued_not_merged(cx: &mut TestAppContext) {
         position: Some(2),
         state: daruda_github::QueueState::AwaitingChecks,
     });
-    let (f, _, _) = opened(cx, queued);
+    let (f, gh, id) = opened(cx, queued);
     assert_eq!(view(&f, cx).state, s::state_open());
     let actions = view(&f, cx).header.actions().cloned().expect("open");
     assert_eq!(
@@ -1639,6 +1705,24 @@ fn a_queued_pull_request_is_shown_queued_not_merged(cx: &mut TestAppContext) {
         )),
         "{facts:?}"
     );
+    // Queued without auto-merge: nothing to turn off, but it can leave.
+    assert_eq!(actions.auto_merge_off, None);
+    assert_eq!(actions.dequeue, Some(ActionSlot::Ready));
+    assert!(asks(&f, cx, |ws, window, cx| ws.ask_pr_dequeue(id, window, cx)));
+    assert_eq!(gh.count(GhOp::Dequeue), 0, "nothing before OK");
+    confirm(&f, cx);
+    assert!(gh.calls().contains(&GhCall::Dequeue {
+        repo: repo(),
+        pr: "PR_7".into(),
+    }));
+    let actions = view(&f, cx).header.actions().cloned().expect("still open");
+    assert_eq!(actions.dequeue, None, "out of the queue");
+    assert!(
+        !matches!(actions.merge.slot, ActionSlot::Blocked(_)),
+        "it can be merged again: {:?}",
+        actions.merge.slot
+    );
+    assert!(error_titles(&f, cx).is_empty());
 }
 
 /// One failed check's own Rerun asks for its run alone, says it was asked
@@ -1676,12 +1760,14 @@ fn a_failed_check_reruns_its_own_run_and_links_to_github(cx: &mut TestAppContext
         })
         .collect();
     assert_eq!(reruns, [12], "that run alone");
-    assert_eq!(
-        view(&f, cx).notice,
-        Some(ActionNotice::Done(
-            crate::surface::strings::pull_requests::rerun_requested()
-        ))
-    );
+    let requested = Some(ActionNotice::Done(
+        crate::surface::strings::pull_requests::rerun_requested(),
+    ));
+    assert_eq!(view(&f, cx).notice, requested);
+    // Polling meanwhile reads the lists, not the detail: the line stays.
+    cx.update(crate::github::PrPoller::tick);
+    cx.run_until_parked();
+    assert_eq!(view(&f, cx).notice, requested, "kept across a poll");
 
     // A run with no failed job is never asked to rerun.
     f.ws.update(cx, |ws, cx| ws.rerun_pr_check_run(id, 99, cx));

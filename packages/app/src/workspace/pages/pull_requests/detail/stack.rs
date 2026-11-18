@@ -1,6 +1,9 @@
-//! The shown pull request's native stack: read with the detail (and again
-//! with each refresh), shown beside it with each pull request of the stack
-//! to go to. A server without stacks, or one not stacked, shows nothing.
+//! The shown pull request's native stack: read with the detail, shown beside
+//! it with each pull request of the stack to go to. A server without stacks,
+//! or one not stacked, shows nothing. A refresh reads it again only while it
+//! is stacked (or not read yet): one answered unstacked, or a server without
+//! stacks, is not asked again on every refresh while the detail is open. An
+//! auto-merge with the stack reads it again itself before it goes.
 
 use daruda_github::{GhError, StackRead};
 use gpui::Context;
@@ -16,6 +19,15 @@ impl PrDetailState {
     /// auto-merge with the stack checks the range anew before it goes.
     pub(in crate::workspace) fn stack(&self) -> Option<&StackRead> {
         self.stack.as_ref().and_then(ReadSlot::last_known)
+    }
+
+    /// Whether a read of the detail reads the stack too: not once GitHub
+    /// answered that there is none to show.
+    pub(super) fn stack_worth_reading(&self) -> bool {
+        !matches!(
+            self.stack(),
+            Some(StackRead::NotStacked | StackRead::Unsupported)
+        )
     }
 
     fn begin_stack_read(&mut self) -> ReadTicket {

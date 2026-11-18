@@ -1122,6 +1122,7 @@ pull_requests:
   send_to_agent: "에이전트에 보내기"
   send_no_lane: "에이전트에 보내려면 먼저 이 pull request의 worktree를 만드세요"
   send_nothing_checks: "보낼 실패한 체크가 없습니다"
+  send_not_open: "닫혔거나 merge되어 에이전트가 고칠 것이 없습니다"
   send_nothing_threads: "보낼 열린 스레드가 없습니다"
   show_log: "실패한 단계의 로그 보기"
   hide_log: "로그 숨기기"
@@ -1176,6 +1177,7 @@ pull_requests:
   auto_merge_stack_item: "아래 스택과 함께 자동 merge: %{method}"
   auto_merge_stack_confirm_body: "“%{title}”과(와) 스택에서 그 아래의 열린(draft 아닌) pull request가 요구 사항을 통과하면 %{method}(으)로 저절로 들어갑니다: %{range}. 보낼 때 스택이 그대로일 때만 그렇습니다."
   auto_merge_off: "자동 merge 끄기"
+  dequeue: "merge queue에서 빼기"
   auto_merge_confirm_title: "#%{number}의 자동 merge를 켤까요?"
   auto_merge_confirm_body: "“%{title}”이(가) 요구 사항을 통과하면 %{method}(으)로 %{base}에 저절로 들어갑니다. head가 여기 보이는 commit일 때만 그렇습니다."
   auto_merge_confirm_ok: "자동 merge 켜기"
@@ -1207,6 +1209,9 @@ pull_requests:
   close_confirm_title: "#%{number}을(를) 닫을까요?"
   close_confirm_body: "“%{title}”이(가) merge되지 않고 닫힙니다. 브랜치는 남고, 다시 열 수 있습니다."
   close_confirm_ok: "Pull request 닫기"
+  dequeue_confirm_title: "#%{number}을(를) merge queue에서 뺄까요?"
+  dequeue_confirm_body: "“%{title}”이(가) merge queue에서 빠지고 queue 안의 순서를 잃습니다. 닫히지는 않습니다."
+  dequeue_confirm_ok: "Queue에서 빼기"
 
 # Settings panel
 settings:
@@ -1499,6 +1504,7 @@ error:
   github_pr_reopen_failed: "#%{number} 다시 열기 실패"
   github_pr_auto_merge_failed: "#%{number} 자동 merge 켜기 실패"
   github_pr_auto_merge_off_failed: "#%{number} 자동 merge 끄기 실패"
+  github_pr_dequeue_failed: "#%{number} merge queue에서 빼기 실패"
   github_pr_ready_failed: "#%{number} 리뷰 준비 완료 표시 실패"
   github_pr_rerun_failed: "#%{number}의 실패한 체크 재실행 실패"
   github_pr_stack_changed: "#%{number}의 스택이 표시된 뒤 바뀌었습니다. 메뉴를 다시 열어 지금 모습을 확인하세요"

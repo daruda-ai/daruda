@@ -195,6 +195,37 @@ fn a_url_into_the_shown_pull_request_moves_it_to_that_tab(cx: &mut TestAppContex
     assert_eq!(tab(cx), Some(PrTab::Checks));
 }
 
+/// A link to another pull request while one is shown leaves that one
+/// first, then opens on the link's tab: the tab goes with the opening, not
+/// picked after it, so it holds whenever the leaving lands.
+#[gpui::test]
+fn a_url_to_another_pull_request_opens_it_on_its_tab(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    gh.set_pr_detail(
+        &repo(),
+        8,
+        crate::workspace::tests::pull_request_detail::detail(8, "other"),
+    );
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    for url in [
+        "https://github.com/o/r/pull/7",
+        "https://github.com/o/r/pull/8/checks",
+    ] {
+        vcx.update(|window, cx| {
+            f.ws.update(cx, |ws, cx| {
+                let (repo, address) = ws.resolve_pr_address(url, cx).unwrap();
+                ws.open_pr_by_address(repo, address, window, cx);
+            })
+        });
+        vcx.run_until_parked();
+    }
+    f.ws.read_with(cx, |ws, _| {
+        let detail = ws.pages.pull_requests.detail.as_ref().expect("shown");
+        assert_eq!(detail.key(), (repo(), 8), "the other one replaced it");
+        assert_eq!(detail.tab(), PrTab::Checks);
+    });
+}
+
 /// A read made to open a link does not replace what the detail already
 /// shown read for itself: started before, it may be the older of the two.
 #[gpui::test]

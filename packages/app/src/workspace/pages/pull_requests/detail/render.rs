@@ -268,6 +268,11 @@ fn header_actions(id: PrDetailId, actions: &HeaderActions, cx: &Context<Workspac
             .debug_selector(|| "pr-detail-auto-merge-off".into())
             .on_click(cx.listener(move |ws, _, _, cx| ws.disable_pr_auto_merge(id, cx)))
         }))
+        .children(actions.dequeue.as_ref().map(|slot| {
+            with_slot(button("pr-detail-dequeue", s::dequeue()), slot)
+                .debug_selector(|| "pr-detail-dequeue".into())
+                .on_click(cx.listener(move |ws, _, window, cx| ws.ask_pr_dequeue(id, window, cx)))
+        }))
         .child(
             with_slot(button("pr-detail-close", s::action_close()), &actions.close)
                 .debug_selector(|| "pr-detail-close".into())
@@ -413,6 +418,7 @@ pub(super) fn send_line(
     let tooltip = match send {
         SendSlot::NoLane => Some(s::send_no_lane()),
         SendSlot::Nothing => Some(nothing),
+        SendSlot::NotOpen => Some(s::send_not_open()),
         SendSlot::Sending | SendSlot::Ready => None,
     };
     div()

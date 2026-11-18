@@ -42,6 +42,10 @@ fn a_stacked_pull_request_shows_its_stack_and_goes_to_the_others(cx: &mut TestAp
     );
     open(&f, item(7, "feat"), cx);
     cx.run_until_parked();
+    // Stacked: each refresh reads it again, as its others merge.
+    let reads = gh.count(daruda_github::fake::GhOp::PrStack);
+    refresh(&f, cx);
+    assert_eq!(gh.count(daruda_github::fake::GhOp::PrStack), reads + 1);
     let stack = stack_shown(&f, cx).expect("stacked");
     let order: Vec<(u64, bool)> = stack.entries.iter().map(|e| (e.number, e.shown)).collect();
     assert_eq!(order, [(6, false), (7, true)], "the one shown marked");
@@ -80,6 +84,15 @@ fn a_server_without_stacks_shows_none(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(stack_shown(&f, cx), None);
     assert_eq!(gh.count(daruda_github::fake::GhOp::PrStack), 1);
+    // Answered: not asked again on every refresh.
+    refresh(&f, cx);
+    assert_eq!(gh.count(daruda_github::fake::GhOp::PrStack), 1);
+}
+
+fn refresh(f: &super::GitFixture, cx: &mut TestAppContext) {
+    let id = super::pull_request_detail::id(f, cx);
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    cx.run_until_parked();
 }
 
 /// Not among the entries listed: no position is claimed.
