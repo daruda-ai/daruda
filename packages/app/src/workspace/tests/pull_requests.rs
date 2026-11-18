@@ -536,3 +536,104 @@ fn choosing_the_copy_makes_the_worktree_there_and_keeps_the_browsed_scope(cx: &m
         "choosing where to make a worktree does not narrow the page"
     );
 }
+
+/// The repository's worktrees: its own on `main`, and one left at the
+/// pull request's checkout path on `left_on` (its window closed before it
+/// was registered).
+fn with_left_worktree(left_on: &'static str) -> impl FnOnce(FakeRepo) -> FakeRepo {
+    move |repo: FakeRepo| {
+        let root = repo.root().to_owned();
+        let left = crate::workspace::lane_ops::lane_checkout_path(&root, "feature");
+        repo.worktrees(vec![
+            crate::lane::git::GitWorktreeInfo {
+                path: root,
+                branch: Some("main".into()),
+                head: None,
+                bare: false,
+            },
+            crate::lane::git::GitWorktreeInfo {
+                path: left,
+                branch: Some(left_on.into()),
+                head: None,
+                bare: false,
+            },
+        ])
+    }
+}
+
+/// A worktree made for the pull request and never registered is taken as
+/// it is: no fetch, no second worktree.
+#[gpui::test]
+fn a_worktree_left_unregistered_is_taken_not_made_again(cx: &mut TestAppContext) {
+    let (f, _gh) = window(cx, |repo| repo);
+    // Made after the window looked for worktrees: no lane holds it.
+    let left = crate::workspace::lane_ops::lane_checkout_path(&f.root, "feature");
+    std::fs::create_dir_all(&left).unwrap();
+    f.fake.set_worktrees(
+        &f.root,
+        vec![
+            crate::lane::git::GitWorktreeInfo {
+                path: f.root.clone(),
+                branch: Some("main".into()),
+                head: None,
+                bare: false,
+            },
+            crate::lane::git::GitWorktreeInfo {
+                path: left.clone(),
+                branch: Some("feature".into()),
+                head: None,
+                bare: false,
+            },
+        ],
+    );
+    f.fake.add_repo(FakeRepo::at(&left).branch("feature"));
+    let lanes_before = f.ws.read_with(cx, |ws, _| ws.projects.lanes().count());
+    click(&f, &item(4, "feature", false), cx);
+    cx.run_until_parked();
+    // Its head is fetched to measure the branch against; nothing is made.
+    assert!(
+        calls(&f)
+            .iter()
+            .all(|call| matches!(call, GitCall::FetchRef { .. })),
+        "{:?}",
+        calls(&f)
+    );
+    assert!(
+        error_titles(&f, cx).is_empty(),
+        "{:?}",
+        error_titles(&f, cx)
+    );
+    f.ws.read_with(cx, |ws, _| {
+        let active = ws.lane_for(ws.active_ref()).map(|lane| lane.path.clone());
+        assert!(
+            active.is_some_and(|path| daruda_core::path::same_path(&path, &left)),
+            "the worktree left behind is the one shown"
+        );
+        assert_eq!(ws.projects.lanes().count(), lanes_before + 1, "registered");
+    });
+    assert!(lock_free(&f, cx));
+}
+
+/// Another branch stands where the worktree would go: it is left alone.
+#[gpui::test]
+fn a_worktree_of_another_branch_in_the_way_is_left_alone(cx: &mut TestAppContext) {
+    let (f, _gh) = window(cx, with_left_worktree("someone-elses"));
+    let left = crate::workspace::lane_ops::lane_checkout_path(&f.root, "feature");
+    std::fs::create_dir_all(&left).unwrap();
+    let lanes_before = f.ws.read_with(cx, |ws, _| ws.projects.lanes().count());
+    click(&f, &item(4, "feature", false), cx);
+    cx.run_until_parked();
+    assert!(calls(&f).is_empty(), "{:?}", calls(&f));
+    let occupied = error::lane_checkout_occupied(left.display());
+    assert!(
+        f.ws.read_with(cx, |ws, _| ws
+            .error_history()
+            .iter()
+            .any(|report| report.title == occupied)),
+        "said why"
+    );
+    f.ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.projects.lanes().count(), lanes_before);
+    });
+    assert!(lock_free(&f, cx));
+}

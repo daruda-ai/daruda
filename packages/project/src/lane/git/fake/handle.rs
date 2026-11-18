@@ -200,6 +200,9 @@ impl GitRepo for FakeHandle {
         };
         self.write(GitOp::FetchRef, call, |_| ())
     }
+    fn worktrees(&self) -> Result<Vec<super::super::GitWorktreeInfo>, GitError> {
+        self.read(GitOp::Worktrees, |repo| Ok(repo.probe().lanes))
+    }
     fn remote_branches(&self, remote: &str) -> Result<Vec<String>, GitError> {
         self.read(GitOp::RemoteBranches, |repo| {
             Ok(repo.remote_branches_answer(remote))

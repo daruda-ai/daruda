@@ -210,7 +210,12 @@ fn lane_button(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
         LaneSlot::Creating { review } => (true, *review),
         LaneSlot::Absent { review } => (false, *review),
     };
-    let label = super::super::list::create_lane_label(review);
+    use super::super::CheckoutStage;
+    let label = match (creating, view.checkout_stage) {
+        (true, Some(CheckoutStage::Fetching)) => s::checkout_fetching(),
+        (true, Some(CheckoutStage::Creating)) => s::checkout_creating(),
+        _ => super::super::list::create_lane_label(review),
+    };
     button("pr-detail-create-lane", label)
         .debug_selector(|| "pr-detail-create-lane".into())
         .loading(creating)

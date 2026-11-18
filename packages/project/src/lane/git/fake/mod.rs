@@ -151,6 +151,7 @@ pub enum GitOp {
     FetchRef,
     RemoteUrl,
     RemoteBranches,
+    Worktrees,
     Pull,
     HasLocalBranch,
     LocalBranch,

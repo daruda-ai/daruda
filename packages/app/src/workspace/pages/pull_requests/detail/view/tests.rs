@@ -131,6 +131,7 @@ static NO_PROGRESS: super::super::progress::ReviewProgress =
 fn inputs(lane: Option<&LaneFacts>) -> DetailInputs<'_> {
     DetailInputs {
         link: Default::default(),
+        checkout_stage: None,
         lane,
         sending: false,
         creating: &NOTHING_CREATING,

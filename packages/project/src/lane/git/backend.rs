@@ -79,6 +79,8 @@ pub trait GitRepo: Send + Sync {
     fn has_local_branch(&self, branch: &str) -> Result<bool, GitError>;
     /// The branches `remote` had when git last fetched it; never fetches.
     fn remote_branches(&self, remote: &str) -> Result<Vec<String>, GitError>;
+    /// The repository's worktrees, as `git worktree list` names them.
+    fn worktrees(&self) -> Result<Vec<super::GitWorktreeInfo>, GitError>;
     /// Where local `branch` stands against `head`, a ref the caller fetched.
     fn local_branch(&self, branch: &str, head: &str) -> Result<LocalBranch, GitError>;
     /// Create `branch` at `head` or move it there, never touching its
@@ -235,6 +237,9 @@ impl GitRepo for SystemRepo {
     }
     fn remote_branches(&self, remote: &str) -> Result<Vec<String>, GitError> {
         remote::remote_branches(&self.path, remote)
+    }
+    fn worktrees(&self) -> Result<Vec<super::GitWorktreeInfo>, GitError> {
+        super::list_worktrees(&self.path)
     }
     fn local_branch(&self, branch: &str, head: &str) -> Result<LocalBranch, GitError> {
         remote::local_branch(&self.path, branch, head)

@@ -396,6 +396,8 @@ pub(in crate::workspace) struct PrDetailView {
     pub meta: String,
     pub url: Option<String>,
     pub lane: LaneSlot,
+    /// How far making its worktree has got, while it runs.
+    pub checkout_stage: Option<super::super::CheckoutStage>,
     pub header: HeaderControls,
     /// What the last action came to, until the next action or reload.
     pub notice: Option<ActionNotice>,
@@ -415,6 +417,8 @@ pub(in crate::workspace) struct DetailInputs<'a> {
     pub sending: bool,
     /// Pull requests a worktree is being made for.
     pub creating: &'a BTreeSet<PrKey>,
+    /// How far making this one's worktree has got.
+    pub checkout_stage: Option<super::super::CheckoutStage>,
     /// Which files were marked viewed.
     pub progress: &'a super::progress::ReviewProgress,
     /// Unsent review text kept for this pull request.
@@ -512,6 +516,7 @@ pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_
         meta: meta(item, loaded, inputs.now),
         url: pr.web_url().map(str::to_owned),
         lane: LaneSlot::of(item, inputs.lane, inputs.creating),
+        checkout_stage: inputs.checkout_stage,
         header: loaded.map_or(HeaderControls::None, |loaded| {
             header_controls(loaded, &state.action)
         }),

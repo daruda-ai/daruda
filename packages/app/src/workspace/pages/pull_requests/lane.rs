@@ -28,6 +28,18 @@ enum CheckedOut {
     /// Where it was: it has commits of its own the head lacks, which moving
     /// it would drop.
     KeptLocal,
+    /// A worktree made for it before and never registered (its window or
+    /// project closed while git ran): checked again and taken as it is,
+    /// `kept_local` when its branch holds commits the fetched head lacks.
+    Existing { kept_local: bool },
+}
+
+/// How far opening a worktree for a pull request has got, as its button
+/// says while it runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum CheckoutStage {
+    Fetching,
+    Creating,
 }
 
 #[derive(Debug)]
@@ -35,6 +47,9 @@ enum CheckoutError {
     /// A branch of the review branch's name exists that was not made to
     /// review this pull request; it is the person's, and is left alone.
     Foreign(String),
+    /// A worktree already stands where this one goes, on another branch or
+    /// reviewing another pull request: it is left alone.
+    Occupied(std::path::PathBuf),
     Git(GitError),
 }
 
@@ -42,6 +57,7 @@ impl std::fmt::Display for CheckoutError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Foreign(branch) => write!(f, "{branch} exists and reviews no such pull request"),
+            Self::Occupied(path) => write!(f, "another worktree stands at {}", path.display()),
             Self::Git(e) => e.fmt(f),
         }
     }
@@ -61,8 +77,40 @@ fn check_out(
     checkout: &PrCheckout,
     push_url: &str,
     new_path: &std::path::Path,
+    progress: &dyn Fn(CheckoutStage),
 ) -> Result<CheckedOut, CheckoutError> {
     let (branch, head) = (checkout.branch.as_str(), checkout.start.as_str());
+    // One made before and left unregistered is taken, never made twice,
+    // once it is checked to be this pull request's: same branch, and for a
+    // review branch, the same mark; then its head is fetched and the branch
+    // measured against it. Only a directory that is there counts: git keeps
+    // listing one deleted since.
+    let left = if new_path.exists() {
+        repo.worktrees()?
+            .into_iter()
+            .find(|worktree| daruda_core::path::same_path(&worktree.path, new_path))
+    } else {
+        None
+    };
+    if let Some(left) = left {
+        let ours = left.branch.as_deref() == Some(branch)
+            && match &checkout.review {
+                Some(mark) => repo.review_mark(branch)?.as_ref() == Some(mark),
+                None => true,
+            };
+        if !ours {
+            return Err(CheckoutError::Occupied(left.path));
+        }
+        progress(CheckoutStage::Fetching);
+        repo.fetch_ref(
+            fetch_source(repo, &checkout.remote, push_url)?,
+            &checkout.refspec,
+        )?;
+        // Checked out there, the branch cannot be moved: it is said when it
+        // holds commits of its own.
+        let kept_local = repo.local_branch(branch, head)? == LocalBranch::Ahead;
+        return Ok(CheckedOut::Existing { kept_local });
+    }
     // Measured before the fetch as well: after a force push the new head no
     // longer holds the old one, yet a branch inside the old one has nothing
     // of the person's to lose.
@@ -73,6 +121,7 @@ fn check_out(
     {
         return Err(CheckoutError::Foreign(branch.to_owned()));
     }
+    progress(CheckoutStage::Fetching);
     repo.fetch_ref(
         fetch_source(repo, &checkout.remote, push_url)?,
         &checkout.refspec,
@@ -94,6 +143,7 @@ fn check_out(
     {
         repo.set_review_mark(branch, mark)?;
     }
+    progress(CheckoutStage::Creating);
     repo.add_lane(new_path, LaneStart::existing_branch(branch))?;
     Ok(if at_head {
         CheckedOut::AtHead
@@ -204,11 +254,29 @@ impl Workspace {
             new_path: plan.new_path.clone(),
             dedup: "pull_requests.lane_unregistered",
         };
+        // Stages reach the button as git gets to them.
+        let (stages, mut heard) = futures::channel::mpsc::unbounded();
+        let stage_key = key.clone();
+        cx.spawn(async move |ws, cx| {
+            use futures::StreamExt as _;
+            while let Some(stage) = heard.next().await {
+                let key = stage_key.clone();
+                // SILENT-OK: the window closed; nothing shows the stage.
+                let _ = ws.update(cx, |ws, cx| ws.show_checkout_stage(key, stage, cx));
+            }
+        })
+        .detach();
         // A window that closes while git runs takes its in-flight row with
         // it; the pipeline logs a checkout left behind.
         self.spawn_worktree_create(
             create,
-            move |repo, new_path| check_out(repo, &checkout, &push.url, new_path),
+            move |repo, new_path| {
+                let progress = |stage| {
+                    // SILENT-OK: the listener is gone with its window.
+                    let _ = stages.unbounded_send(stage);
+                };
+                check_out(repo, &checkout, &push.url, new_path, &progress)
+            },
             move |ws, made, window, cx| ws.finish_pr_lane(key, project, plan, made, window, cx),
             window,
             cx,
@@ -228,13 +296,20 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.pages.pull_requests.creating.remove(&key);
+        self.pages.pull_requests.checkout_stages.remove(&key);
         cx.notify();
         match made {
             Err(CheckoutError::Foreign(branch)) => self.report_review_branch_taken(&branch, cx),
+            Err(CheckoutError::Occupied(path)) => self.warn_pr_lane(
+                error::lane_checkout_occupied(path.display()),
+                "pull_requests.checkout_occupied",
+                cx,
+            ),
             Err(CheckoutError::Git(e)) => self.report_pr_lane_failure(e.to_string(), cx),
+            // Opening it again from the pull request takes this worktree.
             Ok(_) if self.project_for(project).is_none() => self.report_pr_lane_failure(
                 format!(
-                    "the project closed; the worktree is at {}",
+                    "the project closed; the worktree is at {}, and opening it again from the pull request takes it",
                     plan.new_path.display()
                 ),
                 cx,
@@ -242,10 +317,21 @@ impl Workspace {
             Ok(checked_out) => {
                 let branch = plan.branch.clone();
                 self.register_created_lane(plan, project, None, LaneReveal::Foreground, window, cx);
-                if checked_out == CheckedOut::KeptLocal {
+                if matches!(
+                    checked_out,
+                    CheckedOut::KeptLocal | CheckedOut::Existing { kept_local: true }
+                ) {
                     self.report_kept_local_commits(&branch, cx);
                 }
             }
+        }
+    }
+
+    /// Show how far opening a worktree for `key` has got, while it runs.
+    fn show_checkout_stage(&mut self, key: PrKey, stage: CheckoutStage, cx: &mut Context<Self>) {
+        if self.pages.pull_requests.creating.contains(&key) {
+            self.pages.pull_requests.checkout_stages.insert(key, stage);
+            cx.notify();
         }
     }
 
@@ -421,16 +507,122 @@ mod tests {
     const ROOT: &str = "/fake/repo";
     const PUSH_URL: &str = "git@github.com:o/r.git";
 
+    /// `check_out` into `new_path`, with the stages it said.
+    fn run_into(
+        repo: FakeRepo,
+        cross_repo: bool,
+        new_path: &Path,
+    ) -> (
+        Result<CheckedOut, CheckoutError>,
+        Vec<GitCall>,
+        Vec<CheckoutStage>,
+    ) {
+        let git = FakeGit::new().with(repo);
+        let checkout = PrCheckout::of(&item(cross_repo, Some("me"), None), "up");
+        let stages = std::cell::RefCell::new(Vec::new());
+        let made = check_out(
+            &*git.open(Path::new(ROOT)),
+            &checkout,
+            PUSH_URL,
+            new_path,
+            &|stage| stages.borrow_mut().push(stage),
+        );
+        (made, git.calls(), stages.into_inner())
+    }
+
+    fn left_at(repo: FakeRepo, path: &Path, branch: &str) -> FakeRepo {
+        repo.worktrees(vec![
+            crate::lane::git::GitWorktreeInfo {
+                path: Path::new(ROOT).to_owned(),
+                branch: Some("main".into()),
+                head: None,
+                bare: false,
+            },
+            crate::lane::git::GitWorktreeInfo {
+                path: path.to_owned(),
+                branch: Some(branch.into()),
+                head: None,
+                bare: false,
+            },
+        ])
+    }
+
+    #[test]
+    fn a_worktree_left_at_the_path_is_taken_only_when_it_is_this_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let checkout = PrCheckout::of(&item(false, Some("me"), None), "up");
+        let branch = checkout.branch.clone();
+
+        // Ours: fetched and measured, nothing made.
+        let (made, calls, stages) =
+            run_into(left_at(FakeRepo::at(ROOT), path, &branch), false, path);
+        assert!(matches!(made, Ok(CheckedOut::Existing { .. })), "{made:?}");
+        assert!(
+            calls
+                .iter()
+                .all(|call| matches!(call, GitCall::FetchRef { .. })),
+            "{calls:?}"
+        );
+        assert_eq!(stages, [CheckoutStage::Fetching]);
+
+        // Another branch there: left alone, nothing asked of git.
+        let (made, calls, stages) = run_into(
+            left_at(FakeRepo::at(ROOT), path, "someone-elses"),
+            false,
+            path,
+        );
+        assert!(matches!(made, Err(CheckoutError::Occupied(_))), "{made:?}");
+        assert!(
+            calls.is_empty() && stages.is_empty(),
+            "{calls:?} {stages:?}"
+        );
+
+        // A review branch whose mark names another pull request.
+        let review = PrCheckout::of(&item(true, Some("me"), None), "up");
+        let repo = left_at(FakeRepo::at(ROOT), path, &review.branch)
+            .review_mark(review.branch.clone(), "github.com/o/r#999");
+        let (made, _, _) = run_into(repo, true, path);
+        assert!(matches!(made, Err(CheckoutError::Occupied(_))), "{made:?}");
+    }
+
+    #[test]
+    fn a_listed_worktree_whose_directory_is_gone_is_made_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("gone");
+        let checkout = PrCheckout::of(&item(false, Some("me"), None), "up");
+        let (made, calls, _) = run_into(
+            left_at(FakeRepo::at(ROOT), &gone, &checkout.branch),
+            false,
+            &gone,
+        );
+        assert!(matches!(made, Ok(CheckedOut::AtHead)), "{made:?}");
+        assert!(
+            calls
+                .iter()
+                .any(|call| matches!(call, GitCall::AddLane { .. }))
+        );
+    }
+
     /// What `check_out` asked git to change, the reads left out.
     fn run(repo: FakeRepo, cross_repo: bool) -> (Result<CheckedOut, CheckoutError>, Vec<GitCall>) {
         let git = FakeGit::new().with(repo);
         let checkout = PrCheckout::of(&item(cross_repo, Some("me"), None), "up");
+        let stages = std::cell::RefCell::new(Vec::new());
         let made = check_out(
             &*git.open(Path::new(ROOT)),
             &checkout,
             PUSH_URL,
             Path::new("/fake/lane"),
+            &|stage| stages.borrow_mut().push(stage),
         );
+        // Every checkout that makes a worktree says so in order.
+        if matches!(made, Ok(CheckedOut::AtHead | CheckedOut::KeptLocal)) {
+            assert_eq!(
+                *stages.borrow(),
+                [CheckoutStage::Fetching, CheckoutStage::Creating]
+            );
+        }
         (made, git.calls())
     }
 

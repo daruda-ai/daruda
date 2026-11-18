@@ -20,6 +20,7 @@ mod controls;
 mod counts;
 pub(in crate::workspace) mod detail;
 mod lane;
+pub(in crate::workspace) use lane::CheckoutStage;
 pub(in crate::workspace) mod list;
 pub(in crate::workspace) mod navigation;
 pub(in crate::workspace) mod page_layout;
@@ -50,6 +51,8 @@ pub(in crate::workspace) struct PullRequestsPage {
     /// Pull requests a worktree is being made for, so their rows do not
     /// offer to make a second one.
     creating: BTreeSet<PrKey>,
+    /// How far each worktree being made has got.
+    checkout_stages: std::collections::HashMap<PrKey, lane::CheckoutStage>,
     /// Staged each frame while the page shows its list; `None` otherwise.
     pub(in crate::workspace) snapshot: Option<PrPageSnapshot>,
     /// The pull request shown over the list, if any.
@@ -138,6 +141,7 @@ impl PullRequestsPage {
             state: PrSearchState::Open,
             search,
             creating: BTreeSet::new(),
+            checkout_stages: std::collections::HashMap::new(),
             cache: PrListCache::default(),
             snapshot: None,
             detail: None,
@@ -285,6 +289,12 @@ impl Workspace {
                     link: self.pr_link_inputs(state.item(), lane, &lanes, cx),
                     sending: lane.is_some_and(|lane| self.is_sending_pr(lane.lane)),
                     creating: &self.pages.pull_requests.creating,
+                    checkout_stage: self
+                        .pages
+                        .pull_requests
+                        .checkout_stages
+                        .get(&(state.item().repo.clone(), state.item().pr.number))
+                        .copied(),
                     progress: &self.pages.pull_requests.progress,
                     drafts: draft_owner
                         .as_ref()
