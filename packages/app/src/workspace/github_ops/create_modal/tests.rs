@@ -36,6 +36,31 @@ fn the_last_commit_subject_fills_the_title(cx: &mut TestAppContext) {
     assert!(!request.draft);
 }
 
+/// Start over puts back what the form opened with: the commit's subject
+/// as the title, not an empty one.
+#[gpui::test]
+fn starting_over_fills_the_title_from_the_commit_again(cx: &mut TestAppContext) {
+    let repo = FakeRepo::at("/fake/repo").head_message("Fix the sidebar");
+    let (window, modal) = build(cx, repo, Some("main"));
+    window
+        .update(cx, |modal, window, cx| {
+            modal
+                .title
+                .update(cx, |input, cx| input.set_value("Mine", window, cx));
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let title = |cx: &mut TestAppContext| {
+        modal.read_with(cx, |modal, cx| modal.title.read(cx).value().to_string())
+    };
+    assert_eq!(title(cx), "Mine");
+    window
+        .update(cx, |modal, window, cx| modal.discard_for_test(window, cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(title(cx), "Fix the sidebar");
+}
+
 #[gpui::test]
 fn a_blank_title_has_no_request_and_a_blank_base_is_the_default(cx: &mut TestAppContext) {
     // No commits: nothing to prefill.

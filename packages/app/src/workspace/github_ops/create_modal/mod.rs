@@ -70,6 +70,9 @@ pub(crate) struct CreatePrModal {
     default_base: Option<String>,
     /// The template the description was last filled from.
     template: Option<String>,
+    /// The last commit's subject once read: the title until one is typed,
+    /// and again after Start over.
+    subject: Option<String>,
     /// Typed in by the user, clearing included: a late commit subject or
     /// template never replaces it.
     title_edited: bool,
@@ -180,6 +183,7 @@ impl CreatePrModal {
             remote_branches: Vec::new(),
             default_base,
             template: None,
+            subject: None,
             title_edited: false,
             body_edited: false,
             base_edited: false,
@@ -368,6 +372,7 @@ impl CreatePrModal {
     }
 
     fn prefill_title(&mut self, subject: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.subject = Some(subject.clone());
         // Typed, or typed and cleared: the user's choice stands.
         if subject.is_empty() || self.title_edited {
             return;

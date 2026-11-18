@@ -126,6 +126,10 @@ impl CreatePrModal {
             self.draft_edited,
         ) = (false, false, false, false);
         self.restored = false;
+        // As when it opened: the last commit's subject, if read by now.
+        if let Some(subject) = self.subject.clone() {
+            self.prefill_title(subject, window, cx);
+        }
         if let Some(default) = self.templates.default.clone() {
             self.apply_template(&default.path, window, cx);
         }

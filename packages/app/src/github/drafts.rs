@@ -52,6 +52,13 @@ pub(crate) struct DraftStore {
 
 impl Global for DraftStore {}
 
+/// What drafts are kept under: a pull request's, or a branch's being
+/// made into one. Nothing else names drafts.
+pub(crate) trait DraftKey {}
+
+impl DraftKey for DraftOwner {}
+impl DraftKey for CreationOwner {}
+
 impl DraftStore {
     /// Load the profile's drafts and save there from now on. A damaged or
     /// newer file is left alone: drafts are then kept in memory only, never
@@ -110,7 +117,7 @@ impl DraftStore {
 
     /// Whether drafts under `owner` (`None`: no account known) are kept
     /// across restarts.
-    pub(crate) fn keeping<T>(owner: Option<&T>, cx: &App) -> DraftKeeping {
+    pub(crate) fn keeping<T: DraftKey>(owner: Option<&T>, cx: &App) -> DraftKeeping {
         let Some(store) = cx.try_global::<Self>() else {
             // No store installed: tests, where nothing is promised.
             return if owner.is_some() {
