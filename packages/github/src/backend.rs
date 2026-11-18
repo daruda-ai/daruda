@@ -55,6 +55,9 @@ pub trait Gh: Send + Sync {
     fn merge_base(&self, repo: &RepoId, base: &str, head: &str) -> Result<String, GhError>;
     /// What `path` holds at `commit`.
     fn file_at(&self, repo: &RepoId, path: &str, commit: &str) -> Result<crate::FileText, GhError>;
+    /// Pull request `number`'s place in a native stack; `Unsupported` from a
+    /// server without stacks, which then keeps the ordinary flow.
+    fn pr_stack(&self, repo: &RepoId, number: u64) -> Result<crate::StackRead, GhError>;
     /// What pull request `number`'s page shows, in one request.
     fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError>;
     /// Merge pull request `number` with `method`, only if its head is still
@@ -120,13 +123,15 @@ pub trait Gh: Send + Sync {
     fn reopen_pr(&self, repo: &RepoId, number: u64) -> Result<(), GhError>;
     /// Turn auto-merge on for pull request `pr` (its node id) with
     /// `method`, only while its head is `head_sha`: GitHub then merges it,
-    /// or queues it, once its requirements pass.
+    /// or queues it, once its requirements pass. With `include_stack`, for
+    /// the eligible pull requests below it in its stack too.
     fn enable_auto_merge(
         &self,
         repo: &RepoId,
         pr: &str,
         method: MergeMethod,
         head_sha: &str,
+        include_stack: bool,
     ) -> Result<(), GhError>;
     /// Turn auto-merge off for pull request `pr` (its node id).
     fn disable_auto_merge(&self, repo: &RepoId, pr: &str) -> Result<(), GhError>;

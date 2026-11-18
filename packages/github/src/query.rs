@@ -21,6 +21,7 @@ mod paged_search;
 mod rate_limit;
 mod review;
 mod search;
+mod stack;
 mod thread_actions;
 mod threads;
 
@@ -35,6 +36,8 @@ pub(crate) use review::{
     LATEST_REVIEW_QUERY, parse_latest_review, parse_submitted, submit_request,
 };
 pub(crate) use search::{newest_first, parse_search_prs, search_prs_query, search_string};
+pub use stack::{PrStack, StackEntry, StackRead};
+pub(crate) use stack::{lacks_stacks, parse_stack, stack_query};
 pub(crate) use thread_actions::{
     REPLY_MUTATION, RESOLVE_MUTATION, UNRESOLVE_MUTATION, parse_reply, parse_resolved,
 };
@@ -349,6 +352,18 @@ impl Context {
     }
 }
 
+/// GitHub's pull request `state` and draft flag as one state; `None` for a
+/// state this crate does not know.
+fn pr_state(state: &str, draft: bool) -> Option<PrState> {
+    match (state, draft) {
+        ("OPEN", true) => Some(PrState::Draft),
+        ("OPEN", false) => Some(PrState::Open),
+        ("MERGED", _) => Some(PrState::Merged),
+        ("CLOSED", _) => Some(PrState::Closed),
+        _ => None,
+    }
+}
+
 impl PrNode {
     fn into_summary(self) -> Result<PrSummary, GhError> {
         self.into_parts().map(|(summary, _)| summary)
@@ -356,13 +371,8 @@ impl PrNode {
 
     /// The summary and the check runs it was added up from.
     fn into_parts(self) -> Result<(PrSummary, Vec<CheckRun>), GhError> {
-        let state = match (self.state.as_str(), self.is_draft) {
-            ("OPEN", true) => PrState::Draft,
-            ("OPEN", false) => PrState::Open,
-            ("MERGED", _) => PrState::Merged,
-            ("CLOSED", _) => PrState::Closed,
-            (other, _) => return Err(GhError::Parse(format!("PR state {other}"))),
-        };
+        let state = pr_state(&self.state, self.is_draft)
+            .ok_or_else(|| GhError::Parse(format!("PR state {}", self.state)))?;
         let review = match self.review_decision.as_deref() {
             Some("APPROVED") => Some(ReviewDecision::Approved),
             Some("CHANGES_REQUESTED") => Some(ReviewDecision::ChangesRequested),

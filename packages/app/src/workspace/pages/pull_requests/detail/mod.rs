@@ -32,6 +32,8 @@ pub(in crate::workspace) mod review_submit;
 mod review_submit_render;
 pub(in crate::workspace) mod reviewers;
 mod reviewers_render;
+pub(in crate::workspace) mod stack;
+mod stack_render;
 pub(in crate::workspace) mod thread_actions;
 mod threads_render;
 pub(in crate::workspace) mod view;
@@ -131,6 +133,8 @@ pub(in crate::workspace) struct PrDetailState {
     /// The comments on the pull request itself, read when the Description
     /// tab is first shown.
     conversation: Option<ReadSlot<daruda_github::Conversation>>,
+    /// Its native stack, read with it.
+    stack: Option<ReadSlot<daruda_github::StackRead>>,
     /// The description being edited, kept across refreshes.
     body_edit: Option<description::BodyEdit>,
     /// The reviewer box and the last change to who is asked.
@@ -161,6 +165,7 @@ impl PrDetailState {
             expanded_threads: std::collections::HashSet::new(),
             thread_work: thread_actions::ThreadsWork::default(),
             conversation: None,
+            stack: None,
             body_edit: None,
             reviewer_requests: reviewers::ReviewerRequests::default(),
             composer: None,
@@ -566,6 +571,9 @@ impl Workspace {
             move |ws, result, cx| ws.land_pr_detail(id, ticket, result, cx),
         )
         .detach();
+        // Its stack with it: apart, so a server without stacks still reads
+        // the detail.
+        self.read_pr_stack(id, cx);
     }
 
     /// A refresh that fails keeps what an earlier read showed.

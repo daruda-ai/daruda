@@ -39,7 +39,7 @@ pub use model::{
     ReviewThreadDraft, ReviewThreads, ReviewerState, SubmittedReview, ThreadPermissions,
     reviewer_name_ok,
 };
-pub use query::RepoPrs;
+pub use query::{PrStack, RepoPrs, StackEntry, StackRead};
 pub use search::{
     PrAudience, PrCommitStatus, PrRequestedReviewer, PrReviewFilter, PrSearchContinuation,
     PrSearchCriteria, PrSearchPage, PrSearchRequest, PrSearchState,

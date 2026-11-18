@@ -25,6 +25,9 @@ pub enum GhError {
     /// A value the caller passed that must not reach `gh`, such as a merge
     /// pinned to something that is not a commit SHA.
     BadArgument(String),
+    /// A stack operation's range is no longer the stack's: it changed since
+    /// it was shown, and nothing was sent.
+    StackChanged,
 }
 
 impl std::fmt::Display for GhError {
@@ -44,6 +47,9 @@ impl std::fmt::Display for GhError {
             Self::Parse(message) => write!(f, "unexpected gh output: {message}"),
             Self::HeadMoved => write!(f, "the pull request changed since it was read"),
             Self::BadArgument(message) => write!(f, "refused to run gh: {message}"),
+            Self::StackChanged => {
+                write!(f, "the stack changed since it was shown; nothing was sent")
+            }
         }
     }
 }
@@ -108,7 +114,7 @@ impl GhError {
             | Self::Parse(_) => FailureKind::Transient,
             // What a mutation alone answers. No poll produces these; they
             // are named so a new variant has to choose its kind here.
-            Self::HeadMoved | Self::BadArgument(_) => FailureKind::Transient,
+            Self::HeadMoved | Self::BadArgument(_) | Self::StackChanged => FailureKind::Transient,
         }
     }
 }

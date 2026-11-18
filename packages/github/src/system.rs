@@ -533,6 +533,30 @@ impl Gh for SystemGh {
         })
     }
 
+    fn pr_stack(&self, repo: &RepoId, number: u64) -> Result<crate::StackRead, GhError> {
+        let answer = self.stdout([
+            "api".to_owned(),
+            "graphql".to_owned(),
+            "--hostname".to_owned(),
+            repo.host().to_owned(),
+            "-f".to_owned(),
+            format!("query={}", crate::query::stack_query()),
+            "-f".to_owned(),
+            format!("owner={}", repo.owner()),
+            "-f".to_owned(),
+            format!("name={}", repo.name()),
+            "-F".to_owned(),
+            format!("number={number}"),
+        ]);
+        match answer {
+            Ok(json) => crate::query::parse_stack(&json),
+            Err(GhError::Exit { stderr, .. }) if crate::query::lacks_stacks(&stderr) => {
+                Ok(crate::StackRead::Unsupported)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError> {
         let json = self.stdout([
             "api".to_owned(),
@@ -717,9 +741,10 @@ impl Gh for SystemGh {
         pr: &str,
         method: MergeMethod,
         head_sha: &str,
+        include_stack: bool,
     ) -> Result<(), GhError> {
         check_head_sha(head_sha)?;
-        let json = self.stdout(auto_merge_args(
+        let mut args = auto_merge_args(
             repo,
             crate::query::ENABLE_AUTO_MERGE_MUTATION,
             &[
@@ -727,7 +752,11 @@ impl Gh for SystemGh {
                 ("method", crate::query::method_name(method)),
                 ("head", head_sha),
             ],
-        ))?;
+        );
+        // `-F`: a Boolean, not the string "true".
+        args.push("-F".to_owned());
+        args.push(format!("stack={include_stack}"));
+        let json = self.stdout(args)?;
         crate::query::parse_auto_merge(&json, true)
     }
 

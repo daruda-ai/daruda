@@ -34,4 +34,5 @@ fn methods_have_githubs_names() {
     assert_eq!(method_name(MergeMethod::Merge), "MERGE");
     assert_eq!(method_name(MergeMethod::Rebase), "REBASE");
     assert!(ENABLE_AUTO_MERGE_MUTATION.contains("expectedHeadOid: $head"));
+    assert!(ENABLE_AUTO_MERGE_MUTATION.contains("includeStack: $stack"));
 }

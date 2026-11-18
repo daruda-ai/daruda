@@ -68,6 +68,7 @@ impl PrAction {
     fn failure_title(self, number: u64, e: &GhError) -> String {
         match (e, self) {
             (GhError::HeadMoved, _) => error::github_pr_head_moved(number),
+            (GhError::StackChanged, _) => error::github_pr_stack_changed(number),
             (_, Self::Merging) => error::github_pr_merge_failed(number),
             (_, Self::Closing) => error::github_pr_close_failed(number),
             (_, Self::Reopening) => error::github_pr_reopen_failed(number),
@@ -113,11 +114,14 @@ enum Request {
     },
     Close,
     Reopen,
-    /// Auto-merge on pull request `pr` (its node id), pinned to `head_sha`.
+    /// Auto-merge on pull request `pr` (its node id), pinned to `head_sha`;
+    /// with `stack`, the open pull requests of its stack below it too, as
+    /// shown when asked (checked again before it is sent).
     AutoMergeOn {
         pr: String,
         method: MergeMethod,
         head_sha: String,
+        stack: Option<Vec<u64>>,
     },
     AutoMergeOff {
         pr: String,
@@ -174,7 +178,22 @@ impl Request {
                 pr,
                 method,
                 head_sha,
-            } => gh.enable_auto_merge(repo, &pr, method, &head_sha),
+                stack,
+            } => {
+                // The range shown must still be the stack's: an edit to it
+                // since is not merged on a guess.
+                if let Some(shown) = &stack {
+                    let now = match gh.pr_stack(repo, number)? {
+                        daruda_github::StackRead::Stacked(read) => read.range_below(number),
+                        daruda_github::StackRead::NotStacked
+                        | daruda_github::StackRead::Unsupported => None,
+                    };
+                    if now.as_ref() != Some(shown) {
+                        return Err(GhError::StackChanged);
+                    }
+                }
+                gh.enable_auto_merge(repo, &pr, method, &head_sha, stack.is_some())
+            }
             Self::AutoMergeOff { pr } => gh.disable_auto_merge(repo, &pr),
             Self::Ready => gh.set_ready(repo, number),
             // Every run is asked even after one fails; the first failure
@@ -258,6 +277,7 @@ impl Workspace {
         &mut self,
         id: PrDetailId,
         method: MergeMethod,
+        stack: Option<Vec<u64>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -271,14 +291,29 @@ impl Workspace {
             pr,
             method,
             head_sha: target.loaded.head_sha.clone(),
+            stack: stack.clone(),
         };
         if !request.applies(&target.loaded) {
             return;
         }
         let ws = cx.weak_entity();
+        let body = match &stack {
+            Some(range) => s::auto_merge_stack_confirm_body(
+                &target.title,
+                merge_action_label(method),
+                range
+                    .iter()
+                    .map(|number| format!("#{number}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            None => {
+                s::auto_merge_confirm_body(&target.title, merge_action_label(method), &target.base)
+            }
+        };
         open_confirm_dialog(
             s::auto_merge_confirm_title(target.number),
-            s::auto_merge_confirm_body(&target.title, merge_action_label(method), &target.base),
+            body,
             s::auto_merge_confirm_ok(),
             ButtonVariant::Primary,
             move |_, _window, cx| {
@@ -402,6 +437,24 @@ impl Workspace {
         cx.notify();
     }
 
+    /// What was shown is out of date and nothing was sent: a warning whose
+    /// title already says it all, without `gh`'s words after. Returns the
+    /// line said under the header.
+    fn report_out_of_date(
+        &mut self,
+        title: String,
+        dedup: &'static str,
+        cx: &mut Context<Self>,
+    ) -> String {
+        let report = ErrorReport::new(title.clone())
+            .severity(ErrorSeverity::Warning)
+            .at(file!(), line!())
+            .dedup(dedup)
+            .build();
+        self.report_error(report, cx);
+        title
+    }
+
     /// GitHub changed (or may have) whichever detail is shown now, so the
     /// list and the lane badges are asked again either way; only the detail
     /// that asked is reloaded or freed. A failure is reported even if that
@@ -427,16 +480,16 @@ impl Workspace {
                 PrPoller::nudge(repo, cx);
                 None
             }
-            Err(e @ GhError::HeadMoved) => {
-                let title = action.failure_title(number, e);
-                let report = ErrorReport::new(title.clone())
-                    .severity(ErrorSeverity::Warning)
-                    .at(file!(), line!())
-                    .dedup("github.pr_action.head_moved")
-                    .build();
-                self.report_error(report, cx);
-                Some(title)
-            }
+            Err(e @ GhError::HeadMoved) => Some(self.report_out_of_date(
+                action.failure_title(number, e),
+                "github.pr_action.head_moved",
+                cx,
+            )),
+            Err(e @ GhError::StackChanged) => Some(self.report_out_of_date(
+                action.failure_title(number, e),
+                "github.pr_action.stack_changed",
+                cx,
+            )),
             Err(e) => {
                 let title = action.failure_title(number, e);
                 let line = s::action_failed(&title, e);
@@ -577,6 +630,7 @@ mod tests {
                     pr: "PR_7".into(),
                     method: MergeMethod::Squash,
                     head_sha: "abc".into(),
+                    stack: None,
                 },
                 &waiting,
                 true,
@@ -587,6 +641,7 @@ mod tests {
                     pr: "PR_8".into(),
                     method: MergeMethod::Squash,
                     head_sha: "abc".into(),
+                    stack: None,
                 },
                 &waiting,
                 false,
@@ -597,6 +652,7 @@ mod tests {
                     pr: "PR_7".into(),
                     method: MergeMethod::Squash,
                     head_sha: "abc".into(),
+                    stack: None,
                 },
                 &draft,
                 false,
@@ -607,6 +663,7 @@ mod tests {
                     pr: "PR_7".into(),
                     method: MergeMethod::Squash,
                     head_sha: "abc".into(),
+                    stack: None,
                 },
                 &open,
                 false,

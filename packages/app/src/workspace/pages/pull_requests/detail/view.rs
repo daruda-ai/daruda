@@ -75,6 +75,9 @@ impl ActionSlot {
     }
 }
 
+/// Merge methods and the labels their menu items carry.
+pub(in crate::workspace) type MethodLabels = Vec<(MergeMethod, String)>;
+
 /// The merge button and its menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct MergeView {
@@ -84,6 +87,9 @@ pub(in crate::workspace) struct MergeView {
     pub methods: Vec<(MergeMethod, String)>,
     /// The methods auto-merge can be turned on with, and their labels.
     pub auto: Vec<(MergeMethod, String)>,
+    /// In a stack with open pull requests below it: those it would take
+    /// with it, bottom first, and the methods to do so with.
+    pub auto_stack: Option<(Vec<u64>, MethodLabels)>,
     pub slot: ActionSlot,
 }
 
@@ -345,6 +351,34 @@ pub(in crate::workspace) struct SideView {
     pub link: super::links::LinkInputs,
     /// The pull request, for tying a worktree to it.
     pub item: super::super::list::PrKey,
+    /// Its native stack, when it is in one.
+    pub stack: Option<StackView>,
+}
+
+/// A native stack beside the detail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct StackView {
+    pub number: u64,
+    pub base: String,
+    pub size: u32,
+    /// Bottom first.
+    pub entries: Vec<StackEntryView>,
+    /// Where the shown one sits; `None` when it is not among those listed.
+    pub shown_at: Option<u32>,
+    /// Pull requests of the stack not listed here.
+    pub more: usize,
+}
+
+/// One pull request of a stack beside the detail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) struct StackEntryView {
+    pub position: u32,
+    pub number: u64,
+    pub title: String,
+    /// Said beside it when not open.
+    pub state: PrState,
+    /// The one the detail shows.
+    pub shown: bool,
 }
 
 /// Changing who is asked to review.
@@ -518,7 +552,7 @@ pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_
         lane: LaneSlot::of(item, inputs.lane, inputs.creating),
         checkout_stage: inputs.checkout_stage,
         header: loaded.map_or(HeaderControls::None, |loaded| {
-            header_controls(loaded, &state.action)
+            header_controls(loaded, &state.action, stack_range(state))
         }),
         notice: match &state.action {
             ActionState::Failed(line) => Some(ActionNotice::Failed(line.clone())),
@@ -618,11 +652,26 @@ fn ready(
     }
 }
 
+/// The open pull requests of the shown one's stack up to it, when there
+/// are others below it.
+fn stack_range(state: &PrDetailState) -> Option<Vec<u64>> {
+    match state.stack()? {
+        daruda_github::StackRead::Stacked(stack) => stack.range_below(state.item.pr.number),
+        daruda_github::StackRead::NotStacked | daruda_github::StackRead::Unsupported => None,
+    }
+}
+
 /// Merge is offered unless it cannot go at all (see [`MergeBlock`]); then
 /// its tooltip says why, in the words the summary column uses.
-fn header_controls(loaded: &PrDetail, running: &ActionState) -> HeaderControls {
+fn header_controls(
+    loaded: &PrDetail,
+    running: &ActionState,
+    stack: Option<Vec<u64>>,
+) -> HeaderControls {
     match loaded.summary.state {
-        PrState::Open | PrState::Draft => HeaderControls::Active(header_actions(loaded, running)),
+        PrState::Open | PrState::Draft => {
+            HeaderControls::Active(header_actions(loaded, running, stack))
+        }
         PrState::Closed => {
             let refused = (!loaded.can_reopen).then(s::reopen_not_allowed);
             HeaderControls::Reopen(ActionSlot::of(running, PrAction::Reopening, refused))
@@ -631,7 +680,11 @@ fn header_controls(loaded: &PrDetail, running: &ActionState) -> HeaderControls {
     }
 }
 
-fn header_actions(loaded: &PrDetail, running: &ActionState) -> HeaderActions {
+fn header_actions(
+    loaded: &PrDetail,
+    running: &ActionState,
+    stack: Option<Vec<u64>>,
+) -> HeaderActions {
     let draft = loaded.is_draft();
     let methods: Vec<(MergeMethod, String)> = loaded
         .merge_menu()
@@ -660,6 +713,22 @@ fn header_actions(loaded: &PrDetail, running: &ActionState) -> HeaderActions {
                     )
                 })
                 .collect(),
+            // The same methods, for the stack below it as well.
+            auto_stack: stack
+                .map(|range| {
+                    let methods = loaded
+                        .auto_merge_menu()
+                        .into_iter()
+                        .map(|method| {
+                            (
+                                method,
+                                s::auto_merge_stack_item(actions::merge_action_label(method)),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    (range, methods)
+                })
+                .filter(|(_, methods)| !methods.is_empty()),
             slot: ActionSlot::of(running, PrAction::Merging, blocked),
         },
         auto_merge_off: loaded
@@ -1122,6 +1191,31 @@ fn side(
         }),
         link,
         item: (item.repo.clone(), item.pr.number),
+        stack: match state.stack() {
+            Some(daruda_github::StackRead::Stacked(stack)) => Some(StackView {
+                number: stack.number,
+                base: stack.base.clone(),
+                size: stack.size,
+                entries: stack
+                    .entries
+                    .iter()
+                    .map(|entry| StackEntryView {
+                        position: entry.position,
+                        number: entry.number,
+                        title: entry.title.clone(),
+                        state: entry.state,
+                        shown: entry.number == item.pr.number,
+                    })
+                    .collect(),
+                shown_at: stack
+                    .entries
+                    .iter()
+                    .find(|entry| entry.number == item.pr.number)
+                    .map(|entry| entry.position),
+                more: stack.more(),
+            }),
+            _ => None,
+        },
     }
 }
 

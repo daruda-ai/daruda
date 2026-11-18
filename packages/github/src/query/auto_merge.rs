@@ -9,9 +9,9 @@ use crate::{GhError, MergeMethod};
 /// Turn auto-merge on for pull request `$pr` with `$method`, only while
 /// its head is `$head`.
 pub(crate) const ENABLE_AUTO_MERGE_MUTATION: &str = "mutation($pr: ID!, \
-    $method: PullRequestMergeMethod!, $head: GitObjectID!) { \
+    $method: PullRequestMergeMethod!, $head: GitObjectID!, $stack: Boolean) { \
     enablePullRequestAutoMerge(input: {pullRequestId: $pr, mergeMethod: $method, \
-    expectedHeadOid: $head}) { pullRequest { autoMergeRequest { mergeMethod } \
+    expectedHeadOid: $head, includeStack: $stack}) { pullRequest { autoMergeRequest { mergeMethod } \
     mergeQueueEntry { position } } } }";
 
 /// Turn auto-merge off for pull request `$pr`.

@@ -67,6 +67,7 @@ mod pull_request_rate_limit;
 mod pull_request_review_submit;
 mod pull_request_reviewers;
 mod pull_request_split;
+mod pull_request_stack;
 mod pull_request_threads;
 mod pull_requests;
 mod pure_ops;

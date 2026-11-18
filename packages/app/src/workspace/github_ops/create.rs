@@ -243,9 +243,6 @@ impl Workspace {
                 let push = push.ok_or(CreatePrError::NoTarget)?;
                 let remote = push.remote.clone();
                 let plan = plan_pr(push, request, default_base.as_deref(), path)?;
-                // An explicit refspec to the branch the PR names: a no-op when
-                // the remote is already at HEAD, so it never skips commits a
-                // cached ahead count missed.
                 // Before any push: a pull request this branch already has
                 // (an earlier create whose answer was lost, or one opened
                 // elsewhere) is offered instead of a second one; one that
@@ -265,6 +262,9 @@ impl Workspace {
                 {
                     return Err(CreatePrError::Exists(created));
                 }
+                // An explicit refspec to the branch the PR names: a no-op when
+                // the remote is already at HEAD, so it never skips commits a
+                // cached ahead count missed.
                 repo.push_head(&remote, &plan.new.head, plan.set_upstream)
                     .map_err(CreatePrError::Push)?;
                 let url = gh

@@ -71,6 +71,15 @@ through `GitHost`.
   `auto_merge_menu` and turned off with `disablePullRequestAutoMerge`; a
   merge queue entry is read as `PrDetail::queue`, accepted but not merged. A mutation's error is reported to the user who asked; it is
   not a poll failure and does not feed the poller's host state.
+- `pr_stack` reads a pull request's native stack (`PullRequest.stack`,
+  `STACK_PAGE` entries, the rest counted in `PrStack::more`) apart from the
+  detail, so a server without stacks still shows the detail: its refusal of
+  the field reads as `StackRead::Unsupported`, a pull request in none as
+  `NotStacked`. No mutation creates or edits a stack. `PrStack::range_below`
+  decides what auto-merge with the stack below takes;
+  `enable_auto_merge(.., include_stack)` sends it as `includeStack`, and the
+  app reads the stack again just before and sends nothing
+  (`GhError::StackChanged`) when that range is no longer the one shown.
 - `auth` answers the active account and where gh keeps its token
   (`CredentialSource`), parsed from `gh auth status` output, which gh
   writes to stdout or stderr. The token itself is never read or kept.

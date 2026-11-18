@@ -291,6 +291,7 @@ fn merge_button(id: PrDetailId, merge: &MergeView, cx: &Context<Workspace>) -> A
     }
     let methods = merge.methods.clone();
     let auto = merge.auto.clone();
+    let auto_stack = merge.auto_stack.clone();
     let workspace = cx.weak_entity();
     button
         .dropdown_menu_with_anchor(
@@ -310,20 +311,35 @@ fn merge_button(id: PrDetailId, merge: &MergeView, cx: &Context<Workspace>) -> A
                 } else {
                     menu.separator()
                 };
-                auto.iter()
-                    .cloned()
-                    .fold(menu, |menu, (method, label)| {
-                        let workspace = workspace.clone();
-                        menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
-                            if let Some(ws) = workspace.upgrade() {
-                                ws.update(cx, |ws, cx| {
-                                    ws.ask_pr_auto_merge(id, method, window, cx)
-                                });
-                            }
-                        }))
-                    })
-                    .separator()
-                    .label(s::merge_menu_note())
+                let menu = auto.iter().cloned().fold(menu, |menu, (method, label)| {
+                    let workspace = workspace.clone();
+                    menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                        if let Some(ws) = workspace.upgrade() {
+                            ws.update(cx, |ws, cx| {
+                                ws.ask_pr_auto_merge(id, method, None, window, cx)
+                            });
+                        }
+                    }))
+                });
+                // With the stack below it: the range is named when asked.
+                let menu = match &auto_stack {
+                    Some((range, methods)) => {
+                        methods.iter().cloned().fold(menu, |menu, (method, label)| {
+                            let workspace = workspace.clone();
+                            let range = range.clone();
+                            menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                                if let Some(ws) = workspace.upgrade() {
+                                    let range = Some(range.clone());
+                                    ws.update(cx, |ws, cx| {
+                                        ws.ask_pr_auto_merge(id, method, range, window, cx)
+                                    });
+                                }
+                            }))
+                        })
+                    }
+                    None => menu,
+                };
+                menu.separator().label(s::merge_menu_note())
             }),
         )
         .into_any_element()
@@ -620,6 +636,13 @@ fn side(id: PrDetailId, view: &SideView, cx: &Context<Workspace>) -> AnyElement 
                 .into_any_element(),
             cx,
         ))
+        .children(view.stack.as_ref().map(|stack| {
+            section(
+                s::side_stack(),
+                super::stack_render::stack(view.item.0.clone(), stack, cx),
+                cx,
+            )
+        }))
         .child(section(
             s::side_lane(),
             div()

@@ -1540,7 +1540,7 @@ fn auto_merge_is_turned_on_once_asked_and_off_again(cx: &mut TestAppContext) {
     assert_eq!(actions.auto_merge_off, None, "off: nothing to turn off");
 
     assert!(asks(&f, cx, |ws, window, cx| {
-        ws.ask_pr_auto_merge(id, MergeMethod::Squash, window, cx)
+        ws.ask_pr_auto_merge(id, MergeMethod::Squash, None, window, cx)
     }));
     // Polling meanwhile never turns it on.
     cx.update(crate::github::PrPoller::tick);
@@ -1552,6 +1552,7 @@ fn auto_merge_is_turned_on_once_asked_and_off_again(cx: &mut TestAppContext) {
         pr: "PR_7".into(),
         method: MergeMethod::Squash,
         head_sha: "abc".into(),
+        include_stack: false,
     }));
     assert_eq!(loaded_state(&f, cx), Some(PrState::Open), "not merged");
     let facts = merge_facts(&f, cx);
@@ -1578,7 +1579,7 @@ fn auto_merge_is_turned_on_once_asked_and_off_again(cx: &mut TestAppContext) {
 fn auto_merge_on_a_moved_head_is_refused(cx: &mut TestAppContext) {
     let (f, gh, id) = opened(cx, waiting(7));
     assert!(asks(&f, cx, |ws, window, cx| {
-        ws.ask_pr_auto_merge(id, MergeMethod::Squash, window, cx)
+        ws.ask_pr_auto_merge(id, MergeMethod::Squash, None, window, cx)
     }));
     // The branch moves before OK.
     let mut moved = waiting(7);
@@ -1683,4 +1684,85 @@ fn a_failed_check_reruns_its_own_run_and_links_to_github(cx: &mut TestAppContext
     f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
     cx.run_until_parked();
     assert_eq!(view(&f, cx).notice, None);
+}
+
+/// In a stack with an open pull request below it: auto-merge can take the
+/// stack below too, the range named when asked and checked again when sent.
+#[gpui::test]
+fn auto_merge_with_the_stack_below_names_and_rechecks_its_range(cx: &mut TestAppContext) {
+    use daruda_github::{PrStack, StackEntry, StackRead};
+    let stacked = |numbers: &[u64]| {
+        StackRead::Stacked(PrStack {
+            number: 1,
+            base: "main".into(),
+            size: numbers.len() as u32,
+            entries: numbers
+                .iter()
+                .enumerate()
+                .map(|(ix, number)| StackEntry {
+                    position: ix as u32 + 1,
+                    number: *number,
+                    title: String::new(),
+                    state: PrState::Open,
+                })
+                .collect(),
+        })
+    };
+    let (f, gh, _) = window(cx);
+    gh.set_pr_stack(&repo(), 7, stacked(&[6, 7]));
+    gh.set_pr_detail(&repo(), 7, waiting(7));
+    open(&f, item(7, "feat"), cx);
+    cx.run_until_parked();
+    let id = id(&f, cx);
+    let actions = view(&f, cx).header.actions().cloned().expect("open");
+    let (range, methods) = actions.merge.auto_stack.expect("offered with the stack");
+    assert_eq!(range, [6, 7]);
+    assert!(!methods.is_empty());
+
+    assert!(asks(&f, cx, |ws, window, cx| {
+        ws.ask_pr_auto_merge(id, MergeMethod::Squash, Some(vec![6, 7]), window, cx)
+    }));
+    confirm(&f, cx);
+    assert!(gh.calls().contains(&GhCall::EnableAutoMerge {
+        repo: repo(),
+        pr: "PR_7".into(),
+        method: MergeMethod::Squash,
+        head_sha: "abc".into(),
+        include_stack: true,
+    }));
+    assert_eq!(
+        loaded_state(&f, cx),
+        Some(PrState::Open),
+        "accepted, not merged"
+    );
+
+    // The stack changed between asking and sending: nothing is turned on.
+    gh.set_pr_detail(&repo(), 7, waiting(7));
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    cx.run_until_parked();
+    assert!(asks(&f, cx, |ws, window, cx| {
+        ws.ask_pr_auto_merge(id, MergeMethod::Squash, Some(vec![6, 7]), window, cx)
+    }));
+    gh.set_pr_stack(&repo(), 7, stacked(&[5, 6, 7]));
+    let before = gh.count(GhOp::EnableAutoMerge);
+    confirm(&f, cx);
+    assert_eq!(gh.count(GhOp::EnableAutoMerge), before, "not sent");
+    let changed = crate::surface::strings::error::github_pr_stack_changed(7);
+    assert_eq!(error_titles(&f, cx).last(), Some(&changed));
+    let severity = f.ws.read_with(cx, |ws, _| {
+        ws.error_history()
+            .iter()
+            .find(|report| report.title == changed)
+            .map(|report| report.severity)
+    });
+    assert_eq!(
+        severity,
+        Some(daruda_store::observability::error_report::ErrorSeverity::Warning),
+        "an out-of-date view, not a failure"
+    );
+    assert_eq!(
+        view(&f, cx).error(),
+        Some(changed),
+        "said once, without gh's words after"
+    );
 }

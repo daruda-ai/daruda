@@ -315,11 +315,11 @@ fn auto_merge_follows_the_scripted_head() {
     scripted.node_id = Some("PR_7".into());
     gh.set_pr_detail(&repo(), 7, scripted);
     assert!(matches!(
-        gh.enable_auto_merge(&repo(), "PR_7", MergeMethod::Squash, "def"),
+        gh.enable_auto_merge(&repo(), "PR_7", MergeMethod::Squash, "def", false),
         Err(GhError::Exit { .. })
     ));
     assert_eq!(gh.pr_detail(&repo(), 7).unwrap().auto_merge, None);
-    gh.enable_auto_merge(&repo(), "PR_7", MergeMethod::Squash, "abc")
+    gh.enable_auto_merge(&repo(), "PR_7", MergeMethod::Squash, "abc", false)
         .unwrap();
     let on = gh.pr_detail(&repo(), 7).unwrap().auto_merge.unwrap();
     assert_eq!(on.method, Some(MergeMethod::Squash));

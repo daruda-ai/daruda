@@ -14,6 +14,7 @@
 //! | `merge_base` | `merge-base:{base}...{head}` |
 //! | `file_at` | `Absent` |
 //! | `pr_detail` | exit 1, as for a pull request that does not exist |
+//! | `pr_stack` | the `set_pr_stack` answer, else not stacked |
 //! | `merge_pr` | `HeadMoved` if a scripted detail's head differs, else merged |
 //! | `set_ready` | the PR, if scripted, becomes open |
 //! | `close_pr` | the PR, if scripted, becomes closed |
@@ -97,6 +98,10 @@ pub enum GhCall {
         repo: RepoId,
         number: u64,
     },
+    PrStack {
+        repo: RepoId,
+        number: u64,
+    },
     MergePr {
         repo: RepoId,
         number: u64,
@@ -120,6 +125,7 @@ pub enum GhCall {
         pr: String,
         method: MergeMethod,
         head_sha: String,
+        include_stack: bool,
     },
     DisableAutoMerge {
         repo: RepoId,
@@ -185,6 +191,7 @@ pub enum GhOp {
     MergeBase,
     FileAt,
     PrDetail,
+    PrStack,
     MergePr,
     SetReady,
     ClosePr,
@@ -257,6 +264,7 @@ struct FakeState {
     /// out after GitHub took the review.
     review_lands_anyway: bool,
     pr_created_anyway: bool,
+    stacks: HashMap<(RepoId, u64), crate::StackRead>,
     details: HashMap<(RepoId, u64), PrDetail>,
     files: HashMap<(RepoId, u64), crate::PrFiles>,
     file_texts: HashMap<(RepoId, String, String), crate::FileText>,
@@ -350,6 +358,11 @@ impl FakeGh {
         self.lock().review_lands_anyway = lands;
     }
 
+    /// What `pr_stack` answers for PR `number` of `repo`.
+    pub fn set_pr_stack(&self, repo: &RepoId, number: u64, stack: crate::StackRead) {
+        self.lock().stacks.insert((repo.clone(), number), stack);
+    }
+
     /// What `pr_detail` answers for PR `number` of `repo`.
     pub fn set_pr_detail(&self, repo: &RepoId, number: u64, detail: PrDetail) {
         self.lock().details.insert((repo.clone(), number), detail);
@@ -412,6 +425,7 @@ impl GhCall {
             Self::MergeBase { .. } => GhOp::MergeBase,
             Self::FileAt { .. } => GhOp::FileAt,
             Self::PrDetail { .. } => GhOp::PrDetail,
+            Self::PrStack { .. } => GhOp::PrStack,
             Self::MergePr { .. } => GhOp::MergePr,
             Self::SetReady { .. } => GhOp::SetReady,
             Self::ClosePr { .. } => GhOp::ClosePr,
@@ -659,6 +673,19 @@ impl Gh for FakeGh {
             .unwrap_or(crate::FileText::Absent))
     }
 
+    fn pr_stack(&self, repo: &RepoId, number: u64) -> Result<crate::StackRead, GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::PrStack {
+            repo: repo.clone(),
+            number,
+        })?;
+        Ok(state
+            .stacks
+            .get(&(repo.clone(), number))
+            .cloned()
+            .unwrap_or(crate::StackRead::NotStacked))
+    }
+
     fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError> {
         let mut state = self.lock();
         state.calls.push(GhCall::PrDetail {
@@ -894,6 +921,7 @@ impl Gh for FakeGh {
         pr: &str,
         method: MergeMethod,
         head_sha: &str,
+        include_stack: bool,
     ) -> Result<(), GhError> {
         let mut state = self.lock();
         state.record(GhCall::EnableAutoMerge {
@@ -901,6 +929,7 @@ impl Gh for FakeGh {
             pr: pr.to_owned(),
             method,
             head_sha: head_sha.to_owned(),
+            include_stack,
         })?;
         check_head_sha(head_sha)?;
         if let Some(detail) = state.detail_by_node(repo, pr) {
