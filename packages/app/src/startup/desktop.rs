@@ -46,6 +46,7 @@ pub(super) fn run() {
         // Before any Workspace: every window reads this one projection.
         crate::runs::RunsHost::install(runs, cx);
         crate::github::DraftStore::install(cx);
+        crate::github::LinkStore::install(cx);
         super::quit::install(cx);
         super::inspection::before_globals(cx);
         globals::init_all(cx);

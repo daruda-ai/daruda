@@ -632,6 +632,7 @@ fn side(id: PrDetailId, view: &SideView, cx: &Context<Workspace>) -> AnyElement 
                         .text_color(color)
                         .child(text)
                 }))
+                .child(super::links_render::links(view, cx))
                 .into_any_element(),
             cx,
         ))

@@ -20,6 +20,7 @@ pub mod marks;
 pub mod observability;
 pub mod panels;
 pub mod persistence;
+pub mod pr_links;
 pub(crate) mod profile;
 pub mod project;
 pub mod remote_channels;

@@ -24,6 +24,11 @@ pub(crate) enum PrStrip {
     /// daruda created one that GitHub's lists do not show yet: Open it,
     /// never Create another.
     Created(super::lane_pr::CreatedPr),
+    /// The user untied the pull request its branch name finds: tie it
+    /// again rather than offer creating one GitHub already has.
+    Untied {
+        number: u64,
+    },
     Linked(PrLink),
 }
 
@@ -78,9 +83,18 @@ impl Workspace {
         let created = state
             .and_then(|state| state.pr.created_pr())
             .filter(|created| Some(&created.head) == head.as_ref());
-        match (strip_for(enabled, repo, availability, lookup), created) {
-            (PrStrip::NoPr, Some(created)) => PrStrip::Created(created.clone()),
-            (strip, _) => strip,
+        let untied = state
+            .and_then(|state| state.pr_links.as_ref())
+            .and_then(|links| links.suppressed.last())
+            .map(|pr| pr.number);
+        match (
+            strip_for(enabled, repo, availability, lookup),
+            created,
+            untied,
+        ) {
+            (PrStrip::NoPr, Some(created), _) => PrStrip::Created(created.clone()),
+            (PrStrip::NoPr, None, Some(number)) => PrStrip::Untied { number },
+            (strip, _, _) => strip,
         }
     }
 

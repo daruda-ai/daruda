@@ -23,6 +23,10 @@ pub(in crate::workspace) struct LaneScoped {
     pub queued_input_cache: QueuedInputCache,
     /// The pull request this lane's branch belongs to, and work on it.
     pub pr: crate::workspace::github_ops::lane_pr::LanePr,
+    /// What the user decided about this worktree's branch and its pull
+    /// requests, as `LinkStore` holds it; synced only by
+    /// `Workspace::sync_lane_links`.
+    pub pr_links: Option<daruda_store::pr_links::WorktreeLinks>,
     /// Expanded-sidebar disclosure for this app session, independent of rail grouping.
     pub show_individual_panes: bool,
 }

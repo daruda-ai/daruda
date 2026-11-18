@@ -129,6 +129,27 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                 .into_any_element(),
             )
         }
+        PrStrip::Untied { number } => {
+            let workspace = snap.workspace.clone();
+            let retie = crate::ui::button_compact_sized("pr-retie", s::pr_retie(), metrics)
+                .on_click(cx.listener(move |_dock, _: &ClickEvent, _window, cx| {
+                    if let Some(ws) = workspace.upgrade() {
+                        ws.update(cx, |ws, cx| ws.restore_active_pr_lane(cx));
+                    }
+                }));
+            Some(
+                row.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_ellipsis()
+                        .text_color(subtle)
+                        .child(s::pr_untied(s::pr_number(*number))),
+                )
+                .child(retie)
+                .into_any_element(),
+            )
+        }
         PrStrip::Linked(link) => {
             let pr = &link.pr;
             let glyph = tone_glyph(PrTone::of(pr), cx);

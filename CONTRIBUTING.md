@@ -273,6 +273,7 @@ Task state uses the profile data directory:
 | Legacy tasks | `<data_dir>/tasks.json` | One-time migration input, preserved byte-for-byte and never rewritten. |
 | Startup reconciliation marker | `<data_dir>/task-log/.reconciling` | Present only while a start settles the runs the last session left. |
 | Unsent review text | `<data_dir>/review-drafts.json` | Pull request description edits and review replies not yet sent, per host account, repository and pull request; an unreadable or newer file is left untouched and drafts stay memory-only. |
+| Pull request links | `<data_dir>/pr-links.json` | Per worktree and branch: a pull request the user tied it to, ones they untied from it, and its past links; an unreadable or newer file is left untouched and links stay memory-only. |
 | Orchestrator run delivery | `<data_dir>/run-ledger/` | Run ledger of the orchestrator's scope and unreported results, kept across restarts; an unreadable one is left untouched and delivery stays memory-only. |
 | Browser tool binary | `<data_dir>/agent-browser/<version>/agent-browser[.exe]` plus a `.complete` marker | Profile-scoped, unlike the shared Node install. A verified download pinned by sha256 in `packages/agent/src/browser_tool/pinned.rs`. |
 | Browser daemon sockets | `<data_dir>/ab/` | `AGENT_BROWSER_SOCKET_DIR`. Kept short because upstream refuses socket paths over 103 bytes; per data root so a `DARUDA_DATA_DIR` run never reaches the release install's browsers. |

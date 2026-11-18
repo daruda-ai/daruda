@@ -282,6 +282,7 @@ impl Workspace {
                 );
                 let inputs = detail::view::DetailInputs {
                     lane,
+                    link: self.pr_link_inputs(state.item(), lane, &lanes, cx),
                     sending: lane.is_some_and(|lane| self.is_sending_pr(lane.lane)),
                     creating: &self.pages.pull_requests.creating,
                     progress: &self.pages.pull_requests.progress,

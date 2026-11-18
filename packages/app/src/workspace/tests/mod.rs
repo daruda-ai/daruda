@@ -60,6 +60,7 @@ mod pull_request_drafts;
 mod pull_request_files;
 mod pull_request_history;
 mod pull_request_keyboard;
+mod pull_request_links;
 mod pull_request_list;
 pub(in crate::workspace) mod pull_request_page;
 mod pull_request_rate_limit;

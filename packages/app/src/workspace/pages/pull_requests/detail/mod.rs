@@ -21,6 +21,8 @@ pub(in crate::workspace) mod files_render;
 pub(in crate::workspace) mod handoff;
 mod handoff_render;
 pub(in crate::workspace) mod line_comments;
+pub(in crate::workspace) mod links;
+mod links_render;
 pub(in crate::workspace) mod progress;
 mod read_slot;
 pub(in crate::workspace) mod recover;

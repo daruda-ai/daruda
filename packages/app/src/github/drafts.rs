@@ -21,9 +21,10 @@ use super::PrPoller;
 const SAVE_AFTER: Duration = Duration::from_millis(400);
 
 /// Whether what is typed is kept across restarts, as the editor says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum DraftKeeping {
     /// Written to the profile's drafts file.
+    #[default]
     Saved,
     /// The drafts file could not be read (damaged, or from a newer daruda)
     /// and is left alone: drafts last until quit.

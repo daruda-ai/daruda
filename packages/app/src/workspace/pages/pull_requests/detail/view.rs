@@ -341,6 +341,10 @@ pub(in crate::workspace) struct SideView {
     pub lane_note: Option<LaneNote>,
     /// Who is asked to review can be changed: GitHub lets the viewer.
     pub requests: Option<RequestsView>,
+    /// Why the worktree is tied to it, and what can be done about that.
+    pub link: super::links::LinkInputs,
+    /// The pull request, for tying a worktree to it.
+    pub item: super::super::list::PrKey,
 }
 
 /// Changing who is asked to review.
@@ -405,6 +409,8 @@ pub(in crate::workspace) struct PrDetailView {
 pub(in crate::workspace) struct DetailInputs<'a> {
     /// The worktree working on the pull request, if any.
     pub lane: Option<&'a LaneFacts>,
+    /// Why it is tied to it, and the worktrees it could be tied to instead.
+    pub link: super::links::LinkInputs,
     /// Whether a send to that worktree's chat is under way.
     pub sending: bool,
     /// Pull requests a worktree is being made for.
@@ -596,7 +602,14 @@ fn ready(
         description: Some(loaded.body.trim())
             .filter(|body| !body.is_empty())
             .map(str::to_owned),
-        side: side(item, loaded, lane, open_threads(state, loaded), state),
+        side: side(
+            item,
+            loaded,
+            lane,
+            open_threads(state, loaded),
+            state,
+            inputs.link.clone(),
+        ),
     }
 }
 
@@ -1004,6 +1017,7 @@ fn side(
     lane: Option<RowLane>,
     threads: (usize, bool),
     state: &PrDetailState,
+    link: super::links::LinkInputs,
 ) -> SideView {
     let (merge_state, merge_mood) = match loaded.mergeability {
         Mergeability::Ready => (s::merge_ready(), Mood::Good),
@@ -1101,6 +1115,8 @@ fn side(
                 op: requests.op.clone(),
             }
         }),
+        link,
+        item: (item.repo.clone(), item.pr.number),
     }
 }
 
