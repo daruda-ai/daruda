@@ -13,7 +13,7 @@ use crate::workspace::main_area::file_view_pane::{
 };
 use crate::workspace::main_area::pane::FileContent;
 use crate::workspace::main_area::pane_tree::PaneId;
-use crate::workspace::main_area::side_group::{PanePlace, SideTab};
+use crate::workspace::main_area::side_group::{PanePlace, SideGroup, SideTab};
 use crate::workspace::main_area::tab_ops::{OpenIntent, PaneEntry};
 
 mod load;
@@ -119,6 +119,16 @@ fn apply_pending_file_viewer_scroll_without_window(
     }
 }
 
+/// A file to show: what `open_file_pane` settled before choosing its tab.
+struct FileOpen {
+    origin: FileOrigin,
+    path: PathBuf,
+    source: DiffSource,
+    live_status: Option<char>,
+    /// The mode asked for; the one shown depends on the file.
+    mode: FileViewMode,
+}
+
 impl Workspace {
     fn file_content_mut_for_pane(&mut self, pane_id: PaneId) -> Option<&mut FileContent> {
         self.active_runtime_mut()
@@ -168,12 +178,21 @@ impl Workspace {
         }
     }
 
-    /// Whether a file opened now goes to the side tabs: where the keyboard
+    /// Whether what is opened now goes to the side tabs: where the keyboard
     /// already is, or where the setting sends it. With no tab on the left
-    /// there is nothing to open beside, so it opens there.
-    fn opens_beside(&self) -> bool {
-        self.keyboard_is_aside()
-            || (self.mirrors.file_viewer_open_beside && !self.active_runtime().tabs.is_empty())
+    /// there is nothing to open beside, so it opens there. Where only one
+    /// group fits, an open that leaves the keyboard where it is would land
+    /// in the group not drawn, so only one that enters goes aside.
+    pub(in crate::workspace) fn opens_beside(&self, entry: PaneEntry) -> bool {
+        if self.keyboard_is_aside() {
+            return true;
+        }
+        let room = entry == PaneEntry::Enter
+            || SideGroup::fits_beside(
+                self.main_area.groups_width,
+                crate::ui::theme::TAB_GROUP_MIN_WIDTH,
+            );
+        self.mirrors.file_viewer_open_beside && !self.active_runtime().tabs.is_empty() && room
     }
 
     /// Show the tab at `place`, moving into its pane when `entry` enters.
@@ -360,10 +379,46 @@ impl Workspace {
         let owner = target;
         let live_status = self.git_status_for_path(owner, &path, &source);
 
+        let open = FileOpen {
+            origin,
+            path,
+            source,
+            live_status,
+            mode: initial_mode,
+        };
         // Always dedupe: opening a file already open shows its tab, in
         // whichever group it is.
-        let existing = self
-            .side_tab_showing(&path, &source)
+        if let Some((place, pane_id)) = self.existing_file_tab(&open.path, &open.source) {
+            self.show_open_file(place, pane_id, &open, intent, window, cx);
+            return;
+        }
+        let pane_id = match self.scratch_tab_for(intent, entry, window, cx) {
+            // Preview-tab mode: the scratch tab takes the file.
+            Some((place, pane_id)) => {
+                if !self.refill_scratch_tab(place, pane_id, &open, intent, window, cx) {
+                    return;
+                }
+                pane_id
+            }
+            // No reusable tab (or multi-tab mode): a new one.
+            None => self.push_file_tab(&open, intent, window, cx),
+        };
+        // Selection moved — the dock row picks up its selected background.
+        self.invalidate_visible_files_cache(owner);
+        cx.notify();
+        if let Some(fc) = self.file_content_mut_for_pane(pane_id) {
+            let request = FilePaneLoadRequest::from_view(pane_id, owner, &fc.view);
+            self.load_pane_file_content(request, cx);
+        }
+    }
+
+    /// The tab already showing `path` as `source` reads it, in either group.
+    fn existing_file_tab(
+        &self,
+        path: &std::path::Path,
+        source: &DiffSource,
+    ) -> Option<(PanePlace, PaneId)> {
+        self.side_tab_showing(path, source)
             .map(|index| {
                 (
                     PanePlace::Side(index),
@@ -371,108 +426,135 @@ impl Workspace {
                 )
             })
             .or_else(|| {
-                self.find_existing_file_tab(&path, &source)
+                self.find_existing_file_tab(path, source)
                     .map(|(index, pane)| (PanePlace::Tab(index), pane))
-            });
-        if let Some((place, pane_id)) = existing {
-            // Re-stamp the tab being reused. It was opened against an older
-            // the lane's cached status, and the toolbar's mode strip reads
-            // `status()` to decide whether Changes is offered at all.
-            if let Some(fc) = self.file_content_mut_for_pane(pane_id)
-                && (fc.view.live_status != live_status || fc.view.origin != origin)
-            {
-                fc.view.live_status = live_status;
-                // A file first opened for reference may since have become a
-                // lane's own, or the reverse.
-                fc.view.origin = origin;
-                cx.notify();
-            }
-            // Re-activating a tab that already holds this file: a deliberate
-            // open releases the slot, but a preview must not claim it. Skimming
-            // back across a row the user opened with Enter would otherwise make
-            // it replaceable again (zed's `set_up_existing_item` likewise only
-            // ever un-previews).
-            if !intent.claims_preview_slot() {
-                self.release_preview_tab(place);
-            }
-            self.show_tab_at(place, entry, window, cx);
-            return;
-        }
+            })
+    }
 
-        let effective_mode = FileViewMode::effective_for_path(initial_mode, &path);
-        let beside = self.opens_beside();
-
-        // Preview-tab mode: reuse the scratch tab, when it is in the group
-        // this open goes to.
-        if let Some((place, pane_id)) = self
-            .preview_slot(cx)
-            .filter(|(place, _)| matches!(place, PanePlace::Side(_)) == beside)
+    /// Show the tab at `place`, which already holds the file `open` asks for.
+    fn show_open_file(
+        &mut self,
+        place: PanePlace,
+        pane_id: PaneId,
+        open: &FileOpen,
+        intent: OpenIntent,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Re-stamp the tab being reused. It was opened against an older
+        // the lane's cached status, and the toolbar's mode strip reads
+        // `status()` to decide whether Changes is offered at all.
+        if let Some(fc) = self.file_content_mut_for_pane(pane_id)
+            && (fc.view.live_status != open.live_status || fc.view.origin != open.origin)
         {
-            // Replace the pane's view in place; keep its scroll handle,
-            // search input, focus handle, and subscription unchanged.
-            let Some(load_request) = (if let Some(pane) = self
-                .active_runtime_mut()
-                .panes
-                .iter_mut()
-                .find(|p| p.id == pane_id)
-                && let Some(fc) = pane.file_content_mut()
-            {
-                let new_title = title_for_file_path(&path);
-                // The reused pane's images belong to the file it is leaving.
-                fc.release_images(Some(&mut *window), cx);
-                fc.view.replace_with_loading(
-                    origin,
-                    path.clone(),
-                    source,
-                    live_status,
-                    effective_mode,
-                );
-                fc.scroll_handle = gpui::ScrollHandle::new();
-                fc.cached_title = new_title;
-                fc.search_input
-                    .update(cx, |inp, cx_state| inp.set_value("", window, cx_state));
-                Some(FilePaneLoadRequest::from_view(pane_id, owner, &fc.view))
-            } else {
-                None
-            }) else {
-                return;
-            };
-            // Clear the reused tab's user label (it was set for the old file).
-            let runtime = self.active_runtime_mut();
-            match place {
-                PanePlace::Tab(index) => {
-                    if let Some(tab) = runtime.tabs.get_mut(index) {
-                        tab.user_label = None;
-                    }
-                }
-                PanePlace::Side(index) => runtime.side.clear_label(index),
-            }
-            self.mark_preview_tab(place, intent);
-            self.show_tab_at(place, entry, window, cx);
-            if entry == PaneEntry::Enter {
-                self.focus_pane(pane_id, window, cx);
-            }
-            // The reused pane already lived in this lane, so one lane's
-            // selection is all that moved.
-            self.invalidate_visible_files_cache(owner);
+            fc.view.live_status = open.live_status;
+            // A file first opened for reference may since have become a
+            // lane's own, or the reverse.
+            fc.view.origin = open.origin;
             cx.notify();
-            self.load_pane_file_content(load_request, cx);
-            return;
         }
+        // Re-activating a tab that already holds this file: a deliberate
+        // open releases the slot, but a preview must not claim it. Skimming
+        // back across a row the user opened with Enter would otherwise make
+        // it replaceable again (zed's `set_up_existing_item` likewise only
+        // ever un-previews).
+        if !intent.claims_preview_slot() {
+            self.release_preview_tab(place);
+        }
+        self.show_tab_at(place, intent.pane_entry(), window, cx);
+    }
 
-        // No reusable tab (or multi-tab mode): open a new tab.
+    /// The scratch tab this open refills: the one in the group it goes to.
+    /// A skim whose scratch tab is in the other group closes that tab, so
+    /// one preview is on screen at a time and none is left behind as a
+    /// tab nobody chose to keep.
+    fn scratch_tab_for(
+        &mut self,
+        intent: OpenIntent,
+        entry: PaneEntry,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Option<(PanePlace, PaneId)> {
+        let (place, pane_id) = self.preview_slot(cx)?;
+        if matches!(place, PanePlace::Side(_)) == self.opens_beside(entry) {
+            return Some((place, pane_id));
+        }
+        if intent.claims_preview_slot() {
+            self.close_pane_by_id(pane_id, window, cx);
+        }
+        None
+    }
+
+    /// Put `open`'s file in the scratch tab at `place`, keeping the pane:
+    /// its scroll handle, search input, focus handle and subscription.
+    /// `false` when the pane is no longer a file's.
+    fn refill_scratch_tab(
+        &mut self,
+        place: PanePlace,
+        pane_id: PaneId,
+        open: &FileOpen,
+        intent: OpenIntent,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mode = FileViewMode::effective_for_path(open.mode, &open.path);
+        let Some(fc) = self.file_content_mut_for_pane(pane_id) else {
+            return false;
+        };
+        // The reused pane's images belong to the file it is leaving.
+        fc.release_images(Some(&mut *window), cx);
+        fc.view.replace_with_loading(
+            open.origin,
+            open.path.clone(),
+            open.source.clone(),
+            open.live_status,
+            mode,
+        );
+        fc.scroll_handle = gpui::ScrollHandle::new();
+        fc.cached_title = title_for_file_path(&open.path);
+        fc.search_input
+            .update(cx, |inp, cx_state| inp.set_value("", window, cx_state));
+        // Clear the reused tab's user label (it was set for the old file).
+        let runtime = self.active_runtime_mut();
+        match place {
+            PanePlace::Tab(index) => {
+                if let Some(tab) = runtime.tabs.get_mut(index) {
+                    tab.user_label = None;
+                }
+            }
+            PanePlace::Side(index) => runtime.side.clear_label(index),
+        }
+        let entry = intent.pane_entry();
+        self.mark_preview_tab(place, intent);
+        self.show_tab_at(place, entry, window, cx);
+        if entry == PaneEntry::Enter {
+            self.focus_pane(pane_id, window, cx);
+        }
+        true
+    }
+
+    /// Open `open`'s file in a new tab of the group it goes to.
+    fn push_file_tab(
+        &mut self,
+        open: &FileOpen,
+        intent: OpenIntent,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> PaneId {
+        let entry = intent.pane_entry();
+        // Asked after a scratch tab in the other group was closed: with
+        // no tab left on the left there is nothing to open beside.
+        let beside = self.opens_beside(entry);
         let pane = self.create_file_pane(
-            origin,
-            path.clone(),
-            source,
-            live_status,
-            effective_mode,
+            open.origin,
+            open.path.clone(),
+            open.source.clone(),
+            open.live_status,
+            FileViewMode::effective_for_path(open.mode, &open.path),
             window,
             cx,
         );
         let pane_id = pane.id;
-        let load_request =
-            FilePaneLoadRequest::from_view(pane_id, owner, pane.file_view().expect("file pane"));
         let tab_id = self.alloc_id();
         self.active_runtime_mut().panes.push(pane);
         if beside {
@@ -488,32 +570,28 @@ impl Workspace {
             if entry == PaneEntry::Enter {
                 self.focus_side_group(window, cx);
             }
-        } else {
-            self.active_runtime_mut()
-                .tabs
-                .push(crate::workspace::main_area::pane::TabEntry {
-                    id: tab_id,
-                    layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(pane_id),
-                    last_focused_pane: pane_id,
-                    user_label: None,
-                });
-            let cur_tab = self.active_runtime().active_tab_index;
-            self.active_runtime_mut().tab_history.push(cur_tab);
-            let last_tab = self.active_runtime().tabs.len() - 1;
-            self.active_runtime_mut().active_tab_index = last_tab;
-            self.mark_preview_tab(PanePlace::Tab(last_tab), intent);
-            self.set_focused_pane(pane_id, window, cx);
-            self.bump_activity(pane_id);
-            if entry == PaneEntry::Enter {
-                self.focus_pane(pane_id, window, cx);
-            }
+            return pane_id;
         }
-
-        // Selection moved — the dock row picks up its selected background.
-        self.invalidate_visible_files_cache(owner);
-        cx.notify();
-
-        self.load_pane_file_content(load_request, cx);
+        let runtime = self.active_runtime_mut();
+        runtime
+            .tabs
+            .push(crate::workspace::main_area::pane::TabEntry {
+                id: tab_id,
+                layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(pane_id),
+                last_focused_pane: pane_id,
+                user_label: None,
+            });
+        let from = runtime.active_tab_index;
+        runtime.tab_history.push(from);
+        let last_tab = runtime.tabs.len() - 1;
+        runtime.active_tab_index = last_tab;
+        self.mark_preview_tab(PanePlace::Tab(last_tab), intent);
+        self.set_focused_pane(pane_id, window, cx);
+        self.bump_activity(pane_id);
+        if entry == PaneEntry::Enter {
+            self.focus_pane(pane_id, window, cx);
+        }
+        pane_id
     }
 
     /// Switch a file pane between Raw / Preview / Changes mode.

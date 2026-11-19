@@ -268,7 +268,7 @@ impl Workspace {
     }
 
     /// Drop the side tab at `index` with its pane.
-    pub(super) fn close_side_tab(
+    pub(in crate::workspace) fn close_side_tab(
         &mut self,
         index: usize,
         window: &mut Window,

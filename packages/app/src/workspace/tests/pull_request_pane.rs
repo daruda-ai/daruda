@@ -7,7 +7,7 @@ use daruda_github::Gh as _;
 use daruda_github::PrListItem;
 use daruda_github::fake::{FakeGh, GhOp};
 use daruda_store::project::LaneRef;
-use gpui::{TestAppContext, VisualTestContext};
+use gpui::{AppContext as _, TestAppContext, VisualTestContext};
 
 use super::GitFixture;
 use super::pull_request_detail::{detail, item, open, repo, window};
@@ -199,4 +199,82 @@ fn a_pull_request_pane_is_not_kept_across_a_restart(cx: &mut TestAppContext) {
     open_pane(&f, lane, item(7, "feat"), cx);
     let (_, projects) = f.ws.read_with(cx, |ws, cx| ws.snapshot_for_disk(cx));
     assert!(projects[0].lanes[0].side.is_none());
+}
+
+/// What the detail's buttons ask of GitHub is asked from a pane too: the
+/// detail is found by its id, not as the one the page shows.
+#[gpui::test]
+fn a_panes_detail_acts_on_its_pull_request(cx: &mut TestAppContext) {
+    let (f, gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    let id = panes(&f, cx)[0].0;
+    f.ws.read_with(cx, |ws, _| {
+        assert!(ws.active_page().is_none());
+        assert!(ws.pr_detail_id().is_none(), "the page shows none");
+    });
+
+    // Close asks first, as on the page: its dialog comes up.
+    let asked = cx
+        .update_window(f.window.into(), |_, window, cx| {
+            use crate::ui::WindowExt as _;
+            f.ws.update(cx, |ws, cx| ws.ask_pr_close(id, window, cx));
+            let asked = window.has_active_dialog(cx);
+            window.close_dialog(cx);
+            asked
+        })
+        .unwrap();
+    assert!(asked, "the pane's Close asks to confirm");
+    cx.run_until_parked();
+
+    let reruns = gh.count(GhOp::RerunFailed);
+    f.ws.update(cx, |ws, cx| ws.rerun_pr_detail_checks(id, cx));
+    cx.run_until_parked();
+    assert_eq!(gh.count(GhOp::RerunFailed), reruns + 1);
+}
+
+/// Switching GitHub off closes every pull request pane with the page's
+/// detail: none is left to run `gh`.
+#[gpui::test]
+fn switching_github_off_closes_the_pull_request_panes(cx: &mut TestAppContext) {
+    let (f, _gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    act(&f, cx, |ws, window, cx| {
+        ws.close_pr_detail_while_off(window, cx)
+    });
+    assert!(panes(&f, cx).is_empty());
+    f.ws.read_with(cx, |ws, _| {
+        assert!(ws.active_runtime().side.is_empty());
+        assert_eq!(ws.pages.pull_requests.details.len(), 0);
+        assert!(!ws.keyboard_is_aside());
+    });
+}
+
+/// A worktree's runtime dropped whole (its project removed) lets go of the
+/// detail its pane held.
+#[gpui::test]
+fn a_dropped_worktree_lets_go_of_its_pull_request(cx: &mut TestAppContext) {
+    let (f, _gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    f.ws.update(cx, |ws, cx| {
+        ws.release_pr_panes_of(|dropped| dropped.project == lane.project, cx);
+        assert_eq!(ws.pages.pull_requests.details.len(), 0);
+    });
+}
+
+/// The Git panel's pull request follows the rule a file does: with no tab
+/// to be beside, it opens on the page.
+#[gpui::test]
+fn with_no_tab_to_be_beside_the_pull_request_opens_on_the_page(cx: &mut TestAppContext) {
+    let (f, _gh, _lane) = worktree(cx);
+    act(&f, cx, |ws, window, cx| {
+        while !ws.active_runtime().tabs.is_empty() {
+            ws.close_tab_at(0, window, cx);
+        }
+        ws.open_lane_pr(repo(), 7, window, cx);
+    });
+    cx.run_until_parked();
+    assert!(panes(&f, cx).is_empty());
+    f.ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_page(), Some(Page::PullRequests))
+    });
 }

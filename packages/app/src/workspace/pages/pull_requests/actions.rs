@@ -216,9 +216,9 @@ struct Target {
 }
 
 impl Workspace {
-    /// The shown detail's pull request when no action is running on it.
+    /// Detail `id`'s pull request when no action is running on it.
     fn pr_action_target(&self, id: PrDetailId) -> Option<Target> {
-        let detail = self.pages.pull_requests.detail().filter(|d| d.id() == id)?;
+        let detail = self.pr_detail(id)?;
         let loaded = detail.idle_read()?;
         Some(Target {
             repo: detail.item().repo.clone(),

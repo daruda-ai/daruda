@@ -64,6 +64,7 @@ impl Workspace {
         // Drop every lane's runtime — no project remains — and re-seed the
         // default-ref entry so the "active runtime always present"
         // invariant holds for the Landing view that `render` paints next.
+        self.release_pr_panes_of(|_| true, cx);
         self.main_area.runtimes.clear();
         self.page_details_follow_projects(window, cx);
         self.set_active(LaneRef::default());

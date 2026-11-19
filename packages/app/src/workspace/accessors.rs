@@ -115,11 +115,12 @@ impl Workspace {
             .is_some_and(|l| l.availability != crate::lane::availability::LaneAvailability::Present)
     }
 
-    /// `true` when `focused_pane_id` points at a real pane in the active
-    /// lane's runtime. Tests pane membership (not equality to a sentinel):
-    /// the first real pane gets id 0, the same value as the default, so a
-    /// paneless lane (the inaccessible empty-state) is detected only because
-    /// `panes` is empty — not by comparing against a magic id.
+    /// `true` when `focused_pane_id` names a pane of the active tab. Tests
+    /// membership in that tab (not equality to a sentinel): the first real
+    /// pane gets id 0, the same value as the default, so a worktree with no
+    /// tab is detected by its tab being absent. Not membership in `panes`
+    /// either: those hold the side tabs' panes too, which are never the
+    /// focused pane.
     pub(in crate::workspace) fn has_focused_pane(&self) -> bool {
         let runtime = self.active_runtime();
         runtime

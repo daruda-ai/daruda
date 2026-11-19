@@ -144,7 +144,9 @@ impl Workspace {
             number,
             target: None,
         };
-        let to = if self.mirrors.file_viewer_open_beside {
+        // The same rule a file follows; the click enters what it opens.
+        let entry = crate::workspace::main_area::tab_ops::PaneEntry::Enter;
+        let to = if self.opens_beside(entry) {
             PrDestination::Beside(self.active)
         } else {
             PrDestination::Page

@@ -106,7 +106,10 @@ impl SideGroup {
             collapsed,
             ..Self::default()
         };
-        group.set_ratio(ratio);
+        // A file without a share reads as zero: the opening share stands.
+        if ratio > 0.0 {
+            group.set_ratio(ratio);
+        }
         group
     }
 
@@ -216,6 +219,11 @@ impl SideGroup {
         true
     }
 
+    /// Whether `total` pixels hold both groups at `min_width` each.
+    pub(in crate::workspace) fn fits_beside(total: f32, min_width: f32) -> bool {
+        total - DIVIDER_PX >= 2.0 * min_width
+    }
+
     /// The side group's width at `ratio`, of the `room` both share.
     fn side_width(room: f32, ratio: f32) -> f32 {
         room * ratio
@@ -242,7 +250,7 @@ impl SideGroup {
             return GroupsShown::Tabs;
         }
         let room = total - DIVIDER_PX;
-        if room < 2.0 * min_width {
+        if !Self::fits_beside(total, min_width) {
             return match keyboard {
                 KeyboardIn::Side => GroupsShown::Side,
                 KeyboardIn::Tabs => GroupsShown::Tabs,

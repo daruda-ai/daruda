@@ -224,6 +224,7 @@ impl Workspace {
                             // Active is in a different project, so dropping
                             // every runtime keyed to `project_id` leaves the
                             // active runtime intact.
+                            ws.release_pr_panes_of(|lane| lane.project == project_id, cx);
                             ws.main_area
                                 .runtimes
                                 .retain(|key, _| key.project != project_id);

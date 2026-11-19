@@ -601,3 +601,72 @@ async fn a_row_opened_beside_the_tabs_is_entered_by_a_second_enter(cx: &mut Test
     });
     f.1.read_with(cx, |ws, _| assert!(ws.keyboard_is_aside()));
 }
+
+/// Where only one group fits, a row skimmed in a panel opens among the
+/// tabs, which are what is drawn; entered, it opens aside and is shown.
+#[gpui::test]
+async fn a_skim_in_a_narrow_window_opens_where_it_is_seen(cx: &mut TestAppContext) {
+    let f = with_files(cx, &[]);
+    let lane = f.1.read_with(cx, |ws, _| ws.active_ref());
+    f.1.update(cx, |ws, _| {
+        ws.mirrors.file_viewer_open_beside = true;
+        ws.main_area.groups_width = 400.0;
+    });
+    act(&f, cx, |ws, window, cx| {
+        ws.open_files_entry(lane, "a.txt".into(), OpenIntent::Preview, window, cx);
+        ws.main_area.groups_width = 400.0;
+    });
+    assert!(side_files(&f, cx).is_empty());
+    f.1.read_with(cx, |ws, _| assert_eq!(ws.active_runtime().tabs.len(), 2));
+
+    act(&f, cx, |ws, window, cx| {
+        ws.open_files_entry(lane, "b.txt".into(), OpenIntent::Enter, window, cx);
+        ws.main_area.groups_width = 400.0;
+    });
+    assert_eq!(side_files(&f, cx), ["b.txt"]);
+    f.1.read_with(cx, |ws, _| assert_eq!(ws.groups_shown(), GroupsShown::Side));
+}
+
+/// One preview at a time: a skim whose scratch tab is in the other group
+/// closes that tab instead of leaving it behind as a tab nobody kept.
+#[gpui::test]
+async fn a_skim_takes_its_scratch_tab_with_it_to_the_other_group(cx: &mut TestAppContext) {
+    let f = with_files(cx, &[]);
+    let lane = f.1.read_with(cx, |ws, _| ws.active_ref());
+    // Among the tabs first.
+    act(&f, cx, |ws, window, cx| {
+        ws.open_files_entry(lane, "a.txt".into(), OpenIntent::Preview, window, cx)
+    });
+    f.1.read_with(cx, |ws, cx| {
+        assert_eq!(ws.active_runtime().tabs.len(), 2);
+        assert_eq!(ws.preview_tab_index(cx), Some(1));
+    });
+    // Then files open beside the tabs.
+    f.1.update(cx, |ws, _| {
+        ws.mirrors.file_viewer_open_beside = true;
+        ws.main_area.groups_width = 1200.0;
+    });
+    act(&f, cx, |ws, window, cx| {
+        ws.open_files_entry(lane, "b.txt".into(), OpenIntent::Preview, window, cx)
+    });
+    assert_eq!(side_files(&f, cx), ["b.txt"]);
+    f.1.read_with(cx, |ws, cx| {
+        let runtime = ws.active_runtime();
+        assert_eq!(runtime.tabs.len(), 1, "the scratch tab went with the skim");
+        assert_eq!(runtime.panes.len(), 2);
+        assert!(matches!(
+            ws.preview_slot(cx),
+            Some((
+                crate::workspace::main_area::side_group::PanePlace::Side(0),
+                _
+            ))
+        ));
+    });
+    // A file entered among the tabs is kept when the next skim goes aside.
+    act(&f, cx, |ws, window, cx| {
+        ws.mirrors.file_viewer_open_beside = false;
+        ws.focus_tabs_group(window, cx);
+        ws.open_files_entry(lane, "sub/nested.txt".into(), OpenIntent::Enter, window, cx);
+    });
+    f.1.read_with(cx, |ws, _| assert_eq!(ws.active_runtime().tabs.len(), 2));
+}

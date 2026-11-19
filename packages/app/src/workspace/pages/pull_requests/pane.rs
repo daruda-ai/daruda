@@ -79,7 +79,7 @@ impl Workspace {
                     pr.detail = id;
                     pr.label = label(number);
                 }
-                self.release_pr_detail(held);
+                self.release_pr_detail(held, cx);
                 self.active_runtime().side.position_of(pane_id)
             }
             None => {
@@ -133,15 +133,18 @@ impl Workspace {
 
     /// A pane no longer shows detail `id`. When nothing else does, the
     /// detail ends and leaves its place to come back to.
-    pub(in crate::workspace) fn release_pr_detail(&mut self, id: PrDetailId) {
+    pub(in crate::workspace) fn release_pr_detail(&mut self, id: PrDetailId, cx: &mut gpui::App) {
         let page = &mut self.pages.pull_requests;
         if let Some(gone) = page.details.release(id) {
             page.progress.leave(&gone.key(), gone.place());
+            // What was typed in it is on disk before it is gone, as when
+            // the page's detail closes.
+            crate::github::DraftStore::flush(cx);
         }
     }
 
     /// Panes are going away: the pull request ones let go of their detail.
-    pub(in crate::workspace) fn release_pr_panes(&mut self, panes: &[PaneId]) {
+    pub(in crate::workspace) fn release_pr_panes(&mut self, panes: &[PaneId], cx: &mut gpui::App) {
         let held: Vec<PrDetailId> = panes
             .iter()
             .filter_map(|id| match &self.main_area.pane(*id)?.content {
@@ -150,8 +153,63 @@ impl Workspace {
             })
             .collect();
         for id in held {
-            self.release_pr_detail(id);
+            self.release_pr_detail(id, cx);
         }
+    }
+
+    /// Runtimes are being dropped whole, without each pane's teardown:
+    /// their pull request panes still let go of their details.
+    pub(in crate::workspace) fn release_pr_panes_of(
+        &mut self,
+        dropped: impl Fn(&LaneRef) -> bool,
+        cx: &mut gpui::App,
+    ) {
+        let panes: Vec<PaneId> = self
+            .main_area
+            .runtimes
+            .iter()
+            .filter(|(lane, _)| dropped(lane))
+            .flat_map(|(_, runtime)| runtime.panes.iter().map(|pane| pane.id))
+            .collect();
+        self.release_pr_panes(&panes, cx);
+    }
+
+    /// Close every worktree's pull request pane in the window.
+    pub(in crate::workspace) fn close_pr_panes(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let active = self.active;
+        let lanes: Vec<LaneRef> = self.main_area.runtimes.keys().copied().collect();
+        for lane in lanes {
+            let Some(pane) = self.main_area.runtimes.get(&lane).and_then(|runtime| {
+                runtime.panes.iter().find_map(|pane| match &pane.content {
+                    PaneContent::PullRequest(_) => Some(pane.id),
+                    PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::AgentChat(_) => {
+                        None
+                    }
+                })
+            }) else {
+                continue;
+            };
+            if lane == active {
+                // The worktree on screen: through the close that settles
+                // the keyboard and the widths.
+                if let Some(index) = self.active_runtime().side.position_of(pane) {
+                    self.close_side_tab(index, window, cx);
+                }
+                continue;
+            }
+            self.forget_panes(&[pane], cx);
+            if let Some(runtime) = self.main_area.runtimes.get_mut(&lane) {
+                if let Some(index) = runtime.side.position_of(pane) {
+                    runtime.side.remove(index);
+                }
+                runtime.panes.retain(|p| p.id != pane);
+            }
+        }
+        cx.notify();
     }
 
     /// Show on the Pull requests page the pull request `pane` shows.

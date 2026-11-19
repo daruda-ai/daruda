@@ -124,24 +124,27 @@ pub enum LaneStatus {
     Error,
 }
 
-/// On-disk representation of a lane. Each lane owns its own
-/// tab list and active-tab index; a `ProjectState` is a collection of
-/// these lanes plus shared workspace chrome state.
 /// A lane's side tab group: files, diffs and a pull request kept in view
 /// beside its tabs. Each tab's layout is one leaf; nothing splits there.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SerializedSide {
+    #[serde(default)]
     pub tabs: Vec<SerializedTab>,
     /// Index into `tabs` of the one shown.
     #[serde(default)]
     pub active: usize,
-    /// The group's share of the width both groups are drawn in.
+    /// The group's share of the width both groups are drawn in; `0.0`
+    /// (a file without it) takes the share a new group opens with.
+    #[serde(default)]
     pub ratio: f32,
     /// Hidden by the user while it still holds tabs.
     #[serde(default)]
     pub collapsed: bool,
 }
 
+/// On-disk representation of a lane. Each lane owns its own
+/// tab list and active-tab index; a `ProjectState` is a collection of
+/// these lanes plus shared workspace chrome state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SerializedLane {
     pub id: LaneId,

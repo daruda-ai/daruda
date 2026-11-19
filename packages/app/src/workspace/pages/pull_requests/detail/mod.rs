@@ -484,6 +484,13 @@ impl Workspace {
         self.pages.pull_requests.detail().map(|d| d.id)
     }
 
+    /// The open detail `id`, wherever it is shown: on the page or in a
+    /// worktree's pane. Anything given a detail's id finds it here, never
+    /// through the page's shown one.
+    pub(in crate::workspace) fn pr_detail(&self, id: PrDetailId) -> Option<&PrDetailState> {
+        self.pages.pull_requests.details.get(id)
+    }
+
     pub(super) fn pr_detail_mut(&mut self, id: PrDetailId) -> Option<&mut PrDetailState> {
         self.pages.pull_requests.details.get_mut(id)
     }
@@ -616,8 +623,8 @@ impl Workspace {
     }
 
     /// `[github] enabled` was switched off: the detail closes with the list,
-    /// since nothing it shows is kept current and its reads and actions
-    /// would still run `gh`.
+    /// and so does every worktree's pull request pane, since nothing they
+    /// show is kept current and their reads and actions would still run `gh`.
     pub(crate) fn close_pr_detail_while_off(
         &mut self,
         window: &mut Window,
@@ -626,6 +633,7 @@ impl Workspace {
         if let Some(id) = self.pr_detail_id() {
             self.drop_gone_detail(PageDetailId::PullRequest(id), window, cx);
         }
+        self.close_pr_panes(window, cx);
     }
 
     /// Back to the list.
@@ -912,7 +920,7 @@ impl Workspace {
     /// Where the detail's Send to agent goes: the linked worktree's chat,
     /// with the pull request as last read. `None` without either.
     pub(super) fn pr_detail_send_target(&self, id: PrDetailId) -> Option<PrSendTarget> {
-        let detail = self.pages.pull_requests.detail().filter(|d| d.id == id)?;
+        let detail = self.pr_detail(id)?;
         let Load::Ready(loaded) = detail.load() else {
             return None;
         };
@@ -933,12 +941,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let item = self
-            .pages
-            .pull_requests
-            .detail()
-            .filter(|d| d.id == id)
-            .map(|d| d.item.clone());
+        let item = self.pr_detail(id).map(|d| d.item.clone());
         if let Some(item) = item {
             self.create_lane_from_pr(item, None, window, cx);
         }
@@ -952,10 +955,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let lane = self
-            .pages
-            .pull_requests
-            .detail()
-            .filter(|d| d.id == id)
+            .pr_detail(id)
             .and_then(|d| self.pr_detail_lane(&d.item));
         if let Some(lane) = lane {
             self.activate_lane(lane.lane, window, cx);
