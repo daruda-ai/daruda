@@ -11,8 +11,6 @@ use gpui::{Context, Window};
 
 use super::Workspace;
 use crate::workspace::lane_scoped::RefreshSlot;
-use crate::workspace::main_area::file_view_pane::images::release_pane_images;
-use crate::workspace::main_area::pane_tree::PaneId;
 
 mod close;
 
@@ -53,18 +51,14 @@ impl Workspace {
     /// screenshot scenario: a capture must not write the emptied workspace
     /// back over the state dir it was seeded from.
     fn reset_to_empty_workspace_inner(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Every runtime drops below, so release the Markdown GPU images first
-        // — the no-usable-lane caller still has surviving projects whose panes
-        // were never released. Already-released tables are empty, so the panes
-        // of the project that just closed cost one no-op pass.
-        for runtime in self.main_area.runtimes.values_mut() {
-            let pane_ids: Vec<PaneId> = runtime.panes.iter().map(|p| p.id).collect();
-            release_pane_images(&mut runtime.panes, &pane_ids, window, cx);
-        }
-        // Drop every lane's runtime — no project remains — and re-seed the
-        // default-ref entry so the "active runtime always present"
-        // invariant holds for the Landing view that `render` paints next.
-        self.release_pr_panes_of(|_| true, cx);
+        // Every runtime drops below. The no-usable-lane caller still has
+        // surviving projects whose panes were never torn down; the panes of
+        // a project that just closed were, and forgetting them again finds
+        // nothing left to forget.
+        self.forget_runtime_panes(|_| true, window, cx);
+        // No project remains to show: re-seed the default-ref entry so the
+        // "active runtime always present" invariant holds for the Landing
+        // view that `render` paints next.
         self.main_area.runtimes.clear();
         self.page_details_follow_projects(window, cx);
         self.set_active(LaneRef::default());

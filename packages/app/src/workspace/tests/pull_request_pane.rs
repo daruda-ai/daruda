@@ -255,8 +255,8 @@ fn switching_github_off_closes_the_pull_request_panes(cx: &mut TestAppContext) {
 fn a_dropped_worktree_lets_go_of_its_pull_request(cx: &mut TestAppContext) {
     let (f, _gh, lane) = worktree(cx);
     open_pane(&f, lane, item(7, "feat"), cx);
-    f.ws.update(cx, |ws, cx| {
-        ws.release_pr_panes_of(|dropped| dropped.project == lane.project, cx);
+    act(&f, cx, move |ws, window, cx| {
+        ws.forget_runtime_panes(|dropped| dropped.project == lane.project, window, cx);
         assert_eq!(ws.pages.pull_requests.details.len(), 0);
     });
 }

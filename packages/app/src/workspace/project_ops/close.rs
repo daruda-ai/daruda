@@ -9,7 +9,6 @@ use gpui::{AppContext as _, Context, Window};
 
 use crate::lane::git::GitRepo;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 
 impl Workspace {
     /// Remove the active project and route the workspace to the next one.
@@ -29,31 +28,13 @@ impl Workspace {
         // lanes' runtimes (including the active lane, which belongs to
         // this project) — before they drop below. Skipping this leaves
         // the tracker polling dead shell PIDs for the window's lifetime
-        // and stale claude bindings behind. The runtimes themselves are
+        // and stale claude bindings behind, and the GPU images a Markdown
+        // preview holds for the process's lifetime. The runtimes themselves are
         // dropped *after* `activate_lane` re-points `self.active` away
         // from this project (a single `retain` at the tail), so the
         // "active runtime always present" invariant is never broken
         // mid-teardown.
-        let owned_pane_ids: Vec<_> = self
-            .main_area
-            .runtimes
-            .iter()
-            .filter(|(key, _)| key.project == project_id)
-            .flat_map(|(_, runtime)| runtime.panes.iter().map(|p| p.id))
-            .filter(|id| !self.is_orchestrator_pane(*id))
-            .collect();
-        self.forget_panes(&owned_pane_ids, cx);
-        // Same reason, for the GPU images a Markdown preview holds: the
-        // sprite atlas never evicts on its own, so a pane that drops without
-        // this keeps its textures for the process's lifetime.
-        for (_, runtime) in self
-            .main_area
-            .runtimes
-            .iter_mut()
-            .filter(|(key, _)| key.project == project_id)
-        {
-            release_pane_images(&mut runtime.panes, &owned_pane_ids, window, cx);
-        }
+        self.forget_runtime_panes(|lane| lane.project == project_id, window, cx);
         // Drop per-lane caches for the closing project so they do
         // not leak across project deletes.
         self.lane_scoped.retain(|key, _| key.project != project_id);
@@ -224,7 +205,15 @@ impl Workspace {
                             // Active is in a different project, so dropping
                             // every runtime keyed to `project_id` leaves the
                             // active runtime intact.
-                            ws.release_pr_panes_of(|lane| lane.project == project_id, cx);
+                            // The same teardown `close_active_project` makes:
+                            // its panes, and the per-lane state whose
+                            // watchers would otherwise keep running.
+                            ws.forget_runtime_panes(
+                                |lane| lane.project == project_id,
+                                window,
+                                cx,
+                            );
+                            ws.lane_scoped.retain(|key, _| key.project != project_id);
                             ws.main_area
                                 .runtimes
                                 .retain(|key, _| key.project != project_id);

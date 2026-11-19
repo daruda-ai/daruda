@@ -9,7 +9,6 @@ use super::{CreateWorktreePlan, FinalizeError, RemoveWorktreePlan, git_repo_root
 use crate::lane::availability::LaneAvailability;
 use crate::workspace::LaneRuntime;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
 
@@ -115,25 +114,8 @@ impl Workspace {
         // (degenerate about-to-be-empty case), dropping the active
         // runtime would break the "active runtime always present"
         // invariant. The window is closing then, so leave it.
-        let removed_pane_ids: Vec<_> = self
-            .main_area
-            .runtimes
-            .get(&target)
-            .map(|runtime| runtime.panes.iter().map(|p| p.id).collect::<Vec<_>>())
-            .unwrap_or_default();
-        // Never the orchestrator's: its pane can be in the runtime being torn
-        // down, but it belongs to a session that outlives any worktree —
-        // `hide_orchestrator_tab` is what stashes its draft.
-        let forgotten: Vec<_> = removed_pane_ids
-            .iter()
-            .copied()
-            .filter(|id| !self.is_orchestrator_pane(*id))
-            .collect();
         if target != self.active {
-            self.forget_panes(&forgotten, cx);
-            if let Some(runtime) = self.main_area.runtimes.get_mut(&target) {
-                release_pane_images(&mut runtime.panes, &removed_pane_ids, window, cx);
-            }
+            self.forget_runtime_panes(|lane| *lane == target, window, cx);
             self.main_area.runtimes.remove(&target);
         }
         // Clear per-lane state too — else the notify watcher keeps

@@ -163,7 +163,7 @@ impl Workspace {
         // from its `SerializedLane` tab lists. The active entry is
         // re-seeded after the loop so the "active runtime always present"
         // invariant holds even if the active lane was skipped.
-        self.release_pr_panes_of(|_| true, cx);
+        self.forget_runtime_panes(|_| true, window, cx);
         self.main_area.runtimes.clear();
         self.main_area.activity_counter.clear();
 

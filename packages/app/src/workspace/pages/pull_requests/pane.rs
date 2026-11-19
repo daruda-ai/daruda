@@ -157,23 +157,6 @@ impl Workspace {
         }
     }
 
-    /// Runtimes are being dropped whole, without each pane's teardown:
-    /// their pull request panes still let go of their details.
-    pub(in crate::workspace) fn release_pr_panes_of(
-        &mut self,
-        dropped: impl Fn(&LaneRef) -> bool,
-        cx: &mut gpui::App,
-    ) {
-        let panes: Vec<PaneId> = self
-            .main_area
-            .runtimes
-            .iter()
-            .filter(|(lane, _)| dropped(lane))
-            .flat_map(|(_, runtime)| runtime.panes.iter().map(|pane| pane.id))
-            .collect();
-        self.release_pr_panes(&panes, cx);
-    }
-
     /// Close every worktree's pull request pane in the window.
     pub(in crate::workspace) fn close_pr_panes(
         &mut self,

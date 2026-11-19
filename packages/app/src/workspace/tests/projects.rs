@@ -427,6 +427,80 @@ fn close_active_project_releases_pane_tracking(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+/// Every path that drops a runtime whole tears its panes down the same
+/// way: a project deleted on disk while another is on screen, and the
+/// reset to an empty workspace, used to leave the tracker walking dead
+/// shell PIDs. The teardown they share is what releases a pane.
+#[gpui::test]
+fn dropping_a_runtime_whole_releases_its_panes(cx: &mut TestAppContext) {
+    let config = daruda_config::Config::default();
+    let root = "/tmp/daruda_drop_runtime_whole";
+    std::fs::create_dir_all(root).unwrap();
+    let project = daruda_store::project::Project::from_path(root);
+    let wh = cx.add_window(|window, cx| {
+        Workspace::new_with_project_for_test(
+            &config,
+            Some(project),
+            fresh_test_data_dir(),
+            window,
+            cx,
+        )
+    });
+    let ws = wh.root(cx).unwrap();
+    cx.update_window(wh.into(), |_, window, cx| {
+        ws.update(cx, |ws, cx| {
+            ws.add_tab(window, cx);
+            // A runtime parked beside the one on screen, as another
+            // project's is, holding a tracked pane of its own.
+            let parked = daruda_store::project::LaneRef {
+                project: ws.active.project + 1,
+                lane: 0,
+            };
+            let runtime = std::mem::take(ws.active_runtime_mut());
+            let pane_ids: Vec<_> = runtime.panes.iter().map(|pane| pane.id).collect();
+            assert!(!pane_ids.is_empty());
+            ws.main_area.runtimes.insert(parked, runtime);
+            for id in &pane_ids {
+                crate::runs::RunsHost::register_terminal(
+                    ws.run_pane(*id),
+                    crate::hooks::agent_hooks::mint_terminal_id(),
+                    cx,
+                );
+                ws.claude_sessions.pty_bindings.insert(
+                    *id,
+                    daruda_agent::pty_tracker::PtyBinding {
+                        terminal_id: None,
+                        claude_pid: Some(4242),
+                        session_id: format!("sess-{id}"),
+                    },
+                );
+                ws.main_area.activity_counter.insert(*id, 1);
+            }
+
+            ws.forget_runtime_panes(|lane| *lane == parked, window, cx);
+
+            assert!(ws.claude_sessions.pty_bindings.is_empty());
+            assert!(
+                pane_ids
+                    .iter()
+                    .all(|id| crate::runs::RunsHost::terminal_id(ws.run_pane(*id), cx).is_none()),
+                "the dropped runtime's panes leave the tracker"
+            );
+            assert!(
+                pane_ids
+                    .iter()
+                    .all(|id| !ws.main_area.activity_counter.contains_key(id)),
+            );
+            // The runtime itself is the caller's to drop.
+            assert!(ws.main_area.runtimes.contains_key(&parked));
+            // Torn down twice (a project closed, then the reset): nothing
+            // is left to forget, and nothing breaks.
+            ws.forget_runtime_panes(|_| true, window, cx);
+        });
+    })
+    .unwrap();
+}
+
 /// `HistoryBuffer` has no cap and `finalize_remove_lane` is the only other
 /// place anything prunes it, so a project closed with history behind it would
 /// hold every line for the rest of the session.

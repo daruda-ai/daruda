@@ -82,6 +82,51 @@ impl Workspace {
         }
     }
 
+    /// Tear down the panes of every runtime `dropped` names, for a caller
+    /// about to drop those runtimes whole: what each pane's own close would
+    /// forget, and the GPU images a Markdown preview holds, which the
+    /// sprite atlas never evicts on its own. The one teardown every path
+    /// that removes a runtime makes, so none leaves a tracker walking dead
+    /// shell PIDs or a pull request's detail held by a pane that is gone.
+    ///
+    /// The runtimes themselves stay: when they may go depends on the
+    /// caller (the active one only once another is active).
+    pub(in crate::workspace) fn forget_runtime_panes(
+        &mut self,
+        dropped: impl Fn(&daruda_store::project::LaneRef) -> bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let panes: Vec<PaneId> = self
+            .main_area
+            .runtimes
+            .iter()
+            .filter(|(lane, _)| dropped(lane))
+            .flat_map(|(_, runtime)| runtime.panes.iter().map(|pane| pane.id))
+            .collect();
+        // Never the orchestrator's: its pane can be in a runtime being torn
+        // down, but it belongs to a session that outlives any worktree.
+        let forgotten: Vec<PaneId> = panes
+            .iter()
+            .copied()
+            .filter(|id| !self.is_orchestrator_pane(*id))
+            .collect();
+        self.forget_panes(&forgotten, cx);
+        for (_, runtime) in self
+            .main_area
+            .runtimes
+            .iter_mut()
+            .filter(|(lane, _)| dropped(lane))
+        {
+            crate::workspace::main_area::file_view_pane::images::release_pane_images(
+                &mut runtime.panes,
+                &panes,
+                window,
+                cx,
+            );
+        }
+    }
+
     pub(in crate::workspace) fn forget_pane_input_state(&mut self, pane_id: PaneId) {
         self.input_dock.drafts.remove(&pane_id);
         for state in self.lane_scoped.values_mut() {
