@@ -37,8 +37,8 @@ pub(crate) use rate_limit::parse_graphql_reset;
 pub(crate) use review::{
     LATEST_REVIEW_QUERY, parse_latest_review, parse_submitted, submit_request,
 };
-pub use stack::{PrStack, StackEntry, StackRead};
-pub(crate) use stack::{lacks_stacks, parse_stack, stack_query};
+pub use stack::{NoStacking, PrStack, StackEntry, StackPlace, StackRead};
+pub(crate) use stack::{lacks_stacks, parse_stack, stack_query, stack_request};
 pub(crate) use thread_actions::{
     REPLY_MUTATION, RESOLVE_MUTATION, UNRESOLVE_MUTATION, parse_reply, parse_resolved,
 };

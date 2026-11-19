@@ -212,6 +212,17 @@ impl Gh for SystemGh {
         }
     }
 
+    fn stack_pr(
+        &self,
+        repo: &RepoId,
+        place: crate::StackPlace,
+        number: u64,
+    ) -> Result<(), GhError> {
+        let (args, body) = crate::query::stack_request(repo, place, number);
+        // The answer is the stack; `pr_stack` reads it when it is shown.
+        self.stdout_fed(args, body.into_bytes()).map(|_| ())
+    }
+
     fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError> {
         let json = self.stdout(
             Graphql::on(repo, &pr_detail_query())

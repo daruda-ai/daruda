@@ -5,8 +5,11 @@
 
 mod creation;
 mod render;
+mod stacking;
 pub(crate) mod summary;
 pub(crate) mod templates;
+#[cfg(test)]
+mod test_hooks;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,6 +44,35 @@ pub(super) enum CreateState {
     Failed(SharedString),
     /// The branch already has this pull request: open it, not a second.
     Exists(super::lane_pr::CreatedPr),
+    /// Created, but not in the stack asked for; `retrying` while stacking
+    /// it again is in flight.
+    Unstacked {
+        left: super::create::Unstacked,
+        retrying: bool,
+    },
+}
+
+/// The fields the user set, clearing included: a commit subject, a
+/// template or a kept draft read later never replaces one of them.
+#[derive(Debug, Default, Clone, Copy)]
+struct Touched {
+    title: bool,
+    body: bool,
+    base: bool,
+    draft: bool,
+}
+
+/// A template the description was filled from.
+struct TemplateUse {
+    path: String,
+    by: PickedBy,
+}
+
+/// Who picked a template: only the user's pick is kept for the branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PickedBy {
+    Default,
+    User,
 }
 
 pub(crate) struct CreatePrModal {
@@ -69,23 +101,24 @@ pub(crate) struct CreatePrModal {
     /// The base the form opened with, first among suggestions.
     default_base: Option<String>,
     /// The template the description was last filled from.
-    template: Option<String>,
+    template: Option<TemplateUse>,
     /// The last commit's subject once read: the title until one is typed,
     /// and again after Start over.
     subject: Option<String>,
-    /// Typed in by the user, clearing included: a late commit subject or
-    /// template never replaces it.
-    title_edited: bool,
-    body_edited: bool,
-    base_edited: bool,
-    draft_edited: bool,
-    /// The template was chosen by the user, not filled in by default.
-    template_chosen: bool,
+    touched: Touched,
     /// Whose branch the fields are kept under; `None` until the target and
     /// the signed-in account are known, and nothing is kept before.
     creation_owner: Option<daruda_store::review_drafts::CreationOwner>,
     /// The fields came back from a draft left unsent.
     restored: bool,
+    /// The open pull request the base heads, with the base it was found
+    /// for: what this one can be stacked on.
+    stack_parent: Option<(String, u64)>,
+    /// The read of it in flight; replaced (so dropped) by a newer one.
+    stack_parent_read: Option<Task<()>>,
+    /// The pull request the user asked to stack on: a choice of that one,
+    /// not of whichever a later base heads.
+    stack_on: Option<u64>,
     _subscriptions: [Subscription; 3],
 }
 
@@ -122,10 +155,13 @@ impl CreatePrModal {
                     InputEvent::Change => {
                         this.clear_failure(cx);
                         if *input == this.base {
-                            this.base_edited = true;
+                            this.touched.base = true;
+                            // Stacking was chosen for the pull request
+                            // that base heads; another base, another choice.
+                            this.stack_on = None;
                             this.read_against(Some(SUMMARY_AFTER), window, cx);
                         } else {
-                            this.title_edited = true;
+                            this.touched.title = true;
                         }
                         this.keep_creation(cx);
                     }
@@ -135,7 +171,7 @@ impl CreatePrModal {
         };
         let on_body = cx.subscribe_in(&body, window, |this, _, event: &InputEvent, _, cx| {
             if matches!(event, InputEvent::Change) {
-                this.body_edited = true;
+                this.touched.body = true;
                 this.clear_failure(cx);
                 this.keep_creation(cx);
             }
@@ -184,13 +220,12 @@ impl CreatePrModal {
             default_base,
             template: None,
             subject: None,
-            title_edited: false,
-            body_edited: false,
-            base_edited: false,
-            draft_edited: false,
-            template_chosen: false,
+            touched: Touched::default(),
             creation_owner: None,
             restored: false,
+            stack_parent: None,
+            stack_parent_read: None,
+            stack_on: None,
             _subscriptions,
         };
         this.read_publication(window, cx);
@@ -229,10 +264,10 @@ impl CreatePrModal {
                 // Typed, or typed and cleared, before it arrived, or a
                 // template brought back: kept.
                 if let Some(default) = this.templates.default.clone()
-                    && !this.body_edited
+                    && !this.touched.body
                     && this.template.is_none()
                 {
-                    this.apply_template(&default.path, window, cx);
+                    this.apply_template(&default.path, PickedBy::Default, window, cx);
                 }
                 // Typed before the target was read: kept now it is.
                 this.keep_creation(cx);
@@ -246,17 +281,17 @@ impl CreatePrModal {
     /// The template button: fill the description from the template at
     /// `path`, unless the user has written one, and keep the choice.
     pub(super) fn use_template(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if self.apply_template(path, window, cx) {
-            self.template_chosen = true;
+        if self.apply_template(path, PickedBy::User, window, cx) {
             self.keep_creation(cx);
         }
     }
 
     /// Fill the description from the template at `path` unless the user
     /// has written one: their text is never replaced. `true` if filled.
-    pub(super) fn apply_template(
+    fn apply_template(
         &mut self,
         path: &str,
+        by: PickedBy,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -270,15 +305,23 @@ impl CreatePrModal {
             input.set_value_silently(template.body, window, cx)
         });
         // What is there now is the template's, not the user's.
-        self.body_edited = false;
-        self.template = Some(template.path);
+        self.touched.body = false;
+        self.template = Some(TemplateUse {
+            path: template.path,
+            by,
+        });
         cx.notify();
         true
     }
 
+    /// The template the description is filled from, by its path.
+    pub(super) fn template_path(&self) -> Option<&str> {
+        self.template.as_ref().map(|used| used.path.as_str())
+    }
+
     /// The user wrote a description: a template does not replace it.
     pub(super) fn keeps_description(&self, cx: &gpui::App) -> bool {
-        self.body_edited && !self.body.read(cx).value().trim().is_empty()
+        self.touched.body && !self.body.read(cx).value().trim().is_empty()
     }
 
     /// Branches of the push remote whose name holds what is typed in the
@@ -338,6 +381,7 @@ impl CreatePrModal {
             // Read once the target is known.
             return;
         };
+        self.read_stack_parent(delay, window, cx);
         let base = self.base_value(cx);
         let repo = self.repo.clone();
         self.against_read = Some(cx.spawn_in(window, async move |this, cx| {
@@ -374,13 +418,25 @@ impl CreatePrModal {
     fn prefill_title(&mut self, subject: String, window: &mut Window, cx: &mut Context<Self>) {
         self.subject = Some(subject.clone());
         // Typed, or typed and cleared: the user's choice stands.
-        if subject.is_empty() || self.title_edited {
+        if subject.is_empty() || self.touched.title {
             return;
         }
         self.title.update(cx, |input, cx| {
             input.set_value_silently(subject, window, cx)
         });
         cx.notify();
+    }
+
+    /// The pull request was created from this form: its fields describe
+    /// one that exists, so they are no longer kept, written or sent.
+    pub(in crate::workspace) fn is_created(&self) -> bool {
+        matches!(self.state, CreateState::Unstacked { .. })
+    }
+
+    /// Being created, or created already with only its stacking left:
+    /// the form does not send or rewrite its fields again.
+    fn is_sent(&self) -> bool {
+        self.state == CreateState::Creating || self.is_created()
     }
 
     fn clear_failure(&mut self, cx: &mut Context<Self>) {
@@ -392,7 +448,7 @@ impl CreatePrModal {
 
     fn toggle_draft(&mut self, cx: &mut Context<Self>) {
         self.draft = !self.draft;
-        self.draft_edited = true;
+        self.touched.draft = true;
         self.clear_failure(cx);
         self.keep_creation(cx);
         cx.notify();
@@ -414,11 +470,13 @@ impl CreatePrModal {
                 .publication
                 .as_ref()
                 .map_or(summary::Expected::Unchecked, |read| read.target.expected()),
+            stack_on: self.stack_on_value(cx),
         })
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.state == CreateState::Creating {
+        // Not a second pull request.
+        if self.is_sent() {
             return;
         }
         // Nothing is created before the form has shown where it goes.
@@ -433,98 +491,17 @@ impl CreatePrModal {
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
-        self.state = CreateState::Creating;
-        cx.notify();
+        self.begin_creating(cx);
         let me = cx.weak_entity();
         let handle = window.window_handle();
         let lane = self.lane;
         workspace.update(cx, |ws, cx| ws.create_pr(lane, request, me, handle, cx));
     }
 
-    /// [`Self::new`] for workspace tests, which build the form without
-    /// opening a dialog.
-    #[cfg(test)]
-    pub(in crate::workspace) fn new_for_test(
-        workspace: WeakEntity<Workspace>,
-        lane: LaneRef,
-        repo: Arc<dyn GitRepo>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        Self::new(workspace, lane, repo, None, window, cx)
-    }
-
-    /// Type `title` and `body` as the user would (Change events included).
-    #[cfg(test)]
-    pub(crate) fn type_for_test(
-        &mut self,
-        title: &str,
-        body: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.title
-            .update(cx, |input, cx| input.set_value(title, window, cx));
-        self.body
-            .update(cx, |input, cx| input.set_value(body, window, cx));
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fields_for_test(&self, cx: &gpui::App) -> (String, String) {
-        (
-            self.title.read(cx).value().to_string(),
-            self.body.read(cx).value().to_string(),
-        )
-    }
-
-    /// Choose a template and a base as the buttons do.
-    #[cfg(test)]
-    pub(crate) fn choose_for_test(
-        &mut self,
-        template: &str,
-        base: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.use_template(template, window, cx);
-        self.choose_base(base.to_owned(), window, cx);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn toggle_draft_for_test(&mut self, cx: &mut Context<Self>) {
-        self.toggle_draft(cx);
-    }
-
-    /// The base and the draft flag as a request would carry them.
-    #[cfg(test)]
-    pub(crate) fn request_for_test(&self, cx: &gpui::App) -> (Option<String>, bool) {
-        (self.base_value(cx), self.draft)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn restored_for_test(&self) -> bool {
-        self.restored
-    }
-
-    #[cfg(test)]
-    pub(crate) fn discard_for_test(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.discard_creation(window, cx);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn failure(&self) -> Option<&str> {
-        match &self.state {
-            CreateState::Failed(message) => Some(message.as_ref()),
-            CreateState::Editing | CreateState::Creating | CreateState::Exists(_) => None,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn existing(&self) -> Option<&super::lane_pr::CreatedPr> {
-        match &self.state {
-            CreateState::Exists(created) => Some(created),
-            _ => None,
-        }
+    /// The form is sent: what is created is what the fields hold now.
+    fn begin_creating(&mut self, cx: &mut Context<Self>) {
+        self.state = CreateState::Creating;
+        cx.notify();
     }
 
     /// The branch already has a pull request: the form offers to open it.

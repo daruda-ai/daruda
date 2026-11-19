@@ -48,6 +48,11 @@ pub trait Gh: Send + Sync {
     /// Pull request `number`'s place in a native stack; `Unsupported` from a
     /// server without stacks, which then keeps the ordinary flow.
     fn pr_stack(&self, repo: &RepoId, number: u64) -> Result<crate::StackRead, GhError>;
+    /// Put pull request `number` at `place`: on top of a stack, or with
+    /// its parent in a new one. GitHub refuses unless its base is the head
+    /// of the pull request below.
+    fn stack_pr(&self, repo: &RepoId, place: crate::StackPlace, number: u64)
+    -> Result<(), GhError>;
     /// What pull request `number`'s page shows, in one request.
     fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError>;
     /// Merge pull request `number` with `method`, only if its head is still

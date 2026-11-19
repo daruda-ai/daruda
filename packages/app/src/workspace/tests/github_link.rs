@@ -181,7 +181,7 @@ fn turning_the_feature_off_stops_polling_and_clears_links(cx: &mut TestAppContex
 
 // ---- Creating a pull request ----
 
-fn lane_with(cx: &mut TestAppContext, published: bool) -> (GitFixture, LaneRef) {
+pub(super) fn lane_with(cx: &mut TestAppContext, published: bool) -> (GitFixture, LaneRef) {
     let f = GitFixture::open(cx, &daruda_config::Config::default(), |repo: FakeRepo| {
         repo.push_target(PushTarget {
             remote: "origin".into(),
@@ -200,13 +200,14 @@ fn lane_with(cx: &mut TestAppContext, published: bool) -> (GitFixture, LaneRef) 
     (f, id)
 }
 
-fn request(base: Option<&str>) -> crate::workspace::github_ops::create::CreatePrRequest {
+pub(super) fn request(base: Option<&str>) -> crate::workspace::github_ops::create::CreatePrRequest {
     crate::workspace::github_ops::create::CreatePrRequest {
         title: "Add it".into(),
         body: String::new(),
         base: base.map(str::to_owned),
         draft: false,
         expected: crate::workspace::github_ops::create_modal::summary::Expected::Unchecked,
+        stack_on: None,
     }
 }
 
@@ -244,7 +245,7 @@ fn create(f: &GitFixture, lane: LaneRef, cx: &mut TestAppContext) -> Option<Stri
     modal.read_with(cx, |modal, _| modal.failure().map(str::to_owned))
 }
 
-fn toasts(f: &GitFixture, cx: &mut TestAppContext) -> Vec<String> {
+pub(super) fn toasts(f: &GitFixture, cx: &mut TestAppContext) -> Vec<String> {
     f.ws.read_with(cx, |ws, cx| {
         ws.toast_layer
             .read(cx)
@@ -255,7 +256,7 @@ fn toasts(f: &GitFixture, cx: &mut TestAppContext) -> Vec<String> {
     })
 }
 
-fn pushes(f: &GitFixture) -> Vec<crate::lane::git::GitCall> {
+pub(super) fn pushes(f: &GitFixture) -> Vec<crate::lane::git::GitCall> {
     f.fake
         .calls()
         .into_iter()

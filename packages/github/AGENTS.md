@@ -83,7 +83,12 @@ through `GitHost`.
   `STACK_PAGE` entries, the rest counted in `PrStack::more`) apart from the
   detail, so a server without stacks still shows the detail: its refusal of
   the field reads as `StackRead::Unsupported`, a pull request in none as
-  `NotStacked`. No mutation creates or edits a stack. `PrStack::range_below`
+  `NotStacked`. `stack_pr` puts a new pull request on top of another through
+  the stacks REST API (GraphQL has no mutation for it), at the
+  `StackPlace` that `StackRead::place_on` decides: a new stack with a parent
+  in none, appended to a parent at the top of one, refused elsewhere. The
+  endpoints are unmeasured (`ASSUMPTION` in `query/stack.rs`); nothing
+  inserts, reorders or takes one pull request out. `PrStack::range_below`
   decides what auto-merge with the stack below takes;
   `enable_auto_merge(.., include_stack)` sends it as `includeStack`.
   `enable_auto_merge_shown` reads the stack again just before and sends

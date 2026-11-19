@@ -4,11 +4,13 @@
 //! Where to push is read again inside the lock, not taken from the cached
 //! push target: the branch may have moved or gained commits since.
 
+mod plan;
+mod stack;
+
 use std::path::PathBuf;
 
 use daruda_github::availability::GhAvailability;
-use daruda_github::remote_parse::parse_remote;
-use daruda_github::{GhError, NewPr, RepoId};
+use daruda_github::{GhError, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::LaneRef;
@@ -19,12 +21,14 @@ use super::lane_pr::PendingPr;
 use crate::gh_host::GhHost;
 use crate::git_host::GitHost;
 use crate::github::{DraftStore, PrPoller};
-use crate::lane::git::{GitError, PushTarget};
+use crate::lane::git::{GitError, GitRepo};
 use crate::surface::strings::error as s;
 use crate::ui::WindowExt as _;
 use crate::workspace::Workspace;
 use crate::workspace::lane_scoped::LaneScoped;
 use crate::workspace::left_dock::git_ops::lock::GitLock;
+use plan::{base_branch, plan_pr};
+use stack::{existing_unstacked, stack_created};
 
 /// What the modal hands over; the lane supplies the rest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +41,22 @@ pub(crate) struct CreatePrRequest {
     /// Where the form said the branch pushes. A different target read
     /// under the lock stops the push.
     pub expected: super::create_modal::summary::Expected,
+    /// The pull request this one is stacked on, when the form asked: the
+    /// open one its base branch heads.
+    pub stack_on: Option<u64>,
+}
+
+/// A pull request that was created but not put in its stack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Unstacked {
+    pub repo: RepoId,
+    /// The pull request it was to sit on.
+    pub parent: u64,
+    /// `None` when GitHub's answer did not name the new one's number:
+    /// there is nothing to stack again.
+    pub number: Option<u64>,
+    /// What GitHub said, as it came.
+    pub reason: String,
 }
 
 /// What creating ended in, short of a failure.
@@ -46,10 +66,16 @@ enum CreateOutcome {
         repo: RepoId,
         head: String,
         url: String,
+        /// Created, but stacking it then failed.
+        unstacked: Option<Unstacked>,
     },
     /// The branch already has an open pull request: created before (an
     /// answer lost, a timeout) or elsewhere. Offered, never created twice.
-    Exists(super::lane_pr::CreatedPr),
+    Exists {
+        created: super::lane_pr::CreatedPr,
+        /// Stacking was asked for and this one is not in that stack.
+        unstacked: Option<Unstacked>,
+    },
 }
 
 #[derive(Debug)]
@@ -62,6 +88,8 @@ pub(crate) enum CreatePrError {
     ReviewBranch,
     /// The branch now pushes somewhere other than the form showed.
     TargetChanged,
+    /// It cannot sit on the pull request named: nothing is pushed.
+    NoStacking(u64, daruda_github::NoStacking),
     Read(GitError),
     Push(GitError),
     /// Pushed; creating the pull request then failed.
@@ -80,6 +108,9 @@ impl std::fmt::Display for CreatePrError {
             }
             Self::ReviewBranch => write!(f, "the branch reviews another pull request"),
             Self::TargetChanged => write!(f, "the branch's push target changed"),
+            Self::NoStacking(parent, why) => {
+                write!(f, "cannot stack on pull request #{parent}: {why}")
+            }
             Self::Read(e) => write!(f, "read where the branch pushes: {e}"),
             Self::Push(e) => write!(f, "push before creating the pull request: {e}"),
             Self::Gh(e) => write!(f, "pushed, then creating failed: {e}"),
@@ -99,6 +130,12 @@ impl CreatePrError {
             Self::HeadIsBase(branch) => s::github_pr_head_is_base(branch),
             Self::ReviewBranch => s::github_pr_review_branch(),
             Self::TargetChanged => s::github_pr_target_changed(),
+            Self::NoStacking(parent, daruda_github::NoStacking::NotTop) => {
+                s::github_pr_stack_not_top(crate::surface::strings::git::pr_number(*parent))
+            }
+            Self::NoStacking(_, daruda_github::NoStacking::Unsupported) => {
+                s::github_pr_stack_unsupported()
+            }
             Self::Read(e) => format!("{}: {e}", s::github_pr_create_failed()),
             Self::Push(e) => format!("{}: {e}", s::github_pr_push_failed()),
             // A timeout leaves it unknown whether GitHub created it.
@@ -107,67 +144,6 @@ impl CreatePrError {
             Self::CheckFailed(e) => format!("{}: {e}", s::github_pr_check_failed()),
         }
     }
-}
-
-/// A base as `gh --base` takes it: the bare branch, without the push
-/// remote's prefix (`origin/main` names `main` on that remote).
-fn strip_remote<'a>(base: &'a str, remote: &str) -> &'a str {
-    base.strip_prefix(remote)
-        .and_then(|rest| rest.strip_prefix('/'))
-        .unwrap_or(base)
-}
-
-/// A lane's recorded base as a default for the form: a branch, never a
-/// commit, which no PR can target.
-fn base_branch(base: &str, remote: &str) -> Option<String> {
-    let base = strip_remote(base, remote);
-    let commit_like = (7..=40).contains(&base.len()) && base.chars().all(|c| c.is_ascii_hexdigit());
-    (!base.is_empty() && !commit_like).then(|| base.to_owned())
-}
-
-/// What Create PR does, decided before anything is pushed.
-#[derive(Debug, PartialEq, Eq)]
-struct PrPlan {
-    repo: RepoId,
-    /// `-u` only for a branch with no upstream yet: an existing one (in a
-    /// fork workflow, the repository it came from) stays.
-    set_upstream: bool,
-    new: NewPr,
-}
-
-/// Plan the PR for a branch pushing to `push`. `default_base` is the
-/// repository's default branch when an answer has named it: with no base
-/// typed, GitHub targets that one, so the head must not be it either.
-fn plan_pr(
-    push: PushTarget,
-    request: CreatePrRequest,
-    default_base: Option<&str>,
-    worktree: PathBuf,
-) -> Result<PrPlan, CreatePrError> {
-    // Pushing a review branch would copy a fork's head into this
-    // repository and open a second pull request for it.
-    if push.review.is_some() {
-        return Err(CreatePrError::ReviewBranch);
-    }
-    let repo = parse_remote(&push.url).ok_or(CreatePrError::NoTarget)?;
-    let base = request
-        .base
-        .map(|base| strip_remote(&base, &push.remote).to_owned());
-    if base.as_deref().or(default_base) == Some(push.branch.as_str()) {
-        return Err(CreatePrError::HeadIsBase(push.branch));
-    }
-    Ok(PrPlan {
-        repo,
-        set_upstream: !push.published && !push.has_upstream,
-        new: NewPr {
-            head: push.branch,
-            base,
-            title: request.title,
-            body: request.body,
-            draft: request.draft,
-            worktree,
-        },
-    })
 }
 
 impl Workspace {
@@ -197,6 +173,32 @@ impl Workspace {
             crate::surface::strings::git::pr_create_title(),
             None,
             move |window, cx| CreatePrModal::new(workspace, lane, repo, base, window, cx),
+            window,
+            cx,
+        );
+    }
+
+    /// The form as it stands after creating a pull request that GitHub
+    /// then did not take into its stack.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_create_pr_unstacked_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let lane = self.active;
+        let Some(path) = self.git_lane_path(lane) else {
+            return;
+        };
+        let workspace = cx.weak_entity();
+        let repo = GitHost::global(cx).open(&path);
+        crate::workspace::dialog_helpers::open_form_modal(
+            crate::surface::strings::git::pr_create_title(),
+            None,
+            move |window, cx| {
+                let base = Some("sidebar-base".to_owned());
+                CreatePrModal::new(workspace, lane, repo, base, window, cx).unstacked_for_shot()
+            },
             window,
             cx,
         );
@@ -241,91 +243,42 @@ impl Workspace {
             lane,
             cx,
             move || {
-                let push = repo.push_target().map_err(CreatePrError::Read)?;
-                if !request.expected.holds(push.as_ref()) {
-                    return Err(CreatePrError::TargetChanged);
-                }
-                let push = push.ok_or(CreatePrError::NoTarget)?;
-                let remote = push.remote.clone();
-                let plan = plan_pr(push, request, default_base.as_deref(), path)?;
-                // Before any push: a pull request this branch already has
-                // (an earlier create whose answer was lost, or one opened
-                // elsewhere) is offered instead of a second one; one that
-                // cannot be checked for stops here. The same pull requests
-                // count as the poller links: this repository's, on this
-                // head, open or draft. A second pull request from the head
-                // to another base is not offered: the answer has no base.
-                let found = gh
-                    .prs_for_branches(&plan.repo, std::slice::from_ref(&plan.new.head), &[])
-                    .map_err(CreatePrError::CheckFailed)?;
-                if let Some(open) = found
-                    .by_branch
-                    .get(&plan.new.head)
-                    .and_then(|prs| daruda_github::link::open_for(&plan.new.head, prs))
-                    && let Some(created) =
-                        super::lane_pr::CreatedPr::of(open.url.clone(), &plan.new.head)
-                {
-                    return Ok(CreateOutcome::Exists(created));
-                }
-                // An explicit refspec to the branch the PR names: a no-op when
-                // the remote is already at HEAD, so it never skips commits a
-                // cached ahead count missed.
-                repo.push_head(&remote, &plan.new.head, plan.set_upstream)
-                    .map_err(CreatePrError::Push)?;
-                let url = gh
-                    .create_pr(&plan.repo, &plan.new)
-                    .map_err(CreatePrError::Gh)?;
-                Ok::<_, CreatePrError>(CreateOutcome::Created {
-                    repo: plan.repo,
-                    head: plan.new.head,
-                    url,
-                })
+                publish(
+                    repo.as_ref(),
+                    gh.as_ref(),
+                    request,
+                    default_base.as_deref(),
+                    path,
+                )
             },
             move |ws, result, cx| match result {
                 Ok(CreateOutcome::Created {
                     repo: repo_id,
                     head,
                     url,
+                    unstacked,
                 }) => {
-                    // Published: the fields kept for the branch are done with,
-                    // under the account that wrote them and the one now.
-                    let now = DraftStore::creation_owner(&repo_id, &head, cx);
-                    for owner in creation.iter().chain(now.iter()) {
-                        DraftStore::set_creation(owner, None, cx);
-                    }
-                    // Kept until linked: the strip opens it rather than offer
-                    // Create PR again. One with no page to open holds Create
-                    // PR only when a poll can link it soon; a host in backoff
-                    // would hold the button for its pause.
-                    let soon = PrPoller::availability(repo_id.host(), cx) == GhAvailability::Ready;
-                    let pending = match super::lane_pr::CreatedPr::of(url, &head) {
-                        Some(created) => Some(PendingPr::Named(created)),
-                        None => soon.then(|| PendingPr::Unnamed { head: head.clone() }),
-                    };
-                    if let (Some(state), Some(pending)) = (ws.lane_scoped.get_mut(&lane), pending) {
-                        state.pr.created(pending);
-                    }
-                    PrPoller::nudge(repo_id, cx);
-                    // Deferred: this runs inside the workspace's update, and
-                    // closing the dialog re-enters its window. Only this form
-                    // closes; if it is gone, whatever replaced it stays.
-                    cx.defer(move |cx| {
-                        if modal.upgrade().is_none() {
-                            return;
+                    ws.note_created(lane, repo_id, &head, url, creation.as_ref(), cx);
+                    match unstacked {
+                        // Created, so the form does not close on it: it
+                        // says what is left and offers stacking again.
+                        Some(unstacked) => {
+                            unstacked_modal(modal, unstacked, cx);
+                            cx.notify();
                         }
-                        crate::windows::try_update_workspace_window(
-                            window,
-                            cx,
-                            "github.create_pr.close",
-                            |window, cx| window.close_dialog(cx),
-                        );
-                    });
+                        None => close_modal(modal, window, cx),
+                    }
                 }
-                Ok(CreateOutcome::Exists(created)) => {
+                Ok(CreateOutcome::Exists { created, unstacked }) => {
                     if let Some(state) = ws.lane_scoped.get_mut(&lane) {
                         state.pr.created(PendingPr::Named(created.clone()));
                     }
-                    exists_modal(modal, created, cx);
+                    match unstacked {
+                        // The stacking asked for is still owed: the form
+                        // says so rather than only offer the page.
+                        Some(unstacked) => unstacked_modal(modal, unstacked, cx),
+                        None => exists_modal(modal, created, cx),
+                    }
                     cx.notify();
                 }
                 Err(e) => {
@@ -342,6 +295,135 @@ impl Workspace {
             },
         );
     }
+
+    /// A pull request for `lane` now exists at `url`. `kept` is whose
+    /// draft of the form was read when it was sent.
+    fn note_created(
+        &mut self,
+        lane: LaneRef,
+        repo_id: RepoId,
+        head: &str,
+        url: String,
+        kept: Option<&daruda_store::review_drafts::CreationOwner>,
+        cx: &mut Context<Self>,
+    ) {
+        // Published: the fields kept for the branch are done with,
+        // under the account that wrote them and the one now.
+        let now = DraftStore::creation_owner(&repo_id, head, cx);
+        for owner in kept.into_iter().chain(now.iter()) {
+            DraftStore::set_creation(owner, None, cx);
+        }
+        // Kept until linked: the strip opens it rather than offer
+        // Create PR again. One with no page to open holds Create
+        // PR only when a poll can link it soon; a host in backoff
+        // would hold the button for its pause.
+        let soon = PrPoller::availability(repo_id.host(), cx) == GhAvailability::Ready;
+        let pending = match super::lane_pr::CreatedPr::of(url, head) {
+            Some(created) => Some(PendingPr::Named(created)),
+            None => soon.then(|| PendingPr::Unnamed {
+                head: head.to_owned(),
+            }),
+        };
+        if let (Some(state), Some(pending)) = (self.lane_scoped.get_mut(&lane), pending) {
+            state.pr.created(pending);
+        }
+        PrPoller::nudge(repo_id, cx);
+    }
+}
+
+/// Push HEAD and create the pull request `request` describes, stacked
+/// where it asked. **Blocking**: git and `gh`, under the repository lock.
+fn publish(
+    repo: &dyn GitRepo,
+    gh: &dyn daruda_github::Gh,
+    request: CreatePrRequest,
+    default_base: Option<&str>,
+    path: PathBuf,
+) -> Result<CreateOutcome, CreatePrError> {
+    let push = repo.push_target().map_err(CreatePrError::Read)?;
+    if !request.expected.holds(push.as_ref()) {
+        return Err(CreatePrError::TargetChanged);
+    }
+    let push = push.ok_or(CreatePrError::NoTarget)?;
+    let remote = push.remote.clone();
+    let stack_on = request.stack_on;
+    let plan = plan_pr(push, request, default_base, path)?;
+    // Before any push: a pull request this branch already has
+    // (an earlier create whose answer was lost, or one opened
+    // elsewhere) is offered instead of a second one; one that
+    // cannot be checked for stops here. The same pull requests
+    // count as the poller links: this repository's, on this
+    // head, open or draft. A second pull request from the head
+    // to another base is not offered: the answer has no base.
+    let found = gh
+        .prs_for_branches(&plan.repo, std::slice::from_ref(&plan.new.head), &[])
+        .map_err(CreatePrError::CheckFailed)?;
+    if let Some(open) = found
+        .by_branch
+        .get(&plan.new.head)
+        .and_then(|prs| daruda_github::link::open_for(&plan.new.head, prs))
+        && let Some(created) = super::lane_pr::CreatedPr::of(open.url.clone(), &plan.new.head)
+    {
+        let unstacked = existing_unstacked(gh, &plan.repo, stack_on, created.number);
+        return Ok(CreateOutcome::Exists { created, unstacked });
+    }
+    // Where it would sit is settled before anything is pushed:
+    // a parent that is not the top of its stack takes none.
+    let place = match stack_on {
+        Some(parent) => Some((
+            parent,
+            gh.pr_stack(&plan.repo, parent)
+                .map_err(CreatePrError::CheckFailed)?
+                .place_on(parent)
+                .map_err(|why| CreatePrError::NoStacking(parent, why))?,
+        )),
+        None => None,
+    };
+    // An explicit refspec to the branch the PR names: a no-op when
+    // the remote is already at HEAD, so it never skips commits a
+    // cached ahead count missed.
+    repo.push_head(&remote, &plan.new.head, plan.set_upstream)
+        .map_err(CreatePrError::Push)?;
+    let url = gh
+        .create_pr(&plan.repo, &plan.new)
+        .map_err(CreatePrError::Gh)?;
+    // The pull request exists from here: a stacking that fails
+    // leaves it, to be stacked again from the form.
+    let unstacked = place.and_then(|(parent, place)| {
+        stack_created(gh, &plan.repo, parent, place, &url, &plan.new.head)
+    });
+    Ok(CreateOutcome::Created {
+        repo: plan.repo,
+        head: plan.new.head,
+        url,
+        unstacked,
+    })
+}
+
+/// Close the form, if it is still the one open. Deferred: callers run
+/// inside the workspace's update, and closing the dialog re-enters its
+/// window. If the form is gone, whatever replaced it stays.
+fn close_modal(modal: WeakEntity<CreatePrModal>, window: AnyWindowHandle, cx: &mut gpui::App) {
+    cx.defer(move |cx| {
+        if modal.upgrade().is_none() {
+            return;
+        }
+        crate::windows::try_update_workspace_window(
+            window,
+            cx,
+            "github.create_pr.close",
+            |window, cx| window.close_dialog(cx),
+        );
+    });
+}
+
+/// Tell the form its pull request exists but is not stacked.
+fn unstacked_modal(modal: WeakEntity<CreatePrModal>, unstacked: Unstacked, cx: &mut gpui::App) {
+    cx.defer(move |cx| {
+        if let Some(modal) = modal.upgrade() {
+            modal.update(cx, |modal, cx| modal.left_unstacked(unstacked, cx));
+        }
+    });
 }
 
 /// Tell the form the branch already has `created`, to open instead.
@@ -365,149 +447,4 @@ fn fail_modal(modal: WeakEntity<CreatePrModal>, reason: String, cx: &mut gpui::A
             modal.update(cx, |modal, cx| modal.fail(reason, cx));
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_lane_base_becomes_a_branch_gh_can_target() {
-        let cases = [
-            ("origin/main", Some("main")),
-            ("main", Some("main")),
-            ("feature/x", Some("feature/x")),
-            ("upstream/main", Some("upstream/main")),
-            ("1a2b3c4d", None),
-            ("origin/", None),
-        ];
-        for (base, expected) in cases {
-            assert_eq!(base_branch(base, "origin").as_deref(), expected, "{base}");
-        }
-    }
-
-    fn push(branch: &str, published: bool, has_upstream: bool) -> PushTarget {
-        PushTarget {
-            remote: "origin".into(),
-            url: "git@github.com:o/r.git".into(),
-            branch: branch.into(),
-            published,
-            has_upstream,
-            review: None,
-        }
-    }
-
-    fn request(base: Option<&str>) -> CreatePrRequest {
-        CreatePrRequest {
-            title: "t".into(),
-            body: "b".into(),
-            base: base.map(str::to_owned),
-            draft: false,
-            expected: super::super::create_modal::summary::Expected::Unchecked,
-        }
-    }
-
-    #[test]
-    fn a_plan_targets_the_bare_base_and_refuses_the_head_as_base() {
-        // (label, head, typed base, default branch, planned base or None if refused)
-        type Row = (
-            &'static str,
-            &'static str,
-            Option<&'static str>,
-            Option<&'static str>,
-            Option<Option<&'static str>>,
-        );
-        let cases: [Row; 6] = [
-            ("typed base", "feat", Some("main"), None, Some(Some("main"))),
-            (
-                "prefix stripped",
-                "feat",
-                Some("origin/main"),
-                None,
-                Some(Some("main")),
-            ),
-            (
-                "other remote kept",
-                "feat",
-                Some("upstream/main"),
-                None,
-                Some(Some("upstream/main")),
-            ),
-            ("GitHub's choice", "feat", None, Some("main"), Some(None)),
-            (
-                "typed base is the head",
-                "feat",
-                Some("origin/feat"),
-                None,
-                None,
-            ),
-            (
-                "default branch is the head",
-                "main",
-                None,
-                Some("main"),
-                None,
-            ),
-        ];
-        for (label, head, base, default, expected) in cases {
-            let planned = plan_pr(
-                push(head, true, true),
-                request(base),
-                default,
-                PathBuf::new(),
-            );
-            match expected {
-                Some(base) => {
-                    let plan = planned.unwrap_or_else(|e| panic!("{label}: {e}"));
-                    assert_eq!(plan.new.base.as_deref(), base, "{label}");
-                    assert_eq!(plan.new.head, head, "{label}");
-                }
-                None => assert!(
-                    matches!(planned, Err(CreatePrError::HeadIsBase(ref b)) if b == head),
-                    "{label}: {planned:?}"
-                ),
-            }
-        }
-    }
-
-    #[test]
-    fn upstream_is_set_only_for_a_branch_without_one() {
-        let cases = [
-            ("first push", false, false, true),
-            ("already pushed", true, false, false),
-            ("tracks another repository", false, true, false),
-        ];
-        for (label, published, has_upstream, expected) in cases {
-            let plan = plan_pr(
-                push("feat", published, has_upstream),
-                request(None),
-                None,
-                PathBuf::new(),
-            )
-            .unwrap();
-            assert_eq!(plan.set_upstream, expected, "{label}");
-        }
-    }
-
-    #[test]
-    fn a_review_branch_is_never_pushed_for_a_pull_request() {
-        let target = PushTarget {
-            review: Some("github.com/o/r#9".into()),
-            ..push("pr-9", false, false)
-        };
-        assert!(matches!(
-            plan_pr(target, request(None), None, PathBuf::new()),
-            Err(CreatePrError::ReviewBranch)
-        ));
-    }
-
-    #[test]
-    fn a_remote_that_is_not_github_has_no_plan() {
-        let mut target = push("feat", true, true);
-        target.url = "/srv/git/r.git".into();
-        assert!(matches!(
-            plan_pr(target, request(None), None, PathBuf::new()),
-            Err(CreatePrError::NoTarget)
-        ));
-    }
 }

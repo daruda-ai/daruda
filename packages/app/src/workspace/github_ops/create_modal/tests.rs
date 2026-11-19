@@ -11,6 +11,8 @@ fn build(
     base: Option<&str>,
 ) -> (WindowHandle<CreatePrModal>, Entity<CreatePrModal>) {
     crate::test_support::init_gpui_component(cx);
+    // As the app does at startup: the form asks GitHub about a base.
+    cx.update(crate::gh_host::GhHost::init_if_missing);
     let git = FakeGit::new().with(repo);
     let handle = git.open(Path::new("/fake/repo"));
     let base = base.map(str::to_owned);
@@ -138,6 +140,8 @@ fn the_form_says_what_it_publishes_and_follows_the_base(cx: &mut TestAppContext)
 #[gpui::test]
 fn a_form_that_has_not_shown_its_target_creates_nothing(cx: &mut TestAppContext) {
     crate::test_support::init_gpui_component(cx);
+    // As the app does at startup: the form asks GitHub about a base.
+    cx.update(crate::gh_host::GhHost::init_if_missing);
     let git = FakeGit::new().with(FakeRepo::at("/fake/repo"));
     let handle = git.open(Path::new("/fake/repo"));
     let window = cx.add_window(|window, cx| {
@@ -186,6 +190,8 @@ fn with_templates(
         })
         .remote_branches("origin", &["develop", "feat", "main", "release/1.0"]);
     crate::test_support::init_gpui_component(cx);
+    // As the app does at startup: the form asks GitHub about a base.
+    cx.update(crate::gh_host::GhHost::init_if_missing);
     let git = FakeGit::new().with(repo);
     let handle = git.open(root.path());
     let window = cx.add_window(|window, cx| {

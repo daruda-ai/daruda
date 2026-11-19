@@ -8,8 +8,8 @@
 use daruda_store::review_drafts::{CreationDraft, CreationOwner};
 use gpui::{Context, Window};
 
-use super::CreatePrModal;
 use super::summary::TargetRead;
+use super::{CreatePrModal, PickedBy, Touched};
 use crate::github::DraftStore;
 
 impl CreatePrModal {
@@ -39,34 +39,33 @@ impl CreatePrModal {
             return;
         };
         let mut restored = false;
-        if let Some(title) = draft.title.filter(|_| !self.title_edited) {
+        if let Some(title) = draft.title.filter(|_| !self.touched.title) {
             self.title
                 .update(cx, |input, cx| input.set_value_silently(title, window, cx));
-            self.title_edited = true;
+            self.touched.title = true;
             restored = true;
         }
-        if let Some(base) = draft.base.filter(|_| !self.base_edited) {
+        if let Some(base) = draft.base.filter(|_| !self.touched.base) {
             self.base
                 .update(cx, |input, cx| input.set_value_silently(base, window, cx));
-            self.base_edited = true;
+            self.touched.base = true;
             restored = true;
         }
-        if !self.draft_edited && draft.draft {
+        if !self.touched.draft && draft.draft {
             self.draft = true;
-            self.draft_edited = true;
+            self.touched.draft = true;
             restored = true;
         }
-        if !self.body_edited {
+        if !self.touched.body {
             match (draft.body, draft.template) {
                 (Some(body), _) => {
                     self.body
                         .update(cx, |input, cx| input.set_value_silently(body, window, cx));
-                    self.body_edited = true;
+                    self.touched.body = true;
                     restored = true;
                 }
                 (None, Some(template)) => {
-                    if self.apply_template(&template, window, cx) {
-                        self.template_chosen = true;
+                    if self.apply_template(&template, PickedBy::User, window, cx) {
                         restored = true;
                     }
                 }
@@ -80,20 +79,26 @@ impl CreatePrModal {
     /// Keep the fields the user touched under the branch; nothing kept
     /// drops what was.
     pub(super) fn keep_creation(&mut self, cx: &mut Context<Self>) {
+        // Published: what was kept for the branch was dropped with it, and
+        // typing in the form left open does not bring it back.
+        if self.is_created() {
+            return;
+        }
         let Some(owner) = self.resolve_creation_owner(cx) else {
             return;
         };
         let value = |touched: bool, text: String| touched.then_some(text);
         let draft = CreationDraft {
             of: owner.clone(),
-            title: value(self.title_edited, self.title.read(cx).value().to_string()),
-            body: value(self.body_edited, self.body.read(cx).value().to_string()),
-            base: value(self.base_edited, self.base.read(cx).value().to_string()),
-            draft: self.draft_edited && self.draft,
+            title: value(self.touched.title, self.title.read(cx).value().to_string()),
+            body: value(self.touched.body, self.body.read(cx).value().to_string()),
+            base: value(self.touched.base, self.base.read(cx).value().to_string()),
+            draft: self.touched.draft && self.draft,
             template: self
                 .template
-                .clone()
-                .filter(|_| self.template_chosen && !self.body_edited),
+                .as_ref()
+                .filter(|used| used.by == PickedBy::User && !self.touched.body)
+                .map(|used| used.path.clone()),
             saved_at: chrono::Utc::now().timestamp(),
         };
         DraftStore::set_creation(&owner, (!draft.is_empty()).then_some(draft), cx);
@@ -118,20 +123,14 @@ impl CreatePrModal {
             .update(cx, |input, cx| input.set_value_silently(base, window, cx));
         self.draft = false;
         self.template = None;
-        self.template_chosen = false;
-        (
-            self.title_edited,
-            self.body_edited,
-            self.base_edited,
-            self.draft_edited,
-        ) = (false, false, false, false);
+        self.touched = Touched::default();
         self.restored = false;
         // As when it opened: the last commit's subject, if read by now.
         if let Some(subject) = self.subject.clone() {
             self.prefill_title(subject, window, cx);
         }
         if let Some(default) = self.templates.default.clone() {
-            self.apply_template(&default.path, window, cx);
+            self.apply_template(&default.path, PickedBy::Default, window, cx);
         }
         self.read_against(None, window, cx);
         cx.notify();

@@ -296,6 +296,33 @@ fn a_merge_behind_a_queue_enqueues_and_merges_nothing() {
     assert_eq!(gh.count(GhOp::Dequeue), 1);
 }
 
+/// Stacking is read back: the new pull request sits on top, for itself
+/// and for the one it was stacked on, and a second one goes above it.
+#[test]
+fn a_stacked_pull_request_reads_as_the_top_of_its_stack() {
+    use crate::{StackPlace, StackRead};
+    let gh = FakeGh::new();
+    let place = gh.pr_stack(&repo(), 11).unwrap().place_on(11).unwrap();
+    assert_eq!(place, StackPlace::New { parent: 11 });
+    gh.stack_pr(&repo(), place, 12).unwrap();
+    let order = |number: u64| match gh.pr_stack(&repo(), number).unwrap() {
+        StackRead::Stacked(stack) => stack
+            .entries
+            .iter()
+            .map(|entry| entry.number)
+            .collect::<Vec<_>>(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(order(11), [11, 12]);
+    assert_eq!(order(12), [11, 12]);
+    assert!(gh.pr_stack(&repo(), 11).unwrap().place_on(11).is_err());
+
+    let place = gh.pr_stack(&repo(), 12).unwrap().place_on(12).unwrap();
+    gh.stack_pr(&repo(), place, 13).unwrap();
+    assert_eq!(order(11), [11, 12, 13]);
+    assert_eq!(gh.count(GhOp::StackPr), 2);
+}
+
 #[test]
 fn review_threads_belong_to_their_repository() {
     let gh = FakeGh::new();

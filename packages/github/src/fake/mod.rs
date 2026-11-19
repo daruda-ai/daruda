@@ -14,6 +14,7 @@
 //! | `file_at` | `Absent` |
 //! | `pr_detail` | exit 1, as for a pull request that does not exist |
 //! | `pr_stack` | the `set_pr_stack` answer, else not stacked |
+//! | `stack_pr` | `pr_stack` answers the stack with the pull request on top, for it and for its parent |
 //! | `merge_pr` | `HeadMoved` if a scripted detail's head differs; queued, not merged, after `set_merge_queued`; else merged |
 //! | `set_ready` | the PR, if scripted, becomes open |
 //! | `close_pr` | the PR, if scripted, becomes closed |
@@ -153,6 +154,11 @@ gh_calls! {
     Dequeue {
         repo: RepoId,
         pr: String,
+    },
+    StackPr {
+        repo: RepoId,
+        place: crate::StackPlace,
+        number: u64,
     },
     ReplyToThread {
         repo: RepoId,
@@ -610,6 +616,58 @@ impl Gh for FakeGh {
             .get(&(repo.clone(), number))
             .cloned()
             .unwrap_or(crate::StackRead::NotStacked))
+    }
+
+    fn stack_pr(
+        &self,
+        repo: &RepoId,
+        place: crate::StackPlace,
+        number: u64,
+    ) -> Result<(), GhError> {
+        let mut state = self.lock();
+        state.record(GhCall::StackPr {
+            repo: repo.clone(),
+            place,
+            number,
+        })?;
+        let entry = |position: u32, number: u64| crate::StackEntry {
+            position,
+            number,
+            title: String::new(),
+            state: crate::PrState::Open,
+        };
+        let mut stack = match place {
+            crate::StackPlace::New { parent } => crate::PrStack {
+                number: 1,
+                base: String::new(),
+                size: 1,
+                entries: vec![entry(1, parent)],
+            },
+            crate::StackPlace::Top { stack } => state
+                .stacks
+                .values()
+                .find_map(|read| match read {
+                    crate::StackRead::Stacked(found) if found.number == stack => {
+                        Some(found.clone())
+                    }
+                    _ => None,
+                })
+                .unwrap_or(crate::PrStack {
+                    number: stack,
+                    base: String::new(),
+                    size: 0,
+                    entries: Vec::new(),
+                }),
+        };
+        stack.size += 1;
+        stack.entries.push(entry(stack.size, number));
+        for member in stack.entries.iter().map(|entry| entry.number) {
+            state.stacks.insert(
+                (repo.clone(), member),
+                crate::StackRead::Stacked(stack.clone()),
+            );
+        }
+        Ok(())
     }
 
     fn pr_detail(&self, repo: &RepoId, number: u64) -> Result<PrDetail, GhError> {

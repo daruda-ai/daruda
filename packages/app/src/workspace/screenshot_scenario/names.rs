@@ -34,6 +34,8 @@ const NAME_LEFT_DOCK_GIT_GH_MISSING: &str = "left-dock-git-gh-missing";
 const NAME_LEFT_DOCK_WORKTREES_PR: &str = "left-dock-worktrees-pr";
 /// The Create PR form over a lane with no pull request yet.
 const NAME_CREATE_PR_MODAL: &str = "create-pr-modal";
+/// The Create PR form after its pull request was created but not stacked.
+const NAME_CREATE_PR_UNSTACKED: &str = "create-pr-unstacked";
 /// The Pull requests page over two repositories.
 const NAME_PULL_REQUESTS_LIST: &str = "pull-requests-list";
 /// The same page while github.com waits out a rate limit GitHub reported.
@@ -315,6 +317,7 @@ impl ScreenshotScenario {
             NAME_LEFT_DOCK_GIT_GH_MISSING => Some(Self::LeftDockGitGhMissing),
             NAME_LEFT_DOCK_WORKTREES_PR => Some(Self::LeftDockWorktreesPr),
             NAME_CREATE_PR_MODAL => Some(Self::CreatePrModal),
+            NAME_CREATE_PR_UNSTACKED => Some(Self::CreatePrUnstacked),
             NAME_PULL_REQUESTS_LIST => Some(Self::PullRequestsList),
             NAME_PULL_REQUESTS_RATE_LIMITED => Some(Self::PullRequestsRateLimited),
             NAME_PULL_REQUESTS_GITHUB_SEARCH => Some(Self::PullRequestsGithubSearch),

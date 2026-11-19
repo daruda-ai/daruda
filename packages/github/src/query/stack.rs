@@ -1,6 +1,10 @@
 //! A pull request's place in a native GitHub stack: the stack's number,
 //! the branch it targets and its pull requests in order. Asked apart from
 //! the detail, so a server without stacks still shows the detail.
+//!
+//! A new pull request joins a stack only at its top: GitHub's REST API
+//! creates a stack from pull requests in order and appends to one, and has
+//! nothing that inserts, reorders or takes one pull request out.
 
 use serde::Deserialize;
 
@@ -68,6 +72,71 @@ impl PrStack {
     }
 }
 
+/// Where a new pull request goes to sit on top of another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackPlace {
+    /// `parent` is in no stack: the two make a new one.
+    New { parent: u64 },
+    /// `parent` is the top of stack `stack`: the new one is appended.
+    Top { stack: u64 },
+}
+
+/// Why a pull request cannot be stacked on another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoStacking {
+    /// The server has no stacks.
+    Unsupported,
+    /// The other is in a stack but not at its top, or the top is past the
+    /// entries read: only the top takes another.
+    NotTop,
+}
+
+impl std::fmt::Display for NoStacking {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unsupported => write!(f, "the server has no stacks"),
+            Self::NotTop => write!(f, "it is not the top of its stack"),
+        }
+    }
+}
+
+/// The API version the stack endpoints are documented under.
+const STACKS_API_VERSION: &str = "X-GitHub-Api-Version: 2026-03-10";
+
+/// The `gh api` arguments and the request body that put pull request
+/// `number` at `place` in `repo`.
+// ASSUMPTION: not measured — written from GitHub's REST reference
+// (`POST /repos/{owner}/{repo}/stacks` with the pull requests bottom to
+// top, `POST .../stacks/{stack_number}/add` with those to append), and
+// that the `number` GraphQL reads for a stack is that `stack_number`.
+pub(crate) fn stack_request(
+    repo: &crate::RepoId,
+    place: StackPlace,
+    number: u64,
+) -> (Vec<String>, String) {
+    let stacks = format!("repos/{}/{}/stacks", repo.owner(), repo.name());
+    let (path, pull_requests) = match place {
+        StackPlace::New { parent } => (stacks, vec![parent, number]),
+        StackPlace::Top { stack } => (format!("{stacks}/{stack}/add"), vec![number]),
+    };
+    let args = [
+        "api",
+        "--hostname",
+        repo.host(),
+        "--method",
+        "POST",
+        "-H",
+        STACKS_API_VERSION,
+        &path,
+        "--input",
+        "-",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    let body = serde_json::json!({ "pull_requests": pull_requests }).to_string();
+    (args, body)
+}
+
 /// What asking for a pull request's stack answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StackRead {
@@ -78,6 +147,24 @@ pub enum StackRead {
 }
 
 impl StackRead {
+    /// Where a pull request stacked on `parent`, whose stack this is,
+    /// would go.
+    pub fn place_on(&self, parent: u64) -> Result<StackPlace, NoStacking> {
+        match self {
+            Self::NotStacked => Ok(StackPlace::New { parent }),
+            Self::Unsupported => Err(NoStacking::Unsupported),
+            Self::Stacked(stack) => {
+                let top = stack.entries.last().filter(|_| stack.more() == 0);
+                match top {
+                    Some(top) if top.number == parent => Ok(StackPlace::Top {
+                        stack: stack.number,
+                    }),
+                    _ => Err(NoStacking::NotTop),
+                }
+            }
+        }
+    }
+
     /// [`PrStack::range_below`] of a stacked pull request; `None` otherwise.
     pub fn range_below(&self, number: u64) -> Option<Vec<u64>> {
         match self {

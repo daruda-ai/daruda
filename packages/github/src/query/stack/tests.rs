@@ -72,3 +72,85 @@ fn the_range_below_takes_the_open_pull_requests_up_to_this_one() {
     assert_eq!(stack.range_below(11), None, "nothing open below");
     assert_eq!(stack.range_below(99), None, "not listed");
 }
+
+fn stack_of(number: u64, size: u32, listed: &[u64]) -> StackRead {
+    StackRead::Stacked(PrStack {
+        number,
+        base: "main".into(),
+        size,
+        entries: listed
+            .iter()
+            .zip(1..)
+            .map(|(&number, position)| StackEntry {
+                position,
+                number,
+                title: String::new(),
+                state: PrState::Open,
+            })
+            .collect(),
+    })
+}
+
+/// Only the top of a stack takes another pull request: GitHub appends,
+/// and has nothing that inserts.
+#[test]
+fn a_new_pull_request_goes_on_top_or_nowhere() {
+    let cases = [
+        (
+            "the parent is in no stack: the two make one",
+            StackRead::NotStacked,
+            Ok(StackPlace::New { parent: 12 }),
+        ),
+        (
+            "the parent is the top of its stack",
+            stack_of(3, 2, &[11, 12]),
+            Ok(StackPlace::Top { stack: 3 }),
+        ),
+        (
+            "the parent has one above it",
+            stack_of(3, 3, &[11, 12, 13]),
+            Err(NoStacking::NotTop),
+        ),
+        (
+            // More entries than were read: the top is not known to be it.
+            "the stack is longer than what was listed",
+            stack_of(3, 5, &[11, 12]),
+            Err(NoStacking::NotTop),
+        ),
+        (
+            "the server has no stacks",
+            StackRead::Unsupported,
+            Err(NoStacking::Unsupported),
+        ),
+    ];
+    for (label, read, expected) in cases {
+        assert_eq!(read.place_on(12), expected, "{label}");
+    }
+}
+
+/// A new stack names both pull requests bottom first; an append names
+/// only the new one, on the stack's own path.
+#[test]
+fn the_request_is_the_one_githubs_reference_describes() {
+    let repo = crate::RepoId::new("github.com", "o", "r");
+    let (args, body) = stack_request(&repo, StackPlace::New { parent: 12 }, 13);
+    assert_eq!(
+        args,
+        [
+            "api",
+            "--hostname",
+            "github.com",
+            "--method",
+            "POST",
+            "-H",
+            "X-GitHub-Api-Version: 2026-03-10",
+            "repos/o/r/stacks",
+            "--input",
+            "-"
+        ]
+    );
+    assert_eq!(body, r#"{"pull_requests":[12,13]}"#);
+    let (args, body) = stack_request(&repo, StackPlace::Top { stack: 3 }, 13);
+    assert_eq!(args[7], "repos/o/r/stacks/3/add");
+    assert_eq!(body, r#"{"pull_requests":[13]}"#);
+}
