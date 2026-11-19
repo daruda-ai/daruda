@@ -167,6 +167,40 @@ needs a `// SAFETY:`-style comment naming the reason.
 - Repeated multi-field transitions go through one function; seal the fields
   with `pub(super)` rather than repeating the same sequence in call paths.
 
+## Tab Groups
+
+A worktree has two tab groups: its tabs (`LaneRuntime::tabs`, each a split
+tree) and its side tabs (`LaneRuntime::side`, `main_area/side_group.rs`),
+drawn to their right. A side tab is one pane; nothing splits there. Only what
+is read beside a chat goes aside: files, diffs and a pull request
+(`side_hosts`). Both groups' panes live in `LaneRuntime::panes`.
+
+- **`focused_pane_id` is always a pane of the active tab**, or none when the
+  worktree has no tab. A side pane never becomes it. Splitting, zooming and the
+  bottom input act on it.
+- **Which group the keyboard is in** is `LaneRuntime::keyboard`
+  (`KeyboardIn`), written only by `Workspace::focus_pane`. Read it through
+  `keyboard_is_aside()`; it is in the side tabs only while they are drawn.
+- **Commands about what the user is looking at** (find, save, close, send to
+  chat, the focused file view) use `Workspace::keyboard_pane()`, not
+  `focused_pane_id`. A panel row that opened a file without moving the
+  keyboard uses `shown_file_view()`.
+- **Where a pane sits** is `LaneRuntime::place_of(pane) -> PanePlace`. Do not
+  search `tabs` alone for a pane that may be a file or a pull request.
+- **What is drawn** is `groups_shown()`: a page, an unavailable worktree and a
+  zoomed pane hide the side tabs, and a width too narrow for both draws the
+  group the keyboard is in. Pane sizes follow `groups_layout()`, which ignores
+  what covers the groups, so a zoom or a page resizes nothing.
+- **One open path:** `open_file_pane` decides the group (`opens_beside`: the
+  keyboard already aside, or `file_viewer.open_beside` with a tab to be beside)
+  and the reuse (`preview_slot`, one scratch tab across both groups).
+- **A pull request pane** (`PaneContent::PullRequest`,
+  `pages/pull_requests/pane.rs`) holds one of the window's open details
+  (`PrDetails`, `pages/pull_requests/details.rs`). The page showing the same
+  pull request shows the same detail; a detail ends when neither the page nor
+  a pane shows it. A worktree has one such pane, retargeted by the next pull
+  request; it is not saved with the layout.
+
 ## Error Reporting
 
 New `eprintln!` is forbidden. Workspace failures go through
