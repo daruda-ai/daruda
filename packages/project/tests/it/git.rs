@@ -487,6 +487,24 @@ fn explicit_file_staging_and_diffs_use_literal_pathspecs() {
     }
 }
 
+/// Only what the head has over the base, newest first, and no more than
+/// asked for.
+#[test]
+fn range_subjects_lists_the_commits_over_the_base() {
+    let temp = regression_repo(true);
+    let root = temp.path();
+    let from = git(root, &["rev-parse", "HEAD"]);
+    for subject in ["first over", "second over", "third over"] {
+        std::fs::write(root.join("f.txt"), subject).unwrap();
+        open(root).add_all().unwrap();
+        open(root).commit(subject).unwrap();
+    }
+    let all = open(root).range_subjects(from.trim(), "HEAD", 50).unwrap();
+    assert_eq!(all, ["third over", "second over", "first over"]);
+    let capped = open(root).range_subjects(from.trim(), "HEAD", 2).unwrap();
+    assert_eq!(capped, ["third over", "second over"]);
+}
+
 #[test]
 fn explicit_file_unstaging_uses_literal_pathspecs() {
     for batch in [false, true] {

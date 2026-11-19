@@ -121,6 +121,9 @@ pub trait GitRepo: Send + Sync {
     ) -> Result<BaseTips, BaseProblem>;
     fn changes_since(&self, tips: BaseTips) -> Result<AgainstBase, BaseProblem>;
     fn diff_range(&self, from: &str, to: &str, paths: &[&Path]) -> Result<String, GitError>;
+    /// Subjects of the commits `to` has over `from`, newest first, at most
+    /// `limit` of them.
+    fn range_subjects(&self, from: &str, to: &str, limit: usize) -> Result<Vec<String>, GitError>;
     /// `repo_rel` is relative to the worktree root, whatever the handle path.
     fn show_at(&self, rev: &str, repo_rel: &Path) -> Result<Vec<u8>, GitError>;
 }
@@ -294,6 +297,9 @@ impl GitRepo for SystemRepo {
     }
     fn diff_range(&self, from: &str, to: &str, paths: &[&Path]) -> Result<String, GitError> {
         base::git_diff_range(&self.path, from, to, paths)
+    }
+    fn range_subjects(&self, from: &str, to: &str, limit: usize) -> Result<Vec<String>, GitError> {
+        base::git_range_subjects(&self.path, from, to, limit)
     }
     fn show_at(&self, rev: &str, repo_rel: &Path) -> Result<Vec<u8>, GitError> {
         base::git_show_at(&self.path, rev, repo_rel)

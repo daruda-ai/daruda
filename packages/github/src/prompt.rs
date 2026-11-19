@@ -6,6 +6,8 @@
 //! is stripped of control characters before it can reach a terminal, and
 //! quoted in fences no line of it can close.
 
+pub mod draft;
+
 use crate::{FailedCheck, PrSummary, ReviewThreads};
 
 /// Characters kept from one failing step: the command that started it and

@@ -7,3 +7,4 @@ pub(crate) mod configuration;
 pub mod launch_resolve;
 pub mod mcp;
 pub mod skills;
+pub(crate) mod text_run;

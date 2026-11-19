@@ -4,6 +4,7 @@
 //! fields and what the form shows meanwhile.
 
 mod creation;
+mod draft;
 mod render;
 mod stacking;
 pub(crate) mod summary;
@@ -119,6 +120,12 @@ pub(crate) struct CreatePrModal {
     /// The pull request the user asked to stack on: a choice of that one,
     /// not of whichever a later base heads.
     stack_on: Option<u64>,
+    /// The agent run that writes the title and the description, when the
+    /// lane's agent has one.
+    draft_run: Option<crate::agent::text_run::TextRun>,
+    /// Where the Write button stands. Named apart from `draft`, the
+    /// pull request's own draft flag.
+    written: draft::DraftState,
     _subscriptions: [Subscription; 3],
 }
 
@@ -154,6 +161,7 @@ impl CreatePrModal {
                     InputEvent::PressEnter { .. } => this.submit(window, cx),
                     InputEvent::Change => {
                         this.clear_failure(cx);
+                        this.settle_draft(cx);
                         if *input == this.base {
                             this.touched.base = true;
                             // Stacking was chosen for the pull request
@@ -172,6 +180,7 @@ impl CreatePrModal {
         let on_body = cx.subscribe_in(&body, window, |this, _, event: &InputEvent, _, cx| {
             if matches!(event, InputEvent::Change) {
                 this.touched.body = true;
+                this.settle_draft(cx);
                 this.clear_failure(cx);
                 this.keep_creation(cx);
             }
@@ -226,6 +235,8 @@ impl CreatePrModal {
             stack_parent: None,
             stack_parent_read: None,
             stack_on: None,
+            draft_run: None,
+            written: draft::DraftState::Idle,
             _subscriptions,
         };
         this.read_publication(window, cx);
@@ -498,9 +509,11 @@ impl CreatePrModal {
         workspace.update(cx, |ws, cx| ws.create_pr(lane, request, me, handle, cx));
     }
 
-    /// The form is sent: what is created is what the fields hold now.
+    /// The form is sent. What is created is what the fields hold now: a
+    /// draft run still in flight ends rather than change them under it.
     fn begin_creating(&mut self, cx: &mut Context<Self>) {
         self.state = CreateState::Creating;
+        self.reset_draft();
         cx.notify();
     }
 

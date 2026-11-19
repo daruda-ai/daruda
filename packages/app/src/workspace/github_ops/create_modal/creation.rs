@@ -125,6 +125,7 @@ impl CreatePrModal {
         self.template = None;
         self.touched = Touched::default();
         self.restored = false;
+        self.reset_draft();
         // As when it opened: the last commit's subject, if read by now.
         if let Some(subject) = self.subject.clone() {
             self.prefill_title(subject, window, cx);

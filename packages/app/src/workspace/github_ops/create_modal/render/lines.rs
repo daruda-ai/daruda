@@ -3,6 +3,7 @@
 
 use gpui::{AnyElement, ClickEvent, Context, IntoElement, div, prelude::*, px};
 
+use super::super::draft::{DraftOffer, DraftState};
 use super::super::summary::{Against, TargetRead};
 use super::super::{CreatePrModal, CreateState};
 use crate::surface::strings::{common, git as s};
@@ -86,6 +87,74 @@ impl CreatePrModal {
                 .child(text)
                 .into_any_element(),
         )
+    }
+
+    /// The Write button, and beside it why it cannot be pressed, that the
+    /// agent is writing, what went wrong, or the way back to the old text.
+    pub(super) fn draft_line(&self, cx: &Context<Self>) -> AnyElement {
+        let t = theme::current(cx);
+        let note = |text: String, color| {
+            div()
+                .text_size(px(theme::FONT_SIZE_SM))
+                .text_color(color)
+                .child(text)
+        };
+        let offer = self.draft_offer(cx);
+        let sent = self.is_sent();
+        let mut line = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(theme::GAP_SM));
+        line = match &self.written {
+            DraftState::Running { .. } => line
+                .child(
+                    button_compact("create-pr-write", s::pr_writing())
+                        .debug_selector(|| "create-pr-write".into())
+                        .disabled(true),
+                )
+                .child(
+                    button_compact("create-pr-write-stop", s::pr_write_stop())
+                        .debug_selector(|| "create-pr-write-stop".into())
+                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.stop_draft(cx))),
+                ),
+            DraftState::Idle | DraftState::Failed(_) | DraftState::Filled(_) => {
+                line.child(
+                    button_compact("create-pr-write", s::pr_write())
+                        .debug_selector(|| "create-pr-write".into())
+                        .disabled(sent || offer != DraftOffer::Ready)
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.write_draft(window, cx)
+                        })),
+                )
+            }
+        };
+        line = match (&self.written, offer) {
+            (DraftState::Running { .. }, _) => line,
+            (DraftState::Failed(reason), _) => {
+                line.child(note(reason.to_string(), t.banner_warning_text))
+            }
+            (DraftState::Filled(_), _) => {
+                line.child(note(s::pr_write_filled(), t.text_muted)).child(
+                    button_compact("create-pr-write-undo", s::pr_write_undo())
+                        .debug_selector(|| "create-pr-write-undo".into())
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.undo_draft(window, cx)
+                        })),
+                )
+            }
+            (DraftState::Idle, DraftOffer::Ready) => line,
+            (DraftState::Idle, DraftOffer::NoAgent) => {
+                line.child(note(s::pr_write_no_agent(), t.text_muted))
+            }
+            (DraftState::Idle, DraftOffer::NoBase) => {
+                line.child(note(s::pr_write_no_base(), t.text_muted))
+            }
+            (DraftState::Idle, DraftOffer::NothingOver) => {
+                line.child(note(s::pr_write_nothing_over(), t.text_muted))
+            }
+        };
+        line.into_any_element()
     }
 
     /// Which template the description came from, and the others to use

@@ -343,6 +343,50 @@ fn run_captured_kills_a_child_that_outlives_the_deadline() {
     );
 }
 
+/// A run nobody waits on ends when its flag is raised, not at the deadline.
+#[test]
+fn a_cancelled_run_ends_before_its_deadline() {
+    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let raise = cancelled.clone();
+    let raiser = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(200));
+        raise.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    let started = std::time::Instant::now();
+    let result = daruda_core::process::run_captured_until_cancelled(
+        fixture(&["--sleep-ms", "60000"]),
+        Vec::new(),
+        limits(Duration::from_secs(60)),
+        &cancelled,
+    );
+    raiser.join().unwrap();
+    assert!(
+        matches!(result, Ok(Err(daruda_core::process::Cancelled))),
+        "{result:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "returned promptly"
+    );
+}
+
+/// A run stopped before it began starts nothing: a program that cannot
+/// even be spawned is never tried.
+#[test]
+fn a_run_cancelled_before_it_starts_spawns_nothing() {
+    let cancelled = std::sync::atomic::AtomicBool::new(true);
+    let result = daruda_core::process::run_captured_until_cancelled(
+        command("/nonexistent/daruda-never-spawned"),
+        Vec::new(),
+        limits(Duration::from_secs(60)),
+        &cancelled,
+    );
+    assert!(
+        matches!(result, Ok(Err(daruda_core::process::Cancelled))),
+        "{result:?}"
+    );
+}
+
 #[test]
 fn run_captured_stops_a_child_that_floods_its_output() {
     let result = run_captured(fixture(&["--flood"]), limits(Duration::from_secs(30)));

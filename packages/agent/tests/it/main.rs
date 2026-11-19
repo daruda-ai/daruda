@@ -10,6 +10,7 @@ mod accounts_login;
 mod accounts_login_target;
 mod accounts_recipe;
 mod accounts_sweep;
+mod accounts_text_run;
 mod activity;
 mod codex_activity;
 mod hooks_cold_restore;

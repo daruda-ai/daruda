@@ -35,6 +35,7 @@ pub struct FakeRepo {
     base_tips: Option<Result<BaseTips, BaseProblem>>,
     changes_since: Option<Result<AgainstBase, BaseProblem>>,
     diff_range: Option<String>,
+    range_subjects: Vec<String>,
     show_at: HashMap<(String, PathBuf), Vec<u8>>,
     merge_outcome: Option<MergeOutcome>,
     removal_states: HashMap<PathBuf, super::super::LaneRemovalState>,
@@ -65,6 +66,7 @@ impl FakeRepo {
             base_tips: None,
             changes_since: None,
             diff_range: None,
+            range_subjects: Vec::new(),
             show_at: HashMap::new(),
             merge_outcome: None,
             removal_states: HashMap::new(),
@@ -192,6 +194,11 @@ impl FakeRepo {
         self.diff_range = Some(text.into());
         self
     }
+    /// What every `range_subjects` call lists, whatever range it names.
+    pub fn range_subjects(mut self, subjects: &[&str]) -> Self {
+        self.range_subjects = subjects.iter().map(|s| (*s).to_owned()).collect();
+        self
+    }
     pub fn show_at(
         mut self,
         rev: impl Into<String>,
@@ -310,6 +317,9 @@ impl FakeRepo {
     }
     pub(super) fn diff_range_answer(&self) -> String {
         self.diff_range.clone().unwrap_or_default()
+    }
+    pub(super) fn range_subjects_answer(&self, limit: usize) -> Vec<String> {
+        self.range_subjects.iter().take(limit).cloned().collect()
     }
     pub(super) fn show_at_answer(&self, rev: &str, path: &Path) -> Result<Vec<u8>, GitError> {
         self.show_at

@@ -51,6 +51,7 @@ pub mod surface;
 mod telegram;
 #[cfg(test)]
 mod test_support;
+mod text_run_host;
 mod title_bar;
 pub mod ui;
 mod update;

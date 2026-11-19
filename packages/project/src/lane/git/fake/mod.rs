@@ -169,6 +169,7 @@ pub enum GitOp {
     BaseTips,
     ChangesSince,
     DiffRange,
+    RangeSubjects,
     ShowAt,
 }
 
@@ -228,6 +229,7 @@ fn fatal(message: String) -> GitError {
 /// | `tracking` | exit 128 | `branch` from [`FakeRepo::branch`], no upstream |
 /// | `worktree_status` | exit 128 | clean (`Default`) |
 /// | `status_scoped`, `diff`, `diff_untracked`, `diff_range` | exit 128 | `""` |
+/// | `range_subjects` | exit 128 | none |
 /// | `show_staged`, `show_at`, `head_message` | exit 128 | exit 128 (nothing there) |
 /// | `default_branch` | `None` | [`FakeRepo::branch`] |
 /// | `dirs` | exit 128 | `<root>/.git` for both |

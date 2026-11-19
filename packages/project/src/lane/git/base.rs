@@ -227,6 +227,26 @@ pub(crate) fn git_diff_range(
     run_git(wt, args)
 }
 
+/// `git log --format=%s -n <limit> <from>..<to>`: one subject a line.
+pub(crate) fn git_range_subjects(
+    wt: &Path,
+    from: &str,
+    to: &str,
+    limit: usize,
+) -> Result<Vec<String>, GitError> {
+    let out = run_git(
+        wt,
+        [
+            "log",
+            "--format=%s",
+            "-n",
+            &limit.to_string(),
+            &format!("{from}..{to}"),
+        ],
+    )?;
+    Ok(out.lines().map(str::to_owned).collect())
+}
+
 /// The file as it was at `rev` — the Raw view of a range pane.
 pub(crate) fn git_show_at(wt: &Path, rev: &str, repo_rel: &Path) -> Result<Vec<u8>, GitError> {
     let spec = format!("{rev}:{}", super::status::tree_path(repo_rel));

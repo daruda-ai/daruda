@@ -54,6 +54,12 @@ through `GitHost`.
   field a header holds) and is fenced or quoted so it cannot close its
   quote or end a bracketed paste. The app sends it only to writable agent
   chats, inserted and never submitted.
+- `prompt::draft` asks an agent for a new pull request's title and
+  description and reads its answer. The agent runs once with no tools
+  (`daruda_agent::accounts::text_run`), so the prompt carries everything:
+  commit subjects, changed files, the template, and the patch cut to a
+  byte budget shared between files. `parse_pr_draft` takes the first JSON
+  object with a title, whatever surrounds it.
 - Mutations (`merge_pr`, `set_ready`, `close_pr`, `reopen_pr`,
   `enable_auto_merge`, `disable_auto_merge`, `dequeue_pr`, `rerun_failed`,
   `reply_to_thread`, `set_thread_resolved`, `edit_pr_body`,

@@ -25,6 +25,7 @@ pub mod login_target;
 pub mod mcp_mirror;
 pub mod recipe;
 pub mod sweep;
+pub mod text_run;
 
 pub use claude::ClaudeRecipe;
 pub use cli_command::CliCommand;

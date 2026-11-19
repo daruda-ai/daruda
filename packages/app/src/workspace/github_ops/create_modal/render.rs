@@ -29,6 +29,7 @@ impl Render for CreatePrModal {
             .child(self.summary_lines(cx))
             .children(self.keeping_line(cx))
             .children(self.restored_line(cx))
+            .child(self.draft_line(cx))
             .child(label(s::pr_field_title()))
             .child(form_input(&self.title, cx, 0))
             .child(label(s::pr_field_body()))

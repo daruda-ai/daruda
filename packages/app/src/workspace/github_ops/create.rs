@@ -157,6 +157,23 @@ impl Workspace {
             .or_else(|| PrPoller::default_branch(&repo, cx))
     }
 
+    /// The run that writes a pull request's title and description: the
+    /// agent a new chat would open with, under the account it would get.
+    /// `None` when that agent has no text-only run.
+    fn pr_text_run(&self) -> Option<crate::agent::text_run::TextRun> {
+        use crate::workspace::main_area::pane::AccountDomain;
+        let agent_id = self.open_agent_id(None);
+        let agent = self.mirrors.agents.iter().find(|a| a.id == agent_id)?;
+        let (recipe, cli) = crate::agent::text_run::resolve(agent)?;
+        let account = self
+            .resolve_account(
+                self.default_account_selection_for_new_pane(Some(recipe)),
+                AccountDomain::for_agent(Some(recipe)),
+            )
+            .map_or_else(daruda_config::AccountEnv::ambient, |account| account.env);
+        Some(crate::agent::text_run::TextRun { cli, account })
+    }
+
     pub(in crate::workspace) fn open_create_pr_modal(
         &mut self,
         window: &mut Window,
@@ -169,10 +186,13 @@ impl Workspace {
         let base = self.default_pr_base(lane, cx);
         let workspace = cx.weak_entity();
         let repo = GitHost::global(cx).open(&path);
+        let written_by = self.pr_text_run();
         crate::workspace::dialog_helpers::open_form_modal(
             crate::surface::strings::git::pr_create_title(),
             None,
-            move |window, cx| CreatePrModal::new(workspace, lane, repo, base, window, cx),
+            move |window, cx| {
+                CreatePrModal::new(workspace, lane, repo, base, window, cx).written_by(written_by)
+            },
             window,
             cx,
         );
@@ -192,12 +212,15 @@ impl Workspace {
         };
         let workspace = cx.weak_entity();
         let repo = GitHost::global(cx).open(&path);
+        let written_by = self.pr_text_run();
         crate::workspace::dialog_helpers::open_form_modal(
             crate::surface::strings::git::pr_create_title(),
             None,
             move |window, cx| {
                 let base = Some("sidebar-base".to_owned());
-                CreatePrModal::new(workspace, lane, repo, base, window, cx).unstacked_for_shot()
+                CreatePrModal::new(workspace, lane, repo, base, window, cx)
+                    .written_by(written_by)
+                    .unstacked_for_shot()
             },
             window,
             cx,

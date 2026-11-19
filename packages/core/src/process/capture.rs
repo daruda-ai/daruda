@@ -1,8 +1,10 @@
 //! Run a child to completion with its output captured, bounded in time and
 //! size, and torn down as a tree when either bound is crossed.
 
+use std::convert::Infallible;
 use std::io::Read;
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -63,7 +65,7 @@ impl std::error::Error for CaptureError {}
 /// the helpers it forked (ssh, credential helpers) as well as the child.
 /// Both streams drain concurrently, so a full pipe never stalls the child.
 pub fn run_captured(command: Command, limits: CaptureLimits) -> Result<Captured, CaptureError> {
-    run(command, None, limits)
+    uncancelled(run(command, None, limits, Uncancellable))
 }
 
 /// [`run_captured`], with `input` written to the child's stdin and then
@@ -74,19 +76,72 @@ pub fn run_captured_with_input(
     input: Vec<u8>,
     limits: CaptureLimits,
 ) -> Result<Captured, CaptureError> {
-    run(command, Some(input), limits)
+    uncancelled(run(command, Some(input), limits, Uncancellable))
 }
 
-fn run(
+/// The caller raised its flag and the child was killed with its tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cancelled;
+
+/// [`run_captured_with_input`] that also ends, killing the child's tree,
+/// once `cancelled` is raised: for a run nobody waits on any longer, which
+/// would otherwise hold its process until the deadline.
+pub fn run_captured_until_cancelled(
+    command: Command,
+    input: Vec<u8>,
+    limits: CaptureLimits,
+    cancelled: &AtomicBool,
+) -> Result<Result<Captured, Cancelled>, CaptureError> {
+    run(command, Some(input), limits, cancelled)
+}
+
+/// Whether a run is asked to end early. The answer's type says whether it
+/// can be: a run nothing cancels has no cancelled outcome to handle.
+trait Cancel {
+    type Stopped;
+    fn stopped(&self) -> Option<Self::Stopped>;
+}
+
+struct Uncancellable;
+
+impl Cancel for Uncancellable {
+    type Stopped = Infallible;
+    fn stopped(&self) -> Option<Infallible> {
+        None
+    }
+}
+
+impl Cancel for &AtomicBool {
+    type Stopped = Cancelled;
+    fn stopped(&self) -> Option<Cancelled> {
+        self.load(Ordering::Relaxed).then_some(Cancelled)
+    }
+}
+
+fn uncancelled(
+    outcome: Result<Result<Captured, Infallible>, CaptureError>,
+) -> Result<Captured, CaptureError> {
+    outcome.map(|ran| match ran {
+        Ok(captured) => captured,
+        Err(never) => match never {},
+    })
+}
+
+fn run<C: Cancel>(
     mut command: Command,
     input: Option<Vec<u8>>,
     limits: CaptureLimits,
-) -> Result<Captured, CaptureError> {
+    cancel: C,
+) -> Result<Result<Captured, C::Stopped>, CaptureError> {
     if input.is_some() {
         command.stdin(Stdio::piped());
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     lead_own_group(&mut command);
+    // Stopped before it began: nothing is started only to be ended.
+    if let Some(stopped) = cancel.stopped() {
+        return Ok(Err(stopped));
+    }
     let mut child = command.spawn().map_err(CaptureError::Spawn)?;
     let group = match Group::try_adopt(child.id()) {
         Ok(group) => group,
@@ -134,6 +189,14 @@ fn run(
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) => {
+                if let Some(stopped) = cancel.stopped() {
+                    // As at the deadline: the tree ends, the drains detach.
+                    let termination = terminate(&mut child, &group);
+                    drop(stdout_thread);
+                    drop(stderr_thread);
+                    termination?;
+                    return Ok(Err(stopped));
+                }
                 if started.elapsed() >= limits.timeout {
                     // The whole tree, so no helper is left holding the pipes
                     // the drain threads read. Unreaped until the wait inside,
@@ -180,7 +243,7 @@ fn run(
             Stream::Stderr => out.stderr = bytes,
         }
     }
-    Ok(out)
+    Ok(Ok(out))
 }
 
 #[derive(Debug, Clone, Copy)]

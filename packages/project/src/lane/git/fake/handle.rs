@@ -344,6 +344,16 @@ impl GitRepo for FakeHandle {
     fn diff_range(&self, _from: &str, _to: &str, _paths: &[&Path]) -> Result<String, GitError> {
         self.read(GitOp::DiffRange, |repo| Ok(repo.diff_range_answer()))
     }
+    fn range_subjects(
+        &self,
+        _from: &str,
+        _to: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, GitError> {
+        self.read(GitOp::RangeSubjects, |repo| {
+            Ok(repo.range_subjects_answer(limit))
+        })
+    }
     fn show_at(&self, rev: &str, repo_rel: &Path) -> Result<Vec<u8>, GitError> {
         self.read(GitOp::ShowAt, |repo| repo.show_at_answer(rev, repo_rel))
     }
