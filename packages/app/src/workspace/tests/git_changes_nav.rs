@@ -649,6 +649,8 @@ async fn a_preview_armed_before_leaving_the_panel_does_not_fire(cx: &mut TestApp
 #[gpui::test]
 async fn closing_the_scratch_tab_leaves_the_next_preview_intact(cx: &mut TestAppContext) {
     let (w, ws) = dock_showing_changes(cx, vec![entry("a.rs"), entry("b.rs")]);
+    // The scratch tab is closed as a tab: files open among the tabs here.
+    ws.update(cx, |ws, _| ws.mirrors.file_viewer_open_beside = false);
     // A second tab, so closing the scratch one is a real close —
     // `close_tab_at` empties the whole lane when it would close the last tab.
     cx.update_window(w.into(), |_, window, cx| {

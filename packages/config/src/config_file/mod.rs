@@ -280,6 +280,10 @@ pub fn patch_config_file_to(config: &Config, path: &std::path::Path) -> Result<(
             "preview_tab",
             toml_edit::value(config.file_viewer.preview_tab),
         );
+        t.insert(
+            "open_beside",
+            toml_edit::value(config.file_viewer.open_beside),
+        );
     });
 
     patch_section(&mut doc, "editor", |t| {

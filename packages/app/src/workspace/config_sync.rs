@@ -97,6 +97,8 @@ pub(in crate::workspace) struct ConfigMirrors {
     /// existing file-viewer tab instead of opening one per file.
     /// Mirrors `daruda_config::FileViewerConfig::preview_tab`.
     pub file_viewer_preview_tab: bool,
+    /// Mirrors `daruda_config::FileViewerConfig::open_beside`.
+    pub file_viewer_open_beside: bool,
 
     /// Preferred external-editor preset name (`daruda_config::editor`), or
     /// empty for the OS default handler. Mirrors
@@ -210,6 +212,7 @@ impl ConfigMirrors {
             syntax_theme: config.file_viewer.syntax_theme.clone(),
             agent_reader_defaults: ReaderDefaults::from_config(&config.agent),
             file_viewer_preview_tab: config.file_viewer.preview_tab,
+            file_viewer_open_beside: config.file_viewer.open_beside,
             preferred_editor: config.editor.preferred.clone(),
             notifications: config.notifications.clone(),
             git_config: config.git.clone(),

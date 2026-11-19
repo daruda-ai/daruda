@@ -5,6 +5,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use super::file_view_pane::{CharPos, DiffSource, FileViewMode, PaneFileView};
 use super::pane::{FileContent, Pane, PaneContent, PaneSpawnError};
 use super::pane_tree::{PaneId, PaneLayout};
+use super::side_group::PanePlace;
 use crate::path_ext::PathExt as _;
 use crate::workspace::Workspace;
 
@@ -23,6 +24,31 @@ impl Workspace {
             .iter()
             .find(|p| p.id == id)
             .and_then(|p| p.file_view())
+    }
+
+    /// The file a panel's row stands for: the one the keyboard is in, or,
+    /// while the keyboard is elsewhere, the one the side tabs show. A row
+    /// opened from a panel leaves the keyboard in the panel, so with files
+    /// opening beside the tabs this is what the row is highlighted for and
+    /// what a second Enter walks into.
+    pub(in crate::workspace) fn shown_file_view(&self) -> Option<(PaneId, &PaneFileView)> {
+        let runtime = self.active_runtime();
+        let view_of = |id: PaneId| {
+            runtime
+                .panes
+                .iter()
+                .find(|p| p.id == id)
+                .and_then(|p| p.file_view())
+                .map(|view| (id, view))
+        };
+        view_of(self.keyboard_pane()).or_else(|| {
+            let drawn = self.groups_shown() != super::side_group::GroupsShown::Tabs;
+            runtime
+                .side
+                .shown_pane()
+                .filter(|_| drawn)
+                .and_then(view_of)
+        })
     }
 
     /// Focused pane's TerminalView, when the focused pane is a
@@ -57,10 +83,10 @@ impl Workspace {
         let Some(path) = path else {
             return false;
         };
-        // The focused pane is in the lane on screen, so its lane is that one.
+        // The pane is in the lane on screen, so its lane is that one.
         let open = self
-            .focused_file_view()
-            .map(|fv| (fv.path.clone(), fv.source.clone()));
+            .shown_file_view()
+            .map(|(_, fv)| (fv.path.clone(), fv.source.clone()));
         let Some((open_path, open_source)) = open else {
             return false;
         };
@@ -71,7 +97,9 @@ impl Workspace {
         if open_path != path || open_source != source {
             return false;
         }
-        let pane = self.keyboard_pane();
+        let Some((pane, _)) = self.shown_file_view() else {
+            return false;
+        };
         // Entering is a commit — see `release_preview_tab_for_pane`.
         self.release_preview_tab_for_pane(pane);
         self.focus_pane(pane, window, cx);
@@ -117,44 +145,68 @@ impl Workspace {
     /// the edits away, and the italic drops the moment the user types — so
     /// what the strip shows is exactly what the reuse will do.
     pub(in crate::workspace) fn preview_tab_index(&self, cx: &App) -> Option<usize> {
+        match self.preview_slot(cx)? {
+            (PanePlace::Tab(index), _) => Some(index),
+            (PanePlace::Side(_), _) => None,
+        }
+    }
+
+    /// The scratch tab, among the tabs or the side tabs, and its pane: what
+    /// the next preview replaces. `None` when there is none, or it holds
+    /// unsaved edits.
+    pub(in crate::workspace) fn preview_slot(&self, cx: &App) -> Option<(PanePlace, PaneId)> {
         // Multi-tab mode never reuses a tab, so nothing is replaceable and the
         // strip must not italicise one as though it were.
         if !self.mirrors.file_viewer_preview_tab {
             return None;
         }
-        let (i, pane_id) = self.preview_tab_slot()?;
+        let (place, pane_id) = self.recorded_preview_slot()?;
         let pane = self
             .active_runtime()
             .panes
             .iter()
             .find(|p| p.id == pane_id)?;
-        (!pane.is_dirty(cx)).then_some(i)
+        (!pane.is_dirty(cx)).then_some((place, pane_id))
     }
 
     /// The recorded slot, before the unsaved-edits veto. Private on purpose —
-    /// every consumer wants [`Self::preview_tab_index`]'s answer.
-    fn preview_tab_slot(&self) -> Option<(usize, PaneId)> {
-        let preview_id = self.active_runtime().preview_tab_id?;
-        let (i, tab) = self
-            .active_runtime()
-            .tabs
+    /// every consumer wants [`Self::preview_slot`]'s answer.
+    fn recorded_preview_slot(&self) -> Option<(PanePlace, PaneId)> {
+        let runtime = self.active_runtime();
+        let preview_id = runtime.preview_tab_id?;
+        let (place, pane_id) = match runtime
+            .side
+            .tabs()
             .iter()
-            .enumerate()
-            .find(|(_, t)| t.id == preview_id)?;
-        let PaneLayout::Pane(pane_id) = tab.layout else {
-            return None;
+            .position(|tab| tab.id == preview_id)
+        {
+            Some(index) => (PanePlace::Side(index), runtime.side.tabs()[index].pane),
+            None => {
+                let (index, tab) = runtime
+                    .tabs
+                    .iter()
+                    .enumerate()
+                    .find(|(_, tab)| tab.id == preview_id)?;
+                let PaneLayout::Pane(pane_id) = tab.layout else {
+                    return None;
+                };
+                (PanePlace::Tab(index), pane_id)
+            }
         };
-        self.active_runtime()
+        runtime
             .panes
             .iter()
             .any(|p| p.id == pane_id && p.file_view().is_some())
-            .then_some((i, pane_id))
+            .then_some((place, pane_id))
     }
 
-    /// The scratch tab and its pane, for `open_pane_file_view`'s reuse branch.
-    pub(in crate::workspace) fn find_preview_file_tab(&self, cx: &App) -> Option<(usize, PaneId)> {
-        self.preview_tab_index(cx)?;
-        self.preview_tab_slot()
+    /// The id of the tab at `place`, in whichever strip it is.
+    pub(in crate::workspace) fn tab_id_at(&self, place: PanePlace) -> Option<u64> {
+        let runtime = self.active_runtime();
+        match place {
+            PanePlace::Tab(index) => runtime.tabs.get(index).map(|tab| tab.id),
+            PanePlace::Side(index) => runtime.side.tabs().get(index).map(|tab| tab.id),
+        }
     }
 
     /// Find an existing single-pane tab in the lane on screen showing the

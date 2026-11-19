@@ -219,13 +219,18 @@ async fn the_link_menu_resolves_a_file_exactly_as_the_click_does(cx: &mut TestAp
                 },
                 "the menu did not resolve a path under the pane's cwd"
             );
-            let tabs_before = ws.active_runtime().tabs.len();
+            // Beside the chat by default, or among the tabs: either strip.
+            let open_tabs = |ws: &Workspace| {
+                let runtime = ws.active_runtime();
+                runtime.tabs.len() + runtime.side.tabs().len()
+            };
+            let tabs_before = open_tabs(ws);
             assert!(
                 ws.open_pane_link(pane_id, "src/main.rs:12", window, cx),
                 "the click declined the very link the menu called a file"
             );
             assert!(
-                ws.active_runtime().tabs.len() > tabs_before,
+                open_tabs(ws) > tabs_before,
                 "a text file opens in the viewer"
             );
 

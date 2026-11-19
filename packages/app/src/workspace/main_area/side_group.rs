@@ -32,9 +32,6 @@ pub(in crate::workspace) struct SideGroup {
     ratio: f32,
     /// Hidden by the user while it still holds tabs.
     collapsed: bool,
-    /// The tab a left-dock preview opened here, if it is still open: the
-    /// only one a later preview may replace.
-    pub(in crate::workspace) preview_tab_id: Option<u64>,
 }
 
 impl Default for SideGroup {
@@ -44,7 +41,6 @@ impl Default for SideGroup {
             active: 0,
             ratio: DEFAULT_RATIO,
             collapsed: false,
-            preview_tab_id: None,
         }
     }
 }
@@ -139,6 +135,14 @@ impl SideGroup {
         self.tabs.iter().position(|tab| tab.pane == pane)
     }
 
+    /// Drop the name the user gave the tab at `index`: it was for the file
+    /// the tab held before.
+    pub(in crate::workspace) fn clear_label(&mut self, index: usize) {
+        if let Some(tab) = self.tabs.get_mut(index) {
+            tab.user_label = None;
+        }
+    }
+
     /// The pane the group has on show, when it is not hidden: what the
     /// keyboard can be in.
     pub(in crate::workspace) fn shown_pane(&self) -> Option<PaneId> {
@@ -184,9 +188,6 @@ impl SideGroup {
             self.active -= 1;
         }
         self.active = self.active.min(self.tabs.len().saturating_sub(1));
-        if self.preview_tab_id == Some(tab.id) {
-            self.preview_tab_id = None;
-        }
         Some(tab)
     }
 

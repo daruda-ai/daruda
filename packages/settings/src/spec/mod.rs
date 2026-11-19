@@ -305,6 +305,13 @@ pub(super) const BOOL_SETTINGS: &[BoolSpec] = &[
         show: |c| c.file_viewer.preview_tab,
     },
     BoolSpec {
+        setting: BoolSetting::OpenBeside,
+        get: |w| w.open_beside,
+        set: |w, v| w.open_beside = v,
+        patch: SettingsPatch::OpenBeside,
+        show: |c| c.file_viewer.open_beside,
+    },
+    BoolSpec {
         setting: BoolSetting::ShellNaturalTextEditing,
         get: |w| w.shell_natural_text_editing,
         set: |w, v| w.shell_natural_text_editing = v,

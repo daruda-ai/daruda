@@ -62,15 +62,6 @@ fn removing_a_tab_keeps_the_right_one_shown() {
 }
 
 #[test]
-fn an_emptied_group_gives_its_preview_slot_back() {
-    let mut group = group(&[1]);
-    group.preview_tab_id = Some(1);
-    group.remove(0);
-    assert_eq!(group.preview_tab_id, None);
-    assert_eq!(group.shown_pane(), None);
-}
-
-#[test]
 fn a_hidden_group_has_no_pane_on_show() {
     let mut group = group(&[1]);
     assert_eq!(group.shown_pane(), Some(10));

@@ -174,6 +174,7 @@ const WORKSPACE: &[Card] = &[
             b(B::FilesUseGitignore),
             sel(S::FileIconColorMode),
             b(B::PreviewTab),
+            b(B::OpenBeside),
         ],
     },
     Card::Rows {

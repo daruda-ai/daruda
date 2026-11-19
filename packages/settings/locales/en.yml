@@ -88,6 +88,8 @@ settings:
   label_file_icon_colors: "File icon colors"
   label_preview_tab: "Preview tab"
   hint_preview_tab: "Browsing reuses one tab until you edit or pin the file."
+  label_open_beside: "Open files beside the tabs"
+  hint_open_beside: "Files, diffs and pull requests open in side tabs, so the chat stays in view."
   card_files: "Files"
   card_git: "Git"
   label_copy_on_select: "Copy on select"

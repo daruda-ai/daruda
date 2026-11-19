@@ -172,6 +172,10 @@ impl Workspace {
             return;
         };
         let runtime = self.active_runtime_mut();
+        // Moved by hand is kept: it is no longer the scratch tab.
+        if runtime.preview_tab_id == Some(tab.id) {
+            runtime.preview_tab_id = None;
+        }
         let from = runtime.active_tab_index;
         if !runtime.tabs.is_empty() {
             runtime.tab_history.push(from);
@@ -466,7 +470,9 @@ impl Workspace {
                 .iter()
                 .find(|pane| pane.id == tab.pane)
                 .and_then(|pane| pane.file_view())
-                .is_some_and(|view| view.path == path && &view.source == source)
+                .is_some_and(|view| {
+                    daruda_core::path::same_path(&view.path, path) && &view.source == source
+                })
         })
     }
 

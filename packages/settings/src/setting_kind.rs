@@ -96,6 +96,7 @@ pub(crate) enum BoolSetting {
     UpdateAutoCheck,
     LeftCollapsedByDefault,
     PreviewTab,
+    OpenBeside,
     ShellNaturalTextEditing,
     NotifyOsc9,
     NotifyOsc777,
@@ -258,7 +259,7 @@ impl SelectSetting {
 
 impl BoolSetting {
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 31] = [
+    pub(crate) const ALL: [Self; 32] = [
         Self::AgentUseModifierToSend,
         Self::AgentUseReadingWidth,
         Self::AgentToolSummaryLabels,
@@ -269,6 +270,7 @@ impl BoolSetting {
         Self::UpdateAutoCheck,
         Self::LeftCollapsedByDefault,
         Self::PreviewTab,
+        Self::OpenBeside,
         Self::ShellNaturalTextEditing,
         Self::NotifyOsc9,
         Self::NotifyOsc777,
@@ -307,6 +309,7 @@ impl BoolSetting {
             Self::UpdateAutoCheck => (),
             Self::LeftCollapsedByDefault => (),
             Self::PreviewTab => (),
+            Self::OpenBeside => (),
             Self::ShellNaturalTextEditing => (),
             Self::NotifyOsc9 => (),
             Self::NotifyOsc777 => (),

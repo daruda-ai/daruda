@@ -280,6 +280,8 @@ async fn toggle_hide_unchanged_for_pane_targets_the_clicked_pane_not_the_focused
     cx.run_until_parked();
 
     let lane = ws.read_with(cx, |ws, _| ws.active_ref());
+    // Each file is read back as the focused pane: they open among the tabs.
+    ws.update(cx, |ws, _| ws.mirrors.file_viewer_open_beside = false);
 
     // Pane A: f.txt in Changes mode, committed so the next open does not
     // reuse its tab. Becomes the focused pane.

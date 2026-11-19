@@ -148,6 +148,7 @@ fn coverage_of(patch: &SettingsPatch) -> Coverage {
         | SettingsPatch::FlowCostCurrency(_)
         | SettingsPatch::LeftCollapsedByDefault(_)
         | SettingsPatch::PreviewTab(_)
+        | SettingsPatch::OpenBeside(_)
         | SettingsPatch::LeftDefaultWidth(_)
         | SettingsPatch::ShellNaturalTextEditing(_)
         | SettingsPatch::ShellProgram(_)

@@ -33,6 +33,8 @@ fn open_temp_file(
         crate::ui::Root::new(workspace, window, cx)
     });
     let ws = workspace_for_root.into_inner().unwrap();
+    // These tests close and save a file's own tab: it opens among the tabs.
+    ws.update(cx, |ws, _| ws.mirrors.file_viewer_open_beside = false);
     cx.update(|cx| {
         crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);
     });

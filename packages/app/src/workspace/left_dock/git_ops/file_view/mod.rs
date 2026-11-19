@@ -13,6 +13,7 @@ use crate::workspace::main_area::file_view_pane::{
 };
 use crate::workspace::main_area::pane::FileContent;
 use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::main_area::side_group::{PanePlace, SideTab};
 use crate::workspace::main_area::tab_ops::{OpenIntent, PaneEntry};
 
 mod load;
@@ -127,26 +128,25 @@ impl Workspace {
             .and_then(|p| p.file_content_mut())
     }
 
-    /// Record whether the tab at `tab_idx` is the replaceable scratch one.
+    /// Record whether the tab at `place` is the replaceable scratch one.
     /// A preview claims the slot; anything else releases it, which is how a
     /// file the user committed to stops being something a later skim can take.
     ///
     /// Only for the open that actually *filled* the tab — see
     /// [`Self::release_preview_tab`] for why re-activating one must not claim.
-    fn mark_preview_tab(&mut self, tab_idx: usize, intent: OpenIntent) {
+    fn mark_preview_tab(&mut self, place: PanePlace, intent: OpenIntent) {
         if !intent.claims_preview_slot() {
-            self.release_preview_tab(tab_idx);
+            self.release_preview_tab(place);
             return;
         }
-        let Some(tab_id) = self.active_runtime().tabs.get(tab_idx).map(|t| t.id) else {
-            return;
-        };
-        self.active_runtime_mut().preview_tab_id = Some(tab_id);
+        if let Some(tab_id) = self.tab_id_at(place) {
+            self.active_runtime_mut().preview_tab_id = Some(tab_id);
+        }
     }
 
-    /// Drop the scratch slot if `tab_idx` holds it.
-    pub(super) fn release_preview_tab(&mut self, tab_idx: usize) {
-        let Some(tab_id) = self.active_runtime().tabs.get(tab_idx).map(|t| t.id) else {
+    /// Drop the scratch slot if the tab at `place` holds it.
+    pub(in crate::workspace) fn release_preview_tab(&mut self, place: PanePlace) {
+        let Some(tab_id) = self.tab_id_at(place) else {
             return;
         };
         let rt = self.active_runtime_mut();
@@ -160,25 +160,35 @@ impl Workspace {
     /// then entered stays replaceable, and the next arrow key takes the file
     /// they had walked into.
     pub(in crate::workspace) fn release_preview_tab_for_pane(&mut self, pane_id: PaneId) {
-        if let Some(index) = self.active_runtime().side.position_of(pane_id) {
-            let side = &mut self.active_runtime_mut().side;
-            if side.tabs().get(index).map(|tab| tab.id) == side.preview_tab_id {
-                side.preview_tab_id = None;
-            }
-            return;
+        // `place_of` walks a tab's split tree, not just a one-leaf tab: a
+        // pane can be split and collapsed back onto the same `TabEntry`, and
+        // the slot has to be released for the tab that actually holds it.
+        if let Some(place) = self.active_runtime().place_of(pane_id) {
+            self.release_preview_tab(place);
         }
-        let Some(idx) = self
-            .active_runtime()
-            .tabs
-            .iter()
-            // `pane_ids` walks the split tree, not just a one-leaf tab: a pane
-            // can be split and collapsed back onto the same `TabEntry`, and the
-            // slot has to be released for the tab that actually holds it.
-            .position(|t| t.layout.pane_ids().contains(&pane_id))
-        else {
-            return;
-        };
-        self.release_preview_tab(idx);
+    }
+
+    /// Whether a file opened now goes to the side tabs: where the keyboard
+    /// already is, or where the setting sends it. With no tab on the left
+    /// there is nothing to open beside, so it opens there.
+    fn opens_beside(&self) -> bool {
+        self.keyboard_is_aside()
+            || (self.mirrors.file_viewer_open_beside && !self.active_runtime().tabs.is_empty())
+    }
+
+    /// Show the tab at `place`, moving into its pane when `entry` enters.
+    fn show_tab_at(
+        &mut self,
+        place: PanePlace,
+        entry: PaneEntry,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        match (place, entry) {
+            (PanePlace::Tab(index), _) => self.activate_tab_as(index, entry, window, cx),
+            (PanePlace::Side(index), PaneEntry::Enter) => self.activate_side_tab(index, window, cx),
+            (PanePlace::Side(index), PaneEntry::Preview) => self.show_side_tab(index, window, cx),
+        }
     }
 
     /// Select a file in the Git Changes view: open the pane-area file viewer
@@ -350,18 +360,21 @@ impl Workspace {
         let owner = target;
         let live_status = self.git_status_for_path(owner, &path, &source);
 
-        // Always dedupe: a file already open beside the tabs is shown there,
-        // and the keyboard follows only when the open asks to enter.
-        if let Some(index) = self.side_tab_showing(&path, &source) {
-            if entry == PaneEntry::Enter {
-                self.activate_side_tab(index, window, cx);
-            } else {
-                self.show_side_tab(index, window, cx);
-            }
-            return;
-        }
-        // Clicking the same file activates its existing tab.
-        if let Some((tab_idx, pane_id)) = self.find_existing_file_tab(&path, &source) {
+        // Always dedupe: opening a file already open shows its tab, in
+        // whichever group it is.
+        let existing = self
+            .side_tab_showing(&path, &source)
+            .map(|index| {
+                (
+                    PanePlace::Side(index),
+                    self.active_runtime().side.tabs()[index].pane,
+                )
+            })
+            .or_else(|| {
+                self.find_existing_file_tab(&path, &source)
+                    .map(|(index, pane)| (PanePlace::Tab(index), pane))
+            });
+        if let Some((place, pane_id)) = existing {
             // Re-stamp the tab being reused. It was opened against an older
             // the lane's cached status, and the toolbar's mode strip reads
             // `status()` to decide whether Changes is offered at all.
@@ -380,17 +393,20 @@ impl Workspace {
             // it replaceable again (zed's `set_up_existing_item` likewise only
             // ever un-previews).
             if !intent.claims_preview_slot() {
-                self.release_preview_tab(tab_idx);
+                self.release_preview_tab(place);
             }
-            self.activate_tab_as(tab_idx, entry, window, cx);
+            self.show_tab_at(place, entry, window, cx);
             return;
         }
 
         let effective_mode = FileViewMode::effective_for_path(initial_mode, &path);
+        let beside = self.opens_beside();
 
-        // Preview-tab mode: reuse the existing file-viewer tab when available.
-        if self.mirrors.file_viewer_preview_tab
-            && let Some((tab_idx, pane_id)) = self.find_preview_file_tab(cx)
+        // Preview-tab mode: reuse the scratch tab, when it is in the group
+        // this open goes to.
+        if let Some((place, pane_id)) = self
+            .preview_slot(cx)
+            .filter(|(place, _)| matches!(place, PanePlace::Side(_)) == beside)
         {
             // Replace the pane's view in place; keep its scroll handle,
             // search input, focus handle, and subscription unchanged.
@@ -422,11 +438,17 @@ impl Workspace {
                 return;
             };
             // Clear the reused tab's user label (it was set for the old file).
-            if let Some(tab) = self.active_runtime_mut().tabs.get_mut(tab_idx) {
-                tab.user_label = None;
+            let runtime = self.active_runtime_mut();
+            match place {
+                PanePlace::Tab(index) => {
+                    if let Some(tab) = runtime.tabs.get_mut(index) {
+                        tab.user_label = None;
+                    }
+                }
+                PanePlace::Side(index) => runtime.side.clear_label(index),
             }
-            self.mark_preview_tab(tab_idx, intent);
-            self.activate_tab_as(tab_idx, entry, window, cx);
+            self.mark_preview_tab(place, intent);
+            self.show_tab_at(place, entry, window, cx);
             if entry == PaneEntry::Enter {
                 self.focus_pane(pane_id, window, cx);
             }
@@ -453,23 +475,38 @@ impl Workspace {
             FilePaneLoadRequest::from_view(pane_id, owner, pane.file_view().expect("file pane"));
         let tab_id = self.alloc_id();
         self.active_runtime_mut().panes.push(pane);
-        self.active_runtime_mut()
-            .tabs
-            .push(crate::workspace::main_area::pane::TabEntry {
+        if beside {
+            let index = self.active_runtime_mut().side.push(SideTab {
                 id: tab_id,
-                layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(pane_id),
-                last_focused_pane: pane_id,
+                pane: pane_id,
                 user_label: None,
             });
-        let cur_tab = self.active_runtime().active_tab_index;
-        self.active_runtime_mut().tab_history.push(cur_tab);
-        let last_tab = self.active_runtime().tabs.len() - 1;
-        self.active_runtime_mut().active_tab_index = last_tab;
-        self.mark_preview_tab(last_tab, intent);
-        self.set_focused_pane(pane_id, window, cx);
-        self.bump_activity(pane_id);
-        if entry == PaneEntry::Enter {
-            self.focus_pane(pane_id, window, cx);
+            self.mark_preview_tab(PanePlace::Side(index), intent);
+            // The side tabs may have just come into view.
+            self.resize_all_tabs(window, cx);
+            self.bump_activity(pane_id);
+            if entry == PaneEntry::Enter {
+                self.focus_side_group(window, cx);
+            }
+        } else {
+            self.active_runtime_mut()
+                .tabs
+                .push(crate::workspace::main_area::pane::TabEntry {
+                    id: tab_id,
+                    layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(pane_id),
+                    last_focused_pane: pane_id,
+                    user_label: None,
+                });
+            let cur_tab = self.active_runtime().active_tab_index;
+            self.active_runtime_mut().tab_history.push(cur_tab);
+            let last_tab = self.active_runtime().tabs.len() - 1;
+            self.active_runtime_mut().active_tab_index = last_tab;
+            self.mark_preview_tab(PanePlace::Tab(last_tab), intent);
+            self.set_focused_pane(pane_id, window, cx);
+            self.bump_activity(pane_id);
+            if entry == PaneEntry::Enter {
+                self.focus_pane(pane_id, window, cx);
+            }
         }
 
         // Selection moved — the dock row picks up its selected background.

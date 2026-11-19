@@ -392,6 +392,7 @@ impl SettingsView {
             flow_cost_currency_input,
             left_collapsed_by_default: config.left_dock.left_collapsed_by_default,
             preview_tab: config.file_viewer.preview_tab,
+            open_beside: config.file_viewer.open_beside,
             left_default_width_input,
             shell_program_input,
             advanced_open: Default::default(),

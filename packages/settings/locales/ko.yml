@@ -90,6 +90,8 @@ settings:
   label_file_icon_colors: "파일 아이콘 색"
   label_preview_tab: "미리보기 탭"
   hint_preview_tab: "편집하거나 고정하기 전까지 탭 하나를 재사용합니다."
+  label_open_beside: "파일을 탭 옆에 열기"
+  hint_open_beside: "파일, diff, pull request를 옆 탭에 열어 채팅이 계속 보이게 합니다."
   card_files: "파일"
   card_git: "Git"
   label_copy_on_select: "선택하면 복사"

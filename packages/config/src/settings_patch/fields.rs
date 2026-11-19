@@ -54,6 +54,7 @@ macro_rules! with_settings_fields {
             FlowCostCurrency: flow.cost_currency, "flow.cost_currency", clone, |value: String| value;
             LeftCollapsedByDefault: left_dock.left_collapsed_by_default, "left_dock.left_collapsed_by_default", copy, |value: bool| value;
             PreviewTab: file_viewer.preview_tab, "file_viewer.preview_tab", copy, |value: bool| value;
+            OpenBeside: file_viewer.open_beside, "file_viewer.open_beside", copy, |value: bool| value;
             LeftDefaultWidth: left_dock.left_default_width, "left_dock.left_default_width", copy, |value: f32| f64::from(value);
             ShellNaturalTextEditing: shell.natural_text_editing, "shell.natural_text_editing", copy, |value: bool| value;
             NotifyOsc9: notifications.osc9_enabled, "notifications.osc9_enabled", copy, |value: bool| value;

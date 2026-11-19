@@ -20,6 +20,8 @@ fn with_files(cx: &mut TestAppContext, names: &[&str]) -> Fixture {
         crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);
     });
     let id = ws.read_with(cx, |ws, _| ws.active_ref());
+    // These files open among the tabs; each test sends aside what it needs.
+    ws.update(cx, |ws, _| ws.mirrors.file_viewer_open_beside = false);
     // The fixture opens no tab of its own.
     if ws.read_with(cx, |ws, _| ws.active_runtime().tabs.is_empty()) {
         cx.update_window(wh.into(), |_, window, cx| {
@@ -489,4 +491,113 @@ async fn side_tabs_are_saved_and_restored(cx: &mut TestAppContext) {
         assert!(!ws.keyboard_is_aside());
         assert!(ws.has_focused_pane());
     });
+}
+
+/// Where a file opens: beside the tabs by default, among them when the
+/// setting says so or there is no tab to be beside, and wherever the
+/// keyboard already is.
+#[gpui::test]
+async fn a_file_opens_beside_the_tabs_unless_told_or_alone(cx: &mut TestAppContext) {
+    // (label, the setting, a tab on the left, keyboard aside first, opens aside)
+    let cases = [
+        ("the default", true, true, false, true),
+        ("the setting off", false, true, false, false),
+        ("no tab to be beside", true, false, false, false),
+        ("the keyboard already aside", false, true, true, true),
+    ];
+    for (label, setting, left_tab, keyboard_aside, aside) in cases {
+        let f = with_files(cx, &[]);
+        let lane = f.1.read_with(cx, |ws, _| ws.active_ref());
+        if keyboard_aside {
+            act(&f, cx, |ws, window, cx| {
+                ws.open_files_entry(lane, "b.txt".into(), OpenIntent::Enter, window, cx);
+                ws.send_tab_aside(1, window, cx);
+            });
+        }
+        if !left_tab {
+            act(&f, cx, |ws, window, cx| ws.close_tab_at(0, window, cx));
+        }
+        f.1.update(cx, |ws, _| ws.mirrors.file_viewer_open_beside = setting);
+        act(&f, cx, |ws, window, cx| {
+            ws.open_files_entry(lane, "a.txt".into(), OpenIntent::Enter, window, cx)
+        });
+        let opened_aside = side_files(&f, cx).contains(&"a.txt".to_owned());
+        assert_eq!(opened_aside, aside, "{label}");
+        f.1.read_with(cx, |ws, _| {
+            assert_eq!(
+                ws.keyboard_is_aside(),
+                aside,
+                "{label}: entered where it opened"
+            );
+            assert_eq!(
+                ws.focused_file_view()
+                    .and_then(|view| view.path.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .as_deref(),
+                Some("a.txt"),
+                "{label}"
+            );
+        });
+    }
+}
+
+/// Skimming rows in a panel reuses one side tab and leaves the keyboard in
+/// the panel; a row entered keeps its tab, and the next skim opens another.
+#[gpui::test]
+async fn skimming_reuses_one_side_tab_until_a_file_is_entered(cx: &mut TestAppContext) {
+    let f = with_files(cx, &[]);
+    let lane = f.1.read_with(cx, |ws, _| ws.active_ref());
+    f.1.update(cx, |ws, _| ws.mirrors.file_viewer_open_beside = true);
+    let open = |f: &Fixture, cx: &mut TestAppContext, name: &'static str, intent| {
+        act(f, cx, move |ws, window, cx| {
+            ws.open_files_entry(lane, name.into(), intent, window, cx)
+        });
+    };
+
+    open(&f, cx, "a.txt", OpenIntent::Preview);
+    open(&f, cx, "b.txt", OpenIntent::Preview);
+    assert_eq!(side_files(&f, cx), ["b.txt"]);
+    f.1.read_with(cx, |ws, cx| {
+        assert!(!ws.keyboard_is_aside(), "a skim stays in the panel");
+        assert_eq!(ws.preview_tab_index(cx), None, "the slot is not a tab's");
+        assert!(matches!(ws.groups_shown(), GroupsShown::Both { .. }));
+    });
+
+    open(&f, cx, "b.txt", OpenIntent::Enter);
+    f.1.read_with(cx, |ws, cx| {
+        assert!(ws.keyboard_is_aside());
+        assert_eq!(
+            ws.preview_slot(cx),
+            None,
+            "entered: no longer the scratch tab"
+        );
+    });
+    open(&f, cx, "a.txt", OpenIntent::Preview);
+    assert_eq!(side_files(&f, cx), ["b.txt", "a.txt"]);
+}
+
+/// A panel row opened beside the tabs keeps the keyboard in the panel, is
+/// still the file the row stands for, and a second Enter walks into it.
+#[gpui::test]
+async fn a_row_opened_beside_the_tabs_is_entered_by_a_second_enter(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::file_view_pane::DiffSource;
+    let f = with_files(cx, &[]);
+    let lane = f.1.read_with(cx, |ws, _| ws.active_ref());
+    f.1.update(cx, |ws, _| ws.mirrors.file_viewer_open_beside = true);
+    act(&f, cx, |ws, window, cx| {
+        ws.open_files_entry(lane, "a.txt".into(), OpenIntent::Commit, window, cx)
+    });
+    let path = f.1.read_with(cx, |ws, _| {
+        assert!(!ws.keyboard_is_aside());
+        assert!(
+            ws.focused_file_view().is_none(),
+            "the keyboard is not in it"
+        );
+        let (_, view) = ws.shown_file_view().expect("it is the file on show");
+        view.path.clone()
+    });
+    act(&f, cx, move |ws, window, cx| {
+        assert!(ws.step_into_open_file_view(Some(path), DiffSource::WorkingTree, window, cx));
+    });
+    f.1.read_with(cx, |ws, _| assert!(ws.keyboard_is_aside()));
 }

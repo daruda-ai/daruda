@@ -180,10 +180,10 @@ impl Workspace {
                 .get(&self.active)
                 .and_then(|state| state.git.cursor.as_ref().map(|c| c.path.clone())),
             git_changes_panel_focus: Handle(self.git.panel_focus.clone()),
-            // The focused pane belongs to the lane on screen.
+            // The pane belongs to the lane on screen.
             focused_file_selection: self
-                .focused_file_view()
-                .map(|fv| (self.active, fv.path.clone(), fv.source.clone())),
+                .shown_file_view()
+                .map(|(_, fv)| (self.active, fv.path.clone(), fv.source.clone())),
             git_changes_scroll_handle: Handle(self.git.scroll_handle.clone()),
             lanes_scroll_handle: Handle(self.lanes_scroll_handle.clone()),
             git_commit_input: Handle(self.git.commit_input.clone()),

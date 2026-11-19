@@ -279,6 +279,10 @@ pub(super) fn bool(setting: BoolSetting) -> RowCopy {
             label: s::settings::label_left_collapsed,
             hint: s::settings::hint_new_windows_state,
         },
+        BoolSetting::OpenBeside => RowCopy {
+            label: s::settings::label_open_beside,
+            hint: s::settings::hint_open_beside,
+        },
         BoolSetting::PreviewTab => RowCopy {
             label: s::settings::label_preview_tab,
             hint: s::settings::hint_preview_tab,

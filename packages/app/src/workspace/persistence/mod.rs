@@ -31,7 +31,8 @@ pub(in crate::workspace) struct LaneRuntime {
     /// session-only convenience; starts empty on every app launch.
     pub tab_history: Vec<usize>,
     pub focused_pane_id: pane_tree::PaneId,
-    /// Id of the tab a left-dock preview opened, if one is still open. The
+    /// Id of the tab a left-dock preview opened, among these or the side
+    /// tabs, if one is still open. The
     /// *only* tab a later preview may replace — anything the user committed
     /// to by entering it (Enter, a flow, an agent link) is not this one, and
     /// so survives skimming. One `Option` rather than a flag per tab, like

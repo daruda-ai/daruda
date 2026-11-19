@@ -327,6 +327,7 @@ pub struct SettingsView {
     flow_cost_currency_input: Entity<InputState>,
     left_collapsed_by_default: bool,
     preview_tab: bool,
+    open_beside: bool,
     left_default_width_input: Entity<InputState>,
     shell_program_input: Entity<InputState>,
     /// Settings pages whose Advanced card the user has opened this session.

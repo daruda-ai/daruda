@@ -12,6 +12,7 @@ use crate::ui::cursor::CursorReachExt as _;
 use crate::ui::theme;
 use crate::workspace::main_area::pane_tree::{DIVIDER_PX, PaneLayout};
 use crate::workspace::main_area::render_layout;
+use crate::workspace::main_area::side_group::PanePlace;
 use crate::workspace::root_menu::RootContextMenuExt as _;
 use crate::workspace::{TAB_BAR_HEIGHT, Workspace};
 
@@ -30,6 +31,10 @@ impl Workspace {
     fn side_cells(&self, cx: &App) -> Vec<SideCell> {
         let runtime = self.active_runtime();
         let side = &runtime.side;
+        let scratch = match self.preview_slot(cx) {
+            Some((PanePlace::Side(index), _)) => Some(index),
+            Some((PanePlace::Tab(_), _)) | None => None,
+        };
         side.tabs()
             .iter()
             .enumerate()
@@ -54,7 +59,7 @@ impl Workspace {
                     label,
                     title,
                     is_active: index == side.active_index(),
-                    is_scratch: side.preview_tab_id == Some(tab.id),
+                    is_scratch: scratch == Some(index),
                 }
             })
             .collect()

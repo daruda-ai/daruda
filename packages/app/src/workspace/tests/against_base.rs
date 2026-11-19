@@ -134,6 +134,8 @@ fn an_against_base_row_opens_a_diff_pinned_to_its_commits(cx: &mut TestAppContex
     let f = open_feature(cx);
     let (wh, ws, fake, root) = (f.window, &f.ws, &f.fake, &f.root);
     let target = ws.update(cx, |ws, cx| {
+        // The diff is read back as the focused pane: it opens among the tabs.
+        ws.mirrors.file_viewer_open_beside = false;
         ws.projects[0].default_branch = Some("main".to_owned());
         let target = ws.active;
         ws.refresh_git_status(target, cx);

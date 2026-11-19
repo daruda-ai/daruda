@@ -17,6 +17,10 @@ pub struct FileViewerConfig {
     /// agent or a skill, gives it a tab of its own that later browsing leaves
     /// alone. Set to false to open a separate tab for every file.
     pub preview_tab: bool,
+    /// When true (default), a file, a diff or a pull request opens in the
+    /// worktree's side tabs, beside the tab being used, so a chat stays in
+    /// view. Set to false to open it among the worktree's own tabs.
+    pub open_beside: bool,
 }
 
 impl Default for FileViewerConfig {
@@ -24,6 +28,7 @@ impl Default for FileViewerConfig {
         Self {
             syntax_theme: DEFAULT_SYNTAX_THEME.to_owned(),
             preview_tab: true,
+            open_beside: true,
         }
     }
 }
