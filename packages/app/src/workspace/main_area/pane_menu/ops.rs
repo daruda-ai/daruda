@@ -244,7 +244,7 @@ impl Workspace {
                     kind: PaneMenuKind::AgentChat { busy },
                 })
             }
-            PaneContent::File(_) => Some(PaneMenuSnapshot {
+            PaneContent::File(_) | PaneContent::PullRequest(_) => Some(PaneMenuSnapshot {
                 selection: None,
                 kind: PaneMenuKind::Other,
             }),

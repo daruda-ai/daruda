@@ -84,8 +84,7 @@ fn the_keyboard_browses_opens_and_returns_to_the_selected_row(cx: &mut TestAppCo
         let detail = ws
             .pages
             .pull_requests
-            .detail
-            .as_ref()
+            .detail()
             .expect("Enter opens the detail");
         assert_eq!(
             (detail.item().repo.clone(), detail.item().pr.number),

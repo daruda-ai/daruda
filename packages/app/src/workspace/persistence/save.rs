@@ -78,10 +78,18 @@ impl Workspace {
                         .filter(|tab| !self.is_orchestrator_tab(tab))
                         .count()
                         .min(s.tabs.len().saturating_sub(1));
-                    s.side = (!rt.side.is_empty()).then(|| SerializedSide {
-                        tabs: rt
-                            .side
-                            .tabs()
+                    // A pull request pane is not kept: its detail is read
+                    // from GitHub, and is opened again from the Git panel.
+                    let kept = |tab: &&crate::workspace::main_area::side_group::SideTab| {
+                        panes_src
+                            .iter()
+                            .find(|pane| pane.id == tab.pane)
+                            .is_some_and(|pane| pane.is_file())
+                    };
+                    let shown = rt.side.active_index();
+                    let side_tabs: Vec<_> = rt.side.tabs().iter().filter(kept).collect();
+                    s.side = (!side_tabs.is_empty()).then(|| SerializedSide {
+                        tabs: side_tabs
                             .iter()
                             .map(|tab| SerializedTab {
                                 layout: serialize_layout(
@@ -94,7 +102,11 @@ impl Workspace {
                                 user_label: tab.user_label.as_ref().map(|s| s.to_string()),
                             })
                             .collect(),
-                        active: rt.side.active_index(),
+                        active: rt.side.tabs()[..shown]
+                            .iter()
+                            .filter(kept)
+                            .count()
+                            .min(side_tabs.len() - 1),
                         ratio: rt.side.ratio(),
                         collapsed: rt.side.is_collapsed(),
                     });

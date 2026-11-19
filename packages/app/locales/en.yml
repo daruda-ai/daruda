@@ -713,6 +713,7 @@ ctx:
   close_file_viewer: "Close File Viewer"
   send_tab_aside: "Move to Side Tabs"
   send_tab_back: "Move Back to Tabs"
+  open_pr_on_page: "Open on the Pull Requests Page"
   zoom_pane: "Zoom Pane"
   unzoom_pane: "Unzoom Pane"
   open_link: "Open Link"

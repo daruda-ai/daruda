@@ -72,6 +72,8 @@ const NAME_FILE_INPUT_INSERTED: &str = "file-input-inserted";
 const NAME_PANE_CONTEXT_MENU: &str = "pane-context-menu";
 /// CLI token for a file shown in the side tabs, beside the chat.
 const NAME_SIDE_TABS: &str = "side-tabs";
+/// CLI token for a pull request shown in the side tabs.
+const NAME_PULL_REQUEST_PANE: &str = "pull-request-pane";
 /// CLI token for the mermaid-diagram lightbox scenario.
 const NAME_MERMAID_LIGHTBOX: &str = "mermaid-lightbox";
 /// CLI token for the Flows page's graph scenario.
@@ -362,6 +364,7 @@ impl ScreenshotScenario {
             )),
             NAME_PANE_CONTEXT_MENU => Some(Self::PaneContextMenu),
             NAME_SIDE_TABS => Some(Self::SideTabs),
+            NAME_PULL_REQUEST_PANE => Some(Self::PullRequestPane),
             NAME_MERMAID_LIGHTBOX => Some(Self::MermaidLightbox),
             NAME_FLOW_GRAPH => Some(Self::FlowGraph),
             NAME_FLOW_GRAPH_RUNNING => Some(Self::FlowGraphRunning),

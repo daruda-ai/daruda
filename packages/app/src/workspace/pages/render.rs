@@ -104,7 +104,7 @@ pub(in crate::workspace) fn body(
             let layout = ws.pr_page_layout();
             let detail = |cx: &mut Context<Workspace>| -> Option<AnyElement> {
                 let view = pages.detail_snapshot.as_ref()?;
-                let detail = pages.detail.as_ref()?;
+                let detail = pages.detail()?;
                 Some(super::pull_requests::detail::render::render(
                     view,
                     detail.scroll(),

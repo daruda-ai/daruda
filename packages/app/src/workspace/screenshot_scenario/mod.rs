@@ -187,6 +187,9 @@ pub(crate) enum ScreenshotScenario {
     /// A file in the side tabs beside an agent chat: the two strips, the
     /// divider and the widths, which no unit test can see.
     SideTabs,
+    /// A pull request's detail in the side tabs, beside the worktree's
+    /// tabs: how it fits a pane's width.
+    PullRequestPane,
     FileInput(super::main_area::file_context::FileInputShot),
     /// Open the mermaid diagram lightbox with a wide (two-subgraph) sample —
     /// the only way to eyeball the clamp/scroll behavior a unit test can
@@ -688,6 +691,12 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::FileInput(shot) => {
             workspace.update(cx, |ws, cx| ws.open_file_input_for_shot(shot, window, cx));
+        }
+        ScreenshotScenario::PullRequestPane => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_left_dock_for_shot(false, true, false, window, cx);
+                ws.open_pr_pane_for_shot(window, cx);
+            });
         }
         ScreenshotScenario::SideTabs => {
             workspace.update(cx, |ws, cx| ws.open_side_tabs_for_shot(window, cx));

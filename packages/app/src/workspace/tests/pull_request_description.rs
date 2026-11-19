@@ -11,7 +11,7 @@ use crate::workspace::pages::pull_requests::detail::description::SaveState;
 
 fn shown(f: &super::GitFixture, vcx: &mut VisualTestContext) -> Option<String> {
     f.ws.read_with(vcx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref()?;
+        let detail = ws.pages.pull_requests.detail()?;
         detail.idle_read_body()
     })
 }
@@ -81,7 +81,7 @@ fn an_edited_description_saves_and_a_failure_keeps_the_text(cx: &mut TestAppCont
     let typed = |f: &super::GitFixture, vcx: &mut VisualTestContext, text: Option<&str>| {
         vcx.update(|window, cx| {
             f.ws.update(cx, |ws, cx| {
-                let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+                let detail = ws.pages.pull_requests.detail().unwrap();
                 let edit = detail.body_edit()?;
                 let input = edit.input.clone();
                 if let Some(text) = text {
@@ -148,8 +148,7 @@ fn a_description_changed_on_github_meanwhile_is_not_overwritten_unasked(cx: &mut
             let edit = ws
                 .pages
                 .pull_requests
-                .detail
-                .as_ref()
+                .detail()
                 .unwrap()
                 .body_edit()
                 .unwrap();
@@ -176,7 +175,7 @@ fn a_description_changed_on_github_meanwhile_is_not_overwritten_unasked(cx: &mut
     };
     let state = |f: &super::GitFixture, vcx: &mut VisualTestContext| {
         f.ws.read_with(vcx, |ws, _| {
-            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let detail = ws.pages.pull_requests.detail().unwrap();
             detail.body_edit().map(|edit| edit.state.clone())
         })
     };
@@ -213,7 +212,7 @@ fn the_description_can_be_edited_while_a_refresh_is_out(cx: &mut TestAppContext)
         })
     });
     let editing = f.ws.read_with(cx, |ws, cx| {
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         (
             detail.pr_waiting().is_some(),
             detail
@@ -245,8 +244,7 @@ fn a_change_on_github_not_read_yet_still_stops_the_save(cx: &mut TestAppContext)
             let edit = ws
                 .pages
                 .pull_requests
-                .detail
-                .as_ref()
+                .detail()
                 .unwrap()
                 .body_edit()
                 .unwrap();
@@ -263,7 +261,7 @@ fn a_change_on_github_not_read_yet_still_stops_the_save(cx: &mut TestAppContext)
     cx.run_until_parked();
     assert_eq!(gh.count(GhOp::EditPrBody), 0, "theirs is not replaced");
     let state = f.ws.read_with(cx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         detail.body_edit().map(|edit| edit.state.clone())
     });
     assert_eq!(state, Some(SaveState::Conflict));

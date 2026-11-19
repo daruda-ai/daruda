@@ -170,15 +170,24 @@ impl TabMenuData {
     }
 }
 
+/// What a side tab holds, as far as its menu differs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SideTabKind {
+    File,
+    PullRequest(crate::workspace::main_area::pane_tree::PaneId),
+}
+
 /// The menu of the side tab at `index` of `count`.
 pub(super) fn side_tab_context_menu_items(
     ws: &gpui::WeakEntity<Workspace>,
     index: usize,
     count: usize,
+    kind: SideTabKind,
 ) -> Vec<PopupMenuItem> {
     use crate::surface::strings as s;
-    vec![
-        ws_popup_menu_item(
+    let first = match kind {
+        // A file can sit among the tabs; a pull request has its page.
+        SideTabKind::File => ws_popup_menu_item(
             ws.clone(),
             s::ctx::send_tab_back(),
             false,
@@ -188,6 +197,15 @@ pub(super) fn side_tab_context_menu_items(
                 });
             },
         ),
+        SideTabKind::PullRequest(pane) => ws_popup_menu_item(
+            ws.clone(),
+            s::ctx::open_pr_on_page(),
+            false,
+            move |this, win, cx| this.open_pr_pane_on_page(pane, win, cx),
+        ),
+    };
+    vec![
+        first,
         PopupMenuItem::separator(),
         ws_popup_menu_item(
             ws.clone(),

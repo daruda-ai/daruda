@@ -55,9 +55,8 @@ fn reviewing(cx: &mut TestAppContext) -> Fixture {
     );
     open(&f, item(7, "feat"), cx);
     cx.run_until_parked();
-    let id = f.ws.read_with(cx, |ws, _| {
-        ws.pages.pull_requests.detail.as_ref().unwrap().id()
-    });
+    let id =
+        f.ws.read_with(cx, |ws, _| ws.pages.pull_requests.detail().unwrap().id());
     let owner = cx.update(|cx| DraftStore::owner(&repo(), 7, cx)).unwrap();
     for (revision, body) in [("h1", "Fold these."), ("h0", "Stale.")] {
         cx.update(|cx| {
@@ -83,7 +82,7 @@ fn reviewing(cx: &mut TestAppContext) -> Fixture {
 
 fn state(t: &Fixture, vcx: &mut VisualTestContext) -> Option<SubmitState> {
     t.f.ws.read_with(vcx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         detail.review().map(|review| review.state.clone())
     })
 }
@@ -115,8 +114,7 @@ fn begin(t: &Fixture, vcx: &mut VisualTestContext, text: &str) {
             let body = ws
                 .pages
                 .pull_requests
-                .detail
-                .as_ref()
+                .detail()
                 .unwrap()
                 .review()
                 .unwrap()
@@ -288,9 +286,9 @@ fn an_outcome_that_cannot_be_read_is_checked_never_sent_again(cx: &mut TestAppCo
     vcx.update(|window, cx| t.f.ws.update(cx, |ws, cx| ws.back_to_pr_list(window, cx)));
     open(&t.f, item(7, "feat"), &mut vcx);
     vcx.run_until_parked();
-    let again = t.f.ws.read_with(&vcx, |ws, _| {
-        ws.pages.pull_requests.detail.as_ref().unwrap().id()
-    });
+    let again =
+        t.f.ws
+            .read_with(&vcx, |ws, _| ws.pages.pull_requests.detail().unwrap().id());
     let reopened = Fixture { id: again, ..t };
     begin(&reopened, &mut vcx, "Ship it.");
     reopened.f.ws.update(&mut vcx, |ws, cx| {

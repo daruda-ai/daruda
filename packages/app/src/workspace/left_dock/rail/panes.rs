@@ -94,6 +94,7 @@ impl Workspace {
                         PaneContent::Terminal(_) => icons::TERMINAL,
                         PaneContent::AgentChat(_) => icons::SESSION,
                         PaneContent::File(_) => icons::FILE_VIEWER,
+                        PaneContent::PullRequest(_) => icons::PULL_REQUESTS,
                     },
                     title: if include_titles {
                         pane.title(cx)

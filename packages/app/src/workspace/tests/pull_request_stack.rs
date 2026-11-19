@@ -66,12 +66,7 @@ fn a_stacked_pull_request_shows_its_stack_and_goes_to_the_others(cx: &mut TestAp
     });
     cx.run_until_parked();
     assert_eq!(
-        f.ws.read_with(cx, |ws, _| ws
-            .pages
-            .pull_requests
-            .detail
-            .as_ref()
-            .map(|d| d.key())),
+        f.ws.read_with(cx, |ws, _| ws.pages.pull_requests.detail().map(|d| d.key())),
         Some((repo(), 6))
     );
 }

@@ -142,7 +142,7 @@ pub(in crate::workspace) fn open(f: &GitFixture, item: PrListItem, cx: &mut Test
 
 fn shown(f: &GitFixture, cx: &mut TestAppContext) -> Option<(PrDetailId, u64, Load<PrDetail>)> {
     f.ws.read_with(cx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref()?;
+        let detail = ws.pages.pull_requests.detail()?;
         Some((detail.id(), detail.item().pr.number, detail.load().clone()))
     })
 }
@@ -229,13 +229,7 @@ fn pull_request_detail_scrolls_long_checks_and_description(cx: &mut TestAppConte
     cx.run_until_parked();
     let id = id(&f, cx);
     let scroll = f.ws.read_with(cx, |ws, _| {
-        ws.pages
-            .pull_requests
-            .detail
-            .as_ref()
-            .unwrap()
-            .scroll()
-            .clone()
+        ws.pages.pull_requests.detail().unwrap().scroll().clone()
     });
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     for width in [800., 1280.] {
@@ -363,14 +357,14 @@ fn a_threads_read_outdated_by_a_refresh_does_not_land(cx: &mut TestAppContext) {
     gh.set_review_threads(&repo(), 7, thread("new.rs"));
     let threads = |f: &GitFixture, cx: &mut TestAppContext| {
         f.ws.read_with(cx, |ws, _| {
-            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let detail = ws.pages.pull_requests.detail().unwrap();
             detail.threads().cloned()
         })
     };
     // The tab's first read, then a refresh's second, neither answered yet.
     f.ws.update(cx, |ws, cx| {
         ws.select_pr_detail_tab(id, PrTab::Threads, cx);
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         let first = detail.threads_ticket().unwrap();
         ws.refresh_pr_detail(id, cx);
         // The first read answers late, into the slot the second waits in.
@@ -557,8 +551,7 @@ fn view_handoff_closed(f: &GitFixture, cx: &mut TestAppContext) -> bool {
     f.ws.read_with(cx, |ws, _| {
         ws.pages
             .pull_requests
-            .detail
-            .as_ref()
+            .detail()
             .expect("the detail stays")
             .handoff()
             .is_none()
@@ -1470,7 +1463,7 @@ fn a_reopened_log_does_not_take_an_earlier_reads_answer(cx: &mut TestAppContext)
     for reopen in ["closed and opened", "refreshed and opened"] {
         f.ws.update(cx, |ws, cx| {
             ws.toggle_pr_check_log(id, JOB, cx);
-            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let detail = ws.pages.pull_requests.detail().unwrap();
             let first = detail.log_ticket(JOB).unwrap();
             match reopen {
                 "closed and opened" => ws.toggle_pr_check_log(id, JOB, cx),
@@ -1555,12 +1548,12 @@ fn returning_to_a_pull_request_keeps_its_tab_and_scroll(cx: &mut TestAppContext)
         let id = ws.pr_detail_id().unwrap();
         ws.select_pr_detail_tab(id, PrTab::Threads, cx);
         let offset = gpui::point(gpui::px(0.), gpui::px(-240.));
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         detail.scroll().set_offset(offset);
         ws.close_page(cx);
         ws.show_page(Page::Tasks, cx);
         ws.show_page(Page::PullRequests, cx);
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         assert_eq!(detail.id(), id);
         assert_eq!(detail.tab(), PrTab::Threads);
         assert_eq!(detail.scroll().offset(), offset);

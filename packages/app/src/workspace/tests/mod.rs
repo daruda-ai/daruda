@@ -63,6 +63,7 @@ mod pull_request_keyboard;
 mod pull_request_links;
 mod pull_request_list;
 pub(in crate::workspace) mod pull_request_page;
+mod pull_request_pane;
 mod pull_request_rate_limit;
 mod pull_request_review_submit;
 mod pull_request_reviewers;

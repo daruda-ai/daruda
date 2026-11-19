@@ -13,8 +13,7 @@ fn shown_number(f: &super::GitFixture, vcx: &mut VisualTestContext) -> Option<u6
     f.ws.read_with(vcx, |ws, _| {
         ws.pages
             .pull_requests
-            .detail
-            .as_ref()
+            .detail()
             .map(|detail| detail.item().pr.number)
     })
 }

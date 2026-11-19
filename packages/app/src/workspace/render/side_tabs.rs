@@ -6,10 +6,11 @@ use gpui::{
     prelude::*, px,
 };
 
-use super::menus::side_tab_context_menu_items;
+use super::menus::{SideTabKind, side_tab_context_menu_items};
 use super::tab_bar::{TabCellColors, TabStripColors, tab_strip_colors};
 use crate::ui::cursor::CursorReachExt as _;
 use crate::ui::theme;
+use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::{DIVIDER_PX, PaneLayout};
 use crate::workspace::main_area::render_layout;
 use crate::workspace::main_area::side_group::PanePlace;
@@ -25,6 +26,7 @@ struct SideCell {
     is_active: bool,
     /// The tab the next left-dock preview replaces.
     is_scratch: bool,
+    kind: SideTabKind,
 }
 
 impl Workspace {
@@ -60,6 +62,10 @@ impl Workspace {
                     title,
                     is_active: index == side.active_index(),
                     is_scratch: scratch == Some(index),
+                    kind: match pane.map(|pane| &pane.content) {
+                        Some(PaneContent::PullRequest(_)) => SideTabKind::PullRequest(tab.pane),
+                        _ => SideTabKind::File,
+                    },
                 }
             })
             .collect()
@@ -109,6 +115,20 @@ impl Workspace {
                     .border_color(bar_border),
             );
         let runtime = self.active_runtime();
+        // The detail a pull request pane shows, staged for this frame.
+        let mut pr_detail = self.shown_pr_pane_detail().and_then(|id| {
+            let page = &self.pages.pull_requests;
+            let view = page.detail_snapshot.as_ref().filter(|view| view.id == id)?;
+            let detail = page.details.get(id)?;
+            Some(
+                crate::workspace::pages::pull_requests::detail::render::render(
+                    view,
+                    detail.scroll(),
+                    detail.files_scroll(),
+                    cx,
+                ),
+            )
+        });
         let content = match runtime.side.active_pane() {
             Some(pane) => render_layout(
                 &PaneLayout::Pane(pane),
@@ -120,6 +140,7 @@ impl Workspace {
                 None,
                 None,
                 &self.file_send_action(),
+                &mut pr_detail,
                 cx,
             ),
             None => div().into_any_element(),
@@ -148,6 +169,7 @@ impl Workspace {
             title,
             is_active,
             is_scratch,
+            kind,
         } = cell;
         let ws = cx.entity().downgrade();
         let (inactive_bg, inactive_text, hover_bg) = (
@@ -213,7 +235,7 @@ impl Workspace {
                 }),
             )
             .root_context_menu(ws.clone(), move |menu, _window, _cx| {
-                side_tab_context_menu_items(&ws, index, count)
+                side_tab_context_menu_items(&ws, index, count, kind)
                     .into_iter()
                     .fold(menu, |menu, item| menu.item(item))
             })

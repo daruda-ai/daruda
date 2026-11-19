@@ -105,7 +105,7 @@ fn a_thread_expands_in_full_and_leads_to_its_lines(cx: &mut TestAppContext) {
     vcx.simulate_click(go, Modifiers::default());
     vcx.run_until_parked();
     let selected = f.ws.read_with(&vcx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         assert_eq!(detail.tab(), PrTab::Files);
         detail
             .files()
@@ -194,7 +194,7 @@ fn a_thread_folds_back_and_lines_in_an_unlisted_file_are_given_up(cx: &mut TestA
     vcx.run_until_parked();
     f.ws.update(&mut vcx, |ws, cx| ws.show_pr_file(id, "gone.rs", cx));
     let selected = f.ws.read_with(&vcx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         detail.files().and_then(|files| files.selection().cloned())
     });
     assert_eq!(
@@ -226,7 +226,7 @@ fn a_reply_posts_and_a_thread_resolves_each_on_its_own(cx: &mut TestAppContext) 
     vcx.run_until_parked();
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| {
-            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let detail = ws.pages.pull_requests.detail().unwrap();
             let input = detail
                 .thread_work()
                 .get("t1")
@@ -256,7 +256,7 @@ fn a_reply_posts_and_a_thread_resolves_each_on_its_own(cx: &mut TestAppContext) 
     let state = |f: &super::GitFixture, vcx: &mut VisualTestContext| {
         vcx.update(|_, cx| {
             f.ws.read_with(cx, |ws, cx| {
-                let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+                let detail = ws.pages.pull_requests.detail().unwrap();
                 let work = detail.thread_work();
                 let text = work
                     .get("t1")
@@ -307,7 +307,7 @@ fn a_reply_posts_and_a_thread_resolves_each_on_its_own(cx: &mut TestAppContext) 
     let (text, op, _) = state(&f, &mut vcx);
     assert_eq!((text, op), (None, None));
     let replies = f.ws.read_with(&vcx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         match detail.threads() {
             Some(crate::workspace::pages::pull_requests::detail::Load::Ready(threads)) => threads
                 .threads
@@ -343,7 +343,7 @@ fn type_a_reply_github_takes_silently(
     vcx.run_until_parked();
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| {
-            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let detail = ws.pages.pull_requests.detail().unwrap();
             let input = detail
                 .thread_work()
                 .get("t1")
@@ -373,7 +373,7 @@ fn type_a_reply_github_takes_silently(
 /// The reply's box and what is still to do with it.
 fn reply_work(f: &GitFixture, vcx: &VisualTestContext) -> Option<(bool, Option<ThreadOp>)> {
     f.ws.read_with(vcx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         detail
             .thread_work()
             .get("t1")
@@ -454,13 +454,7 @@ fn a_failed_reply_is_checked_when_its_threads_are_shown_again(cx: &mut TestAppCo
     });
     vcx.run_until_parked();
     let held = f.ws.read_with(&vcx, |ws, _| {
-        ws.pages
-            .pull_requests
-            .detail
-            .as_ref()
-            .unwrap()
-            .threads()
-            .is_some()
+        ws.pages.pull_requests.detail().unwrap().threads().is_some()
     });
     assert!(!held, "hidden threads are dropped by the refresh");
     f.ws.update(&mut vcx, |ws, cx| {
@@ -500,7 +494,7 @@ fn a_resolve_stays_shown_when_the_threads_fail_to_read_again(cx: &mut TestAppCon
         "read again"
     );
     f.ws.read_with(cx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         // The threads read before the resolve stay up, so its mark does too.
         assert!(matches!(
             detail.threads(),
@@ -522,7 +516,7 @@ fn a_refresh_keeps_the_shown_threads_up(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let shown = |cx: &mut TestAppContext| {
         f.ws.read_with(cx, |ws, _| {
-            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let detail = ws.pages.pull_requests.detail().unwrap();
             matches!(
                 detail.threads(),
                 Some(crate::workspace::pages::pull_requests::detail::Load::Ready(

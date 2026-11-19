@@ -83,7 +83,7 @@ const LAZY_TABS: [PrTab; 3] = [PrTab::Threads, PrTab::Files, PrTab::Description]
 
 /// A read a tab starts when it is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TabRead {
+pub(in crate::workspace) enum TabRead {
     Threads(ReadTicket),
     Files(ReadTicket),
     Conversation(ReadTicket),
@@ -148,6 +148,18 @@ pub(in crate::workspace) struct PrDetailState {
     review: Option<review_submit::ReviewSubmit>,
     /// A handoff to an agent being prepared.
     handoff: Option<handoff::Handoff>,
+}
+
+/// What is left of opening a detail once something shows it.
+pub(in crate::workspace) enum PrDetailStart {
+    /// It was open already: only the tab asked for is shown.
+    Shown { tab: Option<PrTab> },
+    /// It is new: its pull request is read, or the read made to open it
+    /// is landed, and the tab it opens at reads what it shows.
+    New {
+        read: Option<Box<PrDetail>>,
+        tab_read: Option<TabRead>,
+    },
 }
 
 /// How a detail opens, beyond which pull request.
@@ -469,15 +481,11 @@ fn split<T>(result: Result<T, GhError>) -> (Result<T, String>, Option<GhError>) 
 
 impl Workspace {
     pub(in crate::workspace) fn pr_detail_id(&self) -> Option<PrDetailId> {
-        self.pages.pull_requests.detail.as_ref().map(|d| d.id)
+        self.pages.pull_requests.detail().map(|d| d.id)
     }
 
     pub(super) fn pr_detail_mut(&mut self, id: PrDetailId) -> Option<&mut PrDetailState> {
-        self.pages
-            .pull_requests
-            .detail
-            .as_mut()
-            .filter(|detail| detail.id == id)
+        self.pages.pull_requests.details.get_mut(id)
     }
 
     /// Show `item` over the list. The same pull request already open is
@@ -520,8 +528,7 @@ impl Workspace {
         let open = self
             .pages
             .pull_requests
-            .detail
-            .as_ref()
+            .detail()
             .filter(|d| d.item.repo == item.repo && d.item.pr.number == item.pr.number)
             .map(|d| d.id);
         if let Some(id) = open {
@@ -542,27 +549,70 @@ impl Workspace {
         });
     }
 
+    /// Put `item`'s detail on the page: the one already open for that
+    /// pull request (a worktree's pane holds it), else a new one.
     fn install_pr_detail(&mut self, item: PrListItem, opening: PrOpening, cx: &mut Context<Self>) {
+        let (id, reads) = self.pr_detail_for(item, opening);
+        self.pages.pull_requests.show_detail(Some(id));
+        self.start_pr_detail(id, reads, cx);
+        cx.notify();
+    }
+
+    /// The open detail of `item`'s pull request, or a new one, with what is
+    /// left to do once something shows it. Nothing is read here: a detail
+    /// must be on the page or in a pane before its reads start, since one
+    /// nothing shows does not stay open.
+    pub(in crate::workspace) fn pr_detail_for(
+        &mut self,
+        item: PrListItem,
+        opening: PrOpening,
+    ) -> (PrDetailId, PrDetailStart) {
+        let page = &mut self.pages.pull_requests;
+        if let Some(id) = page.details.of(&item.repo, item.pr.number) {
+            // The open detail keeps its own reads: `opening.read` started
+            // before them could be older than one already landed.
+            return (id, PrDetailStart::Shown { tab: opening.tab });
+        }
         let id = PrDetailId(self.alloc_id());
         let mut detail = PrDetailState::new(id, item);
-        let place = self
-            .pages
-            .pull_requests
-            .progress
-            .place(&detail.key())
-            .cloned();
+        let page = &mut self.pages.pull_requests;
+        let place = page.progress.place(&detail.key()).cloned();
         let tab_read = detail.open_at(place.as_ref(), opening.tab);
-        self.pages.pull_requests.replace_detail(Some(detail));
-        crate::github::DraftStore::flush(cx);
-        match opening.read {
-            // Read just now to open it: shown as is, not asked again.
-            Some(read) => self.land_pr_read(id, *read, cx),
-            None => self.read_pr_detail(id, cx),
+        page.details.open(detail);
+        (
+            id,
+            PrDetailStart::New {
+                read: opening.read,
+                tab_read,
+            },
+        )
+    }
+
+    /// Finish opening detail `id`, now that something shows it.
+    pub(in crate::workspace) fn start_pr_detail(
+        &mut self,
+        id: PrDetailId,
+        start: PrDetailStart,
+        cx: &mut Context<Self>,
+    ) {
+        match start {
+            PrDetailStart::Shown { tab } => {
+                if let Some(tab) = tab {
+                    self.select_pr_detail_tab(id, tab, cx);
+                }
+            }
+            PrDetailStart::New { read, tab_read } => {
+                crate::github::DraftStore::flush(cx);
+                match read {
+                    // Read just now to open it: shown as is, not asked again.
+                    Some(read) => self.land_pr_read(id, *read, cx),
+                    None => self.read_pr_detail(id, cx),
+                }
+                if let Some(read) = tab_read {
+                    self.send_pr_tab_read(id, read, cx);
+                }
+            }
         }
-        if let Some(read) = tab_read {
-            self.send_pr_tab_read(id, read, cx);
-        }
-        cx.notify();
     }
 
     /// `[github] enabled` was switched off: the detail closes with the list,
@@ -862,12 +912,7 @@ impl Workspace {
     /// Where the detail's Send to agent goes: the linked worktree's chat,
     /// with the pull request as last read. `None` without either.
     pub(super) fn pr_detail_send_target(&self, id: PrDetailId) -> Option<PrSendTarget> {
-        let detail = self
-            .pages
-            .pull_requests
-            .detail
-            .as_ref()
-            .filter(|d| d.id == id)?;
+        let detail = self.pages.pull_requests.detail().filter(|d| d.id == id)?;
         let Load::Ready(loaded) = detail.load() else {
             return None;
         };
@@ -891,8 +936,7 @@ impl Workspace {
         let item = self
             .pages
             .pull_requests
-            .detail
-            .as_ref()
+            .detail()
             .filter(|d| d.id == id)
             .map(|d| d.item.clone());
         if let Some(item) = item {
@@ -910,8 +954,7 @@ impl Workspace {
         let lane = self
             .pages
             .pull_requests
-            .detail
-            .as_ref()
+            .detail()
             .filter(|d| d.id == id)
             .and_then(|d| self.pr_detail_lane(&d.item));
         if let Some(lane) = lane {

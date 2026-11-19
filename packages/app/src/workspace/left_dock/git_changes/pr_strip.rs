@@ -121,7 +121,7 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
                     if let Some(ws) = workspace.upgrade() {
                         ws.update(cx, |ws, cx| {
-                            ws.open_pr_in_daruda(repo.clone(), number, window, cx)
+                            ws.open_lane_pr(repo.clone(), number, window, cx)
                         });
                     }
                 }))
@@ -206,7 +206,7 @@ pub(super) fn pr_strip(snap: &LeftDockSnapshot, cx: &mut Context<Dock>) -> Optio
                 .on_click(cx.listener(move |_dock, _: &ClickEvent, window, cx| {
                     if let Some(ws) = in_daruda.upgrade() {
                         ws.update(cx, |ws, cx| {
-                            ws.open_pr_in_daruda(repo.clone(), number, window, cx)
+                            ws.open_lane_pr(repo.clone(), number, window, cx)
                         });
                     }
                 }))

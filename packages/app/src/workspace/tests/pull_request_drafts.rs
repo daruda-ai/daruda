@@ -43,9 +43,7 @@ fn shown(
     f: &super::GitFixture,
     cx: &mut TestAppContext,
 ) -> crate::workspace::pages::pull_requests::detail::PrDetailId {
-    f.ws.read_with(cx, |ws, _| {
-        ws.pages.pull_requests.detail.as_ref().unwrap().id()
-    })
+    f.ws.read_with(cx, |ws, _| ws.pages.pull_requests.detail().unwrap().id())
 }
 
 fn leave(f: &super::GitFixture, vcx: &mut VisualTestContext) {
@@ -57,9 +55,7 @@ fn shown_id(
     f: &super::GitFixture,
     vcx: &mut VisualTestContext,
 ) -> crate::workspace::pages::pull_requests::detail::PrDetailId {
-    f.ws.read_with(vcx, |ws, _| {
-        ws.pages.pull_requests.detail.as_ref().unwrap().id()
-    })
+    f.ws.read_with(vcx, |ws, _| ws.pages.pull_requests.detail().unwrap().id())
 }
 
 #[gpui::test]
@@ -86,8 +82,7 @@ fn a_description_draft_survives_leaving_and_a_restart(cx: &mut TestAppContext) {
             let edit = ws
                 .pages
                 .pull_requests
-                .detail
-                .as_ref()
+                .detail()
                 .unwrap()
                 .body_edit()
                 .unwrap();
@@ -122,8 +117,7 @@ fn a_description_draft_survives_leaving_and_a_restart(cx: &mut TestAppContext) {
             let edit = ws
                 .pages
                 .pull_requests
-                .detail
-                .as_ref()
+                .detail()
                 .unwrap()
                 .body_edit()
                 .unwrap();
@@ -175,7 +169,7 @@ fn a_reply_draft_is_marked_continued_and_dropped_once_posted(cx: &mut TestAppCon
     });
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| {
-            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let detail = ws.pages.pull_requests.detail().unwrap();
             let input = detail
                 .thread_work()
                 .get("t1")
@@ -205,7 +199,7 @@ fn a_reply_draft_is_marked_continued_and_dropped_once_posted(cx: &mut TestAppCon
     });
     let text = vcx.update(|_, cx| {
         f.ws.read_with(cx, |ws, cx| {
-            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let detail = ws.pages.pull_requests.detail().unwrap();
             let reply = detail
                 .thread_work()
                 .get("t1")
@@ -259,7 +253,7 @@ fn a_reply_failed_with_its_detail_gone_is_checked_not_sent_again(cx: &mut TestAp
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| {
             ws.open_pr_reply(id, "t1", window, cx);
-            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let detail = ws.pages.pull_requests.detail().unwrap();
             let input = detail
                 .thread_work()
                 .get("t1")
@@ -331,7 +325,7 @@ fn a_reply_failed_with_its_detail_gone_is_checked_not_sent_again(cx: &mut TestAp
         "not sent again"
     );
     let closed = f.ws.read_with(&vcx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         detail
             .thread_work()
             .get("t1")
@@ -464,14 +458,7 @@ fn a_line_comment_is_kept_as_typed_with_its_lines_and_head(cx: &mut TestAppConte
     vcx.simulate_click(suggest, Modifiers::default());
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| {
-            let composer = ws
-                .pages
-                .pull_requests
-                .detail
-                .as_ref()
-                .unwrap()
-                .composer()
-                .unwrap();
+            let composer = ws.pages.pull_requests.detail().unwrap().composer().unwrap();
             let body = composer.body.clone();
             body.update(cx, |body, cx| body.set_value("Fold these.", window, cx));
         })
@@ -593,7 +580,7 @@ fn a_suggestion_starts_from_the_comments_own_unfolded_lines(cx: &mut TestAppCont
     let suggestion = |f: &super::GitFixture, vcx: &mut VisualTestContext| {
         vcx.update(|_, cx| {
             f.ws.read_with(cx, |ws, cx| {
-                let composer = ws.pages.pull_requests.detail.as_ref().unwrap().composer()?;
+                let composer = ws.pages.pull_requests.detail().unwrap().composer()?;
                 Some(composer.suggestion.as_ref()?.read(cx).value().to_string())
             })
         })
@@ -623,7 +610,7 @@ fn a_suggestion_starts_from_the_comments_own_unfolded_lines(cx: &mut TestAppCont
     });
     vcx.run_until_parked();
     let selected = f.ws.read_with(&vcx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         detail
             .files()
             .and_then(|files| files.selection().cloned())

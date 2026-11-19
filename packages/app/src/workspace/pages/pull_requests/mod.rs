@@ -19,12 +19,14 @@ pub(in crate::workspace) mod actions;
 mod controls;
 mod counts;
 pub(in crate::workspace) mod detail;
+pub(in crate::workspace) mod details;
 mod direct;
 mod lane;
 pub(in crate::workspace) use lane::CheckoutStage;
 pub(in crate::workspace) mod list;
 pub(in crate::workspace) mod navigation;
 pub(in crate::workspace) mod page_layout;
+mod pane;
 mod progress;
 mod remote_search;
 pub(in crate::workspace) mod render;
@@ -34,8 +36,8 @@ mod split;
 
 use std::collections::BTreeSet;
 
-use detail::PrDetailState;
 use detail::view::PrDetailView;
+use detail::{PrDetailId, PrDetailState};
 use list::{LaneFacts, PageInputs, PrKey, PrPageView};
 
 /// What the page remembers while it is not on screen. Never persisted.
@@ -54,8 +56,9 @@ pub(in crate::workspace) struct PullRequestsPage {
     creating: lane::Creating,
     /// Staged each frame while the page shows its list; `None` otherwise.
     pub(in crate::workspace) snapshot: Option<PrPageSnapshot>,
-    /// The pull request shown over the list, if any.
-    pub(in crate::workspace) detail: Option<PrDetailState>,
+    /// Every detail open in the window: the one shown over the list, and
+    /// those worktrees' pull request panes hold.
+    pub(in crate::workspace) details: details::PrDetails,
     /// Staged each frame while the page shows its detail; `None` otherwise.
     pub(in crate::workspace) detail_snapshot: Option<PrDetailView>,
     /// Files marked viewed and where each detail closed, while the window
@@ -115,9 +118,27 @@ impl PullRequestsPage {
     /// Show `next` as the detail, or none; the one it replaces leaves its
     /// place in the review progress to come back to.
     pub(in crate::workspace) fn replace_detail(&mut self, next: Option<PrDetailState>) {
-        if let Some(gone) = std::mem::replace(&mut self.detail, next) {
+        let next = next.map(|detail| self.details.open(detail));
+        self.show_detail(next);
+    }
+
+    /// Show the open detail `next` over the list, or none. The detail it
+    /// replaces leaves its place to come back to when that ends it.
+    pub(in crate::workspace) fn show_detail(&mut self, next: Option<PrDetailId>) {
+        if let Some(gone) = self.details.show_on_page(next) {
             self.progress.leave(&gone.key(), gone.place());
         }
+    }
+
+    /// The detail shown over the list.
+    pub(in crate::workspace) fn detail(&self) -> Option<&PrDetailState> {
+        self.details.on_page()
+    }
+
+    /// For a capture that seeds the shown detail.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn detail_mut(&mut self) -> Option<&mut PrDetailState> {
+        self.details.on_page_mut()
     }
 
     /// The list column's width beside a detail this frame.
@@ -142,7 +163,7 @@ impl PullRequestsPage {
             creating: lane::Creating::new(),
             cache: PrListCache::default(),
             snapshot: None,
-            detail: None,
+            details: details::PrDetails::default(),
             detail_snapshot: None,
             progress: detail::progress::ReviewProgress::new(),
             focus: cx.focus_handle(),
@@ -250,9 +271,55 @@ impl Workspace {
     pub(in crate::workspace) fn pr_page_layout(&self) -> page_layout::PageLayout {
         let page = &self.pages.pull_requests;
         page_layout::PageLayout::of(
-            page.detail.is_some() && self.shown_page_detail_id().is_some(),
+            page.detail().is_some() && self.shown_page_detail_id().is_some(),
             page.split_fits() && page.list_column == page_layout::ListColumn::Beside,
         )
+    }
+
+    /// What detail `state` draws this frame, read against `lanes`.
+    fn pr_detail_view(
+        &self,
+        state: &PrDetailState,
+        lanes: &[list::LaneFacts],
+        cx: &Context<Self>,
+    ) -> PrDetailView {
+        let lane = list::linked_lane(state.item(), lanes);
+        let draft_owner =
+            crate::github::DraftStore::owner(&state.item().repo, state.item().pr.number, cx);
+        let inputs = detail::view::DetailInputs {
+            lane,
+            link: self.pr_link_inputs(state.item(), lane, lanes, cx),
+            sending: lane.is_some_and(|lane| self.is_sending_pr(lane.lane)),
+            creating: &self.pages.pull_requests.creating,
+            checkout_stage: self
+                .pages
+                .pull_requests
+                .creating
+                .get(&(state.item().repo.clone(), state.item().pr.number))
+                .copied()
+                .flatten(),
+            progress: &self.pages.pull_requests.progress,
+            drafts: draft_owner
+                .as_ref()
+                .and_then(|owner| crate::github::DraftStore::of(owner, cx)),
+            keeping: crate::github::DraftStore::keeping(draft_owner.as_ref(), cx),
+            handoff_chats: state
+                .handoff()
+                .map(|handoff| self.writable_chats(handoff.lane, cx))
+                .unwrap_or_default(),
+            now: chrono::Utc::now(),
+        };
+        detail::view::view(state, &inputs)
+    }
+
+    /// The lanes a pull request pane's detail is read against: none while
+    /// no such pane is drawn, as gathering them walks every worktree.
+    fn pr_lanes_for_pane(&self) -> Vec<list::LaneFacts> {
+        if self.shown_pr_pane_detail().is_some() {
+            self.pr_lanes()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Stage what the page draws this frame: its detail when it holds one,
@@ -261,7 +328,13 @@ impl Workspace {
     /// repositories are read once here for everything the frame draws.
     pub(in crate::workspace) fn stage_pr_page(&mut self, cx: &Context<Self>) {
         if self.active_page() != Some(Page::PullRequests) {
-            self.pages.pull_requests.detail_snapshot = None;
+            // No page: a worktree's pull request pane may be drawing one.
+            let lanes = self.pr_lanes_for_pane();
+            let detail = self
+                .shown_pr_pane_detail()
+                .and_then(|id| self.pages.pull_requests.details.get(id))
+                .map(|state| self.pr_detail_view(state, &lanes, cx));
+            self.pages.pull_requests.detail_snapshot = detail;
             self.pages.pull_requests.snapshot = None;
             self.pages.pull_requests.staged_layout = None;
             return;
@@ -272,41 +345,9 @@ impl Workspace {
         let detail = self
             .pages
             .pull_requests
-            .detail
-            .as_ref()
+            .detail()
             .filter(|_| self.shown_page_detail_id().is_some())
-            .map(|state| {
-                let lane = list::linked_lane(state.item(), &lanes);
-                let draft_owner = crate::github::DraftStore::owner(
-                    &state.item().repo,
-                    state.item().pr.number,
-                    cx,
-                );
-                let inputs = detail::view::DetailInputs {
-                    lane,
-                    link: self.pr_link_inputs(state.item(), lane, &lanes, cx),
-                    sending: lane.is_some_and(|lane| self.is_sending_pr(lane.lane)),
-                    creating: &self.pages.pull_requests.creating,
-                    checkout_stage: self
-                        .pages
-                        .pull_requests
-                        .creating
-                        .get(&(state.item().repo.clone(), state.item().pr.number))
-                        .copied()
-                        .flatten(),
-                    progress: &self.pages.pull_requests.progress,
-                    drafts: draft_owner
-                        .as_ref()
-                        .and_then(|owner| crate::github::DraftStore::of(owner, cx)),
-                    keeping: crate::github::DraftStore::keeping(draft_owner.as_ref(), cx),
-                    handoff_chats: state
-                        .handoff()
-                        .map(|handoff| self.writable_chats(handoff.lane, cx))
-                        .unwrap_or_default(),
-                    now: chrono::Utc::now(),
-                };
-                detail::view::view(state, &inputs)
-            });
+            .map(|state| self.pr_detail_view(state, &lanes, cx));
         let shows_list = layout.shows_list();
         self.pages.pull_requests.detail_snapshot = detail;
         self.pages.pull_requests.row_bounds.borrow_mut().clear();

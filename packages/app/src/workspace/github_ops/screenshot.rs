@@ -607,8 +607,7 @@ impl Workspace {
         if let Some(id) = self
             .pages
             .pull_requests
-            .detail
-            .as_ref()
+            .detail()
             .filter(|d| *d.item() == item)
             .map(|d| d.id())
         {
@@ -650,7 +649,7 @@ impl Workspace {
                     );
                     self.toggle_pr_thread(id, "shot-thread-1", cx);
                     self.open_pr_reply(id, "shot-thread-1", window, cx);
-                    let reply = self.pages.pull_requests.detail.as_ref().and_then(|d| {
+                    let reply = self.pages.pull_requests.detail().and_then(|d| {
                         d.thread_work()
                             .get("shot-thread-1")
                             .and_then(|work| work.reply.clone())
@@ -666,7 +665,7 @@ impl Workspace {
                     // The dropdown's open state lives inside the widget, out
                     // of reach of a capture, so the shot is the dialog a
                     // menu item raises; it needs the detail already read.
-                    if let Some(shown) = self.pages.pull_requests.detail.as_mut() {
+                    if let Some(shown) = self.pages.pull_requests.detail_mut() {
                         shown.show_read(detail);
                     }
                     self.ask_pr_merge(id, MergeMethod::Squash, window, cx);

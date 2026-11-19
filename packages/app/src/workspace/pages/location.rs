@@ -75,7 +75,7 @@ impl Workspace {
                 )
             }
             Page::PullRequests => {
-                let detail = self.pages.pull_requests.detail.as_ref()?;
+                let detail = self.pages.pull_requests.detail()?;
                 (
                     detail.item().repo.qualified(),
                     format!("#{}", detail.item().pr.number),

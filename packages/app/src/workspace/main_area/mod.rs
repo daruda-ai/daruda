@@ -230,6 +230,9 @@ pub(in crate::workspace) fn render_layout(
     // few pixels it occupies, since a drag is what pulls the pointer off them.
     dragged_divider: Option<PaneId>,
     file_send: &file_context::FileSendAction,
+    // What a pull request pane draws, built by the caller that has the
+    // detail staged; taken by the one leaf that is such a pane.
+    pr_detail: &mut Option<AnyElement>,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     match layout {
@@ -289,6 +292,12 @@ pub(in crate::workspace) fn render_layout(
             }
 
             let content = match &pane.content {
+                self::pane::PaneContent::PullRequest(pr) => div()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .overflow_hidden()
+                    .track_focus(&pr.focus_handle)
+                    .children(pr_detail.take()),
                 self::pane::PaneContent::File(f) => div()
                     .flex_1()
                     .min_h(px(0.))
@@ -419,6 +428,7 @@ pub(in crate::workspace) fn render_layout(
                     drop_target,
                     dragged_divider,
                     file_send,
+                    pr_detail,
                     cx,
                 );
                 let ratio = ratios[i];

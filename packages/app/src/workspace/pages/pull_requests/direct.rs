@@ -14,6 +14,15 @@ use crate::gh_host::GhHost;
 use crate::surface::strings::pull_requests as s;
 use crate::workspace::Workspace;
 
+/// Where a pull request opened by its address is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum PrDestination {
+    /// Over the Pull requests page's list.
+    Page,
+    /// In this worktree's side tabs.
+    Beside(daruda_store::project::LaneRef),
+}
+
 impl Workspace {
     /// The palette's Open pull request: ask for a reference, then open it.
     pub(in crate::workspace) fn on_open_pull_request(
@@ -32,7 +41,7 @@ impl Workspace {
                     return Ok(());
                 };
                 let (repo, address) = ws.resolve_pr_address(&text, cx)?;
-                ws.open_pr_by_address(repo, address, window, cx);
+                ws.open_pr_by_address(repo, address, PrDestination::Page, window, cx);
                 Ok(())
             },
             window,
@@ -116,14 +125,40 @@ impl Workspace {
             number,
             target: None,
         };
-        self.open_pr_by_address(repo, address, window, cx);
+        self.open_pr_by_address(repo, address, PrDestination::Page, window, cx);
     }
 
-    /// Read `repo#number`, then show it with the tab `address` points at.
+    /// `repo#number`, the pull request the worktree on screen works on,
+    /// opened from its Git panel: beside its tabs, where files open there,
+    /// else on the page.
+    pub(in crate::workspace) fn open_lane_pr(
+        &mut self,
+        repo: RepoId,
+        number: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let address = PrAddress {
+            repo: Some(repo.clone()),
+            host_unknown: false,
+            number,
+            target: None,
+        };
+        let to = if self.mirrors.file_viewer_open_beside {
+            PrDestination::Beside(self.active)
+        } else {
+            PrDestination::Page
+        };
+        self.open_pr_by_address(repo, address, to, window, cx);
+    }
+
+    /// Read `repo#number`, then show it at `to` with the tab `address`
+    /// points at.
     pub(in crate::workspace) fn open_pr_by_address(
         &mut self,
         repo: RepoId,
         address: PrAddress,
+        to: PrDestination,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -147,7 +182,7 @@ impl Workspace {
                 .await;
             // SILENT-OK: the window closed while GitHub answered.
             let _ = ws.update_in(cx, |ws, window, cx| {
-                ws.land_pr_by_address(repo, address, read, window, cx)
+                ws.land_pr_by_address(repo, address, to, read, window, cx)
             });
         })
         .detach();
@@ -157,6 +192,7 @@ impl Workspace {
         &mut self,
         repo: RepoId,
         address: PrAddress,
+        to: PrDestination,
         read: Result<PrDetail, GhError>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -199,7 +235,14 @@ impl Workspace {
             tab,
             read: Some(Box::new(detail)),
         };
-        self.open_pr_detail_as(item, opening, window, cx);
+        match to {
+            PrDestination::Page => {
+                // Asked for from anywhere: the page comes up to show it.
+                self.show_page(super::Page::PullRequests, cx);
+                self.open_pr_detail_as(item, opening, window, cx)
+            }
+            PrDestination::Beside(lane) => self.open_pr_pane(lane, item, opening, window, cx),
+        }
     }
 }
 

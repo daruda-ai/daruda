@@ -104,7 +104,7 @@ fn a_files_read_outdated_by_a_refresh_does_not_land(cx: &mut TestAppContext) {
     gh.set_pr_files(&repo(), 7, one("new.rs"));
     f.ws.update(cx, |ws, cx| {
         ws.select_pr_detail_tab(id, PrTab::Files, cx);
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         let (first, page) = detail.files().unwrap().waiting().unwrap();
         ws.refresh_pr_detail(id, cx);
         let old = daruda_github::PrFilesPage::of(one("old.rs").files, page);
@@ -273,13 +273,7 @@ fn a_long_line_scrolls_sideways_and_a_long_diff_is_drawn_in_steps(cx: &mut TestA
     };
     assert_eq!(shown.as_ref().unwrap().limit, 1_000, "a first step of rows");
     let scroll = f.ws.read_with(&vcx, |ws, _| {
-        ws.pages
-            .pull_requests
-            .detail
-            .as_ref()
-            .unwrap()
-            .scroll()
-            .clone()
+        ws.pages.pull_requests.detail().unwrap().scroll().clone()
     });
     scroll.set_offset(gpui::point(px(0.), -scroll.max_offset().y));
     f.ws.update(&mut vcx, |_, cx| cx.notify());
@@ -450,7 +444,7 @@ fn refreshed_to_a_new_head(cx: &mut TestAppContext, files_first: bool) -> Option
     f.ws.update(cx, |ws, cx| {
         ws.select_pr_line(id, Side::New, 1, false, cx);
         ws.refresh_pr_detail(id, cx);
-        let state = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let state = ws.pages.pull_requests.detail().unwrap();
         let read = state.pr_waiting().unwrap();
         let (files, page) = state.files().unwrap().waiting().unwrap();
         let moved = PrDetail {
@@ -469,7 +463,7 @@ fn refreshed_to_a_new_head(cx: &mut TestAppContext, files_first: bool) -> Option
     cx.run_until_parked();
     let selected = |f: &super::GitFixture, cx: &mut TestAppContext| {
         f.ws.read_with(cx, |ws, _| {
-            let state = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let state = ws.pages.pull_requests.detail().unwrap();
             state
                 .files()
                 .unwrap()
@@ -638,8 +632,7 @@ fn leave_on_a_scrolled_file(
     f.ws.update(vcx, |ws, _| {
         ws.pages
             .pull_requests
-            .detail
-            .as_ref()
+            .detail()
             .unwrap()
             .scroll()
             .set_offset(offset);
@@ -654,13 +647,7 @@ fn detail_offset(
     vcx: &mut gpui::VisualTestContext,
 ) -> gpui::Point<gpui::Pixels> {
     f.ws.read_with(vcx, |ws, _| {
-        ws.pages
-            .pull_requests
-            .detail
-            .as_ref()
-            .unwrap()
-            .scroll()
-            .offset()
+        ws.pages.pull_requests.detail().unwrap().scroll().offset()
     })
 }
 
@@ -704,7 +691,7 @@ fn moving_on_before_a_reopened_detail_comes_back_keeps_it_where_it_is(cx: &mut T
     let again = shown_id(&f, &mut vcx);
     let coming_back = |f: &super::GitFixture, vcx: &mut gpui::VisualTestContext| {
         f.ws.read_with(vcx, |ws, _| {
-            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let detail = ws.pages.pull_requests.detail().unwrap();
             detail.files().is_some_and(|files| files.coming_back())
         })
     };
@@ -811,7 +798,7 @@ fn code_handoff(
 )> {
     f.ws.update(cx, |ws, cx| ws.open_pr_code_handoff(id, cx));
     f.ws.read_with(cx, |ws, _| {
-        let handoff = ws.pages.pull_requests.detail.as_ref()?.handoff()?;
+        let handoff = ws.pages.pull_requests.detail()?.handoff()?;
         Some((handoff.payload.clone(), handoff.prompt.clone()))
     })
 }
@@ -933,23 +920,11 @@ fn sending_the_same_lines_again_keeps_the_handoff(cx: &mut TestAppContext) {
         "{prompt}"
     );
     let before = f.ws.read_with(cx, |ws, _| {
-        ws.pages
-            .pull_requests
-            .detail
-            .as_ref()
-            .unwrap()
-            .handoff()
-            .cloned()
+        ws.pages.pull_requests.detail().unwrap().handoff().cloned()
     });
     assert!(code_handoff(&f, id, cx).is_some());
     let after = f.ws.read_with(cx, |ws, _| {
-        ws.pages
-            .pull_requests
-            .detail
-            .as_ref()
-            .unwrap()
-            .handoff()
-            .cloned()
+        ws.pages.pull_requests.detail().unwrap().handoff().cloned()
     });
     assert_eq!(before, after);
 }

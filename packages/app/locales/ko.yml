@@ -561,6 +561,7 @@ ctx:
   close_file_viewer: "파일 뷰어 닫기"
   send_tab_aside: "옆 탭으로 보내기"
   send_tab_back: "탭 줄로 되돌리기"
+  open_pr_on_page: "Pull requests 페이지에서 열기"
   zoom_pane: "패널 확대"
   unzoom_pane: "패널 축소"
   open_link: "링크 열기"

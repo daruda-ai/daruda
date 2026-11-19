@@ -37,7 +37,7 @@ fn a_url_opens_the_pull_request_on_its_tab_without_touching_worktrees(cx: &mut T
             let (repo, address) = ws
                 .resolve_pr_address("https://github.com/o/r/pull/7/files", cx)
                 .unwrap();
-            ws.open_pr_by_address(repo, address, window, cx);
+            ws.open_pr_by_address(repo, address, super::PrDestination::Page, window, cx);
         })
     });
     cx.run_until_parked();
@@ -48,7 +48,7 @@ fn a_url_opens_the_pull_request_on_its_tab_without_touching_worktrees(cx: &mut T
     );
     f.ws.read_with(cx, |ws, _| {
         assert_eq!(ws.active_page(), Some(Page::PullRequests));
-        let detail = ws.pages.pull_requests.detail.as_ref().expect("shown");
+        let detail = ws.pages.pull_requests.detail().expect("shown");
         assert_eq!(detail.key(), (repo(), 7));
         assert_eq!(detail.tab(), PrTab::Files);
         assert_eq!(ws.projects.lanes().count(), lanes, "no worktree made");
@@ -63,12 +63,12 @@ fn a_pull_request_that_cannot_be_read_opens_nothing(cx: &mut TestAppContext) {
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| {
             let (repo, address) = ws.resolve_pr_address("o/r#404", cx).unwrap();
-            ws.open_pr_by_address(repo, address, window, cx);
+            ws.open_pr_by_address(repo, address, super::PrDestination::Page, window, cx);
         })
     });
     cx.run_until_parked();
     f.ws.read_with(cx, |ws, _| {
-        assert!(ws.pages.pull_requests.detail.is_none());
+        assert!(ws.pages.pull_requests.detail().is_none());
         assert!(
             ws.error_history()
                 .iter()
@@ -143,11 +143,7 @@ fn the_git_panel_opens_the_same_detail(cx: &mut TestAppContext) {
     let (f, _gh, _) = window(cx);
     let shown = |cx: &mut TestAppContext| {
         f.ws.read_with(cx, |ws, _| {
-            ws.pages
-                .pull_requests
-                .detail
-                .as_ref()
-                .map(|detail| detail.key())
+            ws.pages.pull_requests.detail().map(|detail| detail.key())
         })
     };
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
@@ -179,15 +175,13 @@ fn a_url_into_the_shown_pull_request_moves_it_to_that_tab(cx: &mut TestAppContex
         vcx.update(|window, cx| {
             f.ws.update(cx, |ws, cx| {
                 let (repo, address) = ws.resolve_pr_address(url, cx).unwrap();
-                ws.open_pr_by_address(repo, address, window, cx);
+                ws.open_pr_by_address(repo, address, super::PrDestination::Page, window, cx);
             })
         });
         cx.run_until_parked();
     };
     let tab = |cx: &mut TestAppContext| {
-        f.ws.read_with(cx, |ws, _| {
-            ws.pages.pull_requests.detail.as_ref().map(|d| d.tab())
-        })
+        f.ws.read_with(cx, |ws, _| ws.pages.pull_requests.detail().map(|d| d.tab()))
     };
     open("https://github.com/o/r/pull/7/files", cx);
     assert_eq!(tab(cx), Some(PrTab::Files));
@@ -214,13 +208,13 @@ fn a_url_to_another_pull_request_opens_it_on_its_tab(cx: &mut TestAppContext) {
         vcx.update(|window, cx| {
             f.ws.update(cx, |ws, cx| {
                 let (repo, address) = ws.resolve_pr_address(url, cx).unwrap();
-                ws.open_pr_by_address(repo, address, window, cx);
+                ws.open_pr_by_address(repo, address, super::PrDestination::Page, window, cx);
             })
         });
         vcx.run_until_parked();
     }
     f.ws.read_with(cx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().expect("shown");
+        let detail = ws.pages.pull_requests.detail().expect("shown");
         assert_eq!(detail.key(), (repo(), 8), "the other one replaced it");
         assert_eq!(detail.tab(), PrTab::Checks);
     });
@@ -239,7 +233,7 @@ fn a_link_read_leaves_the_shown_details_own_read(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     let (item, shown) = f.ws.read_with(cx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().expect("shown");
+        let detail = ws.pages.pull_requests.detail().expect("shown");
         let Load::Ready(pr) = detail.load() else {
             panic!("read");
         };
@@ -258,7 +252,7 @@ fn a_link_read_leaves_the_shown_details_own_read(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
     f.ws.read_with(cx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().expect("shown");
+        let detail = ws.pages.pull_requests.detail().expect("shown");
         assert!(matches!(detail.load(), Load::Ready(pr) if *pr == shown));
     });
 }

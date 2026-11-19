@@ -10,7 +10,7 @@ use crate::workspace::pages::pull_requests::detail::reviewers::ReviewerOp;
 fn type_reviewers(f: &super::GitFixture, vcx: &mut VisualTestContext, text: &str) {
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| {
-            let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+            let detail = ws.pages.pull_requests.detail().unwrap();
             let input = detail.reviewer_requests().input.clone().unwrap();
             input.update(cx, |input, cx| input.set_value(text.to_owned(), window, cx));
         })
@@ -19,7 +19,7 @@ fn type_reviewers(f: &super::GitFixture, vcx: &mut VisualTestContext, text: &str
 
 fn reviewers(f: &super::GitFixture, vcx: &mut VisualTestContext) -> Vec<(String, ReviewerState)> {
     f.ws.read_with(vcx, |ws, _| {
-        let detail = ws.pages.pull_requests.detail.as_ref().unwrap();
+        let detail = ws.pages.pull_requests.detail().unwrap();
         match detail.load() {
             crate::workspace::pages::pull_requests::detail::Load::Ready(read) => {
                 read.reviewers.clone()
@@ -70,8 +70,7 @@ fn reviewers_are_asked_and_unasked_and_bad_names_never_reach_gh(cx: &mut TestApp
     let op = f.ws.read_with(&vcx, |ws, _| {
         ws.pages
             .pull_requests
-            .detail
-            .as_ref()
+            .detail()
             .unwrap()
             .reviewer_requests()
             .op
@@ -142,13 +141,7 @@ fn the_author_is_not_asked_and_a_failed_request_keeps_the_text(cx: &mut TestAppC
     let state = |f: &super::GitFixture, vcx: &mut VisualTestContext| {
         vcx.update(|_, cx| {
             f.ws.read_with(cx, |ws, cx| {
-                let requests = ws
-                    .pages
-                    .pull_requests
-                    .detail
-                    .as_ref()
-                    .unwrap()
-                    .reviewer_requests();
+                let requests = ws.pages.pull_requests.detail().unwrap().reviewer_requests();
                 (
                     requests
                         .input

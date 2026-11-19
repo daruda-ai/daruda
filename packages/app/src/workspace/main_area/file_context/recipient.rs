@@ -36,7 +36,8 @@ impl Workspace {
             super::super::pane::PaneContent::Terminal(terminal) => {
                 Some((terminal.cached_title.to_string(), Some(ui::icons::TERMINAL)))
             }
-            super::super::pane::PaneContent::File(_) => None,
+            super::super::pane::PaneContent::File(_)
+            | super::super::pane::PaneContent::PullRequest(_) => None,
         });
         match identity {
             Some((name, icon)) => FileSendAction {

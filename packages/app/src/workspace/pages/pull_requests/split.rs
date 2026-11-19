@@ -83,7 +83,7 @@ impl Workspace {
     /// only where the window holds both. `Some(true)` while it is beside.
     pub(in crate::workspace) fn pr_list_column_toggle(&self) -> Option<bool> {
         let page = &self.pages.pull_requests;
-        (page.detail.is_some() && page.split_fits())
+        (page.detail().is_some() && page.split_fits())
             .then_some(page.list_column == ListColumn::Beside)
     }
 

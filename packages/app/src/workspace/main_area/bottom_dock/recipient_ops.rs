@@ -106,7 +106,10 @@ impl Workspace {
                             .map(|agent| agent.name.clone())
                             .unwrap_or_else(|| a.agent_id.clone())
                             .into(),
-                        crate::workspace::main_area::pane::PaneContent::File(_) => return None,
+                        crate::workspace::main_area::pane::PaneContent::File(_)
+                        | crate::workspace::main_area::pane::PaneContent::PullRequest(_) => {
+                            return None;
+                        }
                     };
                     let label = tab.user_label.clone().unwrap_or(fallback);
                     Some((id, label))

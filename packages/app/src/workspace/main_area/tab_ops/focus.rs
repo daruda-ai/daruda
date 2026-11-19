@@ -75,6 +75,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.release_pane_tracking(pane_ids, cx);
+        self.release_pr_panes(pane_ids);
         for id in pane_ids {
             self.main_area.activity_counter.remove(id);
             self.forget_pane_input_state(*id);

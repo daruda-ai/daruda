@@ -80,6 +80,17 @@ pub(in crate::workspace) enum PaneContent {
     Terminal(TerminalContent),
     File(FileContent),
     AgentChat(AgentChatContent),
+    PullRequest(PrPaneContent),
+}
+
+/// A pull request read beside the work on it. The pane names one of the
+/// window's open details (`PrDetails`), which it holds while it is open;
+/// the Pull requests page showing the same pull request shows that detail.
+pub(in crate::workspace) struct PrPaneContent {
+    pub(in crate::workspace) detail: crate::workspace::pages::pull_requests::detail::PrDetailId,
+    /// `#480`, for the tab strip.
+    pub(in crate::workspace) label: SharedString,
+    pub(in crate::workspace) focus_handle: FocusHandle,
 }
 
 /// PTY-backed terminal content. Owns the `TerminalView` entity, the
@@ -234,6 +245,7 @@ impl PaneContent {
             // `Render` impl (like `Terminal` via `TerminalView`), so the
             // wrapper div must not double-track it.
             PaneContent::AgentChat(_) => None,
+            PaneContent::PullRequest(pr) => Some(&pr.focus_handle),
         }
     }
 }
@@ -256,6 +268,7 @@ impl Pane {
                         crate::surface::strings::common::new_agent_chat_named(v.agent_name()).into()
                     })
             }
+            PaneContent::PullRequest(pr) => pr.label.clone(),
         }
     }
 
@@ -269,7 +282,7 @@ impl Pane {
                     t.cached_title = title.into();
                 }
             }
-            PaneContent::File(_) | PaneContent::AgentChat(_) => {}
+            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => {}
         }
     }
 
@@ -287,6 +300,7 @@ impl Pane {
             PaneContent::Terminal(t) => t.cached_cwd.as_deref(),
             PaneContent::File(f) => f.view.path.parent(),
             PaneContent::AgentChat(ac) => ac.cwd.as_ref().and_then(PaneCwd::as_local),
+            PaneContent::PullRequest(_) => None,
         }
     }
 
@@ -321,6 +335,7 @@ impl Pane {
             PaneContent::Terminal(t) => t.view.read(cx).focus_handle().clone(),
             PaneContent::File(f) => f.focus_handle.clone(),
             PaneContent::AgentChat(ac) => ac.view.read(cx).focus_handle(cx),
+            PaneContent::PullRequest(pr) => pr.focus_handle.clone(),
         }
     }
 
@@ -332,7 +347,7 @@ impl Pane {
     pub(in crate::workspace) fn terminal_view(&self) -> Option<&Entity<TerminalView>> {
         match &self.content {
             PaneContent::Terminal(t) => Some(&t.view),
-            PaneContent::File(_) | PaneContent::AgentChat(_) => None,
+            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => None,
         }
     }
 
@@ -345,7 +360,7 @@ impl Pane {
     ) -> Option<daruda_store::accounts::AccountId> {
         match &self.content {
             PaneContent::Terminal(t) => t.account.to_persisted(),
-            PaneContent::File(_) | PaneContent::AgentChat(_) => None,
+            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => None,
         }
     }
 
@@ -362,7 +377,7 @@ impl Pane {
         match &self.content {
             PaneContent::Terminal(t) => Some(t.account),
             PaneContent::AgentChat(ac) => Some(ac.account),
-            PaneContent::File(_) => None,
+            PaneContent::File(_) | PaneContent::PullRequest(_) => None,
         }
     }
 
@@ -370,7 +385,9 @@ impl Pane {
     pub(in crate::workspace) fn file_content(&self) -> Option<&FileContent> {
         match &self.content {
             PaneContent::File(f) => Some(f),
-            PaneContent::Terminal(_) | PaneContent::AgentChat(_) => None,
+            PaneContent::Terminal(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => {
+                None
+            }
         }
     }
 
@@ -380,7 +397,9 @@ impl Pane {
     pub(in crate::workspace) fn file_content_mut(&mut self) -> Option<&mut FileContent> {
         match &mut self.content {
             PaneContent::File(f) => Some(f),
-            PaneContent::Terminal(_) | PaneContent::AgentChat(_) => None,
+            PaneContent::Terminal(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => {
+                None
+            }
         }
     }
 
@@ -389,7 +408,7 @@ impl Pane {
     pub(in crate::workspace) fn agent_chat_content(&self) -> Option<&AgentChatContent> {
         match &self.content {
             PaneContent::AgentChat(ac) => Some(ac),
-            PaneContent::Terminal(_) | PaneContent::File(_) => None,
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::PullRequest(_) => None,
         }
     }
 
@@ -400,7 +419,7 @@ impl Pane {
     pub(in crate::workspace) fn agent_chat_content_mut(&mut self) -> Option<&mut AgentChatContent> {
         match &mut self.content {
             PaneContent::AgentChat(ac) => Some(ac),
-            PaneContent::Terminal(_) | PaneContent::File(_) => None,
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::PullRequest(_) => None,
         }
     }
 
@@ -411,7 +430,7 @@ impl Pane {
     pub(in crate::workspace) fn agent_chat_view(&self) -> Option<&Entity<AgentChatView>> {
         match &self.content {
             PaneContent::AgentChat(ac) => Some(&ac.view),
-            PaneContent::Terminal(_) | PaneContent::File(_) => None,
+            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::PullRequest(_) => None,
         }
     }
 
@@ -427,7 +446,7 @@ impl Pane {
             PaneContent::File(f) => {
                 f.view.holds_editable_buffer() && *f.editor_state.read(cx).text() != f.saved_text
             }
-            PaneContent::AgentChat(_) => false,
+            PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => false,
         }
     }
 
@@ -443,7 +462,7 @@ impl Pane {
                         }))
             }
             PaneContent::AgentChat(ac) => ac.view.read(cx).is_busy(),
-            PaneContent::File(_) => false,
+            PaneContent::File(_) | PaneContent::PullRequest(_) => false,
         }
     }
 
@@ -452,7 +471,7 @@ impl Pane {
         match &self.content {
             PaneContent::Terminal(_) => false,
             PaneContent::File(f) => f.view.holds_editable_buffer() && f.view.path.is_absolute(),
-            PaneContent::AgentChat(_) => false,
+            PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => false,
         }
     }
 
@@ -484,7 +503,7 @@ impl Pane {
     ) -> bool {
         match &mut self.content {
             PaneContent::Terminal(t) => t.update_cached(new_title, new_cwd),
-            PaneContent::File(_) | PaneContent::AgentChat(_) => false,
+            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => false,
         }
     }
 
@@ -505,7 +524,7 @@ impl Pane {
             PaneContent::Terminal(t) => {
                 t.resize_to_fit(avail_w, avail_h, pane_header_h, cache, window, cx)
             }
-            PaneContent::File(_) | PaneContent::AgentChat(_) => true,
+            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => true,
         }
     }
 }
