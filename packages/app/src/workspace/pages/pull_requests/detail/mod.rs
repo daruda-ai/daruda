@@ -10,6 +10,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{App, Context, Window};
 
 use super::actions::{ActionState, PrAction};
+use super::details::DetailHold;
 use super::list::{self, LaneFacts};
 
 pub(in crate::workspace) mod description;
@@ -559,40 +560,53 @@ impl Workspace {
     /// Put `item`'s detail on the page: the one already open for that
     /// pull request (a worktree's pane holds it), else a new one.
     fn install_pr_detail(&mut self, item: PrListItem, opening: PrOpening, cx: &mut Context<Self>) {
-        let (id, reads) = self.pr_detail_for(item, opening);
-        self.pages.pull_requests.show_detail(Some(id));
+        let (hold, reads) = self.pr_detail_for(item, opening);
+        let id = hold.id();
+        self.pages.pull_requests.show_detail(Some(hold));
         self.start_pr_detail(id, reads, cx);
         cx.notify();
     }
 
-    /// The open detail of `item`'s pull request, or a new one, with what is
-    /// left to do once something shows it. Nothing is read here: a detail
-    /// must be on the page or in a pane before its reads start, since one
-    /// nothing shows does not stay open.
+    /// A hold on the open detail of `item`'s pull request, or on a new
+    /// one, with what is left to do once it is shown. The detail lives as
+    /// long as the hold: the caller gives it to the page or to a pane,
+    /// then starts the detail.
     pub(in crate::workspace) fn pr_detail_for(
         &mut self,
         item: PrListItem,
         opening: PrOpening,
-    ) -> (PrDetailId, PrDetailStart) {
+    ) -> (DetailHold, PrDetailStart) {
         let page = &mut self.pages.pull_requests;
-        if let Some(id) = page.details.of(&item.repo, item.pr.number) {
+        let open = page
+            .details
+            .of(&item.repo, item.pr.number)
+            .and_then(|id| page.details.hold(id));
+        if let Some(hold) = open {
             // The open detail keeps its own reads: `opening.read` started
             // before them could be older than one already landed.
-            return (id, PrDetailStart::Shown { tab: opening.tab });
+            return (hold, PrDetailStart::Shown { tab: opening.tab });
         }
         let id = PrDetailId(self.alloc_id());
         let mut detail = PrDetailState::new(id, item);
         let page = &mut self.pages.pull_requests;
         let place = page.progress.place(&detail.key()).cloned();
         let tab_read = detail.open_at(place.as_ref(), opening.tab);
-        page.details.open(detail);
+        let hold = page.details.open(detail);
         (
-            id,
+            hold,
             PrDetailStart::New {
                 read: opening.read,
                 tab_read,
             },
         )
+    }
+
+    /// Settle what details nothing holds any more leave behind: their
+    /// place to come back to, and what was typed in them on disk.
+    pub(in crate::workspace) fn settle_pr_details(&mut self, cx: &mut gpui::App) {
+        if self.pages.pull_requests.settle_ended_details() {
+            crate::github::DraftStore::flush(cx);
+        }
     }
 
     /// Finish opening detail `id`, now that something shows it.

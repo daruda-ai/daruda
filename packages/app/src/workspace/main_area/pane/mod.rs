@@ -87,7 +87,8 @@ pub(in crate::workspace) enum PaneContent {
 /// window's open details (`PrDetails`), which it holds while it is open;
 /// the Pull requests page showing the same pull request shows that detail.
 pub(in crate::workspace) struct PrPaneContent {
-    pub(in crate::workspace) detail: crate::workspace::pages::pull_requests::detail::PrDetailId,
+    /// The pane's hold on its detail: dropped with the pane.
+    pub(in crate::workspace) detail: crate::workspace::pages::pull_requests::details::DetailHold,
     /// `#480`, for the tab strip.
     pub(in crate::workspace) label: SharedString,
     pub(in crate::workspace) focus_handle: FocusHandle,

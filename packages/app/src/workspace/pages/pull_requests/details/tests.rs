@@ -31,56 +31,71 @@ fn detail(id: u64, number: u64) -> PrDetailState {
     )
 }
 
-fn ended(detail: Option<PrDetailState>) -> Option<u64> {
-    detail.map(|detail| detail.id().0)
+fn ended(details: &mut PrDetails) -> Vec<u64> {
+    details
+        .take_ended()
+        .iter()
+        .map(|detail| detail.id().0)
+        .collect()
 }
 
 #[test]
 fn a_detail_the_page_stops_showing_ends_unless_a_pane_holds_it() {
     let mut details = PrDetails::default();
     let first = details.open(detail(1, 480));
-    assert_eq!(ended(details.show_on_page(Some(first))), None);
-    assert_eq!(details.on_page().map(PrDetailState::id), Some(first));
-    assert_eq!(details.of(&repo(), 480), Some(first));
+    let first_id = first.id();
+    details.show_on_page(Some(first));
+    assert_eq!(details.on_page().map(PrDetailState::id), Some(first_id));
+    assert_eq!(details.of(&repo(), 480), Some(first_id));
+    assert!(ended(&mut details).is_empty());
 
-    // Another replaces it on the page: the first ends.
+    // Another replaces it on the page: the first is over, and not found.
     let second = details.open(detail(2, 481));
-    assert_eq!(ended(details.show_on_page(Some(second))), Some(1));
+    let pane = second.clone();
+    details.show_on_page(Some(second));
     assert_eq!(details.of(&repo(), 480), None);
+    assert!(details.get(first_id).is_none());
+    assert_eq!(ended(&mut details), [1]);
 
     // Held by a pane, it outlives the page showing it.
-    details.hold(second);
-    assert_eq!(ended(details.show_on_page(None)), None);
+    details.show_on_page(None);
     assert!(details.on_page().is_none());
-    assert!(details.get(second).is_some());
-    assert_eq!(ended(details.release(second)), Some(2));
+    assert!(details.get(pane.id()).is_some());
+    assert!(ended(&mut details).is_empty());
+    drop(pane);
     assert_eq!(details.len(), 0);
+    assert_eq!(ended(&mut details), [2]);
 }
 
 #[test]
-fn a_detail_ends_with_the_last_thing_showing_it() {
+fn a_detail_ends_with_the_last_hold_however_it_is_dropped() {
     let mut details = PrDetails::default();
-    let id = details.open(detail(1, 480));
-    details.hold(id);
-    details.hold(id);
-    details.show_on_page(Some(id));
+    let first = details.open(detail(1, 480));
+    let id = first.id();
+    let second = details.hold(id).expect("it is open");
+    let third = second.clone();
+    details.show_on_page(Some(first));
 
-    assert_eq!(ended(details.release(id)), None, "a pane and the page");
-    assert_eq!(ended(details.release(id)), None, "the page");
-    assert_eq!(ended(details.release(id)), None, "no pane holds it");
-    assert_eq!(ended(details.show_on_page(None)), Some(1));
+    drop(second);
+    details.show_on_page(None);
+    assert_eq!(details.len(), 1, "one hold is left");
+    // A pane torn down with its runtime drops its hold with it.
+    let runtime = vec![third];
+    drop(runtime);
+    assert_eq!(details.len(), 0);
+    assert!(
+        details.hold(id).is_none(),
+        "an ended detail takes no new hold"
+    );
+    assert_eq!(ended(&mut details), [1]);
+    assert!(ended(&mut details).is_empty(), "taken once");
 }
 
 #[test]
-fn showing_the_same_detail_again_or_one_not_open_ends_nothing() {
+fn a_hold_is_only_on_a_detail_that_is_open() {
     let mut details = PrDetails::default();
-    let id = details.open(detail(1, 480));
-    details.show_on_page(Some(id));
-    assert_eq!(ended(details.show_on_page(Some(id))), None);
-    assert!(details.on_page().is_some());
-    // An id nothing is open under puts nothing on the page.
-    assert_eq!(ended(details.show_on_page(Some(PrDetailId(9)))), Some(1));
-    assert!(details.on_page().is_none());
-    // Releasing what no pane holds ends nothing.
-    assert_eq!(ended(details.release(PrDetailId(9))), None);
+    assert!(details.hold(PrDetailId(9)).is_none());
+    let hold = details.open(detail(1, 480));
+    assert_eq!(details.hold(hold.id()).map(|h| h.id()), Some(hold.id()));
+    assert!(details.get_mut(hold.id()).is_some());
 }

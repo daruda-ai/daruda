@@ -196,10 +196,16 @@ is read beside a chat goes aside: files, diffs and a pull request
   and the reuse (`preview_slot`, one scratch tab across both groups).
 - **A pull request pane** (`PaneContent::PullRequest`,
   `pages/pull_requests/pane.rs`) holds one of the window's open details
-  (`PrDetails`, `pages/pull_requests/details.rs`). The page showing the same
-  pull request shows the same detail; a detail ends when neither the page nor
-  a pane shows it. A worktree has one such pane, retargeted by the next pull
-  request; it is not saved with the layout.
+  (`PrDetails`, `pages/pull_requests/details.rs`) through a `DetailHold` it
+  owns. The page showing the same pull request holds the same detail. A detail
+  is over when its last hold is dropped, so no path that removes a pane has to
+  release it; code given a detail's id finds it with `pr_detail(id)`, never
+  through the one the page shows. A worktree has one such pane, retargeted by
+  the next pull request; it is not saved with the layout.
+- **Where an open goes** is decided by `main_area/open_plan.rs` from plain
+  facts (`plan_open`, `GroupFacts::goes_beside`); the workspace only carries
+  the plan out. A new rule is a row in its table of cases.
+- **A pane's id** is `PaneId`, minted from 1: the default names no pane.
 
 ## Error Reporting
 

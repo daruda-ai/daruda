@@ -36,8 +36,8 @@ mod split;
 
 use std::collections::BTreeSet;
 
+use detail::PrDetailState;
 use detail::view::PrDetailView;
-use detail::{PrDetailId, PrDetailState};
 use list::{LaneFacts, PageInputs, PrKey, PrPageView};
 
 /// What the page remembers while it is not on screen. Never persisted.
@@ -122,12 +122,21 @@ impl PullRequestsPage {
         self.show_detail(next);
     }
 
-    /// Show the open detail `next` over the list, or none. The detail it
-    /// replaces leaves its place to come back to when that ends it.
-    pub(in crate::workspace) fn show_detail(&mut self, next: Option<PrDetailId>) {
-        if let Some(gone) = self.details.show_on_page(next) {
+    /// Show over the list the detail `next` holds, or none. The one it
+    /// replaces ends unless something else holds it.
+    pub(in crate::workspace) fn show_detail(&mut self, next: Option<details::DetailHold>) {
+        self.details.show_on_page(next);
+        self.settle_ended_details();
+    }
+
+    /// Details nothing holds any more leave their place in the review
+    /// progress to come back to. `true` when any ended.
+    pub(in crate::workspace) fn settle_ended_details(&mut self) -> bool {
+        let ended = self.details.take_ended();
+        for gone in &ended {
             self.progress.leave(&gone.key(), gone.place());
         }
+        !ended.is_empty()
     }
 
     /// The detail shown over the list.
@@ -135,7 +144,6 @@ impl PullRequestsPage {
         self.details.on_page()
     }
 
-    /// For a capture that seeds the shown detail.
     #[cfg(feature = "screenshot")]
     pub(in crate::workspace) fn detail_mut(&mut self) -> Option<&mut PrDetailState> {
         self.details.on_page_mut()

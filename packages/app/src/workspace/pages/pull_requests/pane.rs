@@ -3,8 +3,9 @@
 //!
 //! A worktree has at most one such pane. Opening another pull request
 //! there retargets it, as a worktree works on one pull request at a time.
-//! The pane holds one of the window's open details (`details.rs`) and lets
-//! go of it when it closes or is retargeted.
+//! The pane owns a hold on one of the window's open details
+//! (`details.rs`): the detail stays open while the pane does, and is let
+//! go of with the pane, however the pane goes.
 
 use daruda_github::PrListItem;
 use daruda_store::project::LaneRef;
@@ -28,7 +29,7 @@ impl Workspace {
             .panes
             .iter()
             .find_map(|pane| match &pane.content {
-                PaneContent::PullRequest(pr) => Some((pane.id, pr.detail)),
+                PaneContent::PullRequest(pr) => Some((pane.id, pr.detail.id())),
                 PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::AgentChat(_) => None,
             })
     }
@@ -69,24 +70,25 @@ impl Workspace {
             return;
         }
         let number = item.pr.number;
-        let (id, start) = self.pr_detail_for(item, opening);
-        self.pages.pull_requests.details.hold(id);
+        let (hold, start) = self.pr_detail_for(item, opening);
+        let id = hold.id();
         let index = match self.pr_pane() {
-            Some((pane_id, held)) => {
+            Some((pane_id, _)) => {
                 if let Some(pane) = self.main_area.pane_mut(pane_id)
                     && let PaneContent::PullRequest(pr) = &mut pane.content
                 {
-                    pr.detail = id;
+                    // The hold it had is dropped: that detail ends unless
+                    // the page shows it.
+                    pr.detail = hold;
                     pr.label = label(number);
                 }
-                self.release_pr_detail(held, cx);
                 self.active_runtime().side.position_of(pane_id)
             }
             None => {
                 let pane = Pane {
                     id: self.alloc_id().into(),
                     content: PaneContent::PullRequest(PrPaneContent {
-                        detail: id,
+                        detail: hold,
                         label: label(number),
                         focus_handle: cx.focus_handle(),
                     }),
@@ -101,6 +103,7 @@ impl Workspace {
                 Some(runtime.side.push(tab))
             }
         };
+        self.settle_pr_details(cx);
         self.start_pr_detail(id, start, cx);
         self.resize_all_tabs(window, cx);
         if let Some(index) = index {
@@ -131,30 +134,27 @@ impl Workspace {
         self.open_pr_pane(self.active, item, PrOpening::default(), window, cx);
     }
 
-    /// A pane no longer shows detail `id`. When nothing else does, the
-    /// detail ends and leaves its place to come back to.
-    pub(in crate::workspace) fn release_pr_detail(&mut self, id: PrDetailId, cx: &mut gpui::App) {
-        let page = &mut self.pages.pull_requests;
-        if let Some(gone) = page.details.release(id) {
-            page.progress.leave(&gone.key(), gone.place());
-            // What was typed in it is on disk before it is gone, as when
-            // the page's detail closes.
-            crate::github::DraftStore::flush(cx);
+    /// Panes are going away. A pull request pane drops its hold with
+    /// itself; once it has, what its detail leaves behind is settled.
+    pub(in crate::workspace) fn settle_pr_details_after(
+        &mut self,
+        panes: &[PaneId],
+        cx: &mut Context<Self>,
+    ) {
+        let any = panes.iter().any(|id| {
+            self.main_area
+                .pane(*id)
+                .is_some_and(|pane| matches!(pane.content, PaneContent::PullRequest(_)))
+        });
+        if !any {
+            return;
         }
-    }
-
-    /// Panes are going away: the pull request ones let go of their detail.
-    pub(in crate::workspace) fn release_pr_panes(&mut self, panes: &[PaneId], cx: &mut gpui::App) {
-        let held: Vec<PrDetailId> = panes
-            .iter()
-            .filter_map(|id| match &self.main_area.pane(*id)?.content {
-                PaneContent::PullRequest(pr) => Some(pr.detail),
-                PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::AgentChat(_) => None,
-            })
-            .collect();
-        for id in held {
-            self.release_pr_detail(id, cx);
-        }
+        let workspace = cx.weak_entity();
+        // Deferred: the panes are still in their runtime here.
+        cx.defer(move |cx| {
+            // SILENT-OK: a workspace gone with its panes has nothing to settle.
+            let _ = workspace.update(cx, |ws, cx| ws.settle_pr_details(cx));
+        });
     }
 
     /// Close every worktree's pull request pane in the window.
@@ -210,7 +210,7 @@ impl Workspace {
                     .pages
                     .pull_requests
                     .details
-                    .get(pr.detail)
+                    .get(pr.detail.id())
                     .map(|detail| detail.item().clone()),
                 PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::AgentChat(_) => None,
             });

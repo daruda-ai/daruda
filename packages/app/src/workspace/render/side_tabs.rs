@@ -142,9 +142,12 @@ impl Workspace {
                 .find(|pane| pane.id == id)
                 .map(|pane| (id, &pane.content))
         }) {
-            Some((id, PaneContent::PullRequest(pr))) => {
-                render_hosted_pane(id, &pr.focus_handle, self.staged_pr_pane(pr.detail, cx), cx)
-            }
+            Some((id, PaneContent::PullRequest(pr))) => render_hosted_pane(
+                id,
+                &pr.focus_handle,
+                self.staged_pr_pane(pr.detail.id(), cx),
+                cx,
+            ),
             Some((id, _)) => render_layout(
                 &PaneLayout::Pane(id),
                 &runtime.panes,

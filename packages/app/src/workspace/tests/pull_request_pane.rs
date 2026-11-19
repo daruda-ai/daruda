@@ -55,7 +55,7 @@ fn panes(f: &GitFixture, cx: &mut TestAppContext) -> Vec<(PrDetailId, u64)> {
             .panes
             .iter()
             .filter_map(|pane| match &pane.content {
-                PaneContent::PullRequest(pr) => Some(pr.detail),
+                PaneContent::PullRequest(pr) => Some(pr.detail.id()),
                 _ => None,
             })
             .map(|id| {
@@ -249,16 +249,25 @@ fn switching_github_off_closes_the_pull_request_panes(cx: &mut TestAppContext) {
     });
 }
 
-/// A worktree's runtime dropped whole (its project removed) lets go of the
-/// detail its pane held.
+/// A pane that goes away takes its hold with it, whatever path removed
+/// it: here its runtime is dropped whole, with no teardown called at all,
+/// and the detail is over. What it leaves behind is settled afterwards.
 #[gpui::test]
-fn a_dropped_worktree_lets_go_of_its_pull_request(cx: &mut TestAppContext) {
+fn a_pane_dropped_without_teardown_still_ends_its_detail(cx: &mut TestAppContext) {
     let (f, _gh, lane) = worktree(cx);
     open_pane(&f, lane, item(7, "feat"), cx);
-    act(&f, cx, move |ws, window, cx| {
-        ws.forget_runtime_panes(|dropped| dropped.project == lane.project, window, cx);
-        assert_eq!(ws.pages.pull_requests.details.len(), 0);
+    let id = panes(&f, cx)[0].0;
+    f.ws.update(cx, |ws, cx| {
+        *ws.active_runtime_mut() = crate::workspace::LaneRuntime::default();
+        let details = &ws.pages.pull_requests.details;
+        assert_eq!(details.len(), 0);
+        assert!(details.get(id).is_none());
+        assert!(ws.pr_detail(id).is_none(), "nothing acts on it any more");
+        // Opening the pull request again makes a new detail, not the old.
+        ws.settle_pr_details(cx);
     });
+    open_pane(&f, lane, item(7, "feat"), cx);
+    assert_ne!(panes(&f, cx)[0].0, id);
 }
 
 /// The Git panel's pull request follows the rule a file does: with no tab
