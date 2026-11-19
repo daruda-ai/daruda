@@ -16,6 +16,7 @@ pub(in crate::workspace) mod file_save_ops;
 pub(in crate::workspace) mod file_view_pane;
 pub(in crate::workspace) mod nav;
 mod on_screen;
+pub(in crate::workspace) mod open_plan;
 pub(in crate::workspace) mod pane;
 pub(in crate::workspace) mod pane_drag_ops;
 pub(in crate::workspace) mod pane_input_ops;

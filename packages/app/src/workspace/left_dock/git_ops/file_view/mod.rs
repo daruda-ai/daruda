@@ -11,6 +11,7 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::{
     DiffSource, FileOrigin, FileViewMode, PaneFileContent, PaneFileView,
 };
+use crate::workspace::main_area::open_plan::{GroupFacts, OpenFacts, OpenPlan, plan_open};
 use crate::workspace::main_area::pane::FileContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::main_area::side_group::{PanePlace, SideGroup, SideTab};
@@ -178,21 +179,18 @@ impl Workspace {
         }
     }
 
-    /// Whether what is opened now goes to the side tabs: where the keyboard
-    /// already is, or where the setting sends it. With no tab on the left
-    /// there is nothing to open beside, so it opens there. Where only one
-    /// group fits, an open that leaves the keyboard where it is would land
-    /// in the group not drawn, so only one that enters goes aside.
-    pub(in crate::workspace) fn opens_beside(&self, entry: PaneEntry) -> bool {
-        if self.keyboard_is_aside() {
-            return true;
-        }
-        let room = entry == PaneEntry::Enter
-            || SideGroup::fits_beside(
+    /// What the two tab groups are like now, for deciding where an open
+    /// goes (`open_plan`).
+    pub(in crate::workspace) fn group_facts(&self) -> GroupFacts {
+        GroupFacts {
+            keyboard_aside: self.keyboard_is_aside(),
+            beside_setting: self.mirrors.file_viewer_open_beside,
+            tabs: self.active_runtime().tabs.len(),
+            fits_both: SideGroup::fits_beside(
                 self.main_area.groups_width,
                 crate::ui::theme::TAB_GROUP_MIN_WIDTH,
-            );
-        self.mirrors.file_viewer_open_beside && !self.active_runtime().tabs.is_empty() && room
+            ),
+        }
     }
 
     /// Show the tab at `place`, moving into its pane when `entry` enters.
@@ -375,7 +373,6 @@ impl Workspace {
                 return;
             }
         }
-        let entry = intent.pane_entry();
         let owner = target;
         let live_status = self.git_status_for_path(owner, &path, &source);
 
@@ -386,22 +383,29 @@ impl Workspace {
             live_status,
             mode: initial_mode,
         };
-        // Always dedupe: opening a file already open shows its tab, in
-        // whichever group it is.
-        if let Some((place, pane_id)) = self.existing_file_tab(&open.path, &open.source) {
-            self.show_open_file(place, pane_id, &open, intent, window, cx);
-            return;
-        }
-        let pane_id = match self.scratch_tab_for(intent, entry, window, cx) {
+        let facts = OpenFacts {
+            groups: self.group_facts(),
+            existing: self.existing_file_tab(&open.path, &open.source),
+            scratch: self.preview_slot(cx),
+        };
+        let pane_id = match plan_open(intent, &facts) {
+            OpenPlan::Show((place, pane_id)) => {
+                self.show_open_file(place, pane_id, &open, intent, window, cx);
+                return;
+            }
             // Preview-tab mode: the scratch tab takes the file.
-            Some((place, pane_id)) => {
+            OpenPlan::Refill((place, pane_id)) => {
                 if !self.refill_scratch_tab(place, pane_id, &open, intent, window, cx) {
                     return;
                 }
                 pane_id
             }
-            // No reusable tab (or multi-tab mode): a new one.
-            None => self.push_file_tab(&open, intent, window, cx),
+            OpenPlan::New { beside, close } => {
+                if let Some((_, scratch)) = close {
+                    self.close_pane_by_id(scratch, window, cx);
+                }
+                self.push_file_tab(&open, beside, intent, window, cx)
+            }
         };
         // Selection moved — the dock row picks up its selected background.
         self.invalidate_visible_files_cache(owner);
@@ -464,27 +468,6 @@ impl Workspace {
         self.show_tab_at(place, intent.pane_entry(), window, cx);
     }
 
-    /// The scratch tab this open refills: the one in the group it goes to.
-    /// A skim whose scratch tab is in the other group closes that tab, so
-    /// one preview is on screen at a time and none is left behind as a
-    /// tab nobody chose to keep.
-    fn scratch_tab_for(
-        &mut self,
-        intent: OpenIntent,
-        entry: PaneEntry,
-        window: &mut gpui::Window,
-        cx: &mut Context<Self>,
-    ) -> Option<(PanePlace, PaneId)> {
-        let (place, pane_id) = self.preview_slot(cx)?;
-        if matches!(place, PanePlace::Side(_)) == self.opens_beside(entry) {
-            return Some((place, pane_id));
-        }
-        if intent.claims_preview_slot() {
-            self.close_pane_by_id(pane_id, window, cx);
-        }
-        None
-    }
-
     /// Put `open`'s file in the scratch tab at `place`, keeping the pane:
     /// its scroll handle, search input, focus handle and subscription.
     /// `false` when the pane is no longer a file's.
@@ -533,18 +516,16 @@ impl Workspace {
         true
     }
 
-    /// Open `open`'s file in a new tab of the group it goes to.
+    /// Open `open`'s file in a new tab: a side tab when `beside`.
     fn push_file_tab(
         &mut self,
         open: &FileOpen,
+        beside: bool,
         intent: OpenIntent,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) -> PaneId {
         let entry = intent.pane_entry();
-        // Asked after a scratch tab in the other group was closed: with
-        // no tab left on the left there is nothing to open beside.
-        let beside = self.opens_beside(entry);
         let pane = self.create_file_pane(
             open.origin,
             open.path.clone(),

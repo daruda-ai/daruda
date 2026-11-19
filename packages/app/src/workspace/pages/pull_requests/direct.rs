@@ -146,7 +146,7 @@ impl Workspace {
         };
         // The same rule a file follows; the click enters what it opens.
         let entry = crate::workspace::main_area::tab_ops::PaneEntry::Enter;
-        let to = if self.opens_beside(entry) {
+        let to = if self.group_facts().goes_beside(entry) {
             PrDestination::Beside(self.active)
         } else {
             PrDestination::Page
