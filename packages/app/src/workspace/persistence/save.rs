@@ -7,13 +7,14 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use daruda_store::observability::log_writer::LogWriter;
 use daruda_store::observability::system_info::redact_home;
 use daruda_store::project::{
-    DockStates, ProjectOverride, ProjectState, ProjectUuid, SerializedTab,
+    DockStates, ProjectOverride, ProjectState, ProjectUuid, SerializedSide, SerializedTab,
     WORKSPACE_SCHEMA_VERSION, WorkspaceState,
 };
 use gpui::{App, Window};
 
 use super::serialize_layout;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::pane_tree::PaneLayout;
 
 impl Workspace {
     /// Snapshot the workspace into the UUID-keyed disk shape
@@ -77,6 +78,26 @@ impl Workspace {
                         .filter(|tab| !self.is_orchestrator_tab(tab))
                         .count()
                         .min(s.tabs.len().saturating_sub(1));
+                    s.side = (!rt.side.is_empty()).then(|| SerializedSide {
+                        tabs: rt
+                            .side
+                            .tabs()
+                            .iter()
+                            .map(|tab| SerializedTab {
+                                layout: serialize_layout(
+                                    &PaneLayout::Pane(tab.pane),
+                                    panes_src,
+                                    wt.id,
+                                    cx,
+                                ),
+                                last_focused_pane: tab.pane,
+                                user_label: tab.user_label.as_ref().map(|s| s.to_string()),
+                            })
+                            .collect(),
+                        active: rt.side.active_index(),
+                        ratio: rt.side.ratio(),
+                        collapsed: rt.side.is_collapsed(),
+                    });
                     if wt_ref == self.active && self.is_orchestrator_pane(focused_pane_id) {
                         focused_pane_id = s
                             .tabs

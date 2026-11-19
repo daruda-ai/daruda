@@ -96,6 +96,24 @@ impl GroupsShown {
 }
 
 impl SideGroup {
+    /// A group as it was saved. An index past the tabs that came back
+    /// shows the last of them; a share out of range is brought into it.
+    pub(in crate::workspace) fn restored(
+        tabs: Vec<SideTab>,
+        active: usize,
+        ratio: f32,
+        collapsed: bool,
+    ) -> Self {
+        let mut group = Self {
+            active: active.min(tabs.len().saturating_sub(1)),
+            tabs,
+            collapsed,
+            ..Self::default()
+        };
+        group.set_ratio(ratio);
+        group
+    }
+
     pub(in crate::workspace) fn tabs(&self) -> &[SideTab] {
         &self.tabs
     }

@@ -687,6 +687,39 @@ fn serialized_worktree_display_name_prefers_user_name() {
     assert_eq!(w.display_name(), "My Scratch");
 }
 
+/// A lane written before side tabs has no `side` key and reads as having
+/// none; one with side tabs carries them through a round trip.
+#[test]
+fn a_lane_carries_its_side_tabs_and_reads_without_them() {
+    let mut lane = SerializedLane::default_for_path(1, PathBuf::from("/tmp/repo"));
+    let json = serde_json::to_string(&lane).unwrap();
+    assert!(!json.contains("\"side\""), "{json}");
+    assert_eq!(serde_json::from_str::<SerializedLane>(&json).unwrap(), lane);
+
+    lane.side = Some(SerializedSide {
+        tabs: vec![SerializedTab {
+            layout: SerializedLayout::Leaf {
+                pane_id: 7,
+                content: SerializedPaneContent::File(SerializedFileContent {
+                    lane_id: 1,
+                    path: PathBuf::from("src/main.rs"),
+                    staged: false,
+                    range: None,
+                    view_mode: SerializedFileViewMode::Raw,
+                    reference: false,
+                }),
+            },
+            last_focused_pane: 7,
+            user_label: None,
+        }],
+        active: 0,
+        ratio: 0.4,
+        collapsed: true,
+    });
+    let json = serde_json::to_string(&lane).unwrap();
+    assert_eq!(serde_json::from_str::<SerializedLane>(&json).unwrap(), lane);
+}
+
 #[test]
 fn serialized_worktree_display_name_uses_branch_for_git() {
     let w = SerializedLane {
@@ -703,6 +736,7 @@ fn serialized_worktree_display_name_uses_branch_for_git() {
         last_activity: 0,
         tabs: Vec::new(),
         active_tab_index: 0,
+        side: None,
         base_ref: None,
         description: None,
         remote_cwd: None,
@@ -727,6 +761,7 @@ fn serialized_worktree_display_name_detached_head() {
         last_activity: 0,
         tabs: Vec::new(),
         active_tab_index: 0,
+        side: None,
         base_ref: None,
         description: None,
         remote_cwd: None,
@@ -1262,6 +1297,7 @@ fn serialized_lane_git_json_snapshot() {
         last_activity: 1_700_000_000,
         tabs: Vec::new(),
         active_tab_index: 0,
+        side: None,
         base_ref: Some("main".into()),
         description: Some("PR #123 review".into()),
         remote_cwd: None,

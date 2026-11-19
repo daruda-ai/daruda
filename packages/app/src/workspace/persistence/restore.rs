@@ -14,6 +14,7 @@ use crate::lane::availability::LaneAvailability;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{self, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree};
+use crate::workspace::main_area::side_group::SideGroup;
 
 impl Workspace {
     /// Restore from the UUID-keyed disk shape (from
@@ -250,6 +251,18 @@ impl Workspace {
                     }
                 }
 
+                let side = match &swt.side {
+                    Some(saved) => self.rebuild_side_group(
+                        saved,
+                        &swt.path,
+                        &mut id_map,
+                        &mut scratch,
+                        window,
+                        cx,
+                    ),
+                    None => SideGroup::default(),
+                };
+
                 let wt_active_tab = kept_before_active.min(tabs.len().saturating_sub(1));
                 let focused = if wt_ref == self.active {
                     let focused_tab = tabs.get(wt_active_tab);
@@ -294,7 +307,7 @@ impl Workspace {
                     active_tab_index: wt_active_tab,
                     tab_history: Vec::new(),
                     focused_pane_id: focused,
-                    side: Default::default(),
+                    side,
                     keyboard: Default::default(),
                 };
                 if wt_ref == self.active {

@@ -15,9 +15,69 @@ use crate::agent::launch_resolve::account_recipe_for_connect;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{self, PaneSpawnError};
 use crate::workspace::main_area::pane_tree::{self as pane_tree, PaneLayout, SplitDirection};
+use crate::workspace::main_area::side_group::{SideGroup, SideTab};
+use crate::workspace::main_area::side_ops::side_hosts;
 use daruda_chat::view::ChatPaneChoices;
 
 impl Workspace {
+    /// A lane's saved side tabs as live ones, their panes added to
+    /// `scratch`. A tab comes back only as one pane of a kind the side
+    /// group takes; any other is dropped with what it built, and the rest
+    /// still restore.
+    pub(in crate::workspace) fn rebuild_side_group(
+        &mut self,
+        saved: &daruda_store::project::SerializedSide,
+        lane_path: &std::path::Path,
+        id_map: &mut HashMap<u64, pane_tree::PaneId>,
+        scratch: &mut Vec<pane::Pane>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> SideGroup {
+        let mut tabs = Vec::new();
+        // The saved index counts the saved tabs; the ones that did not
+        // come back must not shift it onto a neighbour.
+        let mut kept_before_active = 0;
+        for (ix, stab) in saved.tabs.iter().enumerate() {
+            let built_before = scratch.len();
+            let rebuilt =
+                self.rebuild_layout(&stab.layout, Some(lane_path), id_map, scratch, window, cx);
+            let pane = match rebuilt {
+                Ok(Some(PaneLayout::Pane(pane))) => Some(pane),
+                Ok(Some(PaneLayout::Split { .. }) | None) => None,
+                Err(e) => {
+                    self.report_pane_error(
+                        &crate::surface::strings::error::pane_context_restore(),
+                        e,
+                        cx,
+                    );
+                    None
+                }
+            };
+            let hosted = pane.filter(|id| {
+                scratch
+                    .iter()
+                    .find(|pane| pane.id == *id)
+                    .is_some_and(side_hosts)
+            });
+            let Some(pane) = hosted else {
+                scratch.truncate(built_before);
+                continue;
+            };
+            if ix < saved.active {
+                kept_before_active += 1;
+            }
+            tabs.push(SideTab {
+                id: self.alloc_id(),
+                pane,
+                user_label: stab
+                    .user_label
+                    .as_ref()
+                    .map(|label| gpui::SharedString::from(label.clone())),
+            });
+        }
+        SideGroup::restored(tabs, kept_before_active, saved.ratio, saved.collapsed)
+    }
+
     /// Recursively materialize a serialized layout into live panes. `None`
     /// when nothing of it is restored any more.
     /// `id_map` records the new PaneId per serialized pane_id so

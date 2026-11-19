@@ -821,6 +821,7 @@ fn test_restore_inaccessible_active_lane_leaves_no_tab(cx: &mut TestAppContext) 
                 user_label: None,
             }],
             active_tab_index: 0,
+            side: None,
             base_ref: None,
             description: None,
             remote_cwd: None,

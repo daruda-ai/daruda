@@ -440,3 +440,53 @@ async fn a_divider_held_does_not_follow_to_another_worktree(cx: &mut TestAppCont
     });
     assert_eq!(first, before);
 }
+
+/// Side tabs, the one shown, their share and whether they are hidden come
+/// back after a restart; a saved side tab that is not a file does not.
+#[gpui::test]
+async fn side_tabs_are_saved_and_restored(cx: &mut TestAppContext) {
+    let f = with_files(cx, &["a.txt", "b.txt"]);
+    act(&f, cx, |ws, window, cx| ws.send_tab_aside(2, window, cx));
+    act(&f, cx, |ws, window, cx| ws.focus_tabs_group(window, cx));
+    act(&f, cx, |ws, window, cx| ws.send_tab_aside(1, window, cx));
+    act(&f, cx, |ws, window, cx| {
+        ws.activate_side_tab(0, window, cx);
+        ws.active_runtime_mut().side.set_ratio(0.3);
+        ws.toggle_side_group(window, cx);
+    });
+    let (workspace_state, mut project_states) =
+        f.1.read_with(cx, |ws, cx| ws.snapshot_for_disk(cx));
+    let lane = &mut project_states[0].lanes[0];
+    let side = lane.side.as_mut().expect("side tabs saved");
+    assert_eq!((side.tabs.len(), side.active, side.collapsed), (2, 0, true));
+    assert_eq!(side.ratio, 0.3);
+    // A shell saved as a side tab (a file written by hand): dropped.
+    side.tabs.insert(0, lane.tabs[0].clone());
+    side.active = 2;
+
+    let config = daruda_config::Config::default();
+    let restored = cx.add_window(|window, cx| {
+        let mut ws =
+            Workspace::new_with_project_for_test(&config, None, fresh_test_data_dir(), window, cx);
+        ws.restore_from_disk(&workspace_state, &project_states, window, cx);
+        ws
+    });
+    let restored = (
+        restored,
+        restored.root(cx).unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    cx.run_until_parked();
+    assert_eq!(side_files(&restored, cx), ["b.txt", "a.txt"]);
+    restored.1.read_with(cx, |ws, _| {
+        let runtime = ws.active_runtime();
+        // The index counted the dropped tab; it still names a.txt.
+        assert_eq!(runtime.side.active_index(), 1);
+        assert_eq!(runtime.side.ratio(), 0.3);
+        assert!(runtime.side.is_collapsed());
+        assert_eq!(runtime.tabs.len(), 1);
+        assert_eq!(runtime.panes.len(), 3);
+        assert!(!ws.keyboard_is_aside());
+        assert!(ws.has_focused_pane());
+    });
+}

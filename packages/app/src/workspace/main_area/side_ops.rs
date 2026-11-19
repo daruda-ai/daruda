@@ -29,7 +29,7 @@ pub(in crate::workspace) struct SideDividerDrag {
 
 /// Whether the side group takes `pane`: what is read beside a chat, not
 /// the chat or a shell.
-fn side_hosts(pane: &Pane) -> bool {
+pub(in crate::workspace) fn side_hosts(pane: &Pane) -> bool {
     pane.is_file()
 }
 

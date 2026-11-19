@@ -280,6 +280,7 @@ impl Lane {
             session_host: self.session_host.clone(),
             tabs: Vec::new(),
             active_tab_index: 0,
+            side: None,
         }
     }
 

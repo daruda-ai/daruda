@@ -127,6 +127,21 @@ pub enum LaneStatus {
 /// On-disk representation of a lane. Each lane owns its own
 /// tab list and active-tab index; a `ProjectState` is a collection of
 /// these lanes plus shared workspace chrome state.
+/// A lane's side tab group: files, diffs and a pull request kept in view
+/// beside its tabs. Each tab's layout is one leaf; nothing splits there.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SerializedSide {
+    pub tabs: Vec<SerializedTab>,
+    /// Index into `tabs` of the one shown.
+    #[serde(default)]
+    pub active: usize,
+    /// The group's share of the width both groups are drawn in.
+    pub ratio: f32,
+    /// Hidden by the user while it still holds tabs.
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SerializedLane {
     pub id: LaneId,
@@ -145,6 +160,10 @@ pub struct SerializedLane {
     pub tabs: Vec<SerializedTab>,
     #[serde(default)]
     pub active_tab_index: usize,
+    /// The tabs kept beside the lane's own, when it has any. Absent in
+    /// files written before side tabs, and for a lane without them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side: Option<SerializedSide>,
     /// Ref the lane was branched from (e.g. `main`,
     /// `origin/main`). `None` means the user accepted the default
     /// (current HEAD at creation time). Captured so the user can
@@ -249,6 +268,7 @@ impl SerializedLane {
             last_activity: 0,
             tabs: Vec::new(),
             active_tab_index: 0,
+            side: None,
             base_ref: None,
             description: None,
             remote_cwd: None,
