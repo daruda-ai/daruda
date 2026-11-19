@@ -423,7 +423,7 @@ impl Prepared {
             );
             PaneRef {
                 workspace: ws.uuid(),
-                pane,
+                pane: pane.0,
             }
         })
     }

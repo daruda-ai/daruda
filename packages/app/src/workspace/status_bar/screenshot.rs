@@ -6,6 +6,7 @@ use crate::ui::{Popover, PopupMenu};
 use crate::workspace::flow_request::FlowSource;
 use crate::workspace::flow_rows::FlowRunRow;
 use crate::workspace::main_area::pane::AccountDomain;
+use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::sync::ports::{PortEntry, PortKind, PortScanStatus};
 use daruda_agent::{ProviderUsage, UsageOutcome, UsageWindow, WindowScope};
 use daruda_config::KeepAwakeMode;
@@ -210,7 +211,10 @@ fn seeded_account(data: &StatusBarData) -> super::AccountSlot {
         ..AccountsState::default()
     };
     let selected = AccountSelection::Managed(accounts.accounts[1].id);
-    let pane_id = data.account.as_ref().map_or(0, |slot| slot.pane_id);
+    let pane_id = data
+        .account
+        .as_ref()
+        .map_or(PaneId::default(), |slot| slot.pane_id);
     super::AccountSlot::resolve(
         pane_id,
         selected,

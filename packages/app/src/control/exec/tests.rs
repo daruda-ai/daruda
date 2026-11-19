@@ -44,7 +44,7 @@ async fn listing_order_follows_the_sort_key_not_hashmap_order(cx: &mut gpui::Tes
     });
 
     let mut expected = vec![fixture.pane()];
-    expected.extend(extra);
+    expected.extend(extra.into_iter().map(u64::from));
     expected.sort_unstable();
     assert_eq!(
         panes, expected,
@@ -67,7 +67,7 @@ async fn brief_counts_each_state_separately(cx: &mut gpui::TestAppContext) {
         .expect("window is live");
 
     fixture.workspace.update(cx, |ws, cx| {
-        ws.set_pane_working_for_test(fixture.pane(), cx);
+        ws.set_pane_working_for_test(fixture.pane().into(), cx);
         ws.set_pane_awaiting_permission_for_test(panes[0], cx);
         ws.set_pane_errored_for_test(panes[1], cx);
         ws.set_pane_awaiting_answer_for_test(panes[2], cx);

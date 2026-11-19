@@ -20,11 +20,11 @@ async fn an_exited_shell_is_marked_and_says_so(cx: &mut TestAppContext) {
     let (_wh, ws) = build_workspace(cx);
     cx.run_until_parked();
     let pane_id = ws.read_with(cx, |ws, _| ws.active_runtime().focused_pane_id);
-    assert!(!exited(&ws, pane_id, cx));
+    assert!(!exited(&ws, pane_id.0, cx));
 
     ws.update(cx, |ws, cx| ws.note_terminal_exited(pane_id, cx));
     cx.run_until_parked();
-    assert!(exited(&ws, pane_id, cx));
+    assert!(exited(&ws, pane_id.0, cx));
     let screen = ws.read_with(cx, |ws, cx| {
         let view = ws
             .active_runtime()
@@ -69,7 +69,7 @@ async fn restarting_an_exited_shell_keeps_the_pane(cx: &mut TestAppContext) {
     .unwrap();
     cx.run_until_parked();
     assert!(
-        !exited(&ws, pane_id, cx),
+        !exited(&ws, pane_id.0, cx),
         "a fresh shell runs in the same pane"
     );
     let new_view = ws.read_with(cx, |ws, _| {

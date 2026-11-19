@@ -297,7 +297,7 @@ mod tests {
 
     fn strip(waiting_after: usize) -> QuestionStripSnapshot {
         QuestionStripSnapshot {
-            pane_id: 1,
+            pane_id: crate::workspace::main_area::pane_tree::PaneId(1),
             composer: daruda_chat::view::QuestionComposer {
                 question_id: 1,
                 field: 0,

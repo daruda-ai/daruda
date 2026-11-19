@@ -840,7 +840,7 @@ pub(crate) fn drive(
             let agent = workspace.update(cx, |ws, cx| {
                 ws.seed_orchestrator_for_shot(true, window, cx);
                 let pane = ws.orchestrator_chat_pane().unwrap();
-                ws.agent_chat_view(pane.pane)
+                ws.agent_chat_view(pane.pane.into())
                     .unwrap()
                     .update(cx, |view, cx| {
                         view.seed_transcript(Vec::new(), window, cx);

@@ -184,7 +184,7 @@ fn a_result_the_desktop_asked_for_waits_for_the_next_start(cx: &mut TestAppConte
     let pane = orchestrator_pane(cx).unwrap();
     host(cx).update(cx, |ws, cx| {
         assert!(
-            ws.agent_chat_view(pane.pane)
+            ws.agent_chat_view(pane.pane.into())
                 .unwrap()
                 .read(cx)
                 .phone_turn()

@@ -367,16 +367,28 @@ mod tests {
             Option<PaneId>,
         );
         let cases: Vec<Row> = vec![
-            ("no chat", vec![], 1, 0, None),
-            ("focused chat", vec![(1, 2), (2, 0)], 1, 0, Some(1)),
+            ("no chat", vec![], PaneId(1), 0, None),
+            (
+                "focused chat",
+                vec![(PaneId(1), 2), (PaneId(2), 0)],
+                PaneId(1),
+                0,
+                Some(PaneId(1)),
+            ),
             (
                 "active tab over earlier tab",
-                vec![(1, 0), (2, 3)],
-                9,
+                vec![(PaneId(1), 0), (PaneId(2), 3)],
+                PaneId(9),
                 3,
-                Some(2),
+                Some(PaneId(2)),
             ),
-            ("first tab otherwise", vec![(5, 4), (6, 2)], 9, 0, Some(6)),
+            (
+                "first tab otherwise",
+                vec![(PaneId(5), 4), (PaneId(6), 2)],
+                PaneId(9),
+                0,
+                Some(PaneId(6)),
+            ),
         ];
         for (label, chats, focused, active, expected) in cases {
             assert_eq!(best_target(chats, focused, active), expected, "{label}");

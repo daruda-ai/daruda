@@ -8,7 +8,7 @@ fn orchestrator_say_does_not_start_a_phone_turn(cx: &mut gpui::TestAppContext) {
     let target = fixture.pane_ref(cx);
     let (handle, _probe) = daruda_acp::AcpSessionHandle::detached_for_test();
     fixture.workspace.update(cx, |ws, cx| {
-        ws.agent_chat_view(target.pane)
+        ws.agent_chat_view(target.pane.into())
             .unwrap()
             .update(cx, |view, _| {
                 view.attach_handle(handle);
@@ -30,7 +30,7 @@ fn orchestrator_say_does_not_start_a_phone_turn(cx: &mut gpui::TestAppContext) {
     });
     fixture.workspace.read_with(cx, |ws, cx| {
         assert!(
-            ws.agent_chat_view(target.pane)
+            ws.agent_chat_view(target.pane.into())
                 .unwrap()
                 .read(cx)
                 .phone_turn()
@@ -74,11 +74,13 @@ async fn a_chat_label_names_its_worktree_and_agent(cx: &mut gpui::TestAppContext
     fixture.workspace.read_with(cx, |ws, cx| {
         let pane = fixture.pane();
         let label = ws
-            .control_chat_label(pane, cx)
+            .control_chat_label(pane.into(), cx)
             .expect("the fixture's pane is live");
         // Oracles from the model and the fixture's config, not from the
         // control accessors the label is built on.
-        let lane = ws.lane_ref_for_pane(pane).expect("the pane sits in a lane");
+        let lane = ws
+            .lane_ref_for_pane(pane.into())
+            .expect("the pane sits in a lane");
         let project = ws.project_for(lane.project).expect("project").name.clone();
         let lane_name = ws.lane_for(lane).expect("lane").display_name();
         assert_eq!(
@@ -93,7 +95,7 @@ async fn a_chat_label_names_its_worktree_and_agent(cx: &mut gpui::TestAppContext
             "the name a person reads"
         );
         assert!(
-            ws.control_chat_label(9_999, cx).is_none(),
+            ws.control_chat_label(9_999.into(), cx).is_none(),
             "a pane that is not there has no label"
         );
     });
@@ -311,7 +313,10 @@ async fn snapshot_lists_agent_chat_panes_only(cx: &mut gpui::TestAppContext) {
 async fn snapshot_carries_the_session_title(cx: &mut gpui::TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
     fixture.workspace.update(cx, |ws, cx| {
-        let view = ws.agent_chat_view(fixture.pane()).expect("view").clone();
+        let view = ws
+            .agent_chat_view(fixture.pane().into())
+            .expect("view")
+            .clone();
         view.update(cx, |v, _| {
             v.set_session_title_for_test("restore invariants")
         });
@@ -330,7 +335,12 @@ async fn say_on_a_pane_with_no_live_session_reports_queued(cx: &mut gpui::TestAp
     let fixture = workspace_with_agent_chat(cx);
     fixture.workspace.update(cx, |ws, cx| {
         assert_eq!(
-            ws.control_say(fixture.pane(), "hello".into(), CommandOrigin::Phone, cx,),
+            ws.control_say(
+                fixture.pane().into(),
+                "hello".into(),
+                CommandOrigin::Phone,
+                cx,
+            ),
             Ok(SendDisposition::Queued)
         );
     });
@@ -341,8 +351,8 @@ fn orchestrator_say_preserves_a_queued_or_parked_composer_edit(cx: &mut gpui::Te
     for parked in [false, true] {
         let fixture = workspace_with_agent_chat(cx);
         let edited_id = fixture.workspace.update(cx, |ws, cx| {
-            ws.send_agent_prompt_text(fixture.pane(), "local draft".into(), cx);
-            let view = ws.agent_chat_view(fixture.pane()).unwrap().clone();
+            ws.send_agent_prompt_text(fixture.pane().into(), "local draft".into(), cx);
+            let view = ws.agent_chat_view(fixture.pane().into()).unwrap().clone();
             if parked {
                 view.update(cx, |view, cx| {
                     view.set_turn_in_flight();
@@ -353,17 +363,17 @@ fn orchestrator_say_preserves_a_queued_or_parked_composer_edit(cx: &mut gpui::Te
         });
         cx.update_window(fixture.window.into(), |_, window, cx| {
             fixture.workspace.update(cx, |ws, cx| {
-                ws.begin_edit_queued_prompt(fixture.pane(), edited_id, window, cx);
+                ws.begin_edit_queued_prompt(fixture.pane().into(), edited_id, window, cx);
                 assert_eq!(
                     ws.control_say(
-                        fixture.pane(),
+                        fixture.pane().into(),
                         "orchestrator request".into(),
                         CommandOrigin::Orchestrator,
                         cx,
                     ),
                     Ok(SendDisposition::Queued)
                 );
-                let view = ws.agent_chat_view(fixture.pane()).unwrap().read(cx);
+                let view = ws.agent_chat_view(fixture.pane().into()).unwrap().read(cx);
                 let prompts: Vec<_> = view
                     .queue()
                     .in_strip_order()
@@ -383,8 +393,8 @@ fn orchestrator_say_preserves_a_queued_or_parked_composer_edit(cx: &mut gpui::Te
         })
         .expect("window is live");
         fixture.workspace.update(cx, |ws, cx| {
-            ws.send_agent_prompt_text(fixture.pane(), "revised local".into(), cx);
-            let view = ws.agent_chat_view(fixture.pane()).unwrap().read(cx);
+            ws.send_agent_prompt_text(fixture.pane().into(), "revised local".into(), cx);
+            let view = ws.agent_chat_view(fixture.pane().into()).unwrap().read(cx);
             let prompts: Vec<_> = view
                 .queue()
                 .in_strip_order()
@@ -407,7 +417,7 @@ async fn say_on_a_missing_pane_is_target_gone(cx: &mut gpui::TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
     fixture.workspace.update(cx, |ws, cx| {
         assert_eq!(
-            ws.control_say(9_999, "hello".into(), CommandOrigin::Phone, cx),
+            ws.control_say(9_999.into(), "hello".into(), CommandOrigin::Phone, cx),
             Err(ControlError::TargetGone)
         );
     });
@@ -419,27 +429,27 @@ fn phone_say_starts_a_phone_turn_and_both_origins_handle_clear(cx: &mut gpui::Te
         let fixture = workspace_with_agent_chat(cx);
         let (handle, _probe) = daruda_acp::AcpSessionHandle::detached_for_test();
         fixture.workspace.update(cx, |ws, cx| {
-            let view = ws.agent_chat_view(fixture.pane()).unwrap().clone();
+            let view = ws.agent_chat_view(fixture.pane().into()).unwrap().clone();
             view.update(cx, |view, _| {
                 view.attach_handle(handle);
                 view.set_status_for_test(AgentSessionStatus::Connected);
                 view.set_session_id_for_test(Some("original".into()));
             });
             assert_eq!(
-                ws.control_say(fixture.pane(), "hello".into(), origin, cx),
+                ws.control_say(fixture.pane().into(), "hello".into(), origin, cx),
                 Ok(SendDisposition::Delivered)
             );
             assert_eq!(
-                ws.phone_turn_open(fixture.pane(), cx),
+                ws.phone_turn_open(fixture.pane().into(), cx),
                 origin == CommandOrigin::Phone
             );
             assert_eq!(
-                ws.control_say(fixture.pane(), "/clear".into(), origin, cx),
+                ws.control_say(fixture.pane().into(), "/clear".into(), origin, cx),
                 Ok(SendDisposition::HandledLocally)
             );
             assert!(view.read(cx).session_id().is_none());
             assert!(view.read(cx).items().is_empty());
-            assert!(!ws.phone_turn_open(fixture.pane(), cx));
+            assert!(!ws.phone_turn_open(fixture.pane().into(), cx));
         });
     }
 }
@@ -454,7 +464,7 @@ fn command_origin_uses_only_the_registered_orchestrators_phone_turn(cx: &mut gpu
     let orchestrator = cx
         .update_window(fixture.window.into(), |_, window, cx| {
             fixture.workspace.update(cx, |ws, cx| {
-                ws.agent_chat_view(fixture.pane())
+                ws.agent_chat_view(fixture.pane().into())
                     .unwrap()
                     .update(cx, |view, _| {
                         view.start_phone_turn_for_test(std::time::Instant::now());
@@ -500,7 +510,7 @@ async fn stop_on_an_idle_pane_reports_already_idle(cx: &mut gpui::TestAppContext
     let fixture = workspace_with_agent_chat(cx);
     fixture.workspace.update(cx, |ws, cx| {
         assert_eq!(
-            ws.control_stop(fixture.pane(), cx),
+            ws.control_stop(fixture.pane().into(), cx),
             Ok(StopDisposition::AlreadyIdle)
         );
     });
@@ -510,7 +520,10 @@ async fn stop_on_an_idle_pane_reports_already_idle(cx: &mut gpui::TestAppContext
 async fn stop_on_a_missing_pane_is_target_gone(cx: &mut gpui::TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
     fixture.workspace.update(cx, |ws, cx| {
-        assert_eq!(ws.control_stop(9_999, cx), Err(ControlError::TargetGone));
+        assert_eq!(
+            ws.control_stop(9_999.into(), cx),
+            Err(ControlError::TargetGone)
+        );
     });
 }
 

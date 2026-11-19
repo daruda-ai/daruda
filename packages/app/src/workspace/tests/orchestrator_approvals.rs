@@ -192,9 +192,9 @@ fn explicit_orchestrator_stop_withdraws_after_the_foreground_turn_already_comple
         cx.run_until_parked();
         fixture.workspace.update(cx, |ws, cx| {
             if escape {
-                assert!(ws.cancel_agent_turn_if_active(pane, cx));
+                assert!(ws.cancel_agent_turn_if_active(pane.into(), cx));
             } else {
-                ws.cancel_agent_turn(pane, cx);
+                ws.cancel_agent_turn(pane.into(), cx);
             }
         });
         cx.run_until_parked();
@@ -213,7 +213,7 @@ fn explicit_orchestrator_stop_withdraws_after_the_foreground_turn_already_comple
     });
     fixture
         .workspace
-        .update(cx, |ws, cx| ws.cancel_agent_turn(pane, cx));
+        .update(cx, |ws, cx| ws.cancel_agent_turn(pane.into(), cx));
     cx.run_until_parked();
     assert_eq!(answer.try_recv(), Ok(ApprovalOutcome::Withdrawn));
     assert!(!cx.update(|cx| is_waiting(id, cx)));

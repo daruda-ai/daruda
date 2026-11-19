@@ -6,11 +6,12 @@
 //! the history entry, not a return value).
 
 use super::*;
+use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_store::observability::error_report::ErrorSeverity;
 use daruda_terminal::session::LineBufferPosition;
 use daruda_terminal::session::interval_tree::{LineCoord, LineRange};
 
-fn first_terminal_pane_id(ws: &Workspace) -> crate::workspace::main_area::pane_tree::PaneId {
+fn first_terminal_pane_id(ws: &Workspace) -> PaneId {
     ws.active_runtime()
         .panes
         .iter()
@@ -45,7 +46,7 @@ async fn add_annotation_round_trips_and_missing_pane_reports_error(cx: &mut Test
 
     // PaneId is a monotonic u64; an id far above the next allocation is
     // guaranteed to miss the lookup without mutating workspace state.
-    let phantom_pane: crate::workspace::main_area::pane_tree::PaneId = 99_999_u64;
+    let phantom_pane: PaneId = 99_999_u64.into();
 
     workspace.update(cx, |ws, cx| {
         ws.add_annotation(

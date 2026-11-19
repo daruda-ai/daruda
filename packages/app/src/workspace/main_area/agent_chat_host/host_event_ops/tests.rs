@@ -62,9 +62,9 @@ fn desktop_permission_and_stop_settle_the_phone_cards_through_host_events(cx: &m
     let fixture = crate::test_support::workspace_with_agent_chat(cx);
     cx.run_until_parked();
     let pane = fixture.pane_ref(cx);
-    let view = fixture
-        .workspace
-        .read_with(cx, |ws, _| ws.agent_chat_view(pane.pane).unwrap().clone());
+    let view = fixture.workspace.read_with(cx, |ws, _| {
+        ws.agent_chat_view(pane.pane.into()).unwrap().clone()
+    });
     view.update(cx, |view, cx| {
         for id in 1..=3 {
             view.hold_permission_card_for_test(permission(id), cx);
@@ -112,9 +112,9 @@ fn a_replaced_sessions_late_receipt_and_button_cannot_answer_its_reused_request_
     let fixture = crate::test_support::workspace_with_agent_chat(cx);
     cx.run_until_parked();
     let pane = fixture.pane_ref(cx);
-    let view = fixture
-        .workspace
-        .read_with(cx, |ws, _| ws.agent_chat_view(pane.pane).unwrap().clone());
+    let view = fixture.workspace.read_with(cx, |ws, _| {
+        ws.agent_chat_view(pane.pane.into()).unwrap().clone()
+    });
     view.update(cx, |view, cx| {
         view.hold_permission_card_for_test(permission(0), cx)
     });
@@ -135,7 +135,7 @@ fn a_replaced_sessions_late_receipt_and_button_cannot_answer_its_reused_request_
     fixture.workspace.update(cx, |ws, cx| {
         assert_eq!(
             ws.respond_bot_permission(
-                pane.pane,
+                pane.pane.into(),
                 old_session,
                 0,
                 PermissionDecision::Allow("allow".into()),

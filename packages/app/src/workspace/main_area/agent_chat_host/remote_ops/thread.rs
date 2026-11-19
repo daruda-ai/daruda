@@ -121,7 +121,7 @@ impl Workspace {
     fn remote_pane(&self, pane_id: PaneId) -> PaneRef {
         PaneRef {
             workspace: self.uuid(),
-            pane: pane_id,
+            pane: pane_id.0,
         }
     }
 }

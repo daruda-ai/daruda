@@ -928,12 +928,15 @@ fn a_thread_reply_reaches_its_pane_and_an_unplaceable_thread_is_refused(cx: &mut
     let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
     let set_session = |session: &str, cx: &mut TestAppContext| {
         fixture.workspace.update(cx, |ws, cx| {
-            ws.set_pane_session_for_test(fixture.pane(), session, cx);
+            ws.set_pane_session_for_test(fixture.pane().into(), session, cx);
             let pane = PaneRef {
                 workspace: ws.uuid(),
                 pane: fixture.pane(),
             };
-            let key: ConversationKey = ws.remote_conversation(fixture.pane(), cx).unwrap().key;
+            let key: ConversationKey = ws
+                .remote_conversation(fixture.pane().into(), cx)
+                .unwrap()
+                .key;
             (pane, key)
         })
     };
@@ -1036,8 +1039,10 @@ fn a_root_stop_tap_reaches_the_threads_pane_and_answers_in_the_thread(cx: &mut T
     let root = tempfile::tempdir().unwrap();
     let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
     let key: ConversationKey = fixture.workspace.update(cx, |ws, cx| {
-        ws.set_pane_session_for_test(fixture.pane(), "s1", cx);
-        ws.remote_conversation(fixture.pane(), cx).unwrap().key
+        ws.set_pane_session_for_test(fixture.pane().into(), "s1", cx);
+        ws.remote_conversation(fixture.pane().into(), cx)
+            .unwrap()
+            .key
     });
     let generation = cx.update(|cx| {
         let generation = install_connection("work", bot.clone(), cx);
@@ -1079,7 +1084,7 @@ fn a_root_stop_tap_reaches_the_threads_pane_and_answers_in_the_thread(cx: &mut T
         };
         let closed = s::remote_channel::thread_closed();
         fixture.workspace.update(cx, |ws, cx| {
-            ws.set_pane_working_for_test(fixture.pane(), cx)
+            ws.set_pane_working_for_test(fixture.pane().into(), cx)
         });
         let (effect, thread) = tap(stop::token("t1"), cx);
         let effect = effect.unwrap();
@@ -1090,7 +1095,7 @@ fn a_root_stop_tap_reaches_the_threads_pane_and_answers_in_the_thread(cx: &mut T
         assert_eq!(
             fixture
                 .workspace
-                .update(cx, |ws, cx| ws.control_stop(fixture.pane(), cx)),
+                .update(cx, |ws, cx| ws.control_stop(fixture.pane().into(), cx)),
             Ok(crate::control::result::StopDisposition::AlreadyIdle),
             "the tap stopped the working pane"
         );
@@ -1133,8 +1138,10 @@ fn threaded_pane(cx: &mut TestAppContext) -> ThreadedPane {
     let root = tempfile::tempdir().unwrap();
     let bot = open_bot(root.path(), || Ok(InboxSeed::default()));
     let key = fixture.workspace.update(cx, |ws, cx| {
-        ws.set_pane_session_for_test(fixture.pane(), "s1", cx);
-        ws.remote_conversation(fixture.pane(), cx).unwrap().key
+        ws.set_pane_session_for_test(fixture.pane().into(), "s1", cx);
+        ws.remote_conversation(fixture.pane().into(), cx)
+            .unwrap()
+            .key
     });
     let (generation, queue) = cx.update(|cx| {
         let installed = install_connection_with_queue("work", bot.clone(), cx);
@@ -1187,7 +1194,7 @@ fn a_bare_stop_in_a_panes_thread_stops_that_pane(cx: &mut TestAppContext) {
     threaded
         .fixture
         .workspace
-        .update(cx, |ws, cx| ws.set_pane_working_for_test(pane, cx));
+        .update(cx, |ws, cx| ws.set_pane_working_for_test(pane.into(), cx));
     cx.update(|cx| {
         dispatch_claimed(
             "work",
@@ -1202,7 +1209,7 @@ fn a_bare_stop_in_a_panes_thread_stops_that_pane(cx: &mut TestAppContext) {
         threaded
             .fixture
             .workspace
-            .update(cx, |ws, cx| ws.control_stop(pane, cx)),
+            .update(cx, |ws, cx| ws.control_stop(pane.into(), cx)),
         Ok(crate::control::result::StopDisposition::AlreadyIdle)
     );
 }

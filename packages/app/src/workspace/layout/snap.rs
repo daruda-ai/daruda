@@ -21,6 +21,7 @@ use crate::workspace::left_dock::file_tree_ops::VisibleEntry;
 
 use super::diff_policy::{ByPointer, Handle, PerFrame};
 use crate::workspace::Workspace;
+use crate::workspace::main_area::pane_tree::PaneId;
 
 // ----------------------------------------------------------------
 // Left dock
@@ -97,7 +98,7 @@ pub(in crate::workspace) struct LeftDockSnapshot {
         daruda_store::project::LaneRef,
         Vec<crate::workspace::left_dock::rail::PaneSnapshot>,
     >,
-    pub focused_pane: u64,
+    pub focused_pane: PaneId,
     pub left_dock_view: daruda_store::project::LeftDockView,
     pub workspace_page: Option<crate::workspace::pages::Page>,
     pub page_project: Option<daruda_store::project::ProjectId>,
@@ -262,7 +263,7 @@ pub(in crate::workspace) struct QueuedPromptView {
 /// sibling flag, so "armed" cannot exist without the rows it describes.
 #[derive(Clone, PartialEq)]
 pub(in crate::workspace) struct QueuedPromptsSnapshot {
-    pub pane_id: crate::workspace::main_area::pane_tree::PaneId,
+    pub pane_id: PaneId,
     pub prompts: Vec<QueuedPromptView>,
     /// Mirrors `AgentChatView::resume_armed()` — an empty-composer Enter has
     /// armed the parked queue and the header asks for a second one.
@@ -273,7 +274,7 @@ pub(in crate::workspace) struct QueuedPromptsSnapshot {
 /// open: what `question_composer()` reports, plus the host's own marks.
 #[derive(Clone, PartialEq)]
 pub(in crate::workspace) struct QuestionStripSnapshot {
-    pub pane_id: crate::workspace::main_area::pane_tree::PaneId,
+    pub pane_id: PaneId,
     pub composer: daruda_chat::view::QuestionComposer,
     /// A prompt Enter tried to send while the question waits released; the
     /// strip warns it would wait behind the question.
@@ -333,11 +334,8 @@ pub(in crate::workspace) struct SlashMenuView {
 
 #[derive(PartialEq)]
 pub(in crate::workspace) struct BottomDockSnapshot {
-    pub input_recipients: Vec<(
-        crate::workspace::main_area::pane_tree::PaneId,
-        gpui::SharedString,
-    )>,
-    pub input_recipient: Option<crate::workspace::main_area::pane_tree::PaneId>,
+    pub input_recipients: Vec<(PaneId, gpui::SharedString)>,
+    pub input_recipient: Option<PaneId>,
     pub agent_cli_snapshot: Option<CliSnapshot>,
     pub terminal_input_visible: bool,
     pub active_tab_id: Option<daruda_store::panels::TabId>,
@@ -355,27 +353,21 @@ pub(in crate::workspace) struct BottomDockSnapshot {
     pub input_font: daruda_config::font::InputFontConfig,
     /// The input recipient while busy: renders Queue plus a separate Stop
     /// control. Questions bound to the input take precedence over Queue.
-    pub agent_stop_pane: Option<crate::workspace::main_area::pane_tree::PaneId>,
+    pub agent_stop_pane: Option<PaneId>,
     /// Names only: image payloads never enter render snapshots.
-    pub attachment_draft: Option<(crate::workspace::main_area::pane_tree::PaneId, Vec<String>)>,
+    pub attachment_draft: Option<(PaneId, Vec<String>)>,
     /// Set when the input recipient is an Agent chat pane that advertises session
     /// modes. Carries that pane's id + its mode state so the bottom-input
     /// renders the mode chip to the left of the Submit button. `None` for a
     /// terminal-pane focus (or an agent pane the adapter gave no modes), where
     /// only the Submit button shows.
-    pub agent_mode: Option<(
-        crate::workspace::main_area::pane_tree::PaneId,
-        daruda_acp::ModeStateView,
-    )>,
+    pub agent_mode: Option<(PaneId, daruda_acp::ModeStateView)>,
     /// Set when the input recipient is an Agent chat pane advertising select config
     /// options of the Model / ThoughtLevel category. Carries the pane id + those
     /// options so the bottom input renders a chip per option (model, effort)
     /// beside the Submit button. `None` for a terminal-pane focus or an agent
     /// pane with no such options. Mode is excluded — it renders via `agent_mode`.
-    pub agent_config_options: Option<(
-        crate::workspace::main_area::pane_tree::PaneId,
-        Vec<daruda_acp::ConfigOptionView>,
-    )>,
+    pub agent_config_options: Option<(PaneId, Vec<daruda_acp::ConfigOptionView>)>,
     /// Set when the input recipient is an Agent chat pane with a non-empty prompt
     /// queue. Carries the pane id + the queued prompts (in FIFO order) so the
     /// bottom dock renders the queued-prompt strip above the input and routes

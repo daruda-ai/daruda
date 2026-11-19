@@ -67,7 +67,7 @@ impl Workspace {
                     ChatSummary {
                         target: PaneRef {
                             workspace: uuid,
-                            pane: pane_id,
+                            pane: pane_id.0,
                         },
                         agent: v.agent_id().to_owned(),
                         agent_name: v.agent_name().to_owned(),
@@ -289,7 +289,7 @@ impl Workspace {
         self.reveal_new_agent_chat_pane(pane, window, cx);
         Ok(PaneRef {
             workspace: self.uuid(),
-            pane,
+            pane: pane.0,
         })
     }
 
@@ -406,7 +406,7 @@ impl Workspace {
             self.active,
             PaneRef {
                 workspace: self.uuid(),
-                pane,
+                pane: pane.0,
             },
         ))
     }
@@ -516,7 +516,7 @@ impl Workspace {
         };
         Some(PaneRef {
             workspace: self.uuid(),
-            pane,
+            pane: pane.0,
         })
     }
 

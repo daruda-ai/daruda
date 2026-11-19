@@ -109,7 +109,7 @@ mod tests {
     fn the_listing_has_one_line_per_item_and_marks_drafts() {
         let items = [
             DirtyItem {
-                target: DirtyTarget::Pane(1),
+                target: DirtyTarget::Pane(PaneId(1)),
                 title: "notes.md".into(),
                 is_draft: false,
             },

@@ -8,7 +8,56 @@
 //!   Splits with a single child collapse and Splits whose direction matches
 //!   their parent are flattened into the parent.
 
-pub(in crate::workspace) type PaneId = u64;
+/// Names a pane within a window. Never reused while the window lives.
+///
+/// A type of its own, so a tab's id, a lane's id or a count is not taken
+/// for one. Outside the workspace (notifications, the remote channel, the
+/// control surface, saved state) a pane travels as its number.
+///
+/// The default, 0, names no pane: ids are minted from 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub(crate) struct PaneId(pub(crate) u64);
+
+impl From<u64> for PaneId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+impl From<PaneId> for u64 {
+    fn from(id: PaneId) -> Self {
+        id.0
+    }
+}
+
+/// Tests name panes by number; outside tests a pane is compared with a pane.
+#[cfg(test)]
+impl PartialEq<u64> for PaneId {
+    fn eq(&self, other: &u64) -> bool {
+        self.0 == *other
+    }
+}
+
+#[cfg(test)]
+impl PartialEq<PaneId> for u64 {
+    fn eq(&self, other: &PaneId) -> bool {
+        *self == other.0
+    }
+}
+
+#[cfg(test)]
+impl std::ops::Add<u64> for PaneId {
+    type Output = PaneId;
+    fn add(self, by: u64) -> PaneId {
+        PaneId(self.0 + by)
+    }
+}
+
+impl std::fmt::Display for PaneId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 pub(in crate::workspace) const DIVIDER_PX: f32 = 1.0;
 
@@ -213,7 +262,7 @@ fn try_insert_node_at(
                 children.insert(slot, new_node);
             } else {
                 // Case B: wrap target in a new Split.
-                let target_leaf = std::mem::replace(&mut children[i], PaneLayout::Pane(0));
+                let target_leaf = std::mem::replace(&mut children[i], PaneLayout::Pane(PaneId(0)));
                 let inner = if before {
                     vec![new_node, target_leaf]
                 } else {
@@ -394,7 +443,7 @@ pub(in crate::workspace) fn cleanup_after_remove(layout: &mut PaneLayout) {
             }
             let parent_share = ratios[i];
             let (mut inner_children, inner_ratios) =
-                match std::mem::replace(&mut children[i], PaneLayout::Pane(0)) {
+                match std::mem::replace(&mut children[i], PaneLayout::Pane(PaneId(0))) {
                     PaneLayout::Split {
                         children: ic,
                         ratios: ir,

@@ -21,7 +21,7 @@ impl CommandOrigin {
                         let workspace = workspace.read(cx);
                         workspace
                             .orchestrator_chat_pane()
-                            .is_some_and(|pane| workspace.phone_turn_open(pane.pane, cx))
+                            .is_some_and(|pane| workspace.phone_turn_open(pane.pane.into(), cx))
                     }),
             },
         }

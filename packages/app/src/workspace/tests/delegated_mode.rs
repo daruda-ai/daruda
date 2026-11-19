@@ -91,9 +91,9 @@ fn a_control_chat_starts_delegated_and_a_menu_chat_does_not(cx: &mut TestAppCont
         .unwrap();
     cx.run_until_parked();
     assert_ne!(control, menu);
-    assert_eq!(requested_modes(control, cx), delegated());
+    assert_eq!(requested_modes(control.into(), cx), delegated());
     assert_eq!(
-        mode_of(&workspace, control, cx),
+        mode_of(&workspace, control.into(), cx),
         ModeChoice::FollowDelegated
     );
     assert_eq!(requested_modes(menu, cx), ordinary());
@@ -127,7 +127,7 @@ fn a_control_worktree_opens_its_chat_delegated(cx: &mut TestAppContext) {
         })
         .unwrap();
     cx.run_until_parked();
-    assert_eq!(requested_modes(pane, cx), delegated());
+    assert_eq!(requested_modes(pane.into(), cx), delegated());
 }
 
 /// A task's chat reopened in a new pane by the control surface runs

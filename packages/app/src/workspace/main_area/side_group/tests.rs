@@ -3,7 +3,7 @@ use super::*;
 fn tab(id: u64) -> SideTab {
     SideTab {
         id,
-        pane: id * 10,
+        pane: (id * 10).into(),
         user_label: None,
     }
 }
@@ -25,7 +25,7 @@ fn a_tab_added_is_the_one_shown_and_opens_a_collapsed_group() {
     let mut group = group(&[1, 2]);
     group.set_collapsed(true);
     assert_eq!(group.push(tab(3)), 2);
-    assert_eq!(group.active_pane(), Some(30));
+    assert_eq!(group.active_pane(), Some(30.into()));
     assert!(!group.is_collapsed());
 }
 
@@ -64,10 +64,10 @@ fn removing_a_tab_keeps_the_right_one_shown() {
 #[test]
 fn a_hidden_group_has_no_pane_on_show() {
     let mut group = group(&[1]);
-    assert_eq!(group.shown_pane(), Some(10));
+    assert_eq!(group.shown_pane(), Some(10.into()));
     group.set_collapsed(true);
     assert_eq!(group.shown_pane(), None);
-    assert_eq!(group.active_pane(), Some(10), "its tab stays open");
+    assert_eq!(group.active_pane(), Some(10.into()), "its tab stays open");
 }
 
 #[test]

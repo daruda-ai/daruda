@@ -146,7 +146,7 @@ async fn drop_tab_onto_bar_reorders_dragged_tab_before_first(cx: &mut TestAppCon
     });
     cx.run_until_parked();
 
-    let (after_ids, after_panes): (Vec<u64>, Vec<u64>) = ws.read_with(cx, |ws, _| {
+    let (after_ids, after_panes): (Vec<u64>, Vec<PaneId>) = ws.read_with(cx, |ws, _| {
         ws.active_runtime()
             .tabs
             .iter()
@@ -412,7 +412,7 @@ async fn drop_tab_onto_pane_keeps_committed_preview_and_restores_refused_merge(
     in_window(wh, &ws, cx, |ws, window, cx| {
         ws.switch_tab_for_drag_preview(0, cx);
         // A pane id that exists in no tab — `merge_tab_into_pane` bails.
-        ws.main_area.pane_drop_hover = Some((PaneId::MAX, DropHalf::East));
+        ws.main_area.pane_drop_hover = Some((PaneId(u64::MAX), DropHalf::East));
         ws.drop_tab_onto_pane(dragged_id, window, cx);
     });
     cx.run_until_parked();

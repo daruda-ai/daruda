@@ -503,7 +503,7 @@ fn announce_chat(
 ) -> Option<crate::workspace::ChatLabel> {
     let delivery = caller.delivery(crate::app_presence::is_away(cx));
     let label = in_pane_window(pane, cx, |ws, _window, cx| {
-        ws.control_chat_label(pane.pane, cx)
+        ws.control_chat_label(pane.pane.into(), cx)
             .ok_or(ControlError::TargetGone)
     })
     .ok()?;
@@ -556,7 +556,7 @@ async fn create_lane(
         // way, and the caller can send the prompt again.
         cx.update(|cx| {
             let _ = in_pane_window(chat, cx, |ws, _window, cx| {
-                ws.control_say(chat.pane, prompt.clone(), origin, cx)
+                ws.control_say(chat.pane.into(), prompt.clone(), origin, cx)
             });
         });
     }

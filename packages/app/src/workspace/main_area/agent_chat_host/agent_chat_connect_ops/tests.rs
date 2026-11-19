@@ -143,11 +143,13 @@ mod browser {
         cx: &mut TestAppContext,
     ) -> Vec<serde_json::Value> {
         assert!(
-            workspace.read_with(cx, |ws, _| ws.has_agent_chat_pane_for_test(pane)),
+            workspace.read_with(cx, |ws, _| ws.has_agent_chat_pane_for_test(pane.into())),
             "pane {pane} must be an agent-chat pane in this workspace"
         );
         workspace
-            .update(cx, |ws, cx| ws.mcp_servers_for_pane_for_test(pane, cx))
+            .update(cx, |ws, cx| {
+                ws.mcp_servers_for_pane_for_test(pane.into(), cx)
+            })
             .iter()
             .map(|server| serde_json::to_value(server).expect("serialize"))
             .collect()
@@ -175,12 +177,13 @@ mod browser {
     }
 
     fn open_chat(fixture: &ControlFixture, cx: &mut TestAppContext) -> u64 {
-        cx.update_window(fixture.window.into(), |_, window, cx| {
+        (cx.update_window(fixture.window.into(), |_, window, cx| {
             fixture
                 .workspace
                 .update(cx, |ws, cx| ws.open_agent_chat_pane_for_test(window, cx))
         })
-        .expect("window is live")
+        .expect("window is live"))
+        .0
     }
 
     /// Add a lane rooted at `root` to the active project, activate it, and
@@ -190,7 +193,7 @@ mod browser {
         root: PathBuf,
         cx: &mut TestAppContext,
     ) -> u64 {
-        cx.update_window(fixture.window.into(), |_, window, cx| {
+        (cx.update_window(fixture.window.into(), |_, window, cx| {
             fixture.workspace.update(cx, |ws, cx| {
                 let project = ws.active.project;
                 let lane_id = ws.alloc_id();
@@ -211,7 +214,8 @@ mod browser {
                 ws.open_agent_chat_pane_for_test(window, cx)
             })
         })
-        .expect("window is live")
+        .expect("window is live"))
+        .0
     }
 
     #[gpui::test]
@@ -219,10 +223,13 @@ mod browser {
         let user = crate::test_support::workspace_with_agent_chat(cx);
         browser_tool(true, true, cx);
         let lane_root = user.workspace.read_with(cx, |ws, _| {
-            ws.lane_for(ws.lane_ref_for_pane(user.pane()).expect("owning lane"))
-                .expect("lane")
-                .path
-                .clone()
+            ws.lane_for(
+                ws.lane_ref_for_pane(user.pane().into())
+                    .expect("owning lane"),
+            )
+            .expect("lane")
+            .path
+            .clone()
         });
 
         assert_eq!(
@@ -277,7 +284,9 @@ mod browser {
             let user = crate::test_support::workspace_with_agent_chat(cx);
             browser_tool(true, true, cx);
             user.workspace.update(cx, |ws, cx| {
-                let lane = ws.lane_ref_for_pane(user.pane()).expect("owning lane");
+                let lane = ws
+                    .lane_ref_for_pane(user.pane().into())
+                    .expect("owning lane");
                 ws.set_lane_session_host(lane, host, cx);
             });
             assert!(
@@ -314,7 +323,7 @@ mod browser {
         );
 
         user.workspace.update(cx, |ws, cx| {
-            ws.agent_chat_view(user.pane())
+            ws.agent_chat_view(user.pane().into())
                 .expect("chat view")
                 .update(cx, |view, _| {
                     view.set_access(daruda_store::tasks::AgentChatAccess::CliSnapshot(

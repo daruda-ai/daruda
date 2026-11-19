@@ -51,9 +51,11 @@ fn binding(pane_id: PaneId, session_id: &str) -> (PaneId, PtyBinding) {
 fn aggregate_two_panes_in_one_lane_orders_by_layout_and_maxes_priority() {
     let lane = lane_ref(1, 7);
     // Layout order: pane 10 before pane 20.
-    let pane_lane = vec![(10u64, lane), (20u64, lane)];
+    let pane_lane = vec![(PaneId(10), lane), (PaneId(20), lane)];
     let bindings: HashMap<PaneId, PtyBinding> =
-        [binding(10, "a"), binding(20, "b")].into_iter().collect();
+        [binding(PaneId(10), "a"), binding(PaneId(20), "b")]
+            .into_iter()
+            .collect();
     // The session cwds deliberately do NOT match the lane path —
     // attribution comes from pane membership, not cwd.
     let store = store_with(vec![
@@ -74,27 +76,32 @@ fn aggregate_two_panes_in_one_lane_orders_by_layout_and_maxes_priority() {
 /// a tab with no session shows nothing.
 #[test]
 fn a_tab_takes_the_most_urgent_of_its_panes() {
-    let bindings: HashMap<PaneId, PtyBinding> = [binding(10, "a")].into_iter().collect();
+    let bindings: HashMap<PaneId, PtyBinding> = [binding(PaneId(10), "a")].into_iter().collect();
     let store = store_with(vec![entry("a", "/x", SessionStatus::Working)]);
-    let acp = [(20u64, SessionStatus::NeedsAttention)];
+    let acp = [(PaneId(20), SessionStatus::NeedsAttention)];
     assert_eq!(
-        tab_session_status(&[10, 20], &bindings, &store, &acp),
+        tab_session_status(&[PaneId(10), PaneId(20)], &bindings, &store, &acp),
         Some(SessionStatus::NeedsAttention)
     );
     assert_eq!(
-        tab_session_status(&[10], &bindings, &store, &acp),
+        tab_session_status(&[PaneId(10)], &bindings, &store, &acp),
         Some(SessionStatus::Working)
     );
-    assert_eq!(tab_session_status(&[30], &bindings, &store, &acp), None);
+    assert_eq!(
+        tab_session_status(&[PaneId(30)], &bindings, &store, &acp),
+        None
+    );
 }
 
 #[test]
 fn aggregate_does_not_mix_panes_across_lanes() {
     let lane_a = lane_ref(1, 1);
     let lane_b = lane_ref(2, 1);
-    let pane_lane = vec![(10u64, lane_a), (20u64, lane_b)];
+    let pane_lane = vec![(PaneId(10), lane_a), (PaneId(20), lane_b)];
     let bindings: HashMap<PaneId, PtyBinding> =
-        [binding(10, "a"), binding(20, "b")].into_iter().collect();
+        [binding(PaneId(10), "a"), binding(PaneId(20), "b")]
+            .into_iter()
+            .collect();
     let store = store_with(vec![
         entry("a", "/x", SessionStatus::Working),
         entry("b", "/y", SessionStatus::NeedsAttention),
@@ -112,8 +119,8 @@ fn aggregate_does_not_mix_panes_across_lanes() {
 fn aggregate_omits_panes_without_binding() {
     let lane = lane_ref(1, 1);
     // Pane 20 has no binding (no Claude session in that pane).
-    let pane_lane = vec![(10u64, lane), (20u64, lane)];
-    let bindings: HashMap<PaneId, PtyBinding> = [binding(10, "a")].into_iter().collect();
+    let pane_lane = vec![(PaneId(10), lane), (PaneId(20), lane)];
+    let bindings: HashMap<PaneId, PtyBinding> = [binding(PaneId(10), "a")].into_iter().collect();
     let store = store_with(vec![entry("a", "/x", SessionStatus::Working)]);
 
     let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store, &[]);
@@ -126,11 +133,13 @@ fn aggregate_omits_panes_without_binding() {
 #[test]
 fn aggregate_omits_session_missing_from_store() {
     let lane = lane_ref(1, 1);
-    let pane_lane = vec![(10u64, lane), (20u64, lane)];
+    let pane_lane = vec![(PaneId(10), lane), (PaneId(20), lane)];
     // Both panes bound, but 'b' has no store entry → omitted entirely
     // (NOT surfaced as Connecting).
     let bindings: HashMap<PaneId, PtyBinding> =
-        [binding(10, "a"), binding(20, "b")].into_iter().collect();
+        [binding(PaneId(10), "a"), binding(PaneId(20), "b")]
+            .into_iter()
+            .collect();
     let store = store_with(vec![entry("a", "/x", SessionStatus::Working)]);
 
     let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store, &[]);
@@ -155,9 +164,11 @@ fn aggregate_counts_a_session_once_per_lane() {
     // of a running session in a second pane) is one session — it
     // must not fabricate a multi-session sub-row.
     let lane = lane_ref(1, 1);
-    let pane_lane = vec![(10u64, lane), (20u64, lane)];
+    let pane_lane = vec![(PaneId(10), lane), (PaneId(20), lane)];
     let bindings: HashMap<PaneId, PtyBinding> =
-        [binding(10, "s"), binding(20, "s")].into_iter().collect();
+        [binding(PaneId(10), "s"), binding(PaneId(20), "s")]
+            .into_iter()
+            .collect();
     let store = store_with(vec![entry("s", "/x", SessionStatus::Working)]);
 
     let (per_lane, per_session) = aggregate_over_panes(&pane_lane, &bindings, &store, &[]);
@@ -171,14 +182,17 @@ fn aggregate_counts_a_session_once_per_lane() {
 
 #[test]
 fn distinct_sessions_count_a_session_once_across_lanes_and_keep_chat_panes() {
-    let bindings: HashMap<PaneId, PtyBinding> =
-        [binding(10, "s"), binding(20, "s"), binding(30, "gone")]
-            .into_iter()
-            .collect();
+    let bindings: HashMap<PaneId, PtyBinding> = [
+        binding(PaneId(10), "s"),
+        binding(PaneId(20), "s"),
+        binding(PaneId(30), "gone"),
+    ]
+    .into_iter()
+    .collect();
     let store = store_with(vec![entry("s", "/x", SessionStatus::ExecutingTool)]);
-    let acp = [(40u64, SessionStatus::NeedsAttention)];
+    let acp = [(PaneId(40), SessionStatus::NeedsAttention)];
 
-    let sessions = distinct_sessions([10, 20, 30, 40, 50], &bindings, &store, &acp);
+    let sessions = distinct_sessions([10, 20, 30, 40, 50].map(PaneId), &bindings, &store, &acp);
 
     assert_eq!(
         sessions,
@@ -194,11 +208,14 @@ fn aggregate_dedup_keeps_first_pane_position() {
     // A duplicate binding later in layout order neither reorders
     // nor duplicates the sub-row entry for its session.
     let lane = lane_ref(1, 1);
-    let pane_lane = vec![(10u64, lane), (20u64, lane), (30u64, lane)];
-    let bindings: HashMap<PaneId, PtyBinding> =
-        [binding(10, "a"), binding(20, "b"), binding(30, "a")]
-            .into_iter()
-            .collect();
+    let pane_lane = vec![(PaneId(10), lane), (PaneId(20), lane), (PaneId(30), lane)];
+    let bindings: HashMap<PaneId, PtyBinding> = [
+        binding(PaneId(10), "a"),
+        binding(PaneId(20), "b"),
+        binding(PaneId(30), "a"),
+    ]
+    .into_iter()
+    .collect();
     let store = store_with(vec![
         entry("a", "/x", SessionStatus::Working),
         entry("b", "/y", SessionStatus::NeedsAttention),
@@ -223,9 +240,11 @@ fn animating_when_a_connecting_session_hides_behind_idle_aggregate() {
     // animates in the sub-row — the pulse gate must look at the
     // sessions, not the collapsed aggregate.
     let lane = lane_ref(1, 1);
-    let pane_lane = vec![(10u64, lane), (20u64, lane)];
+    let pane_lane = vec![(PaneId(10), lane), (PaneId(20), lane)];
     let bindings: HashMap<PaneId, PtyBinding> =
-        [binding(10, "a"), binding(20, "b")].into_iter().collect();
+        [binding(PaneId(10), "a"), binding(PaneId(20), "b")]
+            .into_iter()
+            .collect();
     let store = store_with(vec![
         entry("a", "/x", SessionStatus::Idle),
         entry("b", "/x", SessionStatus::Connecting),
@@ -243,9 +262,11 @@ fn animating_when_a_connecting_session_hides_behind_idle_aggregate() {
 #[test]
 fn not_animating_when_every_bound_session_is_idle() {
     let lane = lane_ref(1, 1);
-    let pane_lane = vec![(10u64, lane), (20u64, lane)];
+    let pane_lane = vec![(PaneId(10), lane), (PaneId(20), lane)];
     let bindings: HashMap<PaneId, PtyBinding> =
-        [binding(10, "a"), binding(20, "b")].into_iter().collect();
+        [binding(PaneId(10), "a"), binding(PaneId(20), "b")]
+            .into_iter()
+            .collect();
     let store = store_with(vec![
         entry("a", "/x", SessionStatus::Idle),
         entry("b", "/y", SessionStatus::Idle),
@@ -265,8 +286,9 @@ fn not_animating_for_unbound_panes_or_missing_store_entries() {
     // Panes without a binding and bindings whose session has no
     // store entry contribute no motion.
     let lane = lane_ref(1, 1);
-    let pane_lane = vec![(10u64, lane), (20u64, lane)];
-    let bindings: HashMap<PaneId, PtyBinding> = [binding(10, "ghost")].into_iter().collect();
+    let pane_lane = vec![(PaneId(10), lane), (PaneId(20), lane)];
+    let bindings: HashMap<PaneId, PtyBinding> =
+        [binding(PaneId(10), "ghost")].into_iter().collect();
     let store = daruda_agent::ClaudeStatusStore::new();
     assert!(!any_pane_session_animating(
         &pane_lane,
@@ -287,7 +309,7 @@ fn session_report_is_info_with_transition_message_and_context() {
         "sess-1",
         &PathBuf::from("/tmp/wt"),
         "PreToolUse",
-        Some(42),
+        Some(PaneId(42)),
         "demo-project",
         "feature/x",
     );
@@ -403,10 +425,10 @@ fn aggregate_report_marks_unbound_lane() {
 #[test]
 fn icon_attention_is_static_but_does_not_hide_a_busy_sibling() {
     let lane = lane_ref(1, 1);
-    let panes = [(10, lane), (20, lane)];
+    let panes = [(PaneId(10), lane), (PaneId(20), lane)];
     let bindings = HashMap::new();
     let store = daruda_agent::ClaudeStatusStore::new();
-    let attention = [(10, SessionStatus::NeedsAttention)];
+    let attention = [(PaneId(10), SessionStatus::NeedsAttention)];
     assert!(!any_pane_session_animating(
         &panes,
         &bindings,
@@ -428,8 +450,8 @@ fn icon_attention_is_static_but_does_not_hide_a_busy_sibling() {
         &bindings,
         &store,
         &[
-            (10, SessionStatus::NeedsAttention),
-            (20, SessionStatus::Working)
+            (PaneId(10), SessionStatus::NeedsAttention),
+            (PaneId(20), SessionStatus::Working)
         ],
         &daruda_config::StatusIconTheme::Icons,
         &crate::status_icon_themes::Catalog::default()
@@ -445,7 +467,7 @@ fn resumed_sessions_in_distinct_terminals_keep_independent_badges() {
     second.terminal_id = daruda_agent::hooks::route::TerminalId::parse("terminal-b");
     let bindings = HashMap::from([
         (
-            1,
+            PaneId(1),
             PtyBinding {
                 terminal_id: first.terminal_id.clone(),
                 session_id: first.session_id.clone(),
@@ -453,7 +475,7 @@ fn resumed_sessions_in_distinct_terminals_keep_independent_badges() {
             },
         ),
         (
-            2,
+            PaneId(2),
             PtyBinding {
                 terminal_id: second.terminal_id.clone(),
                 session_id: second.session_id.clone(),
@@ -462,16 +484,20 @@ fn resumed_sessions_in_distinct_terminals_keep_independent_badges() {
         ),
     ]);
     let store = store_with(vec![first, second]);
-    let (statuses, sessions) =
-        aggregate_over_panes(&[(1, lane), (2, lane)], &bindings, &store, &[]);
+    let (statuses, sessions) = aggregate_over_panes(
+        &[(PaneId(1), lane), (PaneId(2), lane)],
+        &bindings,
+        &store,
+        &[],
+    );
     assert_eq!(statuses[&lane], SessionStatus::Working);
     assert_eq!(sessions[&lane].len(), 2);
     assert_eq!(
-        tab_session_status(&[1], &bindings, &store, &[]),
+        tab_session_status(&[PaneId(1)], &bindings, &store, &[]),
         Some(SessionStatus::Idle)
     );
     assert_eq!(
-        tab_session_status(&[2], &bindings, &store, &[]),
+        tab_session_status(&[PaneId(2)], &bindings, &store, &[]),
         Some(SessionStatus::Working)
     );
 }

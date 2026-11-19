@@ -43,7 +43,7 @@ pub(super) fn conversation_of(pane: PaneRef, cx: &mut App) -> Option<PaneConvers
     let mut found = None;
     crate::remote_channel::dispatch::target::dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
         if found.is_none() {
-            found = ws.remote_conversation(pane.pane, cx);
+            found = ws.remote_conversation(pane.pane.into(), cx);
         }
     });
     found

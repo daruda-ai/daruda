@@ -18,10 +18,10 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Option<gpui::WeakEntity<daruda_chat::view::AgentChatView>> {
         let pane = self.orchestrator_chat_pane()?;
-        let view = self.agent_chat_view(pane.pane)?.clone();
+        let view = self.agent_chat_view(pane.pane.into())?.clone();
         view.update(cx, |view, cx| view.push_host_card(card, cx));
         self.notify_agent_pane(
-            pane.pane,
+            pane.pane.into(),
             self.mirrors.notifications.agent_waiting_enabled,
             s::notification::agent_waiting(),
             cx,
@@ -46,7 +46,7 @@ impl Workspace {
             &body,
             crate::platform::notifications::Target {
                 workspace: self.uuid(),
-                pane: pane_id,
+                pane: pane_id.0,
             },
         );
     }
@@ -279,7 +279,7 @@ impl Workspace {
     ) {
         let target = crate::remote_channel::bridge::PaneRef {
             workspace: self.uuid(),
-            pane: pane_id,
+            pane: pane_id.0,
         };
         if !crate::control::ask::has_waiter(target, cx) {
             return;

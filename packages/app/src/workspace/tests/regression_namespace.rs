@@ -42,7 +42,7 @@ fn terminal_output_restore_uses_the_owning_project_and_profile(cx: &mut TestAppC
                 .filter(|(lane, _)| lane.project == enabled_project)
                 .flat_map(|(_, runtime)| &runtime.panes)
                 .filter(|pane| pane.terminal_view().is_some())
-                .map(|pane| pane.id)
+                .map(|pane| pane.id.0)
                 .collect();
             assert!(!expected.is_empty());
             ws.persist_state(cx);

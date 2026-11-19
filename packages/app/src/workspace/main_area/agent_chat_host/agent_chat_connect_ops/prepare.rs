@@ -348,7 +348,7 @@ impl Workspace {
         // pane *is* that workspace — so `weak.upgrade().read(cx)` would be a
         // second lease on the entity we are in (AGENTS.md pitfall 5).
         weak.entity_id() == cx.entity_id()
-            && self.orchestrator_chat_pane().map(|p| p.pane) == Some(pane_id)
+            && self.orchestrator_chat_pane().map(|p| p.pane) == Some(pane_id.0)
     }
 
     #[cfg(test)]

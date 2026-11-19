@@ -88,7 +88,7 @@ fn pane_divider(
     let offset = (DIVIDER_PX - hit) / 2.0;
     let div_id = (
         if is_horizontal { "div-h" } else { "div-v" },
-        leaf_id as usize,
+        leaf_id.0 as usize,
     );
     let overlay_cursor = if is_horizontal {
         CursorStyle::ResizeLeftRight
@@ -154,7 +154,7 @@ fn pane_header(
     _is_zoomed: bool,
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
-    let close = crate::ui::button_close(("pane-close", pane_id as usize), cx).on_click(
+    let close = crate::ui::button_close(("pane-close", pane_id.0 as usize), cx).on_click(
         cx.listener(move |this, _: &ClickEvent, window, cx| {
             this.request_close_pane(pane_id, window, cx);
         }),
@@ -168,7 +168,7 @@ fn pane_header(
     let cwd_text = t.text_muted;
 
     div()
-        .id(("pane-hdr", pane_id as usize))
+        .id(("pane-hdr", pane_id.0 as usize))
         .flex()
         .flex_row()
         .items_center()
@@ -226,7 +226,7 @@ pub(in crate::workspace) fn render_hosted_pane(
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     div()
-        .id(("pane", id as usize))
+        .id(("pane", id.0 as usize))
         .relative()
         .size_full()
         .flex()
@@ -272,7 +272,7 @@ pub(in crate::workspace) fn render_layout(
             };
             let is_focused = has_splits && id == focused_pane_id;
             let mut root = div()
-                .id(("pane", id as usize))
+                .id(("pane", id.0 as usize))
                 .relative()
                 .size_full()
                 .flex()
@@ -347,7 +347,7 @@ pub(in crate::workspace) fn render_layout(
                     .when_some(ac.restore.flow_origin().cloned(), |d, origin| {
                         d.child(
                             crate::ui::button(
-                                ("flow-origin", id as usize),
+                                ("flow-origin", id.0 as usize),
                                 crate::surface::strings::flow::session_return(),
                             )
                             .on_click(cx.listener(

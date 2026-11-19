@@ -45,7 +45,7 @@ fn cache_prompt(
 fn cache_validates_payloads_and_keeps_equal_prompts_independent(cx: &mut TestAppContext) {
     let fixture = workspace_with_agent_chat(cx);
     let pane = fixture.pane();
-    let (view, first) = cache_prompt(&fixture, pane, cx);
+    let (view, first) = cache_prompt(&fixture, pane.into(), cx);
     let second = view.update(cx, |view, cx| {
         view.send_prompt_text(PROMPT_TEXT.into(), cx);
         view.queue().last_prompt_id().unwrap()
@@ -53,25 +53,40 @@ fn cache_validates_payloads_and_keeps_equal_prompts_independent(cx: &mut TestApp
     assert_ne!(first, second);
     let mut cache = QueuedInputCache::default();
     for id in [first, second] {
-        cache.remember(pane, id, PROMPT_TEXT, &content());
+        cache.remember(pane.into(), id, PROMPT_TEXT, &content());
     }
-    cache.remember(pane + 1, first, PROMPT_TEXT, &content());
-    assert_eq!(cache.content(pane, first, PROMPT_TEXT), Some(&content()));
-    assert!(cache.content(pane, first, "changed source").is_none());
+    cache.remember((pane + 1).into(), first, PROMPT_TEXT, &content());
+    assert_eq!(
+        cache.content(pane.into(), first, PROMPT_TEXT),
+        Some(&content())
+    );
+    assert!(
+        cache
+            .content(pane.into(), first, "changed source")
+            .is_none()
+    );
 
     // Replacing one equal prompt with plain text must not inherit its token
     // or remove the other prompt's independent presentation.
-    cache.remember(pane, first, PROMPT_TEXT, &InputContent::new(PROMPT_TEXT));
-    assert!(cache.content(pane, first, PROMPT_TEXT).is_none());
-    assert_eq!(cache.content(pane, second, PROMPT_TEXT), Some(&content()));
-    cache.forget_pane(pane);
-    assert!(!cache.has_pane(pane));
+    cache.remember(
+        pane.into(),
+        first,
+        PROMPT_TEXT,
+        &InputContent::new(PROMPT_TEXT),
+    );
+    assert!(cache.content(pane.into(), first, PROMPT_TEXT).is_none());
     assert_eq!(
-        cache.content(pane + 1, first, PROMPT_TEXT),
+        cache.content(pane.into(), second, PROMPT_TEXT),
+        Some(&content())
+    );
+    cache.forget_pane(pane.into());
+    assert!(!cache.has_pane(pane.into()));
+    assert_eq!(
+        cache.content((pane + 1).into(), first, PROMPT_TEXT),
         Some(&content())
     );
     cache.remember(
-        pane + 1,
+        (pane + 1).into(),
         first,
         PROMPT_TEXT,
         &InputContent::new(PROMPT_TEXT),
@@ -111,7 +126,7 @@ fn queue_notifications_reconcile_removals_and_preserve_waiting_drafts(cx: &mut T
     ] {
         let fixture = workspace_with_agent_chat(cx);
         let pane = fixture.pane();
-        let (view, id) = cache_prompt(&fixture, pane, cx);
+        let (view, id) = cache_prompt(&fixture, pane.into(), cx);
         // Keep the receiver alive so the Sent case proves a successful wire
         // handoff, rather than the failure path discarding the same queue.
         let (handle, mut probe) = AcpSessionHandle::detached_for_test();
@@ -122,7 +137,7 @@ fn queue_notifications_reconcile_removals_and_preserve_waiting_drafts(cx: &mut T
                     view.set_status_for_test(AgentSessionStatus::Connected);
                 });
                 ws.fold_agent_chat_event(
-                    pane,
+                    pane.into(),
                     AcpEvent::TurnEnded {
                         stop_reason: "end_turn".into(),
                         completed_normally: true,
@@ -133,7 +148,7 @@ fn queue_notifications_reconcile_removals_and_preserve_waiting_drafts(cx: &mut T
             }
             Change::Error => {
                 ws.fold_agent_chat_event(
-                    pane,
+                    pane.into(),
                     AcpEvent::Error(daruda_acp::AcpFailure::unclassified("session failed")),
                     cx,
                 );
@@ -165,11 +180,11 @@ fn queue_notifications_reconcile_removals_and_preserve_waiting_drafts(cx: &mut T
         });
         cx.run_until_parked();
         fixture.workspace.read_with(cx, |ws, _| {
-            let lane = ws.lane_ref_for_pane(pane).unwrap();
+            let lane = ws.lane_ref_for_pane(pane.into()).unwrap();
             let cache = &ws.lane_scoped.get(&lane).unwrap().queued_input_cache;
-            assert_eq!(cache.has_pane(pane), retained, "{change:?}");
+            assert_eq!(cache.has_pane(pane.into()), retained, "{change:?}");
             assert_eq!(
-                cache.content(pane, id, PROMPT_TEXT),
+                cache.content(pane.into(), id, PROMPT_TEXT),
                 retained.then(content).as_ref(),
                 "{change:?}"
             );
@@ -186,10 +201,10 @@ fn background_queue_cleanup_uses_its_own_lane_and_does_not_recreate_removed_stat
 ) {
     let fixture = workspace_with_agent_chat(cx);
     let first_pane = fixture.pane();
-    let (first_view, first_id) = cache_prompt(&fixture, first_pane, cx);
+    let (first_view, first_id) = cache_prompt(&fixture, first_pane.into(), cx);
     let home = fixture
         .workspace
-        .read_with(cx, |ws, _| ws.lane_ref_for_pane(first_pane).unwrap());
+        .read_with(cx, |ws, _| ws.lane_ref_for_pane(first_pane.into()).unwrap());
     let other_pane = cx
         .update_window(fixture.window.into(), |_, window, cx| {
             fixture.workspace.update(cx, |ws, cx| {
@@ -202,7 +217,7 @@ fn background_queue_cleanup_uses_its_own_lane_and_does_not_recreate_removed_stat
     fixture.workspace.read_with(cx, |ws, _| {
         assert_ne!(ws.active_ref(), home);
         assert_eq!(
-            ws.queued_input_content(first_pane, first_id, PROMPT_TEXT),
+            ws.queued_input_content(first_pane.into(), first_id, PROMPT_TEXT),
             content()
         );
     });
@@ -215,7 +230,7 @@ fn background_queue_cleanup_uses_its_own_lane_and_does_not_recreate_removed_stat
                 .get(&home)
                 .unwrap()
                 .queued_input_cache
-                .has_pane(first_pane)
+                .has_pane(first_pane.into())
         );
         assert_eq!(
             ws.queued_input_content(other_pane, other_id, PROMPT_TEXT),

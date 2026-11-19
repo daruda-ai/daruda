@@ -103,7 +103,7 @@ pub(crate) fn lent_target_reply(
 ) -> Option<crate::remote_channel::command::RenderedReply> {
     let mut label = None;
     dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-        label = ws.control_chat_label(pane.pane, cx);
+        label = ws.control_chat_label(pane.pane.into(), cx);
     });
     let label = label?;
     trace::delivery("target.lent", || {

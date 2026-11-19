@@ -65,7 +65,7 @@ fn finish_chat(
 ) {
     workspace.update(cx, |ws, cx| {
         let outcome = ws
-            .agent_chat_view(pane.pane)
+            .agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, cx| {
                 view.seed_items_for_test(
@@ -99,7 +99,7 @@ fn finish_chat(
                 TurnOutcome::Completed
             })
         );
-        ws.fire_activity_completion(pane.pane, outcome.unwrap(), cx);
+        ws.fire_activity_completion(pane.pane.into(), outcome.unwrap(), cx);
     });
     cx.run_until_parked();
 }
@@ -169,13 +169,13 @@ async fn task_completion(
             execution,
             crate::remote_channel::bridge::PaneRef {
                 workspace: ws.uuid(),
-                pane,
+                pane: pane.0,
             },
         )
     });
     if matches!(conversation, Conversation::ExplicitChild) {
         fixture.workspace.update(cx, |ws, cx| {
-            ws.agent_chat_view(child.pane)
+            ws.agent_chat_view(child.pane.into())
                 .unwrap()
                 .update(cx, |view, _| {
                     let started = std::time::Instant::now();
@@ -226,11 +226,11 @@ async fn task_completion(
     if matches!(conversation, Conversation::ManualContinuation) {
         fixture.workspace.update(cx, |ws, cx| {
             assert_eq!(
-                RunsHost::pane_execution(ws.run_pane(child.pane), cx),
+                RunsHost::pane_execution(ws.run_pane(child.pane.into()), cx),
                 Some(&execution)
             );
             ws.control_say(
-                child.pane,
+                child.pane.into(),
                 "continue manually".into(),
                 CommandOrigin::Orchestrator,
                 cx,

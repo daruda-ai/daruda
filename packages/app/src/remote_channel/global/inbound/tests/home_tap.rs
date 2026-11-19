@@ -66,7 +66,7 @@ async fn a_home_tap_acts_once_and_answers_on_the_page(cx: &mut TestAppContext) {
     assert_eq!(selected(cx), None, "a redelivered tap is claimed already");
 
     fixture.workspace.update(cx, |ws, cx| {
-        ws.set_pane_working_for_test(fixture.pane(), cx)
+        ws.set_pane_working_for_test(fixture.pane().into(), cx)
     });
     cx.update(|cx| {
         crate::remote_channel::panes::activity(
@@ -94,7 +94,7 @@ async fn a_home_tap_acts_once_and_answers_on_the_page(cx: &mut TestAppContext) {
     let stop_now = |cx: &mut TestAppContext| {
         fixture
             .workspace
-            .update(cx, |ws, cx| ws.control_stop(fixture.pane(), cx))
+            .update(cx, |ws, cx| ws.control_stop(fixture.pane().into(), cx))
     };
     assert_eq!(
         stop_now(cx),
@@ -102,7 +102,7 @@ async fn a_home_tap_acts_once_and_answers_on_the_page(cx: &mut TestAppContext) {
         "the tap stopped the working pane"
     );
     fixture.workspace.update(cx, |ws, cx| {
-        ws.set_pane_working_for_test(fixture.pane(), cx)
+        ws.set_pane_working_for_test(fixture.pane().into(), cx)
     });
     tap(generation, "stop-1", &stop, cx).await;
     assert_eq!(
@@ -111,7 +111,7 @@ async fn a_home_tap_acts_once_and_answers_on_the_page(cx: &mut TestAppContext) {
         "the redelivered stop did not stop it again"
     );
     fixture.workspace.update(cx, |ws, cx| {
-        ws.set_pane_working_for_test(fixture.pane(), cx)
+        ws.set_pane_working_for_test(fixture.pane().into(), cx)
     });
     tap(generation, "stop-2", &stop, cx).await;
     assert_eq!(

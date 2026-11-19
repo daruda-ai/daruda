@@ -269,11 +269,14 @@ impl Workspace {
             claude_pid: file.agent_pid,
             session_id: file.session_id.clone(),
         };
-        if self.claude_sessions.pty_bindings.get(&pane.pane) != Some(&binding) {
+        if self.claude_sessions.pty_bindings.get(&pane.pane.into()) != Some(&binding) {
             if let Some(pid) = file.agent_pid {
                 crate::runs::RunsHost::cli_tracker(cx).track_agent(file.session_id.clone(), pid);
             }
-            if let Some(previous) = self.claude_sessions.pty_bindings.insert(pane.pane, binding)
+            if let Some(previous) = self
+                .claude_sessions
+                .pty_bindings
+                .insert(pane.pane.into(), binding)
                 && previous.session_id != file.session_id
             {
                 self.forget_terminal_session(&previous.identity());

@@ -152,7 +152,7 @@ pub(crate) fn workspace_with_agent_chat(cx: &mut TestAppContext) -> ControlFixtu
         })
         .expect("window is live");
     ControlFixture {
-        pane: Some(pane),
+        pane: Some(pane.0),
         ..fixture
     }
 }

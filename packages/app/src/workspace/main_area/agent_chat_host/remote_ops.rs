@@ -525,7 +525,7 @@ impl Workspace {
         crate::remote_channel::bridge::BridgePing {
             pane: crate::remote_channel::bridge::PaneRef {
                 workspace: self.uuid(),
-                pane: pane_id,
+                pane: pane_id.0,
             },
             header,
             tail,
@@ -550,7 +550,7 @@ impl Workspace {
                 "pane={pane_id} delivery={delivery:?} sent={sent} {} text={}",
                 trace::presence(
                     crate::platform::attention::is_app_active(),
-                    self.lane_ref_for_pane(pane_id),
+                    self.lane_ref_for_pane(pane_id.into()),
                     self.active_ref()
                 ),
                 trace::opt(text)

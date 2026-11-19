@@ -164,7 +164,7 @@ fn open_pane_with(conversations: &[ConversationKey], cx: &mut App) -> Option<Pan
         {
             found = Some(PaneRef {
                 workspace: ws.uuid(),
-                pane,
+                pane: pane.0,
             });
         }
     });
@@ -174,7 +174,7 @@ fn open_pane_with(conversations: &[ConversationKey], cx: &mut App) -> Option<Pan
 fn is_open(pane: PaneRef, cx: &mut App) -> bool {
     let mut open = false;
     crate::remote_channel::dispatch::target::dispatch_to_workspace(cx, pane.workspace, |ws, _| {
-        open |= ws.has_agent_chat(pane.pane)
+        open |= ws.has_agent_chat(pane.pane.into())
     });
     open
 }

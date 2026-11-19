@@ -130,7 +130,7 @@ impl Workspace {
                 };
                 let pane = crate::remote_channel::bridge::PaneRef {
                     workspace: self.uuid(),
-                    pane: pane_id,
+                    pane: pane_id.0,
                 };
                 crate::remote_channel::settle_questions(
                     pane,

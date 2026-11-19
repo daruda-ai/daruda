@@ -84,7 +84,7 @@ async fn interrupted_run(
             .upgrade()
             .unwrap()
             .read(cx)
-            .agent_chat_view(pane.pane)
+            .agent_chat_view(pane.pane.into())
             .unwrap()
             .clone()
     });

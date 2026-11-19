@@ -80,7 +80,7 @@ async fn merge_tab_into_pane_handles_noops_then_lands_two_leaf_split(cx: &mut Te
             workspace.update(cx, |ws, cx| {
                 ws.merge_tab_into_pane(
                     tab0_id,
-                    vanished_target,
+                    vanished_target.into(),
                     SplitDirection::Horizontal,
                     false,
                     window,

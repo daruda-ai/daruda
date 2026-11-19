@@ -137,7 +137,7 @@ impl Workspace {
     pub(in crate::workspace) fn run_pane(&self, pane: PaneId) -> crate::runs::RunPane {
         crate::runs::RunPane {
             workspace: self.uuid(),
-            pane,
+            pane: pane.0,
         }
     }
 

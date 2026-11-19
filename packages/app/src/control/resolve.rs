@@ -88,7 +88,7 @@ mod tests {
         for (fixture, commands) in windows.iter().zip([["usage", "model"], ["model", "cost"]]) {
             let pane = fixture.pane();
             fixture.workspace.update(cx, |ws, cx| {
-                ws.advertise_slash_commands_for_test(pane, &commands, cx);
+                ws.advertise_slash_commands_for_test(pane.into(), &commands, cx);
             });
         }
         cx.update(|cx| {

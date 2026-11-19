@@ -28,7 +28,7 @@ impl Workspace {
             RailItem::Group(group) => self.toggle_group_collapse(group, cx),
             RailItem::Project(project) => self.select_project(project, window, cx),
             RailItem::Lane(lane, bounds) => self.choose_lane_from_rail(lane, bounds, window, cx),
-            RailItem::Pane(lane, pane) => self.activate_rail_pane(lane, pane, window, cx),
+            RailItem::Pane(lane, pane) => self.activate_rail_pane(lane, pane.into(), window, cx),
         }
         cx.stop_propagation();
     }

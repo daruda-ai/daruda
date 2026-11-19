@@ -52,13 +52,15 @@ fn an_orchestrator_stop_withdraws_all_pending_approvals(cx: &mut TestAppContext)
             ),
         ]
     });
-    for pane in [fixture.pane(), orchestrator] {
+    for pane in [fixture.pane(), orchestrator.0] {
         fixture.workspace.update(cx, |ws, cx| {
-            ws.agent_chat_view(pane).unwrap().update(cx, |view, cx| {
-                view.set_turn_in_flight();
-                view.tick_activity(std::time::Instant::now(), cx);
-            });
-            ws.cancel_agent_turn(pane, cx);
+            ws.agent_chat_view(pane.into())
+                .unwrap()
+                .update(cx, |view, cx| {
+                    view.set_turn_in_flight();
+                    view.tick_activity(std::time::Instant::now(), cx);
+                });
+            ws.cancel_agent_turn(pane.into(), cx);
         });
         cx.update(|cx| {
             if pane == fixture.pane() {

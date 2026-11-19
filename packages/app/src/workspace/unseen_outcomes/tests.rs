@@ -1,7 +1,7 @@
 use super::*;
 
-const A: PaneId = 1;
-const B: PaneId = 2;
+const A: PaneId = PaneId(1);
+const B: PaneId = PaneId(2);
 
 #[test]
 fn a_later_outcome_replaces_an_earlier_one() {
@@ -49,7 +49,7 @@ fn lane_outcomes_keep_projects_separate_and_follow_acknowledgements() {
     let mut unseen = UnseenOutcomes::default();
     unseen.record(A, AgentOutcome::Completed);
     unseen.record(B, AgentOutcome::Errored);
-    unseen.record(3, AgentOutcome::Completed);
+    unseen.record(PaneId(3), AgentOutcome::Completed);
     assert_eq!(
         unseen.by_lane(&panes),
         HashMap::from([

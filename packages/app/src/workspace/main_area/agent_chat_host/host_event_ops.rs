@@ -20,7 +20,7 @@ impl Workspace {
     ) {
         let pane_ref = crate::remote_channel::bridge::PaneRef {
             workspace: self.uuid(),
-            pane: pane_id,
+            pane: pane_id.0,
         };
         App::subscribe(cx, view, move |_, event: &AgentChatEvent, cx| {
             on_app_chat_event(pane_ref, event, cx)

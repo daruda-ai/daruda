@@ -2,6 +2,7 @@ use super::*;
 
 use std::sync::Arc;
 
+use crate::workspace::main_area::pane_tree::PaneId;
 use gpui::{AppContext as _, ScrollHandle, TestAppContext, Window};
 
 /// Build a minimal but real `LeftDockSnapshot` inside a live window so
@@ -20,7 +21,7 @@ fn fixture(window: &mut Window, cx: &mut gpui::App) -> LeftDockSnapshot {
         open_tabs: Default::default(),
         named_sessions: Default::default(),
         rail_panes: Default::default(),
-        focused_pane: 0,
+        focused_pane: PaneId(0),
         left_dock_view: daruda_store::project::LeftDockView::default(),
         workspace_page: None,
         page_project: None,

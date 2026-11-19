@@ -107,7 +107,7 @@ pub(super) fn render(snap: &BottomDockSnapshot, cx: &mut Context<Dock>) -> Optio
 
     // One row per queued prompt: single-line text + × remove button.
     let mut list = div()
-        .id(("agent-queue-list", pane_id as usize))
+        .id(("agent-queue-list", pane_id.0 as usize))
         .flex()
         .flex_col()
         .gap(px(theme::AGENT_QUEUE_STRIP_GAP))

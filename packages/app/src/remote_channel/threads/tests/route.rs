@@ -12,8 +12,8 @@ fn a_pane_that_moved_to_a_new_conversation_still_answers_in_its_thread(
     let fixture = crate::test_support::workspace_with_agent_chat(cx);
     let pane_id = fixture.pane();
     let key = fixture.workspace.update(cx, |ws, cx| {
-        ws.set_pane_session_for_test(pane_id, "s1", cx);
-        ws.remote_conversation(pane_id, cx).unwrap()
+        ws.set_pane_session_for_test(pane_id.into(), "s1", cx);
+        ws.remote_conversation(pane_id.into(), cx).unwrap()
     });
     let pane = fixture.pane_ref(cx);
     let bot = cx.update(|cx| {
@@ -25,9 +25,9 @@ fn a_pane_that_moved_to_a_new_conversation_still_answers_in_its_thread(
         start_thread(&mut channels.threads, &scope, pane, &key, "1.1");
         bot
     });
-    fixture
-        .workspace
-        .update(cx, |ws, cx| ws.set_pane_session_for_test(pane_id, "s2", cx));
+    fixture.workspace.update(cx, |ws, cx| {
+        ws.set_pane_session_for_test(pane_id.into(), "s2", cx)
+    });
     cx.update(|cx| {
         assert_eq!(
             route_reply("work", &bot, Some("1.1"), cx),

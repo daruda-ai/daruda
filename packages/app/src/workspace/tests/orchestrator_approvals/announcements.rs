@@ -197,7 +197,7 @@ async fn delayed_announcement(kind: Announcement, cx: &mut TestAppContext) {
         });
         if let Some(checkout) = checkout {
             fixture.workspace.read_with(cx, |ws, cx| {
-                assert!(!ws.phone_turn_open(chat.pane, cx));
+                assert!(!ws.phone_turn_open(chat.pane.into(), cx));
             });
             assert_eq!(crate::test_support::added_lane(&fake).new_path, checkout);
             assert_eq!(fake.calls().len(), 1, "the only write: {:?}", fake.calls());

@@ -9,6 +9,7 @@ use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{AppContext, TestAppContext};
 
 use super::build_workspace;
+use crate::workspace::main_area::pane_tree::PaneId;
 
 #[gpui::test]
 async fn report_error_appends_to_history_and_pushes_toast(cx: &mut TestAppContext) {
@@ -147,7 +148,7 @@ async fn a_session_notice_surfaces_as_a_toast(cx: &mut TestAppContext) {
 
     workspace.update(cx, |ws, cx| {
         ws.report_agent_notice(
-            1,
+            PaneId(1),
             &daruda_acp::AcpEvent::Notice(
                 "set_mode(bypassPermissions) on connect failed".to_string(),
             ),
@@ -186,7 +187,7 @@ async fn protocol_notices_preserve_fields_and_unknown_severity(cx: &mut TestAppC
                 description: Some("First line\nSecond line".into()),
             };
             ws.report_agent_notice(
-                7,
+                PaneId(7),
                 &AcpEvent::SessionNotice {
                     session_id: "child-session".into(),
                     notice,
@@ -222,7 +223,7 @@ async fn repeated_protocol_notices_remain_independent_and_dismiss_locally(cx: &m
     workspace.update(cx, |ws, cx| {
         for _ in 0..2 {
             ws.report_agent_notice(
-                7,
+                PaneId(7),
                 &AcpEvent::SessionNotice {
                     session_id: "root-session".into(),
                     notice: SessionNoticeView {
@@ -259,7 +260,7 @@ async fn a_legacy_delegation_surfaces_its_localized_wording(cx: &mut TestAppCont
     let (_window, workspace) = build_workspace(cx);
 
     workspace.update(cx, |ws, cx| {
-        ws.report_agent_notice(1, &daruda_acp::AcpEvent::LegacyDelegation, cx);
+        ws.report_agent_notice(PaneId(1), &daruda_acp::AcpEvent::LegacyDelegation, cx);
     });
 
     workspace.read_with(cx, |ws, cx| {
@@ -311,7 +312,7 @@ async fn other_events_raise_no_toast(cx: &mut TestAppContext) {
 
     workspace.update(cx, |ws, cx| {
         ws.report_agent_notice(
-            1,
+            PaneId(1),
             &daruda_acp::AcpEvent::TurnEnded {
                 stop_reason: "EndTurn".to_string(),
                 completed_normally: true,

@@ -314,7 +314,11 @@ fn ending_one_terminal_preserves_another_with_the_same_session(cx: &mut gpui::Te
         let mut files = Vec::new();
         for (pane, pid) in [(100, 41), (101, 42)] {
             let terminal = crate::hooks::agent_hooks::mint_terminal_id();
-            crate::runs::RunsHost::register_terminal(ws.run_pane(pane), terminal.clone(), cx);
+            crate::runs::RunsHost::register_terminal(
+                ws.run_pane(pane.into()),
+                terminal.clone(),
+                cx,
+            );
             let mut file = sf::StatusFile::new_hook(
                 "resumed",
                 dir.path(),
@@ -340,8 +344,8 @@ fn ending_one_terminal_preserves_another_with_the_same_session(cx: &mut gpui::Te
             crate::hooks::watcher::StatusEvent::Changed(path.clone()),
             cx,
         );
-        assert!(!ws.claude_sessions.pty_bindings.contains_key(&100));
-        assert!(ws.claude_sessions.pty_bindings.contains_key(&101));
+        assert!(!ws.claude_sessions.pty_bindings.contains_key(&100.into()));
+        assert!(ws.claude_sessions.pty_bindings.contains_key(&101.into()));
         assert_eq!(ws.claude_sessions.status.len(), 1);
         ws.apply_pty_tracker_event(
             ProcessExited {
@@ -350,7 +354,7 @@ fn ending_one_terminal_preserves_another_with_the_same_session(cx: &mut gpui::Te
             },
             cx,
         );
-        assert!(ws.claude_sessions.pty_bindings.contains_key(&101));
+        assert!(ws.claude_sessions.pty_bindings.contains_key(&101.into()));
         assert_eq!(
             ws.claude_sessions
                 .status

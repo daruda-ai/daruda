@@ -112,7 +112,9 @@ async fn a_task_keeps_solicitation_after_its_approval_and_phone_turn_close(
     let fixture = crate::test_support::workspace_with_agent_chat(cx);
     let pane = crate::test_support::register_test_orchestrator(cx);
     let workspace = host(cx);
-    let view = workspace.read_with(cx, |ws, _| ws.agent_chat_view(pane.pane).unwrap().clone());
+    let view = workspace.read_with(cx, |ws, _| {
+        ws.agent_chat_view(pane.pane.into()).unwrap().clone()
+    });
     let _connections = cx.update(crate::workspace::Workspace::fake_agent_connections_for_test);
     let lane = fixture
         .workspace
@@ -210,7 +212,7 @@ pub(super) fn answer_reaches_phone_once(
     assert!(outbound.next().now_or_never().is_none(), "no received ACK");
     let workspace = host(cx);
     workspace.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, cx| {
                 assert_eq!(view.phone_turn().is_some(), solicited);
@@ -237,7 +239,7 @@ pub(super) fn answer_reaches_phone_once(
     );
     workspace.update(cx, |ws, cx| {
         let outcome = ws
-            .agent_chat_view(pane.pane)
+            .agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, cx| {
                 let event = if failed {
@@ -262,7 +264,7 @@ pub(super) fn answer_reaches_phone_once(
                 TurnOutcome::Completed
             })
         );
-        ws.fire_activity_completion(pane.pane, outcome.unwrap(), cx);
+        ws.fire_activity_completion(pane.pane.into(), outcome.unwrap(), cx);
     });
     cx.run_until_parked();
     let mut channels = Vec::new();
@@ -289,7 +291,7 @@ pub(super) fn answer_reaches_phone_once(
     );
     workspace.update(cx, |ws, cx| {
         assert!(
-            ws.agent_chat_view(pane.pane)
+            ws.agent_chat_view(pane.pane.into())
                 .unwrap()
                 .read(cx)
                 .phone_turn()

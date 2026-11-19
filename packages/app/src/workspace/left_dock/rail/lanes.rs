@@ -154,7 +154,7 @@ fn pane_row(
     let keyboard_workspace = workspace.clone();
     let theme = theme::current(cx);
     div()
-        .id(("rail-pane", id as usize))
+        .id(("rail-pane", id.0 as usize))
         .debug_selector(move || format!("rail-pane-{id}"))
         .focusable()
         .tab_stop(true)
@@ -182,7 +182,7 @@ fn pane_row(
         .on_key_down(move |event, window, cx| {
             if let Some(workspace) = keyboard_workspace.upgrade() {
                 workspace.update(cx, |workspace, cx| {
-                    workspace.on_rail_key(RailItem::Pane(target, id), event, window, cx)
+                    workspace.on_rail_key(RailItem::Pane(target, id.0), event, window, cx)
                 });
             }
         })

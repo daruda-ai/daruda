@@ -1,4 +1,5 @@
 use super::project_initial;
+use crate::workspace::main_area::pane_tree::PaneId;
 #[test]
 fn initials_keep_unicode_graphemes() {
     assert_eq!(project_initial(" daruda"), "D");
@@ -74,7 +75,7 @@ async fn project_and_group_folding_preserve_the_active_pane_and_input(
         vcx.update(|window, cx| {
             workspace
                 .read(cx)
-                .assert_fold_state(active, pane, window, cx)
+                .assert_fold_state(active, pane.0, window, cx)
         });
     }
     let group_selector = Box::leak(format!("rail-group-{group}").into_boxed_str());
@@ -87,7 +88,7 @@ async fn project_and_group_folding_preserve_the_active_pane_and_input(
     vcx.update(|window, cx| {
         workspace
             .read(cx)
-            .assert_fold_state(active, pane, window, cx)
+            .assert_fold_state(active, pane.0, window, cx)
     });
     let line = bounds(vcx, line_selector).unwrap();
     assert_eq!(line.left(), group_bounds.left());
@@ -298,7 +299,7 @@ fn pane_kind_icons_preserve_connected_idle_and_other_session_states() {
 
     for icon in [crate::ui::icons::TERMINAL, crate::ui::icons::SESSION] {
         let mut pane = super::PaneSnapshot {
-            pane: 1,
+            pane: PaneId(1),
             title: "pane".into(),
             neutral_icon: icon,
             status: None,

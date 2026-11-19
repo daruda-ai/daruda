@@ -5,6 +5,7 @@ use daruda_store::project::LaneRef;
 use gpui::{App, Context, SharedString, Window};
 
 use crate::ui::icons;
+use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{
     Workspace,
     main_area::{pane::PaneContent, tab_ops::PaneEntry},
@@ -12,7 +13,7 @@ use crate::workspace::{
 
 #[derive(Clone, PartialEq)]
 pub(in crate::workspace) struct PaneSnapshot {
-    pub pane: u64,
+    pub pane: PaneId,
     pub title: SharedString,
     pub neutral_icon: &'static str,
     pub status: Option<SessionStatus>,
@@ -28,7 +29,7 @@ impl PaneSnapshot {
 impl Workspace {
     pub(in crate::workspace) fn rail_pane_snapshots(
         &self,
-        acp: &[(u64, SessionStatus)],
+        acp: &[(PaneId, SessionStatus)],
         cx: &App,
     ) -> HashMap<LaneRef, Vec<PaneSnapshot>> {
         let compact = !self.docks.left.read(cx).is_open;
@@ -71,7 +72,7 @@ impl Workspace {
     fn lane_pane_snapshots(
         &self,
         lane: LaneRef,
-        acp: &[(u64, SessionStatus)],
+        acp: &[(PaneId, SessionStatus)],
         include_titles: bool,
         cx: &App,
     ) -> Vec<PaneSnapshot> {
@@ -89,7 +90,7 @@ impl Workspace {
             .map(|pane| {
                 let ids = [pane.id];
                 PaneSnapshot {
-                    pane: pane.id,
+                    pane: pane.id.0.into(),
                     neutral_icon: match &pane.content {
                         PaneContent::Terminal(_) => icons::TERMINAL,
                         PaneContent::AgentChat(_) => icons::SESSION,
@@ -116,7 +117,7 @@ impl Workspace {
     pub(in crate::workspace) fn activate_rail_pane(
         &mut self,
         lane: LaneRef,
-        pane: u64,
+        pane: PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

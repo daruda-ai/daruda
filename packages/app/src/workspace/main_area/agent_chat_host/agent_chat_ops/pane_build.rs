@@ -176,7 +176,7 @@ impl Workspace {
                 )
             }
         });
-        self.subscribe_agent_chat(pane_id, &view, window, cx);
+        self.subscribe_agent_chat(pane_id.into(), &view, window, cx);
         let preferred_editor = self.mirrors.preferred_editor.clone();
         let question_timeout = self.question_timeout_for(&agent_id);
         view.update(cx, |view, cx| {
@@ -184,7 +184,7 @@ impl Workspace {
             view.set_question_timeout(question_timeout, cx);
         });
         Pane {
-            id: pane_id,
+            id: pane_id.into(),
             content: PaneContent::AgentChat(AgentChatContent {
                 cli_resume: None,
                 restore: Default::default(),

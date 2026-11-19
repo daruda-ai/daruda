@@ -14,7 +14,7 @@ impl Workspace {
         let Some((_, lane)) = self
             .pane_lane_index()
             .into_iter()
-            .find(|(id, _)| *id == pane)
+            .find(|(id, _)| id.0 == pane)
         else {
             return;
         };
@@ -25,12 +25,12 @@ impl Workspace {
             .active_runtime()
             .tabs
             .iter()
-            .position(|tab| tab.layout.pane_ids().contains(&pane))
+            .position(|tab| tab.layout.contains(pane.into()))
         {
             self.activate_tab(index, window, cx);
         }
-        self.set_focused_pane(pane, window, cx);
-        self.focus_pane(pane, window, cx);
+        self.set_focused_pane(pane.into(), window, cx);
+        self.focus_pane(pane.into(), window, cx);
         cx.notify();
     }
 }

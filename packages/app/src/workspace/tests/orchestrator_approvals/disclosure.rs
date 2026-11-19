@@ -105,7 +105,7 @@ fn opened_agent(
     cx: &mut TestAppContext,
 ) -> String {
     fixture.workspace.read_with(cx, |ws, cx| {
-        ws.control_chat_label(chat.pane, cx)
+        ws.control_chat_label(chat.pane.into(), cx)
             .expect("the chat is open")
             .agent
     })

@@ -274,7 +274,10 @@ mod ask {
 
         cx.update_window(fixture.window.into(), |_, _window, cx| {
             fixture.workspace.update(cx, |ws, cx| {
-                let view = ws.agent_chat_view(target.pane).expect("pane").clone();
+                let view = ws
+                    .agent_chat_view(target.pane.into())
+                    .expect("pane")
+                    .clone();
                 view.update(cx, |v, cx| {
                     v.set_turn_in_flight();
                     v.seed_items_for_test(items, cx);
@@ -382,7 +385,10 @@ mod ask {
             .workspace
             .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
         fixture.workspace.update(cx, |ws, cx| {
-            let view = ws.agent_chat_view(target.pane).expect("pane").clone();
+            let view = ws
+                .agent_chat_view(target.pane.into())
+                .expect("pane")
+                .clone();
             view.update(cx, |v, cx| {
                 v.set_turn_in_flight();
                 v.seed_items_for_test(
@@ -399,7 +405,8 @@ mod ask {
                 );
             });
             assert_eq!(
-                ws.control_read(target.pane, cx).expect("pane is there"),
+                ws.control_read(target.pane.into(), cx)
+                    .expect("pane is there"),
                 Some("the previous turn's answer".to_string()),
                 "a fragment must not be reported as what it said"
             );
@@ -454,7 +461,10 @@ mod ask {
             .read_with(cx, |ws, cx| ws.control_snapshot(cx)[0].1.target);
         cx.update_window(fixture.window.into(), |_, _window, cx| {
             fixture.workspace.update(cx, |ws, cx| {
-                let view = ws.agent_chat_view(target.pane).expect("pane").clone();
+                let view = ws
+                    .agent_chat_view(target.pane.into())
+                    .expect("pane")
+                    .clone();
                 view.update(cx, |v, cx| {
                     v.set_turn_in_flight();
                     v.seed_items_for_test(vec![said("nobody is listening")], cx);
@@ -572,7 +582,7 @@ mod fallback_target {
                 .workspace
                 .read_with(cx, |ws, _| ws.fallback_agent_chat())
                 .map(|p| p.pane),
-            Some(second)
+            Some(second.0)
         );
     }
 }
@@ -592,9 +602,9 @@ mod unowned_slash {
         let fixture = workspace_with_agent_chat(cx);
         let pane = fixture.pane();
         fixture.workspace.update(cx, |ws, cx| {
-            ws.advertise_slash_commands_for_test(pane, &["usage", "cost", "model"], cx);
+            ws.advertise_slash_commands_for_test(pane.into(), &["usage", "cost", "model"], cx);
             assert!(
-                ws.agent_takes_slash_command(pane, "usage", cx),
+                ws.agent_takes_slash_command(pane.into(), "usage", cx),
                 "the agent advertises /usage, so /usage is the agent's"
             );
         });
@@ -607,9 +617,9 @@ mod unowned_slash {
         let fixture = workspace_with_agent_chat(cx);
         let pane = fixture.pane();
         fixture.workspace.update(cx, |ws, cx| {
-            ws.advertise_slash_commands_for_test(pane, &["usage", "cost"], cx);
+            ws.advertise_slash_commands_for_test(pane.into(), &["usage", "cost"], cx);
             assert!(
-                !ws.agent_takes_slash_command(pane, "lst", cx),
+                !ws.agent_takes_slash_command(pane.into(), "lst", cx),
                 "a typo of /list is not one of the agent's, so daruda answers it"
             );
         });
@@ -623,8 +633,8 @@ mod unowned_slash {
         let fixture = workspace_with_agent_chat(cx);
         let pane = fixture.pane();
         fixture.workspace.update(cx, |ws, cx| {
-            ws.advertise_slash_commands_for_test(pane, &[], cx);
-            assert!(ws.agent_takes_slash_command(pane, "usage", cx));
+            ws.advertise_slash_commands_for_test(pane.into(), &[], cx);
+            assert!(ws.agent_takes_slash_command(pane.into(), "usage", cx));
         });
     }
 
@@ -634,7 +644,7 @@ mod unowned_slash {
     async fn a_pane_that_is_gone_is_not_answered_as_a_typo(cx: &mut TestAppContext) {
         let fixture = workspace_with_agent_chat(cx);
         fixture.workspace.update(cx, |ws, cx| {
-            assert!(ws.agent_takes_slash_command(9999, "usage", cx));
+            assert!(ws.agent_takes_slash_command(PaneId(9999), "usage", cx));
         });
     }
 
@@ -649,7 +659,7 @@ mod unowned_slash {
         let fixture = workspace_with_agent_chat(cx);
         let pane = fixture.pane();
         fixture.workspace.update(cx, |ws, cx| {
-            ws.advertise_slash_commands_for_test(pane, &["usage", "cost", "model"], cx);
+            ws.advertise_slash_commands_for_test(pane.into(), &["usage", "cost", "model"], cx);
             assert_eq!(ws.slash_claim("usage", cx), SlashClaim::Claims);
             assert!(!ws.slash_claim("usage", cx).rules_out());
         });
@@ -662,7 +672,7 @@ mod unowned_slash {
         let fixture = workspace_with_agent_chat(cx);
         let pane = fixture.pane();
         fixture.workspace.update(cx, |ws, cx| {
-            ws.advertise_slash_commands_for_test(pane, &["usage", "cost"], cx);
+            ws.advertise_slash_commands_for_test(pane.into(), &["usage", "cost"], cx);
             assert!(ws.slash_claim("lst", cx).rules_out());
         });
     }
@@ -677,7 +687,7 @@ mod unowned_slash {
         let advertised = fixture.pane();
         let cold = second_chat(&fixture, cx);
         fixture.workspace.update(cx, |ws, cx| {
-            ws.advertise_slash_commands_for_test(advertised, &["usage", "cost"], cx);
+            ws.advertise_slash_commands_for_test(advertised.into(), &["usage", "cost"], cx);
             ws.advertise_slash_commands_for_test(cold, &[], cx);
             assert_eq!(ws.slash_claim("lst", cx), SlashClaim::Disclaims);
             assert!(
@@ -707,7 +717,7 @@ mod unowned_slash {
         let cold = workspace_with_agent_chat(cx);
         let pane = cold.pane();
         cold.workspace.update(cx, |ws, cx| {
-            ws.advertise_slash_commands_for_test(pane, &[], cx);
+            ws.advertise_slash_commands_for_test(pane.into(), &[], cx);
             assert_eq!(ws.slash_claim("usage", cx), SlashClaim::Unsaid);
         });
     }
@@ -722,7 +732,7 @@ mod unowned_slash {
         let pane = fixture.pane();
         let orchestrator = seed_orchestrator(&fixture, cx);
         fixture.workspace.update(cx, |ws, cx| {
-            ws.advertise_slash_commands_for_test(pane, &["usage", "cost"], cx);
+            ws.advertise_slash_commands_for_test(pane.into(), &["usage", "cost"], cx);
             ws.advertise_slash_commands_for_test(orchestrator, &[], cx);
             assert!(
                 ws.slash_claim("lst", cx).rules_out(),

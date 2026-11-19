@@ -4,7 +4,7 @@ use super::*;
 fn forgetting_a_pane_drops_only_its_marks() {
     let mut marks = QuestionMarks::default();
     marks.bound.insert(
-        1,
+        PaneId(1),
         BoundField {
             question_id: 7,
             field: 0,
@@ -12,7 +12,7 @@ fn forgetting_a_pane_drops_only_its_marks() {
         },
     );
     marks.bound.insert(
-        2,
+        PaneId(2),
         BoundField {
             question_id: 8,
             field: 1,
@@ -20,13 +20,13 @@ fn forgetting_a_pane_drops_only_its_marks() {
         },
     );
     marks.blocked_prompt = Some(BlockedPrompt {
-        pane: 1,
+        pane: PaneId(1),
         question_id: 7,
         text: "later".into(),
     });
-    marks.esc_released = Some(2);
+    marks.esc_released = Some(PaneId(2));
     marks.text_refused = Some((
-        1,
+        PaneId(1),
         BoundField {
             question_id: 7,
             field: 0,
@@ -34,11 +34,11 @@ fn forgetting_a_pane_drops_only_its_marks() {
         },
     ));
 
-    marks.forget_pane(1);
+    marks.forget_pane(PaneId(1));
 
-    assert!(!marks.bound.contains_key(&1));
-    assert!(marks.bound.contains_key(&2));
+    assert!(!marks.bound.contains_key(&1.into()));
+    assert!(marks.bound.contains_key(&2.into()));
     assert!(marks.blocked_prompt.is_none());
-    assert_eq!(marks.esc_released, Some(2));
+    assert_eq!(marks.esc_released, Some(2.into()));
     assert!(marks.text_refused.is_none());
 }

@@ -52,7 +52,7 @@ fn submenu<'a>(entries: &'a [MenuEntry], label: &str) -> Option<&'a Vec<MenuEntr
 
 fn base(kind: PaneMenuKind) -> PaneMenuContext {
     PaneMenuContext {
-        pane_id: 1,
+        pane_id: PaneId(1),
         role: PaneRole::Solo,
         lane: LaneAccess::Accessible,
         selection: None,
@@ -75,7 +75,7 @@ fn terminal_context(role: PaneRole) -> PaneMenuContext {
 fn targets(count: usize) -> Vec<SendTarget> {
     (0..count)
         .map(|index| SendTarget {
-            pane_id: (index + 10) as u64,
+            pane_id: ((index + 10) as u64).into(),
             label: SharedString::from(format!("target-{index}")),
         })
         .collect()

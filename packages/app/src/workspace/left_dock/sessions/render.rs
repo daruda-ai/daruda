@@ -46,7 +46,7 @@ fn session_row(
         ),
     };
     div()
-        .id(("dock-session", pane as usize))
+        .id(("dock-session", pane.0 as usize))
         .flex()
         .items_center()
         .gap(px(theme::GAP_LG))

@@ -1,5 +1,6 @@
 use super::{ChatHold, agent_menu_entries};
 use crate::workspace::main_area::pane_menu::spec::MenuEntry;
+use crate::workspace::main_area::pane_tree::PaneId;
 
 fn agents() -> Vec<(String, String)> {
     vec![
@@ -25,7 +26,7 @@ fn submenu(entries: &[MenuEntry], index: usize) -> Vec<(String, bool)> {
 
 #[test]
 fn continue_offers_every_other_agent_and_new_chat_offers_all() {
-    let entries = agent_menu_entries(1, &agents(), "claude", ChatHold::Conversation);
+    let entries = agent_menu_entries(PaneId(1), &agents(), "claude", ChatHold::Conversation);
     assert_eq!(
         submenu(&entries, 0),
         vec![("Codex".into(), false), ("Gemini".into(), false)]
@@ -36,7 +37,7 @@ fn continue_offers_every_other_agent_and_new_chat_offers_all() {
 #[test]
 fn continue_is_disabled_while_the_pane_cannot_hand_off() {
     for hold in [ChatHold::Busy, ChatHold::Pinned] {
-        let entries = agent_menu_entries(1, &agents(), "claude", hold);
+        let entries = agent_menu_entries(PaneId(1), &agents(), "claude", hold);
         assert!(
             submenu(&entries, 0).iter().all(|(_, disabled)| *disabled),
             "{hold:?}"
@@ -51,7 +52,7 @@ fn continue_is_disabled_while_the_pane_cannot_hand_off() {
 #[test]
 fn a_one_agent_catalog_offers_only_a_new_chat() {
     let only = vec![("claude".to_string(), "Claude Code".to_string())];
-    let entries = agent_menu_entries(1, &only, "claude", ChatHold::Conversation);
+    let entries = agent_menu_entries(PaneId(1), &only, "claude", ChatHold::Conversation);
     assert_eq!(entries.len(), 1, "the empty Continue submenu drops");
     assert_eq!(submenu(&entries, 0), vec![("Claude Code".into(), false)]);
 }

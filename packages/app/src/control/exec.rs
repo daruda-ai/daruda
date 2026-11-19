@@ -38,21 +38,21 @@ pub(crate) fn run(cmd: ResolvedCommand, origin: CommandOrigin, cx: &mut App) -> 
         ResolvedCommand::List => Ok(ControlResult::Listing(listing(cx))),
         ResolvedCommand::Brief => Ok(ControlResult::Brief(brief(cx))),
         ResolvedCommand::Say { target, text } => in_pane_window(target, cx, |ws, _window, cx| {
-            ws.control_say(target.pane, text.clone(), origin, cx)
+            ws.control_say(target.pane.into(), text.clone(), origin, cx)
         })
         .map(|disposition| ControlResult::Sent {
             target,
             disposition,
         }),
         ResolvedCommand::Stop { target } => in_pane_window(target, cx, |ws, _window, cx| {
-            ws.control_stop(target.pane, cx)
+            ws.control_stop(target.pane.into(), cx)
         })
         .map(|disposition| ControlResult::Stopped {
             target,
             disposition,
         }),
         ResolvedCommand::Read { target } => in_pane_window(target, cx, |ws, _window, cx| {
-            ws.control_read(target.pane, cx)
+            ws.control_read(target.pane.into(), cx)
         })
         .map(|text| ControlResult::Transcript { target, text }),
         // A flow is worktree-scoped, and which flows one can run depends on
@@ -248,7 +248,7 @@ pub(crate) fn run_waiting(cmd: WaitingCommand, origin: CommandOrigin, cx: &mut A
 /// later.
 fn ask_pane(target: PaneRef, text: String, origin: CommandOrigin, cx: &mut App) -> Dispatch {
     let sent = in_pane_window(target, cx, |ws, _window, cx| {
-        ws.control_say(target.pane, text.clone(), origin, cx)
+        ws.control_say(target.pane.into(), text.clone(), origin, cx)
     });
     let answered = |answer| Dispatch::Ready(Ok(ControlResult::Answer { target, answer }));
     match sent {
@@ -354,7 +354,7 @@ fn ask_orchestrator(
     // `/list` never names the orchestrator, so fold a missing pane into its
     // own error.
     let send = in_pane_window(destination, cx, |ws, _window, cx| {
-        ws.control_say(destination.pane, text.clone(), origin, cx)
+        ws.control_say(destination.pane.into(), text.clone(), origin, cx)
     })
     .map_err(|_| ControlError::OrchestratorUnavailable)?;
     Ok(ControlResult::Accepted {

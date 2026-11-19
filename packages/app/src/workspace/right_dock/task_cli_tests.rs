@@ -707,7 +707,7 @@ fn continue_checks_routed_sessions_without_pids_in_other_windows(cx: &mut TestAp
         .unwrap();
     second.update(cx, |ws, _cx| {
         ws.claude_sessions.pty_bindings.insert(
-            100,
+            PaneId(100),
             PtyBinding {
                 terminal_id: Some(crate::hooks::agent_hooks::mint_terminal_id()),
                 session_id: "cli-session".into(),

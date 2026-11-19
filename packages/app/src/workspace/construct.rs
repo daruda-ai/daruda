@@ -153,7 +153,10 @@ impl Workspace {
             uuid: daruda_store::project::WorkspaceUuid::new(),
             main_area: main_area::MainAreaContext::default(),
             orchestrator: orchestrator_ops::OrchestratorHost::default(),
-            next_id: 0,
+            // From 1: `PaneId::default()` (0) names no pane, so a runtime
+            // with nothing focused cannot be taken for one focused on its
+            // first pane.
+            next_id: 1,
             window_runtime: window_runtime::WindowRuntime::new(window, cx),
             docks: layout::docks::Docks::new(&ws_weak, config, cx),
             workspace_page: pages::ShownPage::default(),

@@ -90,8 +90,14 @@ mod tests {
     #[test]
     fn the_same_advisory_from_one_pane_shares_a_key() {
         assert_eq!(
-            notice_dedup_key(7, "could not restore this conversation"),
-            notice_dedup_key(7, "could not restore this conversation")
+            notice_dedup_key(
+                crate::workspace::main_area::pane_tree::PaneId(7),
+                "could not restore this conversation"
+            ),
+            notice_dedup_key(
+                crate::workspace::main_area::pane_tree::PaneId(7),
+                "could not restore this conversation"
+            )
         );
     }
 
@@ -113,7 +119,10 @@ mod tests {
                 (8, "the configured mode was refused"),
             ),
         ] {
-            assert_ne!(notice_dedup_key(a.0, a.1), notice_dedup_key(b.0, b.1));
+            assert_ne!(
+                notice_dedup_key(a.0.into(), a.1),
+                notice_dedup_key(b.0.into(), b.1)
+            );
         }
     }
 }

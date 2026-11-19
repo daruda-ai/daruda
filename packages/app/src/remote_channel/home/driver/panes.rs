@@ -42,8 +42,8 @@ pub(super) fn now(cx: &mut App) -> Panes {
             .flat_map(|lane| &lane.panes)
         {
             let pane = summary.target;
-            if let Some(name) = ws.remote_name(pane.pane, cx) {
-                let key = ws.remote_key(pane.pane, cx);
+            if let Some(name) = ws.remote_name(pane.pane.into(), cx) {
+                let key = ws.remote_key(pane.pane.into(), cx);
                 panes.now.insert(pane, PaneNow { name, key });
             }
         }
@@ -83,12 +83,14 @@ mod tests {
         assert!(!before.name.title.is_empty());
         assert_eq!(before.key, None, "no session yet");
         fixture.workspace.update(cx, |ws, cx| {
-            ws.set_pane_session_for_test(fixture.pane(), "s1", cx);
+            ws.set_pane_session_for_test(fixture.pane().into(), "s1", cx);
         });
         let after = found(cx).expect("still named");
         let root = fixture
             .workspace
-            .update(cx, |ws, cx| ws.remote_conversation(fixture.pane(), cx))
+            .update(cx, |ws, cx| {
+                ws.remote_conversation(fixture.pane().into(), cx)
+            })
             .expect("a pane with a session has a conversation");
         assert_eq!(after.name, root.name, "named as its thread root is");
         assert_eq!(after.key, Some(root.key), "the session it is in");

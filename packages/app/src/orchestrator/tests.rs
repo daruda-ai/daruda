@@ -129,7 +129,9 @@ fn offered(
     pane: u64,
     cx: &mut TestAppContext,
 ) -> Vec<daruda_acp::McpServer> {
-    workspace.update(cx, |ws, cx| ws.mcp_servers_for_pane_for_test(pane, cx))
+    workspace.update(cx, |ws, cx| {
+        ws.mcp_servers_for_pane_for_test(pane.into(), cx)
+    })
 }
 
 /// Whether `pane` is offered a server running the control shim. Asserts the
@@ -141,7 +143,7 @@ fn offers_control(
     cx: &mut TestAppContext,
 ) -> bool {
     assert!(
-        workspace.read_with(cx, |ws, _| ws.has_agent_chat_pane_for_test(pane)),
+        workspace.read_with(cx, |ws, _| ws.has_agent_chat_pane_for_test(pane.into())),
         "pane {pane} must be an agent-chat pane in this workspace"
     );
     offered(workspace, pane, cx)
@@ -180,13 +182,13 @@ fn a_same_numbered_pane_in_another_window_gets_nothing(cx: &mut TestAppContext) 
     );
     assert!(
         !user.workspace.update(cx, |ws, cx| ws
-            .offers_control_tools_for_test(orchestrator.pane, cx)),
+            .offers_control_tools_for_test(orchestrator.pane.into(), cx)),
         "the decision itself, not only the servers it yields"
     );
     // The same question in the orchestrator's own window is a yes, so the
     // refusal above is the window's doing.
     assert!(orchestrator_workspace(cx).update(cx, |ws, cx| {
-        ws.offers_control_tools_for_test(orchestrator.pane, cx)
+        ws.offers_control_tools_for_test(orchestrator.pane.into(), cx)
     }));
 }
 

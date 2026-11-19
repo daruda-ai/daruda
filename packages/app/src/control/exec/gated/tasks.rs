@@ -147,7 +147,7 @@ impl PendingTaskStart {
             .scope_run(crate::runs::result::RunKey::Task(exec.clone()), cx);
         let chat = pane.map(|pane| PaneRef {
             workspace: self.workspace,
-            pane,
+            pane: pane.0,
         });
         if let Some(chat) = chat {
             announce_chat(chat, self.caller, cx);
@@ -179,7 +179,7 @@ pub(super) fn open_task_in(
         let pane = ws.control_task_open(&task, mode.clone(), window, cx)?;
         Ok(PaneRef {
             workspace: ws.uuid(),
-            pane,
+            pane: pane.0,
         })
     })?;
     announce_chat(chat, caller, cx);

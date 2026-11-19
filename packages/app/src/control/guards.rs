@@ -102,7 +102,7 @@ pub(crate) fn guard_queue_depth(target: PaneRef, cx: &mut App) -> Result<(), Con
     let mut depth = None;
     WindowRegistry::for_each_workspace(cx, |ws, _window, cx| {
         if ws.uuid() == target.workspace {
-            depth = ws.agent_chat_queue_depth(target.pane, cx);
+            depth = ws.agent_chat_queue_depth(target.pane.into(), cx);
         }
     });
     match depth {
@@ -186,7 +186,7 @@ mod tests {
         cx.update(|cx| assert_eq!(guard_queue_depth(target, cx), Ok(())));
 
         fixture.workspace.update(cx, |ws, cx| {
-            ws.fill_prompt_queue_for_test(target.pane, QUEUE_DEPTH_MAX, cx)
+            ws.fill_prompt_queue_for_test(target.pane.into(), QUEUE_DEPTH_MAX, cx)
         });
         cx.update(|cx| {
             assert_eq!(guard_queue_depth(target, cx), Err(ControlError::QueueFull));

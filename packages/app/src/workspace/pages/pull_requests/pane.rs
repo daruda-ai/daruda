@@ -84,7 +84,7 @@ impl Workspace {
             }
             None => {
                 let pane = Pane {
-                    id: self.alloc_id(),
+                    id: self.alloc_id().into(),
                     content: PaneContent::PullRequest(PrPaneContent {
                         detail: id,
                         label: label(number),

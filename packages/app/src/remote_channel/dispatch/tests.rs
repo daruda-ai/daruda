@@ -55,7 +55,7 @@ async fn a_lent_target_is_reported_back_to_the_sender(cx: &mut gpui::TestAppCont
     let pane = fixture.pane();
     let expected = fixture
         .workspace
-        .read_with(cx, |ws, cx| ws.control_chat_label(pane, cx))
+        .read_with(cx, |ws, cx| ws.control_chat_label(pane.into(), cx))
         .expect("the fixture's pane has a label");
     let mut async_cx = cx.to_async();
 

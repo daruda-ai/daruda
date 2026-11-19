@@ -17,7 +17,7 @@ fn quiesced_completion(cx: &mut TestAppContext, connected: bool) {
     let answer = cx.update(|cx| crate::control::ask::wait_for(pane, cx).2);
     let (handle, mut probe) = daruda_acp::AcpSessionHandle::detached_for_test();
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, _| {
                 if connected {
@@ -49,7 +49,7 @@ fn quiesced_completion(cx: &mut TestAppContext, connected: bool) {
     let (next_id, _, next_answer) = cx.update(|cx| crate::control::ask::wait_for(pane, cx));
     ws.update(cx, |ws, cx| {
         assert_eq!(
-            ws.agent_chat_view(pane.pane)
+            ws.agent_chat_view(pane.pane.into())
                 .unwrap()
                 .read(cx)
                 .last_reconciled_busy(),
@@ -99,7 +99,7 @@ fn a_notice_waits_behind_queued_prompts_and_survives_their_discard(cx: &mut Test
     let _probe = connect(pane, cx);
     let ws = host(cx);
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, _| view.fill_queue_for_test(1));
         produce("behind", cx);
@@ -108,7 +108,7 @@ fn a_notice_waits_behind_queued_prompts_and_survives_their_discard(cx: &mut Test
     assert_eq!(queued(cx).len(), 1, "only the person's prompt is queued");
     assert!(sent(cx).is_empty());
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, cx| view.clear_queue(cx));
     });
@@ -131,7 +131,7 @@ fn a_replaced_session_in_the_same_pane_hears_unreported_episodes_again(cx: &mut 
     let session = |id: &str, cx: &mut TestAppContext| {
         let id = id.to_owned();
         ws.update(cx, |ws, cx| {
-            ws.agent_chat_view(pane.pane)
+            ws.agent_chat_view(pane.pane.into())
                 .unwrap()
                 .update(cx, |view, _| view.set_session_id_for_test(Some(id)));
         });
@@ -157,7 +157,7 @@ fn a_replaced_session_in_the_same_pane_hears_unreported_episodes_again(cx: &mut 
 fn end_turn(pane: crate::remote_channel::bridge::PaneRef, cx: &mut TestAppContext) {
     host(cx).update(cx, |ws, cx| {
         let outcome = ws
-            .agent_chat_view(pane.pane)
+            .agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, cx| {
                 view.apply_event(
@@ -173,7 +173,7 @@ fn end_turn(pane: crate::remote_channel::bridge::PaneRef, cx: &mut TestAppContex
                 view.tick_activity(std::time::Instant::now(), cx)
             });
         if let Some(outcome) = outcome {
-            ws.fire_activity_completion(pane.pane, outcome, cx);
+            ws.fire_activity_completion(pane.pane.into(), outcome, cx);
         }
     });
     cx.run_until_parked();
@@ -186,7 +186,7 @@ fn a_notice_is_sent_after_the_users_queued_prompts_drain(cx: &mut TestAppContext
     let _probe = connect(pane, cx);
     let ws = host(cx);
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, cx| {
                 view.set_turn_in_flight();

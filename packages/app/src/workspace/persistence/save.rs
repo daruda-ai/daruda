@@ -14,6 +14,7 @@ use gpui::{App, Window};
 
 use super::serialize_layout;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::main_area::pane_tree::PaneLayout;
 
 impl Workspace {
@@ -68,7 +69,7 @@ impl Workspace {
                         .filter(|tab| !self.is_orchestrator_tab(tab))
                         .map(|tab| daruda_store::project::SerializedTab {
                             layout: serialize_layout(&tab.layout, panes_src, wt.id, cx),
-                            last_focused_pane: tab.last_focused_pane,
+                            last_focused_pane: tab.last_focused_pane.0,
                             user_label: tab.user_label.as_ref().map(|s| s.to_string()),
                         })
                         .collect();
@@ -98,7 +99,7 @@ impl Workspace {
                                     wt.id,
                                     cx,
                                 ),
-                                last_focused_pane: tab.pane,
+                                last_focused_pane: tab.pane.0,
                                 user_label: tab.user_label.as_ref().map(|s| s.to_string()),
                             })
                             .collect(),
@@ -114,7 +115,7 @@ impl Workspace {
                         focused_pane_id = s
                             .tabs
                             .get(s.active_tab_index)
-                            .map_or(0, |tab| tab.last_focused_pane);
+                            .map_or(PaneId::default(), |tab| tab.last_focused_pane.into());
                     }
                     s
                 })
@@ -209,7 +210,7 @@ impl Workspace {
             font_size: self.mirrors.terminal_config.font_size,
             vertical_spacing: self.mirrors.terminal_config.vertical_spacing,
             horizontal_spacing: self.mirrors.terminal_config.horizontal_spacing,
-            focused_pane_id,
+            focused_pane_id: focused_pane_id.0,
             active_dock_view: self.docks.left_view,
             active_right_panel_view: self.docks.right_view,
             active_page: self
@@ -334,7 +335,7 @@ impl Workspace {
                     .session()
                     .dump_viewport()
                     .ok()?;
-                (text.len() <= 64 * 1024).then_some((pane.id, text))
+                (text.len() <= 64 * 1024).then_some((pane.id.0, text))
             })
             .collect();
         if !snapshots.is_empty() {

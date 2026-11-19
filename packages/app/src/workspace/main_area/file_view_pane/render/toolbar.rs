@@ -141,11 +141,11 @@ fn mode_button_group(
     cx: &mut Context<Workspace>,
 ) -> impl IntoElement {
     let values = options.clone();
-    button_group_on_surface(("file-viewer-mode-group", pane_id), surface, cx)
+    button_group_on_surface(("file-viewer-mode-group", pane_id.0), surface, cx)
         .children(options.into_iter().map(|mode| {
             let is_active = mode == active;
             crate::ui::button_icon_on_surface(
-                (mode_button_id(mode), pane_id),
+                (mode_button_id(mode), pane_id.0),
                 mode_icon(mode),
                 surface,
                 cx,

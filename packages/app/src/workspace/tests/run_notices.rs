@@ -45,7 +45,7 @@ fn connect(
 ) -> daruda_acp::HandleProbe {
     let (handle, probe) = daruda_acp::AcpSessionHandle::detached_for_test();
     host(cx).update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, cx| {
                 view.set_status_for_test(daruda_chat::view::AgentSessionStatus::Connected);
@@ -58,7 +58,7 @@ fn connect(
 /// End the orchestrator's turn at its reconciled completion.
 fn complete(pane: crate::remote_channel::bridge::PaneRef, cx: &mut TestAppContext) {
     host(cx).update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, _| {
                 view.set_turn_idle();
@@ -130,7 +130,7 @@ fn busy_orchestrator_gets_one_group_at_reconciled_completion(cx: &mut TestAppCon
     let _probe = connect(pane, cx);
     let ws = host(cx);
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, cx| {
                 view.set_turn_in_flight();
@@ -189,7 +189,7 @@ fn gate_rotation_flushes_pending_but_not_accepted_notices(cx: &mut TestAppContex
     let _probe = connect(pane, cx);
     let ws = host(cx);
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, _| view.set_turn_in_flight());
     });
@@ -198,7 +198,7 @@ fn gate_rotation_flushes_pending_but_not_accepted_notices(cx: &mut TestAppContex
     cx.run_until_parked();
     assert!(sent(cx).is_empty());
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, _| view.set_turn_idle());
     });
@@ -274,7 +274,7 @@ fn a_full_queue_retains_notices_for_the_next_opportunity(cx: &mut TestAppContext
     let _probe = connect(pane, cx);
     let ws = host(cx);
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, _| {
                 view.fill_queue_for_test(daruda_chat::QUEUE_DEPTH_MAX)
@@ -290,7 +290,7 @@ fn a_full_queue_retains_notices_for_the_next_opportunity(cx: &mut TestAppContext
     );
     assert!(sent(cx).is_empty());
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, cx| view.clear_queue(cx));
     });
@@ -313,7 +313,7 @@ fn read_only_or_unavailable_notices_retry_after_session_replacement(cx: &mut Tes
     install(cx);
     let ws = host(cx);
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, _| {
                 view.set_access(AgentChatAccess::CliSnapshot(ExecutionRef {
@@ -326,7 +326,7 @@ fn read_only_or_unavailable_notices_retry_after_session_replacement(cx: &mut Tes
     cx.run_until_parked();
     assert!(queued(cx).is_empty());
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, _| {
                 view.make_interactive();
@@ -343,7 +343,7 @@ fn read_only_or_unavailable_notices_retry_after_session_replacement(cx: &mut Tes
         "closed command channel cannot accept a notice"
     );
     ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(pane.pane)
+        ws.agent_chat_view(pane.pane.into())
             .unwrap()
             .update(cx, |view, _| {
                 view.detach_handle();
@@ -475,14 +475,14 @@ fn internal_notice_preserves_workspace_composer_and_queued_edit(cx: &mut TestApp
     let edit = cx
         .update_window(window, |_, window, cx| {
             ws.update(cx, |ws, cx| {
-                let view = ws.agent_chat_view(target.pane).unwrap().clone();
+                let view = ws.agent_chat_view(target.pane.into()).unwrap().clone();
                 let id = view.update(cx, |view, cx| {
                     view.send_prompt_text("original user prompt".into(), cx);
                     let id = view.queue().last_prompt_id().unwrap();
                     view.begin_edit(id, cx);
                     id
                 });
-                ws.input_dock.owner = Some(target.pane);
+                ws.input_dock.owner = Some(target.pane.into());
                 ws.input_dock.input.update(cx, |input, cx| {
                     input.set_value("unfinished composer", window, cx)
                 });
@@ -493,7 +493,7 @@ fn internal_notice_preserves_workspace_composer_and_queued_edit(cx: &mut TestApp
         .unwrap();
     cx.run_until_parked();
     ws.read_with(cx, |ws, cx| {
-        let view = ws.agent_chat_view(target.pane).unwrap().read(cx);
+        let view = ws.agent_chat_view(target.pane.into()).unwrap().read(cx);
         assert_eq!(view.queue().editing(), Some(edit));
         assert_eq!(
             view.queue().find(edit).unwrap().text(),
@@ -538,7 +538,7 @@ async fn workspace_flow_and_two_tasks_return_one_pointer_group(cx: &mut TestAppC
         outbox
     });
     orchestrator_ws.update(cx, |ws, cx| {
-        ws.agent_chat_view(orchestrator.pane)
+        ws.agent_chat_view(orchestrator.pane.into())
             .unwrap()
             .update(cx, |view, cx| {
                 view.set_turn_in_flight();
@@ -612,7 +612,7 @@ async fn workspace_flow_and_two_tasks_return_one_pointer_group(cx: &mut TestAppC
     for chat in task_chats {
         fixture.workspace.update(cx, |ws, cx| {
             let outcome = ws
-                .agent_chat_view(chat.pane)
+                .agent_chat_view(chat.pane.into())
                 .unwrap()
                 .update(cx, |view, cx| {
                     view.apply_event(
@@ -627,7 +627,11 @@ async fn workspace_flow_and_two_tasks_return_one_pointer_group(cx: &mut TestAppC
                     );
                     view.tick_activity(std::time::Instant::now(), cx)
                 });
-            ws.fire_activity_completion(chat.pane, outcome.expect("reconciled completion"), cx);
+            ws.fire_activity_completion(
+                chat.pane.into(),
+                outcome.expect("reconciled completion"),
+                cx,
+            );
         });
     }
     // A waiter's wake-up is the engine thread's signal: no polling sleep.

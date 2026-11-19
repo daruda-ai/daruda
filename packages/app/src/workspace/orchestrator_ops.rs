@@ -333,7 +333,7 @@ impl Workspace {
                 rt.focused_pane_id = rt
                     .tabs
                     .get(rt.active_tab_index)
-                    .map_or(0, |tab| tab.last_focused_pane);
+                    .map_or(PaneId(0), |tab| tab.last_focused_pane);
             }
         }
         // Put back the zoom the tab stood down, never the tab's own pane.
@@ -417,7 +417,7 @@ impl Workspace {
     pub(crate) fn orchestrator_chat_pane(&self) -> Option<crate::remote_channel::bridge::PaneRef> {
         Some(crate::remote_channel::bridge::PaneRef {
             workspace: self.uuid(),
-            pane: self.orchestrator.chat.as_ref()?.pane_id,
+            pane: (self.orchestrator.chat.as_ref()?.pane_id).0,
         })
     }
 

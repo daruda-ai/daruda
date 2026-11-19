@@ -180,7 +180,7 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
         } => {
             let mut agents = true;
             dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-                agents = ws.agent_takes_slash_command(pane.pane, &name, cx);
+                agents = ws.agent_takes_slash_command(pane.pane.into(), &name, cx);
             });
             if agents {
                 deliver_prompt(pane, text, adopted, target, cx)
@@ -211,8 +211,13 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
         } => {
             let mut outcome = BotPermissionOutcome::Gone;
             dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-                outcome =
-                    ws.respond_bot_permission(pane.pane, session, perm_id, decision.clone(), cx);
+                outcome = ws.respond_bot_permission(
+                    pane.pane.into(),
+                    session,
+                    perm_id,
+                    decision.clone(),
+                    cx,
+                );
             });
             Effect::Feedback {
                 label: permission_feedback(&decision, outcome),
@@ -226,7 +231,7 @@ pub(crate) fn handle_in_app(aimed: Aimed, target: &Target, cx: &mut App) -> Effe
         } => {
             let mut outcome = BotQuestionOutcome::Gone;
             dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-                outcome = ws.respond_bot_question(pane.pane, question, reply.clone(), cx);
+                outcome = ws.respond_bot_question(pane.pane.into(), question, reply.clone(), cx);
             });
             question_effect(&reply, outcome)
         }
@@ -348,7 +353,7 @@ fn deliver_prompt(
 ) -> Effect {
     let mut delivered = false;
     dispatch_to_workspace(cx, pane.workspace, |ws, cx| {
-        delivered = ws.inject_bot_reply(pane.pane, text.clone(), cx);
+        delivered = ws.inject_bot_reply(pane.pane.into(), text.clone(), cx);
     });
     if !delivered {
         return command::report_target_gone(pane, target, cx).map_or(Effect::None, Effect::Reply);

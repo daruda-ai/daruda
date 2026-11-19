@@ -54,7 +54,10 @@ fn what_goes_beside_the_tabs() {
 #[test]
 fn an_open_shows_refills_or_makes_a_tab() {
     use OpenIntent::{Commit, Enter, Preview};
-    let (left, aside) = ((PanePlace::Tab(1), 11), (PanePlace::Side(0), 22));
+    let (left, aside) = (
+        (PanePlace::Tab(1), PaneId(11)),
+        (PanePlace::Side(0), PaneId(22)),
+    );
     let facts = |existing, scratch, groups| OpenFacts {
         groups,
         existing,
@@ -113,10 +116,10 @@ fn an_open_shows_refills_or_makes_a_tab() {
             Preview,
             facts(
                 None,
-                Some((PanePlace::Tab(0), 11)),
+                Some((PanePlace::Tab(0), PaneId(11))),
                 GroupFacts { tabs: 1, ..ROOMY },
             ),
-            new(false, Some((PanePlace::Tab(0), 11))),
+            new(false, Some((PanePlace::Tab(0), PaneId(11)))),
         ),
     ];
     for (label, intent, facts, plan) in cases {

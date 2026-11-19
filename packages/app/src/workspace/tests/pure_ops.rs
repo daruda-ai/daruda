@@ -19,10 +19,13 @@ fn leaf(id: PaneId) -> PaneLayout {
 
 #[test]
 fn test_pane_layout_contains() {
-    let layout = split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
-    assert!(layout.contains(1));
-    assert!(layout.contains(2));
-    assert!(!layout.contains(3));
+    let layout = split(
+        SplitDirection::Horizontal,
+        vec![leaf(PaneId(1)), leaf(PaneId(2))],
+    );
+    assert!(layout.contains(PaneId(1)));
+    assert!(layout.contains(PaneId(2)));
+    assert!(!layout.contains(PaneId(3)));
 }
 
 #[test]
@@ -30,32 +33,38 @@ fn test_pane_layout_pane_ids() {
     let layout = split(
         SplitDirection::Horizontal,
         vec![
-            leaf(10),
-            split(SplitDirection::Vertical, vec![leaf(20), leaf(30)]),
+            leaf(PaneId(10)),
+            split(
+                SplitDirection::Vertical,
+                vec![leaf(PaneId(20)), leaf(PaneId(30))],
+            ),
         ],
     );
     assert_eq!(layout.pane_ids(), vec![10, 20, 30]);
     assert_eq!(layout.leaf_count(), 3);
-    assert_eq!(layout.first_leaf(), 10);
+    assert_eq!(layout.first_leaf(), PaneId(10));
 }
 
 #[test]
 fn test_pane_layout_next_prev() {
-    let layout = split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
-    assert_eq!(layout.next_pane(1), Some(2));
-    assert_eq!(layout.next_pane(2), Some(1));
-    assert_eq!(layout.prev_pane(2), Some(1));
-    assert_eq!(layout.prev_pane(1), Some(2));
+    let layout = split(
+        SplitDirection::Horizontal,
+        vec![leaf(PaneId(1)), leaf(PaneId(2))],
+    );
+    assert_eq!(layout.next_pane(PaneId(1)), Some(2.into()));
+    assert_eq!(layout.next_pane(PaneId(2)), Some(1.into()));
+    assert_eq!(layout.prev_pane(PaneId(2)), Some(1.into()));
+    assert_eq!(layout.prev_pane(PaneId(1)), Some(2.into()));
 }
 
 #[test]
 fn test_insert_split_at_root_leaf() {
-    let mut layout = leaf(1);
+    let mut layout = leaf(PaneId(1));
     assert!(insert_split_at(
         &mut layout,
-        1,
+        1.into(),
         SplitDirection::Horizontal,
-        2,
+        2.into(),
         false
     ));
     assert_eq!(layout.pane_ids(), vec![1, 2]);
@@ -71,12 +80,15 @@ fn test_insert_split_at_root_leaf() {
 #[test]
 fn test_insert_split_same_direction_splices_into_parent() {
     // [1 | 2] horizontal, split 2 horizontally → [1 | 2 | 3]
-    let mut layout = split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+    let mut layout = split(
+        SplitDirection::Horizontal,
+        vec![leaf(PaneId(1)), leaf(PaneId(2))],
+    );
     assert!(insert_split_at(
         &mut layout,
-        2,
+        2.into(),
         SplitDirection::Horizontal,
-        3,
+        3.into(),
         false
     ));
     assert_eq!(layout.pane_ids(), vec![1, 2, 3]);
@@ -90,12 +102,15 @@ fn test_insert_split_same_direction_splices_into_parent() {
 #[test]
 fn test_insert_split_opposite_direction_creates_nested() {
     // [1 | 2] horizontal, split 2 vertically → [1 | [2 / 3]]
-    let mut layout = split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+    let mut layout = split(
+        SplitDirection::Horizontal,
+        vec![leaf(PaneId(1)), leaf(PaneId(2))],
+    );
     assert!(insert_split_at(
         &mut layout,
-        2,
+        2.into(),
         SplitDirection::Vertical,
-        3,
+        3.into(),
         false
     ));
     assert_eq!(layout.pane_ids(), vec![1, 2, 3]);
@@ -121,9 +136,12 @@ fn test_insert_split_opposite_direction_creates_nested() {
 
 #[test]
 fn test_remove_pane_collapses_split() {
-    let mut layout = split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
-    assert!(remove_pane_from_layout(&mut layout, 1));
-    assert!(matches!(layout, PaneLayout::Pane(2)));
+    let mut layout = split(
+        SplitDirection::Horizontal,
+        vec![leaf(PaneId(1)), leaf(PaneId(2))],
+    );
+    assert!(remove_pane_from_layout(&mut layout, PaneId(1)));
+    assert!(matches!(layout, PaneLayout::Pane(PaneId(2))));
 }
 
 #[test]
@@ -132,11 +150,14 @@ fn test_remove_pane_nested_promotes() {
     let mut layout = split(
         SplitDirection::Horizontal,
         vec![
-            leaf(1),
-            split(SplitDirection::Vertical, vec![leaf(2), leaf(3)]),
+            leaf(PaneId(1)),
+            split(
+                SplitDirection::Vertical,
+                vec![leaf(PaneId(2)), leaf(PaneId(3))],
+            ),
         ],
     );
-    assert!(remove_pane_from_layout(&mut layout, 2));
+    assert!(remove_pane_from_layout(&mut layout, PaneId(2)));
     assert_eq!(layout.pane_ids(), vec![1, 3]);
     assert_eq!(layout.leaf_count(), 2);
     assert!(matches!(
@@ -151,14 +172,17 @@ fn test_remove_pane_nested_promotes() {
 #[test]
 fn test_cleanup_flattens_same_direction_nested() {
     // Manually construct [1 | [2 | 3]] (both Horizontal) and expect flatten.
-    let inner = split(SplitDirection::Horizontal, vec![leaf(2), leaf(3)]);
-    let mut layout = split(SplitDirection::Horizontal, vec![leaf(1), inner]);
+    let inner = split(
+        SplitDirection::Horizontal,
+        vec![leaf(PaneId(2)), leaf(PaneId(3))],
+    );
+    let mut layout = split(SplitDirection::Horizontal, vec![leaf(PaneId(1)), inner]);
     cleanup_after_remove(&mut layout);
     if let PaneLayout::Split { children, .. } = &layout {
         assert_eq!(children.len(), 3);
-        assert!(matches!(children[0], PaneLayout::Pane(1)));
-        assert!(matches!(children[1], PaneLayout::Pane(2)));
-        assert!(matches!(children[2], PaneLayout::Pane(3)));
+        assert!(matches!(children[0], PaneLayout::Pane(PaneId(1))));
+        assert!(matches!(children[1], PaneLayout::Pane(PaneId(2))));
+        assert!(matches!(children[2], PaneLayout::Pane(PaneId(3))));
     } else {
         panic!("expected Split");
     }
@@ -166,31 +190,37 @@ fn test_cleanup_flattens_same_direction_nested() {
 
 #[test]
 fn test_collect_pane_sizes_single() {
-    let layout = leaf(1);
+    let layout = leaf(PaneId(1));
     let mut sizes = Vec::new();
     collect_pane_sizes(&layout, 800.0, 600.0, &mut sizes);
     assert_eq!(sizes.len(), 1);
-    assert_eq!(sizes[0], (1, 800.0, 600.0));
+    assert_eq!(sizes[0], (1.into(), 800.0, 600.0));
 }
 
 #[test]
 fn test_collect_pane_sizes_h_split() {
-    let layout = split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
+    let layout = split(
+        SplitDirection::Horizontal,
+        vec![leaf(PaneId(1)), leaf(PaneId(2))],
+    );
     let mut sizes = Vec::new();
     collect_pane_sizes(&layout, 801.0, 600.0, &mut sizes);
     assert_eq!(sizes.len(), 2);
-    assert_eq!(sizes[0], (1, 400.0, 600.0));
-    assert_eq!(sizes[1], (2, 400.0, 600.0));
+    assert_eq!(sizes[0], (1.into(), 400.0, 600.0));
+    assert_eq!(sizes[1], (2.into(), 400.0, 600.0));
 }
 
 #[test]
 fn test_collect_pane_sizes_v_split() {
-    let layout = split(SplitDirection::Vertical, vec![leaf(1), leaf(2)]);
+    let layout = split(
+        SplitDirection::Vertical,
+        vec![leaf(PaneId(1)), leaf(PaneId(2))],
+    );
     let mut sizes = Vec::new();
     collect_pane_sizes(&layout, 800.0, 601.0, &mut sizes);
     assert_eq!(sizes.len(), 2);
-    assert_eq!(sizes[0], (1, 800.0, 300.0));
-    assert_eq!(sizes[1], (2, 800.0, 300.0));
+    assert_eq!(sizes[0], (1.into(), 800.0, 300.0));
+    assert_eq!(sizes[1], (2.into(), 800.0, 300.0));
 }
 
 #[test]
@@ -199,8 +229,11 @@ fn test_collect_pane_rects_nested() {
     let layout = split(
         SplitDirection::Horizontal,
         vec![
-            leaf(1),
-            split(SplitDirection::Vertical, vec![leaf(2), leaf(3)]),
+            leaf(PaneId(1)),
+            split(
+                SplitDirection::Vertical,
+                vec![leaf(PaneId(2)), leaf(PaneId(3))],
+            ),
         ],
     );
     let mut rects = Vec::new();
@@ -215,8 +248,11 @@ fn test_collect_pane_rects_nested() {
 
 #[test]
 fn test_adjust_divider_changes_ratios() {
-    let mut layout = split(SplitDirection::Horizontal, vec![leaf(1), leaf(2)]);
-    assert!(adjust_divider(&mut layout, 1, 0.2));
+    let mut layout = split(
+        SplitDirection::Horizontal,
+        vec![leaf(PaneId(1)), leaf(PaneId(2))],
+    );
+    assert!(adjust_divider(&mut layout, PaneId(1), 0.2));
     if let PaneLayout::Split { ratios, .. } = &layout {
         assert!((ratios[0] - 0.7).abs() < 1e-4);
         assert!((ratios[1] - 0.3).abs() < 1e-4);

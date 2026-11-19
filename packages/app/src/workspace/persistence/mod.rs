@@ -420,7 +420,7 @@ fn serialize_layout(
                 |p| serialize_pane_content(p, lane, cx),
             );
             daruda_store::project::SerializedLayout::Leaf {
-                pane_id: *id,
+                pane_id: id.0,
                 content,
             }
         }

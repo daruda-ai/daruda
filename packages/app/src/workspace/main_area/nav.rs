@@ -141,48 +141,60 @@ mod tests {
     #[test]
     fn left_right_in_h_split() {
         // [1 | 2 | 3]
-        let layout = split(SplitDirection::Horizontal, vec![leaf(1), leaf(2), leaf(3)]);
+        let layout = split(
+            SplitDirection::Horizontal,
+            vec![leaf(PaneId(1)), leaf(PaneId(2)), leaf(PaneId(3))],
+        );
         let rects = rects_of(&layout);
         let act = HashMap::new();
         assert_eq!(
-            pane_in_direction(&rects, 2, NavDirection::Left, &act),
-            Some(1)
+            pane_in_direction(&rects, PaneId(2), NavDirection::Left, &act),
+            Some(1.into())
         );
         assert_eq!(
-            pane_in_direction(&rects, 2, NavDirection::Right, &act),
-            Some(3)
+            pane_in_direction(&rects, PaneId(2), NavDirection::Right, &act),
+            Some(3.into())
         );
-        assert_eq!(pane_in_direction(&rects, 1, NavDirection::Left, &act), None);
         assert_eq!(
-            pane_in_direction(&rects, 3, NavDirection::Right, &act),
+            pane_in_direction(&rects, PaneId(1), NavDirection::Left, &act),
+            None
+        );
+        assert_eq!(
+            pane_in_direction(&rects, PaneId(3), NavDirection::Right, &act),
             None
         );
     }
 
     #[test]
     fn up_down_in_v_split() {
-        let layout = split(SplitDirection::Vertical, vec![leaf(1), leaf(2), leaf(3)]);
+        let layout = split(
+            SplitDirection::Vertical,
+            vec![leaf(PaneId(1)), leaf(PaneId(2)), leaf(PaneId(3))],
+        );
         let rects = rects_of(&layout);
         let act = HashMap::new();
         assert_eq!(
-            pane_in_direction(&rects, 2, NavDirection::Up, &act),
-            Some(1)
+            pane_in_direction(&rects, PaneId(2), NavDirection::Up, &act),
+            Some(1.into())
         );
         assert_eq!(
-            pane_in_direction(&rects, 2, NavDirection::Down, &act),
-            Some(3)
+            pane_in_direction(&rects, PaneId(2), NavDirection::Down, &act),
+            Some(3.into())
         );
     }
 
     #[test]
     fn adjacency_skips_far_pane() {
         // [1 | 2 | 3] — from 1, Right should pick 2 (not 3, which is farther).
-        let layout = split(SplitDirection::Horizontal, vec![leaf(1), leaf(2), leaf(3)]);
+        let layout = split(
+            SplitDirection::Horizontal,
+            vec![leaf(PaneId(1)), leaf(PaneId(2)), leaf(PaneId(3))],
+        );
         let rects = rects_of(&layout);
         let act = HashMap::new();
         assert_eq!(
-            pane_in_direction(&rects, 1, NavDirection::Right, &act),
-            Some(2)
+            pane_in_direction(&rects, PaneId(1), NavDirection::Right, &act),
+            Some(2.into())
         );
     }
 
@@ -193,37 +205,40 @@ mod tests {
         let layout = split(
             SplitDirection::Horizontal,
             vec![
-                leaf(1),
-                split(SplitDirection::Vertical, vec![leaf(2), leaf(3)]),
+                leaf(PaneId(1)),
+                split(
+                    SplitDirection::Vertical,
+                    vec![leaf(PaneId(2)), leaf(PaneId(3))],
+                ),
             ],
         );
         let rects = rects_of(&layout);
         let mut act = HashMap::new();
-        act.insert(3, 5);
-        act.insert(2, 1);
+        act.insert(PaneId(3), 5);
+        act.insert(PaneId(2), 1);
         assert_eq!(
-            pane_in_direction(&rects, 1, NavDirection::Right, &act),
-            Some(3)
+            pane_in_direction(&rects, 1.into(), NavDirection::Right, &act),
+            Some(3.into())
         );
         // From 2 → Down → 3
         assert_eq!(
-            pane_in_direction(&rects, 2, NavDirection::Down, &act),
-            Some(3)
+            pane_in_direction(&rects, 2.into(), NavDirection::Down, &act),
+            Some(3.into())
         );
         // From 3 → Left → 1
         assert_eq!(
-            pane_in_direction(&rects, 3, NavDirection::Left, &act),
-            Some(1)
+            pane_in_direction(&rects, 3.into(), NavDirection::Left, &act),
+            Some(1.into())
         );
     }
 
     #[test]
     fn no_neighbor_returns_none() {
-        let layout = leaf(1);
+        let layout = leaf(PaneId(1));
         let rects = rects_of(&layout);
         let act = HashMap::new();
         assert_eq!(
-            pane_in_direction(&rects, 1, NavDirection::Right, &act),
+            pane_in_direction(&rects, PaneId(1), NavDirection::Right, &act),
             None
         );
     }

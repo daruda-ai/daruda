@@ -139,7 +139,7 @@ impl Workspace {
             self.close_session_chooser(true, window, cx);
             return;
         };
-        self.activate_rail_pane(lane, target.pane, window, cx);
+        self.activate_rail_pane(lane, target.pane.0.into(), window, cx);
     }
 }
 
