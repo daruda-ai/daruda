@@ -47,6 +47,10 @@ impl Workspace {
             height = (height - bottom_size).max(1.0);
         }
 
+        // The tabs share the width with the group beside them, when shown.
+        self.main_area.groups_width = width;
+        width = self.groups_layout().tabs_width(width).max(1.0);
+
         let mut metrics_cache: std::collections::HashMap<FontMetricsKey, TerminalLayout> =
             std::collections::HashMap::new();
 

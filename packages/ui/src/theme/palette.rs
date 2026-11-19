@@ -154,6 +154,9 @@ pub const TAB_STATUS_DOT_GAP: f32 = GAP_SM;
 pub const NEW_TAB_FONT_SIZE: f32 = FONT_SIZE_MD;
 pub const NEW_TAB_MARGIN_X: f32 = GAP_XS;
 pub const AGENT_MENU_FLAT_MAX: usize = 5;
+/// The least width either tab group keeps while both are shown; under
+/// twice this (and a divider) only the group being used is drawn.
+pub const TAB_GROUP_MIN_WIDTH: f32 = 320.0;
 pub const PANE_HEADER_HEIGHT: f32 = 28.0;
 pub const PANE_HEADER_FONT_SIZE: f32 = FONT_SIZE_SM;
 pub const PANE_HEADER_CWD_FONT_SIZE: f32 = FONT_SIZE_XS;

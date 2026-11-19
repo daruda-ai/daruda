@@ -5,7 +5,8 @@ use super::pane_tree::PaneId;
 use crate::workspace::Workspace;
 
 impl Workspace {
-    /// `true` when `pane_id` is drawn: in the active lane's active tab, not
+    /// `true` when `pane_id` is drawn: the side group's shown pane, or in the
+    /// active lane's active tab, not
     /// hidden behind another pane zoomed in that tab, and not covered by
     /// Settings, a page or an unavailable lane's empty state. Every pane of a
     /// split counts, not only the focused one. Mirrors `render::center`.
@@ -19,6 +20,14 @@ impl Workspace {
             return false;
         }
         let runtime = self.active_runtime();
+        let shown = self.groups_shown();
+        if let Some(super::side_group::PanePlace::Side(index)) = runtime.place_of(pane_id) {
+            return index == runtime.side.active_index()
+                && shown != super::side_group::GroupsShown::Tabs;
+        }
+        if !shown.draws_tabs() {
+            return false;
+        }
         let Some(tab) = runtime.tabs.get(runtime.active_tab_index) else {
             return false;
         };

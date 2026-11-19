@@ -171,13 +171,14 @@ impl Workspace {
         }
         // The active lane's last tab empties the lane in place (→ empty-state)
         // and keeps the window, even when it is the window's last tab: on
-        // Windows and Linux the last window closing quits the app.
-        if self.active_runtime().tabs.len() <= 1 {
+        // Windows and Linux the last window closing quits the app. Tabs
+        // still open beside it stay, with the empty state on the left.
+        if self.active_runtime().tabs.len() <= 1 && self.active_runtime().side.is_empty() {
             self.empty_active_lane_runtime(window, cx);
             return;
         }
 
-        let tab = self.active_runtime_mut().tabs.remove(index);
+        let tab = self.unlist_tab(index);
         let pane_ids = tab.layout.pane_ids();
         if pane_ids
             .iter()
@@ -190,10 +191,27 @@ impl Workspace {
         self.active_runtime_mut()
             .panes
             .retain(|p| !pane_ids.contains(&p.id));
+        self.focus_active_tab(window, cx);
+        cx.notify();
+    }
+
+    /// Take the tab at `index` out of the strip and settle which tab is
+    /// shown after it. Its panes stay in the runtime: the caller drops them
+    /// or gives them another place. The caller checked the index.
+    pub(super) fn unlist_tab(&mut self, index: usize) -> TabEntry {
+        let tab = self.active_runtime_mut().tabs.remove(index);
 
         // Adjust history for the removed tab: drop direct references to it
         // and shift all higher indices down by one so they remain valid.
         rebase_tab_history_after_removal(&mut self.active_runtime_mut().tab_history, index);
+
+        if self.active_runtime().tabs.is_empty() {
+            let runtime = self.active_runtime_mut();
+            runtime.tab_history.clear();
+            runtime.active_tab_index = 0;
+            runtime.focused_pane_id = PaneId::default();
+            return tab;
+        }
 
         // Choose next active tab. Prefer the most-recent history entry;
         // fall back to the nearest neighbor when history is empty.
@@ -216,7 +234,12 @@ impl Workspace {
             self.active_runtime().active_tab_index
         };
         self.active_runtime_mut().active_tab_index = new_active;
+        tab
+    }
 
+    /// Move into the pane the tab now shown was last used in. With no tab
+    /// left, the keyboard goes to the tabs beside them, if any.
+    pub(super) fn focus_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(focused) = self
             .active_runtime()
             .tabs
@@ -226,8 +249,9 @@ impl Workspace {
             self.set_focused_pane(focused, window, cx);
             self.bump_activity(focused);
             self.focus_pane(focused, window, cx);
+        } else {
+            self.focus_side_group(window, cx);
         }
-        cx.notify();
     }
 
     /// Shared core behind `activate_tab` and `switch_tab_for_drag_preview`:

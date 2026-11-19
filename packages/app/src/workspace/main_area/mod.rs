@@ -23,6 +23,8 @@ pub(in crate::workspace) mod pane_menu;
 mod pane_press;
 pub(in crate::workspace) mod pane_tree;
 pub(in crate::workspace) mod resize;
+pub(in crate::workspace) mod side_group;
+pub(in crate::workspace) mod side_ops;
 pub(in crate::workspace) mod tab_drag_ops;
 mod tab_name_ops;
 pub(in crate::workspace) mod tab_ops;

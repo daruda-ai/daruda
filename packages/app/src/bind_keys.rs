@@ -20,16 +20,17 @@ use crate::windows::{
 use crate::workspace::{
     ClosePane, FileViewerSearchNext, FileViewerSearchOpen, FileViewerSearchPrev, FilesActivate,
     FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev, FilesToggleHidden,
-    FocusNextPane, FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane,
-    FocusSkillSearch, GitChangesActivate, GitChangesSelectNext, GitChangesSelectPrev,
-    GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow, MoveActiveProjectToGroup,
-    MoveTabLeft, MoveTabRight, NewGroup, NewTab, NextTab, OpenCommandHistory, OpenSettings,
-    PrevTab, PullRequestsFocusSearch, PullRequestsOpenSelected, PullRequestsSelectNext,
-    PullRequestsSelectPrev, QuestionNextField, QuestionPick1, QuestionPick2, QuestionPick3,
-    QuestionPick4, QuestionPick5, QuestionPick6, QuestionPick7, QuestionPick8, QuestionPick9,
-    QuestionPrevField, QuestionToggle, RenameActiveProject, SaveFilePane, SplitDown, SplitRight,
-    ToggleBottomDock, ToggleCommandPalette, ToggleFilesFocus, ToggleFullScreen,
-    ToggleGitChangesFocus, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock,
+    FocusNextPane, FocusOtherTabGroup, FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp,
+    FocusPrevPane, FocusSkillSearch, GitChangesActivate, GitChangesSelectNext,
+    GitChangesSelectPrev, GitChangesToggleStage, InvokeSkillPalette, MinimizeWindow,
+    MoveActiveProjectToGroup, MoveTabLeft, MoveTabRight, MoveTabToOtherGroup, NewGroup, NewTab,
+    NextTab, OpenCommandHistory, OpenSettings, PrevTab, PullRequestsFocusSearch,
+    PullRequestsOpenSelected, PullRequestsSelectNext, PullRequestsSelectPrev, QuestionNextField,
+    QuestionPick1, QuestionPick2, QuestionPick3, QuestionPick4, QuestionPick5, QuestionPick6,
+    QuestionPick7, QuestionPick8, QuestionPick9, QuestionPrevField, QuestionToggle,
+    RenameActiveProject, SaveFilePane, SplitDown, SplitRight, ToggleBottomDock,
+    ToggleCommandPalette, ToggleFilesFocus, ToggleFullScreen, ToggleGitChangesFocus,
+    ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock, ToggleSideTabs,
 };
 use crate::{
     CloseProject, NewEmptyWindow, OpenDarudaHelp, OpenFolder, OpenFolderInNewWindow,
@@ -92,6 +93,19 @@ pub(crate) fn register_static_bindings(cx: &mut App) {
         // Tab move (iTerm2: cmd-shift-ctrl-arrow).
         binding(k::SHORTCUT_MOVE_TAB_LEFT, MoveTabLeft, None, cx),
         binding(k::SHORTCUT_MOVE_TAB_RIGHT, MoveTabRight, None, cx),
+        binding(
+            k::SHORTCUT_FOCUS_OTHER_TAB_GROUP,
+            FocusOtherTabGroup,
+            None,
+            cx,
+        ),
+        binding(
+            k::SHORTCUT_MOVE_TAB_TO_OTHER_GROUP,
+            MoveTabToOtherGroup,
+            None,
+            cx,
+        ),
+        binding(k::SHORTCUT_TOGGLE_SIDE_TABS, ToggleSideTabs, None, cx),
         binding(k::SHORTCUT_NEXT_TAB, NextTab, None, cx),
         binding(k::SHORTCUT_PREV_TAB, PrevTab, None, cx),
         // Dock toggles

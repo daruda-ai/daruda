@@ -84,6 +84,12 @@ pub const SHORTCUT_MOVE_TAB_LEFT: &str = per_platform("cmd-shift-ctrl-left", "ct
 pub const SHORTCUT_MOVE_TAB_RIGHT: &str =
     per_platform("cmd-shift-ctrl-right", "ctrl-shift-pagedown");
 
+// The tabs kept beside a worktree's own: where the keyboard is, where a
+// tab sits, and whether they are drawn.
+pub const SHORTCUT_FOCUS_OTHER_TAB_GROUP: &str = "secondary-\\";
+pub const SHORTCUT_MOVE_TAB_TO_OTHER_GROUP: &str = "secondary-shift-\\";
+pub const SHORTCUT_TOGGLE_SIDE_TABS: &str = "secondary-alt-b";
+
 // ============================================================================
 // Splits
 // ============================================================================

@@ -108,6 +108,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<PaneMenuContext> {
+        // The menu's split and zoom act on the focused pane, which a side
+        // tab's pane never is: it has no such menu.
+        if self.pane_is_aside(pane_id) {
+            return None;
+        }
         let snapshot = self.pane_menu_kind_and_selection(pane_id, window, cx)?;
         let role = self.pane_role(pane_id);
         let lane = if self.active_lane_is_inaccessible() {

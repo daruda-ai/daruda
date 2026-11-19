@@ -23,6 +23,22 @@ pub(crate) enum FileInputShot {
 }
 
 impl Workspace {
+    /// A sample file in the side tabs, beside the agent chat it is read for.
+    pub(in crate::workspace) fn open_side_tabs_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_file_input_for_shot(FileInputShot::Selection, window, cx);
+        let file_tab = self.active_runtime().active_tab_index;
+        self.send_tab_aside(file_tab, window, cx);
+        // The sample's selection popover is placed for the file among the
+        // tabs; it runs deferred, so it is taken down after it.
+        cx.defer_in(window, |ws, _window, cx| {
+            ws.dismiss_file_selection_action(cx)
+        });
+    }
+
     pub(in crate::workspace) fn open_file_input_for_shot(
         &mut self,
         shot: FileInputShot,

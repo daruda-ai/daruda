@@ -93,7 +93,7 @@ impl Workspace {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        if self.active_runtime().focused_pane_id != pane {
+        if self.keyboard_pane() != pane {
             return;
         }
         let Some(reference) = self

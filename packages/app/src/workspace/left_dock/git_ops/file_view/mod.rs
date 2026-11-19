@@ -160,6 +160,13 @@ impl Workspace {
     /// then entered stays replaceable, and the next arrow key takes the file
     /// they had walked into.
     pub(in crate::workspace) fn release_preview_tab_for_pane(&mut self, pane_id: PaneId) {
+        if let Some(index) = self.active_runtime().side.position_of(pane_id) {
+            let side = &mut self.active_runtime_mut().side;
+            if side.tabs().get(index).map(|tab| tab.id) == side.preview_tab_id {
+                side.preview_tab_id = None;
+            }
+            return;
+        }
         let Some(idx) = self
             .active_runtime()
             .tabs
@@ -343,7 +350,17 @@ impl Workspace {
         let owner = target;
         let live_status = self.git_status_for_path(owner, &path, &source);
 
-        // Always dedupe: clicking the same file activates its existing tab.
+        // Always dedupe: a file already open beside the tabs is shown there,
+        // and the keyboard follows only when the open asks to enter.
+        if let Some(index) = self.side_tab_showing(&path, &source) {
+            if entry == PaneEntry::Enter {
+                self.activate_side_tab(index, window, cx);
+            } else {
+                self.show_side_tab(index, window, cx);
+            }
+            return;
+        }
+        // Clicking the same file activates its existing tab.
         if let Some((tab_idx, pane_id)) = self.find_existing_file_tab(&path, &source) {
             // Re-stamp the tab being reused. It was opened against an older
             // the lane's cached status, and the toolbar's mode strip reads
@@ -471,7 +488,7 @@ impl Workspace {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        let pane_id = self.active_runtime().focused_pane_id;
+        let pane_id = self.keyboard_pane();
         self.set_file_view_mode_for_pane(pane_id, mode, window, cx);
     }
 
@@ -568,7 +585,7 @@ impl Workspace {
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        let id = self.active_runtime().focused_pane_id;
+        let id = self.keyboard_pane();
         let is_file = self
             .active_runtime()
             .panes

@@ -12,7 +12,7 @@ pub(in crate::workspace) fn selection_action(
     if ws.active_page().is_some() {
         return None;
     }
-    let pane = ws.active_runtime().focused_pane_id;
+    let pane = ws.keyboard_pane();
     let file = ws
         .active_runtime()
         .panes

@@ -33,6 +33,10 @@ pub(in crate::workspace) struct MainAreaContext {
     pub activity_counter: HashMap<PaneId, u64>,
     pub activity_tick: u64,
     pub last_viewport: Option<(f32, f32)>,
+    /// The width both tab groups are drawn in, as last measured.
+    pub groups_width: f32,
+    /// The divider between the tab groups being dragged.
+    pub side_divider_drag: Option<super::side_ops::SideDividerDrag>,
     /// Active pane-divider drag. `None` = no drag in progress.
     pub drag_state: Option<DividerDrag>,
     /// The open right-click menu, if any (root-deployed) — see `PopupMenuDeploy`.

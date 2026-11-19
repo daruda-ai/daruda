@@ -26,13 +26,13 @@ pub(in crate::workspace) enum FileSaveOutcome {
 }
 
 impl Workspace {
-    /// ⌘S on the focused file pane.
+    /// ⌘S on the file pane the keyboard is in.
     pub(in crate::workspace) fn save_focused_file_pane(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let pane_id = self.active_runtime().focused_pane_id;
+        let pane_id = self.keyboard_pane();
         self.save_file_pane_or_ask(pane_id, false, window, cx);
     }
 

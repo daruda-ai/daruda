@@ -32,7 +32,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if self.active_page().is_none() && self.focused_file_view().is_some() {
-            self.add_file_reference(self.active_runtime().focused_pane_id, selection, window, cx);
+            self.add_file_reference(self.keyboard_pane(), selection, window, cx);
         }
     }
 
@@ -299,7 +299,7 @@ impl Workspace {
             .focused_file_view()
             .is_some_and(|view| view.hide_unchanged != hide_unchanged)
         {
-            self.toggle_hide_unchanged_for_pane(self.active_runtime().focused_pane_id, window, cx);
+            self.toggle_hide_unchanged_for_pane(self.keyboard_pane(), window, cx);
         }
         if let Some(line) = line {
             self.scroll_focused_file_viewer_to_line(line, window, cx);

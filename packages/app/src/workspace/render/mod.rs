@@ -22,6 +22,7 @@ mod center;
 mod docks;
 mod landing;
 mod menus;
+mod side_tabs;
 mod snapshots;
 mod tab_bar;
 mod tab_cells;

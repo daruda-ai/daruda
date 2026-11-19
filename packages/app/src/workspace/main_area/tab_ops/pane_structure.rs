@@ -8,6 +8,7 @@ use crate::workspace::main_area::pane::TabEntry;
 use crate::workspace::main_area::pane_tree::{
     PaneId, PaneLayout, SplitDirection, insert_node_at, insert_split_at, remove_pane_from_layout,
 };
+use crate::workspace::main_area::side_group::PanePlace;
 use gpui::{Context, Window};
 
 impl Workspace {
@@ -177,6 +178,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(PanePlace::Side(index)) = self.active_runtime().place_of(pane_id) {
+            self.close_side_tab(index, window, cx);
+            return;
+        }
         let Some(tab_index) = self
             .active_runtime()
             .tabs
@@ -380,6 +385,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.request_close_pane(self.active_runtime().focused_pane_id, window, cx);
+        // The pane the keyboard is in: a side tab's while it is there.
+        self.request_close_pane(self.keyboard_pane(), window, cx);
     }
 }

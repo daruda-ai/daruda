@@ -136,6 +136,8 @@ pub(super) struct TabMenuData {
     tab_id: u64,
     tab_count: usize,
     is_orchestrator: bool,
+    /// One pane of a kind the side tabs take.
+    can_go_aside: bool,
     abs_str: Option<String>,
     rel_path: Option<String>,
 }
@@ -146,6 +148,7 @@ impl TabMenuData {
         tab_id: u64,
         tab_count: usize,
         is_orchestrator: bool,
+        can_go_aside: bool,
         file_path: Option<&std::path::Path>,
         worktree_root: Option<&std::path::Path>,
     ) -> Self {
@@ -154,6 +157,7 @@ impl TabMenuData {
             tab_id,
             tab_count,
             is_orchestrator,
+            can_go_aside,
             abs_str: file_path.map(|p| p.to_string_lossy().into_owned()),
             rel_path: file_path.and_then(|p| {
                 worktree_root.and_then(|root| {
@@ -164,6 +168,55 @@ impl TabMenuData {
             }),
         }
     }
+}
+
+/// The menu of the side tab at `index` of `count`.
+pub(super) fn side_tab_context_menu_items(
+    ws: &gpui::WeakEntity<Workspace>,
+    index: usize,
+    count: usize,
+) -> Vec<PopupMenuItem> {
+    use crate::surface::strings as s;
+    vec![
+        ws_popup_menu_item(
+            ws.clone(),
+            s::ctx::send_tab_back(),
+            false,
+            move |this, win, cx| {
+                this.mutate_durable_in(win, cx, |ws, win, cx| {
+                    ws.send_side_tab_back(index, win, cx)
+                });
+            },
+        ),
+        PopupMenuItem::separator(),
+        ws_popup_menu_item(
+            ws.clone(),
+            s::common::move_tab_left(),
+            index == 0,
+            move |this, _win, cx| {
+                this.mutate_durable(cx, |ws, cx| ws.move_side_tab(index, index - 1, cx));
+            },
+        ),
+        ws_popup_menu_item(
+            ws.clone(),
+            s::common::move_tab_right(),
+            index + 1 >= count,
+            move |this, _win, cx| {
+                this.mutate_durable(cx, |ws, cx| ws.move_side_tab(index, index + 1, cx));
+            },
+        ),
+        PopupMenuItem::separator(),
+        ws_popup_menu_item(
+            ws.clone(),
+            s::common::close_tab(),
+            false,
+            move |this, win, cx| {
+                this.mutate_durable_in(win, cx, |ws, win, cx| {
+                    ws.request_close_side_tab(index, win, cx)
+                });
+            },
+        ),
+    ]
 }
 
 pub(super) fn tab_context_menu_items(
@@ -178,6 +231,7 @@ pub(super) fn tab_context_menu_items(
         tab_id,
         tab_count,
         is_orchestrator,
+        can_go_aside,
         abs_str,
         rel_path,
     } = data;
@@ -324,6 +378,16 @@ pub(super) fn tab_context_menu_items(
     // File-pane-specific items
     if is_file {
         items.push(PopupMenuItem::separator());
+        if *can_go_aside {
+            items.push(ws_popup_menu_item(
+                ws.clone(),
+                s::ctx::send_tab_aside(),
+                false,
+                move |this, win, cx| {
+                    this.mutate_durable_in(win, cx, |ws, win, cx| ws.send_tab_aside(i, win, cx));
+                },
+            ));
+        }
         if let Some(abs) = abs_str.clone() {
             items.push(ws_popup_clipboard_item(s::ctx::copy_file_path(), abs));
         }

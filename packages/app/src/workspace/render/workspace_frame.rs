@@ -8,6 +8,7 @@ use super::docks::{DockFrame, dock_resize_handle, dock_toggle_icon};
 use super::{center, root_key_context};
 use crate::workspace::layout::DockPosition;
 use crate::workspace::main_area::pane_drag_ops::PaneHeaderDrag;
+use crate::workspace::main_area::side_group::GroupsShown;
 use crate::workspace::main_area::tab_drag_ops::TabDrag;
 use crate::workspace::{FileViewerSearchNext, FileViewerSearchPrev, SaveFilePane, Workspace};
 
@@ -97,14 +98,37 @@ impl Workspace {
             .on_drag_move::<PaneHeaderDrag>(cx.listener(Self::update_pane_drag_from_move))
             .on_drag_move::<TabDrag>(cx.listener(Self::update_tab_merge_hover_from_move))
             .child(center_content);
+        // The worktree's tabs, and beside them its side tabs when shown.
+        let tabs_column = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .flex_col()
+            .when(self.active_page().is_none(), |el| el.child(tab_bar))
+            .child(pane_area);
+        let groups = div().flex_1().min_h_0().w_full().flex().flex_row();
+        let groups = match self.groups_shown() {
+            GroupsShown::Tabs => groups.child(tabs_column),
+            GroupsShown::Side => groups.child(self.build_side_group(cx)),
+            GroupsShown::Both { side, .. } => groups
+                .child(tabs_column)
+                .child(self.build_side_divider(cx))
+                .child(
+                    div()
+                        .flex_none()
+                        .w(px(side))
+                        .h_full()
+                        .child(self.build_side_group(cx)),
+                ),
+        };
         let main_area = div()
             .flex_1()
             .flex()
             .flex_col()
             .relative()
             .overflow_hidden()
-            .when(self.active_page().is_none(), |el| el.child(tab_bar))
-            .child(pane_area)
+            .child(groups)
             // `.cached()`: when the bottom dock isn't notified (its
             // snapshot was staged unchanged above), GPUI recycles its
             // previous layout + paint instead of re-rendering the macro
@@ -279,7 +303,10 @@ impl Workspace {
             .on_action(cx.listener(Self::on_focus_pane_up))
             .on_action(cx.listener(Self::on_focus_pane_down))
             .on_action(cx.listener(Self::on_move_tab_left))
-            .on_action(cx.listener(Self::on_move_tab_right));
+            .on_action(cx.listener(Self::on_move_tab_right))
+            .on_action(cx.listener(Self::on_focus_other_tab_group))
+            .on_action(cx.listener(Self::on_move_tab_to_other_group))
+            .on_action(cx.listener(Self::on_toggle_side_tabs));
         // Cmd+1..9 tab quick-switch + Cmd+Ctrl+1..9 lane quick-switch —
         // each slot is one macro line in `slot_actions.rs`.
         let workspace_root = crate::tab_slot_table!(@register_listeners cx, workspace_root);

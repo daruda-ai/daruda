@@ -121,8 +121,11 @@ impl Workspace {
     /// paneless lane (the inaccessible empty-state) is detected only because
     /// `panes` is empty — not by comparing against a magic id.
     pub(in crate::workspace) fn has_focused_pane(&self) -> bool {
-        let focused = self.active_runtime().focused_pane_id;
-        self.active_runtime().panes.iter().any(|p| p.id == focused)
+        let runtime = self.active_runtime();
+        runtime
+            .tabs
+            .get(runtime.active_tab_index)
+            .is_some_and(|tab| tab.layout.contains(runtime.focused_pane_id))
     }
 
     /// Resolve a `ProjectId` to its runtime project.

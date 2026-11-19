@@ -335,6 +335,21 @@ pub(in crate::workspace) const PALETTE_ENTRIES: &[PaletteEntry] = &[
         shortcut: k::SHORTCUT_MOVE_TAB_RIGHT,
     },
     PaletteEntry {
+        id: "focus_other_tab_group",
+        label: s::command::focus_other_tab_group,
+        shortcut: k::SHORTCUT_FOCUS_OTHER_TAB_GROUP,
+    },
+    PaletteEntry {
+        id: "move_tab_to_other_group",
+        label: s::command::move_tab_to_other_group,
+        shortcut: k::SHORTCUT_MOVE_TAB_TO_OTHER_GROUP,
+    },
+    PaletteEntry {
+        id: "toggle_side_tabs",
+        label: s::command::toggle_side_tabs,
+        shortcut: k::SHORTCUT_TOGGLE_SIDE_TABS,
+    },
+    PaletteEntry {
         id: "copy",
         label: s::command::copy,
         shortcut: k::SHORTCUT_COPY,

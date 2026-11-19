@@ -42,7 +42,7 @@ impl Workspace {
             // `InputEvent`, so the per-pane subscription can't
             // see it; the panel-level handler picks it up.
             "escape" if search_open => {
-                let pane_id = self.active_runtime().focused_pane_id;
+                let pane_id = self.keyboard_pane();
                 if let Some(fc) = self.focused_file_content() {
                     let input = fc.search_input.clone();
                     input.update(cx, |inp, cx_state| inp.set_value("", window, cx_state));
@@ -98,7 +98,9 @@ impl Workspace {
             self.finish_tab_drag(false, cx);
             return;
         }
-        if self.drag_pr_divider(ev.position.x.into(), cx) {
+        if self.drag_pr_divider(ev.position.x.into(), cx)
+            || self.drag_side_divider(ev.position.x.into(), window, cx)
+        {
             return;
         }
         if let Some(drag) = self.docks.drag {
@@ -128,6 +130,7 @@ impl Workspace {
         self.end_divider_drag(cx);
         self.end_dock_drag(cx);
         self.end_pr_divider_drag(cx);
+        self.end_side_divider_drag(cx);
         self.end_file_selection_drag(cx);
         self.clear_pane_drop_hover(cx);
         self.finish_tab_drag(false, cx);

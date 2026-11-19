@@ -12,6 +12,8 @@ use crate::workspace::main_area::pane::{self, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree};
 use daruda_transcript::fold_mode::FoldMode;
 
+use crate::workspace::main_area::side_group::{KeyboardIn, PanePlace};
+
 mod rebuild;
 mod restore;
 mod save;
@@ -41,6 +43,44 @@ pub(in crate::workspace) struct LaneRuntime {
     /// the middle of it. A restored tab is simply committed, so the first
     /// skim after a restart opens one new tab and reuses it from then on.
     pub preview_tab_id: Option<u64>,
+    /// The tabs shown beside these: files, diffs and a pull request kept
+    /// in view while the tabs on the left change.
+    pub side: crate::workspace::main_area::side_group::SideGroup,
+    /// Which of the two groups the keyboard is in. Written by
+    /// `Workspace::focus_pane` only; read through [`Self::keyboard_in`].
+    pub(in crate::workspace) keyboard: KeyboardIn,
+}
+
+impl LaneRuntime {
+    /// Where `pane` sits: a side tab, or a tab's split tree.
+    pub(in crate::workspace) fn place_of(&self, pane: pane_tree::PaneId) -> Option<PanePlace> {
+        self.side
+            .position_of(pane)
+            .map(PanePlace::Side)
+            .or_else(|| {
+                self.tabs
+                    .iter()
+                    .position(|tab| tab.layout.contains(pane))
+                    .map(PanePlace::Tab)
+            })
+    }
+
+    /// The group the keyboard is in. It can be in the side group only
+    /// while that has a pane on show.
+    pub(in crate::workspace) fn keyboard_in(&self) -> KeyboardIn {
+        match self.keyboard {
+            KeyboardIn::Side if self.side.shown_pane().is_some() => KeyboardIn::Side,
+            KeyboardIn::Side | KeyboardIn::Tabs => KeyboardIn::Tabs,
+        }
+    }
+
+    /// The pane the keyboard is in: the side group's, or the focused one.
+    pub(in crate::workspace) fn keyboard_pane(&self) -> pane_tree::PaneId {
+        match (self.keyboard_in(), self.side.shown_pane()) {
+            (KeyboardIn::Side, Some(pane)) => pane,
+            _ => self.focused_pane_id,
+        }
+    }
 }
 
 impl Workspace {

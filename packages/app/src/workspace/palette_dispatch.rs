@@ -8,15 +8,16 @@ use gpui::{Context, Window};
 use super::command::picker::PickerKey;
 use super::command::picker_key::picker_keystroke;
 use super::{
-    ClosePane, CloseTab, EditTask, EditWindowTitle, FocusNextPane, FocusPaneDown, FocusPaneLeft,
-    FocusPaneRight, FocusPaneUp, FocusPrevPane, InstallAgentHooks, MoveActiveProjectToGroup,
-    MoveFlowToRepository, MoveTabLeft, MoveTabRight, NewGroup, NewSkill, NewTab, NewTask, NextTab,
-    OpenAgentChat, OpenCommandHistory, OpenProjectConfig, OpenSettings, PrevTab, ReloadFlowGraph,
-    RenameActiveProject, RunFlow, ShowFlowGraph, ShowLeftDockFiles, ShowLeftDockGit,
-    ShowLeftDockLanes, SplitDown, SplitRight, SwitchRightPanelFlows, SwitchRightPanelSkills,
-    SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage, ToggleBottomDock,
-    ToggleCommandPalette, ToggleFilesFocus, ToggleGitChangesFocus, ToggleLaneSwitcher,
-    ToggleLeftDock, ToggleRightDock, UninstallAgentHooks, ValidateFlow, Workspace, ZoomWindow,
+    ClosePane, CloseTab, EditTask, EditWindowTitle, FocusNextPane, FocusOtherTabGroup,
+    FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp, FocusPrevPane, InstallAgentHooks,
+    MoveActiveProjectToGroup, MoveFlowToRepository, MoveTabLeft, MoveTabRight, MoveTabToOtherGroup,
+    NewGroup, NewSkill, NewTab, NewTask, NextTab, OpenAgentChat, OpenCommandHistory,
+    OpenProjectConfig, OpenSettings, PrevTab, ReloadFlowGraph, RenameActiveProject, RunFlow,
+    ShowFlowGraph, ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes, SplitDown, SplitRight,
+    SwitchRightPanelFlows, SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools,
+    SwitchRightPanelUsage, ToggleBottomDock, ToggleCommandPalette, ToggleFilesFocus,
+    ToggleGitChangesFocus, ToggleLaneSwitcher, ToggleLeftDock, ToggleRightDock, ToggleSideTabs,
+    UninstallAgentHooks, ValidateFlow, Workspace, ZoomWindow,
 };
 
 impl Workspace {
@@ -154,6 +155,13 @@ impl Workspace {
                 "focus_pane_down" => self.on_focus_pane_down(&FocusPaneDown, window, cx),
                 "move_tab_left" => self.on_move_tab_left(&MoveTabLeft, window, cx),
                 "move_tab_right" => self.on_move_tab_right(&MoveTabRight, window, cx),
+                "focus_other_tab_group" => {
+                    self.on_focus_other_tab_group(&FocusOtherTabGroup, window, cx)
+                }
+                "move_tab_to_other_group" => {
+                    self.on_move_tab_to_other_group(&MoveTabToOtherGroup, window, cx)
+                }
+                "toggle_side_tabs" => self.on_toggle_side_tabs(&ToggleSideTabs, window, cx),
                 "show_left_dock_lanes" => {
                     self.on_show_left_dock_worktrees(&ShowLeftDockLanes, window, cx);
                 }

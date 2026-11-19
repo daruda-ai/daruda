@@ -202,7 +202,7 @@ impl Workspace {
                     .files_panel_focus
                     .contains_focused(window, cx))
         {
-            self.focus_pane(self.active_runtime().focused_pane_id, window, cx);
+            self.focus_pane(self.keyboard_pane(), window, cx);
         }
         self.mutate_durable(cx, |ws, cx| {
             ws.docks.left.update(cx, |d, _| d.toggle());
@@ -236,7 +236,7 @@ impl Workspace {
             && self.docks.left.read(cx).is_open
             && panel.is_focused(window);
         if already_there {
-            let pane = self.active_runtime().focused_pane_id;
+            let pane = self.keyboard_pane();
             self.focus_pane(pane, window, cx);
             return;
         }
@@ -461,6 +461,7 @@ impl Workspace {
         self.end_dock_drag(cx);
         self.end_divider_drag(cx);
         self.end_pr_divider_drag(cx);
+        self.end_side_divider_drag(cx);
     }
 
     /// Resize the bottom dock to a preset height matching N rows of

@@ -15,49 +15,12 @@ use crate::workspace::{TAB_BAR_HEIGHT, Workspace};
 impl Workspace {
     /// The tab strip: one cell per tab of the active lane, then the `+` button.
     pub(super) fn build_tab_bar(&self, cx: &mut Context<Self>) -> gpui::Div {
-        let t = theme::current(cx);
-        let dark = t.is_dark();
-        // These tab-strip slots still read raw consts; pick light-aware values
-        // so the tab bar doesn't render dark with white text on the light theme.
-        let tab_bar_bg = if dark {
-            theme::SURFACE_1
-        } else {
-            theme::LIGHT_SURFACE_1
-        };
-        let tab_bar_border = if dark {
-            theme::HAIRLINE
-        } else {
-            theme::LIGHT_SURFACE_3
-        };
-        let tab_active_bg = if dark {
-            theme::CANVAS
-        } else {
-            theme::LIGHT_CANVAS
-        };
-        // Active file tabs are workspace chrome, so they stay on the Daruda UI
-        // theme token. The file-viewer body/editor surface may follow the
-        // terminal-mirrored content color, but that should not leak into the
-        // tab strip.
-        let tab_active_file_chrome_bg = t.file_viewer_bg;
-        let tab_active_text = if dark {
-            t.text_primary
-        } else {
-            theme::LIGHT_INK
-        };
-        let tab_inactive_bg = t.tab_inactive_bg;
-        let tab_inactive_text = t.text_muted;
-        let tab_inactive_hover_bg = t.tab_inactive_hover_bg;
-        let tab_insertion_line_color = t.terminal_drop_target_bg;
-
-        let colors = TabCellColors {
-            tab_active_file_chrome_bg,
-            tab_inactive_hover_bg,
-            tab_inactive_text,
-            tab_inactive_bg,
-            tab_active_text,
-            tab_active_bg,
-            tab_insertion_line_color,
-        };
+        let TabStripColors {
+            bar_bg: tab_bar_bg,
+            bar_border: tab_bar_border,
+            cell: colors,
+        } = tab_strip_colors(cx);
+        let tab_insertion_line_color = colors.tab_insertion_line_color;
 
         // Pre-collect tab bar data (no entity reads during element construction).
         let tab_cells = self.tab_cells(cx);
@@ -124,6 +87,16 @@ impl Workspace {
                     .then(|| crate::workspace::pages::chrome::resume_button(self, cx))
                     .flatten(),
             )
+            // Side tabs hidden while they still hold something: the way back.
+            .children(self.side_tabs_hidden().then(|| {
+                crate::ui::button_icon("show-side-tabs", crate::ui::icons::DOCK, cx)
+                    .tooltip(crate::surface::strings::common::side_tabs_show())
+                    .ml_auto()
+                    .mx(px(theme::NEW_TAB_MARGIN_X))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.on_toggle_side_tabs(&crate::workspace::ToggleSideTabs, window, cx)
+                    }))
+            }))
             .child(
                 div()
                     .absolute()
@@ -196,6 +169,7 @@ impl Workspace {
             tab_id,
             tab_count,
             is_orchestrator,
+            self.tab_can_go_aside(i),
             file_path.as_deref(),
             worktree_root.as_deref(),
         );
@@ -310,12 +284,69 @@ impl Workspace {
     }
 }
 
-struct TabCellColors {
-    tab_active_file_chrome_bg: gpui::Hsla,
-    tab_inactive_hover_bg: gpui::Hsla,
-    tab_inactive_text: gpui::Hsla,
-    tab_inactive_bg: gpui::Hsla,
-    tab_active_text: gpui::Hsla,
-    tab_active_bg: gpui::Hsla,
-    tab_insertion_line_color: gpui::Hsla,
+pub(super) struct TabCellColors {
+    pub(super) tab_active_file_chrome_bg: gpui::Hsla,
+    pub(super) tab_inactive_hover_bg: gpui::Hsla,
+    pub(super) tab_inactive_text: gpui::Hsla,
+    pub(super) tab_inactive_bg: gpui::Hsla,
+    pub(super) tab_active_text: gpui::Hsla,
+    pub(super) tab_active_bg: gpui::Hsla,
+    pub(super) tab_insertion_line_color: gpui::Hsla,
+}
+/// The colours both tab strips are drawn in.
+pub(super) struct TabStripColors {
+    pub(super) bar_bg: gpui::Hsla,
+    pub(super) bar_border: gpui::Hsla,
+    pub(super) cell: TabCellColors,
+}
+
+pub(super) fn tab_strip_colors(cx: &gpui::App) -> TabStripColors {
+    let t = theme::current(cx);
+    let dark = t.is_dark();
+    // These tab-strip slots still read raw consts; pick light-aware values
+    // so the tab bar doesn't render dark with white text on the light theme.
+    let tab_bar_bg = if dark {
+        theme::SURFACE_1
+    } else {
+        theme::LIGHT_SURFACE_1
+    };
+    let tab_bar_border = if dark {
+        theme::HAIRLINE
+    } else {
+        theme::LIGHT_SURFACE_3
+    };
+    let tab_active_bg = if dark {
+        theme::CANVAS
+    } else {
+        theme::LIGHT_CANVAS
+    };
+    // Active file tabs are workspace chrome, so they stay on the Daruda UI
+    // theme token. The file-viewer body/editor surface may follow the
+    // terminal-mirrored content color, but that should not leak into the
+    // tab strip.
+    let tab_active_file_chrome_bg = t.file_viewer_bg;
+    let tab_active_text = if dark {
+        t.text_primary
+    } else {
+        theme::LIGHT_INK
+    };
+    let tab_inactive_bg = t.tab_inactive_bg;
+    let tab_inactive_text = t.text_muted;
+    let tab_inactive_hover_bg = t.tab_inactive_hover_bg;
+    let tab_insertion_line_color = t.terminal_drop_target_bg;
+
+    let cell = TabCellColors {
+        tab_active_file_chrome_bg,
+        tab_inactive_hover_bg,
+        tab_inactive_text,
+        tab_inactive_bg,
+        tab_active_text,
+        tab_active_bg,
+        tab_insertion_line_color,
+    };
+    TabStripColors {
+        bar_bg: tab_bar_bg,
+        bar_border: tab_bar_border,
+        cell,
+    }
 }

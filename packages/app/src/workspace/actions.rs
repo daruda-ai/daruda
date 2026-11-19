@@ -19,14 +19,14 @@ use super::Workspace;
 use super::{
     CloseOtherTabs, ClosePane, CloseTab, CloseTabsToRight, CommitAmend, EditTask, FetchChanges,
     FilesActivate, FilesCollapse, FilesExpand, FilesRefresh, FilesSelectNext, FilesSelectPrev,
-    FilesToggleHidden, FocusNextPane, FocusPaneDown, FocusPaneLeft, FocusPaneRight, FocusPaneUp,
-    FocusPrevPane, FocusSkillSearch, GitChangesActivate, GitChangesSelectNext,
-    GitChangesSelectPrev, GitChangesToggleStage, InvokeSkillPalette, MoveTabLeft, MoveTabRight,
-    NewSkill, NewTab, NewTask, NextTab, OpenAgentChat, PrevTab, PullChanges, RefreshGitStatus,
-    ShowLeftDockFiles, ShowLeftDockGit, ShowLeftDockLanes, SplitDown, SplitRight,
-    SwitchRightPanelFlows, SwitchRightPanelSkills, SwitchRightPanelTasks, SwitchRightPanelTools,
-    SwitchRightPanelUsage, ToggleCommandPalette, ToggleFilesFocus, ToggleGitChangesFocus,
-    ToggleZoomPane,
+    FilesToggleHidden, FocusNextPane, FocusOtherTabGroup, FocusPaneDown, FocusPaneLeft,
+    FocusPaneRight, FocusPaneUp, FocusPrevPane, FocusSkillSearch, GitChangesActivate,
+    GitChangesSelectNext, GitChangesSelectPrev, GitChangesToggleStage, InvokeSkillPalette,
+    MoveTabLeft, MoveTabRight, MoveTabToOtherGroup, NewSkill, NewTab, NewTask, NextTab,
+    OpenAgentChat, PrevTab, PullChanges, RefreshGitStatus, ShowLeftDockFiles, ShowLeftDockGit,
+    ShowLeftDockLanes, SplitDown, SplitRight, SwitchRightPanelFlows, SwitchRightPanelSkills,
+    SwitchRightPanelTasks, SwitchRightPanelTools, SwitchRightPanelUsage, ToggleCommandPalette,
+    ToggleFilesFocus, ToggleGitChangesFocus, ToggleSideTabs, ToggleZoomPane,
 };
 use crate::workspace::main_area::nav::NavDirection;
 use crate::workspace::main_area::pane_tree::SplitDirection;
@@ -57,6 +57,11 @@ impl Workspace {
             return;
         }
         self.mutate_durable_in(window, cx, |ws, window, cx| {
+            if ws.keyboard_is_aside() {
+                let index = ws.active_runtime().side.active_index();
+                ws.request_close_side_tab(index, window, cx);
+                return;
+            }
             let idx = ws.active_runtime().active_tab_index;
             ws.request_close_tab(idx, window, cx);
         });
@@ -68,6 +73,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.step_side_tab(1, window, cx) {
+            return;
+        }
         if self.active_runtime().tabs.len() > 1 {
             self.activate_tab(
                 (self.active_runtime().active_tab_index + 1) % self.active_runtime().tabs.len(),
@@ -83,6 +91,9 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.step_side_tab(-1, window, cx) {
+            return;
+        }
         if self.active_runtime().tabs.len() > 1 {
             let idx = if self.active_runtime().active_tab_index == 0 {
                 self.active_runtime().tabs.len() - 1
@@ -537,6 +548,9 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.shift_side_tab(-1, cx) {
+            return;
+        }
         let from = self.active_runtime().active_tab_index;
         if from > 0 {
             self.mutate_durable(cx, |ws, cx| {
@@ -551,12 +565,48 @@ impl Workspace {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.shift_side_tab(1, cx) {
+            return;
+        }
         let from = self.active_runtime().active_tab_index;
         if from + 1 < self.active_runtime().tabs.len() {
             self.mutate_durable(cx, |ws, cx| {
                 ws.move_tab(from, from + 1, cx);
             });
         }
+    }
+
+    // ---- Side tabs ----
+
+    pub(in crate::workspace) fn on_focus_other_tab_group(
+        &mut self,
+        _: &FocusOtherTabGroup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_other_tab_group(window, cx);
+    }
+
+    pub(in crate::workspace) fn on_move_tab_to_other_group(
+        &mut self,
+        _: &MoveTabToOtherGroup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            ws.move_tab_to_other_group(window, cx)
+        });
+    }
+
+    pub(in crate::workspace) fn on_toggle_side_tabs(
+        &mut self,
+        _: &ToggleSideTabs,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.mutate_durable_in(window, cx, |ws, window, cx| {
+            ws.toggle_side_group(window, cx)
+        });
     }
 
     // ---- Git Changes keyboard navigation ----

@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;
 
+use super::side_group::KeyboardIn;
 use daruda_store::project::PaneCwd;
 use daruda_terminal::view::{TerminalInput, TerminalLayout, TerminalView};
 use daruda_terminal::{TerminalDims, TerminalSession};
@@ -599,6 +600,14 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.close_page(cx);
+        // The keyboard is in the group the pane belongs to. Where only one
+        // group fits, the one drawn follows it.
+        let place = if self.pane_is_aside(pane_id) {
+            KeyboardIn::Side
+        } else {
+            KeyboardIn::Tabs
+        };
+        self.set_keyboard_in(place, window, cx);
         // The bottom input is the shared prompt/command surface for every
         // pane, so on each (re-)entry surface its panel and sync the
         // placeholder to the focused pane kind. Done here — the canonical

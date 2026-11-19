@@ -289,6 +289,8 @@ impl Workspace {
             active_tab_index: 0,
             tab_history: Vec::new(),
             focused_pane_id: pane_id,
+            side: Default::default(),
+            keyboard: Default::default(),
         };
         self.register_created_lane(plan, project_id, Some(runtime), reveal, window, cx);
         pane_id

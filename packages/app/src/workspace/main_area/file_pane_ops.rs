@@ -14,10 +14,10 @@ impl Workspace {
     // Each open file lives in its own `Pane` carrying
     // `PaneContent::File(FileContent)`; "the file viewer" — for
     // action handlers, key contexts, dock highlighting — is
-    // whichever file pane currently has focus.
+    // whichever file pane the keyboard is in, on either tab group.
 
     pub(in crate::workspace) fn focused_file_view(&self) -> Option<&PaneFileView> {
-        let id = self.active_runtime().focused_pane_id;
+        let id = self.keyboard_pane();
         self.active_runtime()
             .panes
             .iter()
@@ -71,7 +71,7 @@ impl Workspace {
         if open_path != path || open_source != source {
             return false;
         }
-        let pane = self.active_runtime().focused_pane_id;
+        let pane = self.keyboard_pane();
         // Entering is a commit — see `release_preview_tab_for_pane`.
         self.release_preview_tab_for_pane(pane);
         self.focus_pane(pane, window, cx);
@@ -79,7 +79,7 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn focused_file_view_mut(&mut self) -> Option<&mut PaneFileView> {
-        let id = self.active_runtime().focused_pane_id;
+        let id = self.keyboard_pane();
         self.active_runtime_mut()
             .panes
             .iter_mut()
@@ -88,7 +88,7 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn focused_file_content(&self) -> Option<&FileContent> {
-        let id = self.active_runtime().focused_pane_id;
+        let id = self.keyboard_pane();
         self.active_runtime()
             .panes
             .iter()
@@ -97,7 +97,7 @@ impl Workspace {
     }
 
     pub(in crate::workspace) fn focused_file_content_mut(&mut self) -> Option<&mut FileContent> {
-        let id = self.active_runtime().focused_pane_id;
+        let id = self.keyboard_pane();
         self.active_runtime_mut()
             .panes
             .iter_mut()

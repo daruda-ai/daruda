@@ -5,6 +5,7 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::nav::{NavDirection, pane_in_direction};
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::{PaneId, collect_pane_rects};
+use crate::workspace::main_area::side_group::PanePlace;
 use gpui::{Context, Window};
 
 impl Workspace {
@@ -173,7 +174,19 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A side tab's pane takes the keyboard without becoming the focused
+        // pane: that stays one of the active tab's.
+        if let Some(PanePlace::Side(index)) = self.active_runtime().place_of(id) {
+            if !(self.keyboard_is_aside() && self.active_runtime().side.active_index() == index) {
+                self.activate_side_tab(index, window, cx);
+            }
+            return;
+        }
         if !self.set_menu_target_pane(id, window, cx) {
+            // Already the focused pane, but the keyboard may be aside.
+            if self.keyboard_is_aside() {
+                self.focus_tabs_group(window, cx);
+            }
             return;
         }
         self.bump_activity(id);
@@ -197,7 +210,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.active_runtime().focused_pane_id == id {
+        if self.active_runtime().focused_pane_id == id || self.pane_is_aside(id) {
             return false;
         }
         self.set_focused_pane(id, window, cx);
