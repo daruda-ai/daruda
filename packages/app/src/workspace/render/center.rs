@@ -73,7 +73,6 @@ pub(super) fn render_center_content(
                     ws.main_area.pane_drop_hover,
                     dragged_divider,
                     &file_send,
-                    &mut None,
                     cx,
                 )
             } else {
@@ -87,7 +86,6 @@ pub(super) fn render_center_content(
                     ws.main_area.pane_drop_hover,
                     dragged_divider,
                     &file_send,
-                    &mut None,
                     cx,
                 )
             }
@@ -102,7 +100,6 @@ pub(super) fn render_center_content(
                 ws.main_area.pane_drop_hover,
                 dragged_divider,
                 &file_send,
-                &mut None,
                 cx,
             )
         }

@@ -216,6 +216,37 @@ fn pane_header(
         .child(close)
 }
 
+/// A pane whose body the caller builds, in the frame every pane has: a
+/// press moves the keyboard into it, and it tracks its focus handle.
+pub(in crate::workspace) fn render_hosted_pane(
+    id: PaneId,
+    focus: &gpui::FocusHandle,
+    body: Option<AnyElement>,
+    cx: &mut Context<Workspace>,
+) -> AnyElement {
+    div()
+        .id(("pane", id as usize))
+        .relative()
+        .size_full()
+        .flex()
+        .flex_col()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, window, cx| this.focus_pane_on_click(id, window, cx)),
+        )
+        // First child, so its hitbox is behind everything the pane paints.
+        .child(pane_press::blocked_press_layer(id, cx))
+        .child(
+            div()
+                .flex_1()
+                .min_h(px(0.))
+                .overflow_hidden()
+                .track_focus(focus)
+                .children(body),
+        )
+        .into_any_element()
+}
+
 /// Render the layout tree as GPUI elements.
 #[allow(clippy::too_many_arguments)]
 pub(in crate::workspace) fn render_layout(
@@ -230,9 +261,6 @@ pub(in crate::workspace) fn render_layout(
     // few pixels it occupies, since a drag is what pulls the pointer off them.
     dragged_divider: Option<PaneId>,
     file_send: &file_context::FileSendAction,
-    // What a pull request pane draws, built by the caller that has the
-    // detail staged; taken by the one leaf that is such a pane.
-    pr_detail: &mut Option<AnyElement>,
     cx: &mut Context<Workspace>,
 ) -> AnyElement {
     match layout {
@@ -292,12 +320,9 @@ pub(in crate::workspace) fn render_layout(
             }
 
             let content = match &pane.content {
-                self::pane::PaneContent::PullRequest(pr) => div()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .overflow_hidden()
-                    .track_focus(&pr.focus_handle)
-                    .children(pr_detail.take()),
+                // Drawn by `render_hosted_pane`, from a detail staged for
+                // the frame: a pull request is never a leaf of a split tree.
+                self::pane::PaneContent::PullRequest(_) => div(),
                 self::pane::PaneContent::File(f) => div()
                     .flex_1()
                     .min_h(px(0.))
@@ -428,7 +453,6 @@ pub(in crate::workspace) fn render_layout(
                     drop_target,
                     dragged_divider,
                     file_send,
-                    pr_detail,
                     cx,
                 );
                 let ratio = ratios[i];

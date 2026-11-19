@@ -71,6 +71,7 @@ impl PrDetails {
 
     /// A pane now shows `id`.
     pub(in crate::workspace) fn hold(&mut self, id: PrDetailId) {
+        debug_assert!(self.get(id).is_some(), "a pane holds a detail that is open");
         if self.get(id).is_some() {
             self.panes.push(id);
         }

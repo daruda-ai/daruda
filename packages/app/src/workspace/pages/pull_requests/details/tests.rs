@@ -81,6 +81,6 @@ fn showing_the_same_detail_again_or_one_not_open_ends_nothing() {
     // An id nothing is open under puts nothing on the page.
     assert_eq!(ended(details.show_on_page(Some(PrDetailId(9)))), Some(1));
     assert!(details.on_page().is_none());
-    details.hold(PrDetailId(9));
+    // Releasing what no pane holds ends nothing.
     assert_eq!(ended(details.release(PrDetailId(9))), None);
 }

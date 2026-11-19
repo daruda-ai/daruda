@@ -174,24 +174,7 @@ impl Workspace {
             worktree_root.as_deref(),
         );
 
-        div()
-            .id(("tab", i))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(theme::TAB_GAP))
-            .pl(px(theme::TAB_PAD_LEFT))
-            .pr(px(theme::TAB_PAD_RIGHT))
-            .py(px(theme::TAB_PAD_Y))
-            .mx(px(theme::TAB_MARGIN_X))
-            .min_w(px(theme::TAB_MIN_WIDTH))
-            .max_w(px(theme::TAB_MAX_WIDTH))
-            .flex_grow(1.)
-            .flex_basis(px(0.0))
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .text_size(px(theme::TAB_FONT_SIZE))
-            .cursor_pointer()
+        tab_cell_frame(("tab", i))
             .when(Some(i) == tab_reorder_preview, |d| {
                 d.border_l_2().border_color(colors.tab_insertion_line_color)
             })
@@ -293,6 +276,29 @@ pub(super) struct TabCellColors {
     pub(super) tab_active_bg: gpui::Hsla,
     pub(super) tab_insertion_line_color: gpui::Hsla,
 }
+/// A tab's cell as both strips lay it out: sharing the row between a
+/// least and a greatest width, its label cut where it runs out.
+pub(super) fn tab_cell_frame(id: impl Into<gpui::ElementId>) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(theme::TAB_GAP))
+        .pl(px(theme::TAB_PAD_LEFT))
+        .pr(px(theme::TAB_PAD_RIGHT))
+        .py(px(theme::TAB_PAD_Y))
+        .mx(px(theme::TAB_MARGIN_X))
+        .min_w(px(theme::TAB_MIN_WIDTH))
+        .max_w(px(theme::TAB_MAX_WIDTH))
+        .flex_grow(1.)
+        .flex_basis(px(0.0))
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_size(px(theme::TAB_FONT_SIZE))
+        .cursor_pointer()
+}
+
 /// The colours both tab strips are drawn in.
 pub(super) struct TabStripColors {
     pub(super) bar_bg: gpui::Hsla,

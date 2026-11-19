@@ -7,13 +7,13 @@ use gpui::{
 };
 
 use super::menus::{SideTabKind, side_tab_context_menu_items};
-use super::tab_bar::{TabCellColors, TabStripColors, tab_strip_colors};
+use super::tab_bar::{TabCellColors, TabStripColors, tab_cell_frame, tab_strip_colors};
 use crate::ui::cursor::CursorReachExt as _;
 use crate::ui::theme;
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::{DIVIDER_PX, PaneLayout};
-use crate::workspace::main_area::render_layout;
 use crate::workspace::main_area::side_group::PanePlace;
+use crate::workspace::main_area::{render_hosted_pane, render_layout};
 use crate::workspace::root_menu::RootContextMenuExt as _;
 use crate::workspace::{TAB_BAR_HEIGHT, Workspace};
 
@@ -71,6 +71,26 @@ impl Workspace {
             .collect()
     }
 
+    /// What the pull request pane holding detail `id` draws: the view
+    /// staged for this frame, when it is that detail's.
+    fn staged_pr_pane(
+        &self,
+        id: crate::workspace::pages::pull_requests::detail::PrDetailId,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let page = &self.pages.pull_requests;
+        let view = page.detail_snapshot.as_ref().filter(|view| view.id == id)?;
+        let detail = page.details.get(id)?;
+        Some(
+            crate::workspace::pages::pull_requests::detail::render::render(
+                view,
+                detail.scroll(),
+                detail.files_scroll(),
+                cx,
+            ),
+        )
+    }
+
     /// The side group: its strip, then the pane of the tab shown.
     pub(super) fn build_side_group(&self, cx: &mut Context<Self>) -> AnyElement {
         let TabStripColors {
@@ -115,32 +135,26 @@ impl Workspace {
                     .border_color(bar_border),
             );
         let runtime = self.active_runtime();
-        // The detail a pull request pane shows, staged for this frame.
-        let mut pr_detail = self.shown_pr_pane_detail().and_then(|id| {
-            let page = &self.pages.pull_requests;
-            let view = page.detail_snapshot.as_ref().filter(|view| view.id == id)?;
-            let detail = page.details.get(id)?;
-            Some(
-                crate::workspace::pages::pull_requests::detail::render::render(
-                    view,
-                    detail.scroll(),
-                    detail.files_scroll(),
-                    cx,
-                ),
-            )
-        });
-        let content = match runtime.side.active_pane() {
-            Some(pane) => render_layout(
-                &PaneLayout::Pane(pane),
+        let content = match runtime.side.active_pane().and_then(|id| {
+            runtime
+                .panes
+                .iter()
+                .find(|pane| pane.id == id)
+                .map(|pane| (id, &pane.content))
+        }) {
+            Some((id, PaneContent::PullRequest(pr))) => {
+                render_hosted_pane(id, &pr.focus_handle, self.staged_pr_pane(pr.detail, cx), cx)
+            }
+            Some((id, _)) => render_layout(
+                &PaneLayout::Pane(id),
                 &runtime.panes,
-                pane,
+                id,
                 false,
                 SharedString::from(self.mirrors.font_family.clone()),
                 None,
                 None,
                 None,
                 &self.file_send_action(),
-                &mut pr_detail,
                 cx,
             ),
             None => div().into_any_element(),
@@ -185,25 +199,8 @@ impl Workspace {
                     ws.request_close_side_tab(index, window, cx)
                 });
             }));
-        div()
-            .id(("side-tab", index))
+        tab_cell_frame(("side-tab", index))
             .debug_selector(move || format!("side-tab-{index}"))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(theme::TAB_GAP))
-            .pl(px(theme::TAB_PAD_LEFT))
-            .pr(px(theme::TAB_PAD_RIGHT))
-            .py(px(theme::TAB_PAD_Y))
-            .mx(px(theme::TAB_MARGIN_X))
-            .min_w(px(theme::TAB_MIN_WIDTH))
-            .max_w(px(theme::TAB_MAX_WIDTH))
-            .flex_grow(1.)
-            .flex_basis(px(0.0))
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .text_size(px(theme::TAB_FONT_SIZE))
-            .cursor_pointer()
             .when(is_active, |d| {
                 d.bg(colors.tab_active_file_chrome_bg)
                     .text_color(if group_focused {
