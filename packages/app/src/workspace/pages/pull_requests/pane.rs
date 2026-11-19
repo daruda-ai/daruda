@@ -28,10 +28,7 @@ impl Workspace {
         self.active_runtime()
             .panes
             .iter()
-            .find_map(|pane| match &pane.content {
-                PaneContent::PullRequest(pr) => Some((pane.id, pr.detail.id())),
-                PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::AgentChat(_) => None,
-            })
+            .find_map(|pane| Some((pane.id, pane.content.as_pull_request()?.detail.id())))
     }
 
     /// The detail a pull request pane shows on screen now, if one does.
@@ -74,8 +71,10 @@ impl Workspace {
         let id = hold.id();
         let index = match self.pr_pane() {
             Some((pane_id, _)) => {
-                if let Some(pane) = self.main_area.pane_mut(pane_id)
-                    && let PaneContent::PullRequest(pr) = &mut pane.content
+                if let Some(pr) = self
+                    .main_area
+                    .pane_mut(pane_id)
+                    .and_then(|pane| pane.content.as_pull_request_mut())
                 {
                     // The hold it had is dropped: that detail ends unless
                     // the page shows it.
@@ -144,7 +143,7 @@ impl Workspace {
         let any = panes.iter().any(|id| {
             self.main_area
                 .pane(*id)
-                .is_some_and(|pane| matches!(pane.content, PaneContent::PullRequest(_)))
+                .is_some_and(|pane| pane.content.as_pull_request().is_some())
         });
         if !any {
             return;
@@ -167,12 +166,11 @@ impl Workspace {
         let lanes: Vec<LaneRef> = self.main_area.runtimes.keys().copied().collect();
         for lane in lanes {
             let Some(pane) = self.main_area.runtimes.get(&lane).and_then(|runtime| {
-                runtime.panes.iter().find_map(|pane| match &pane.content {
-                    PaneContent::PullRequest(_) => Some(pane.id),
-                    PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::AgentChat(_) => {
-                        None
-                    }
-                })
+                runtime
+                    .panes
+                    .iter()
+                    .find(|pane| pane.content.as_pull_request().is_some())
+                    .map(|pane| pane.id)
             }) else {
                 continue;
             };
@@ -205,15 +203,9 @@ impl Workspace {
         let item = self
             .main_area
             .pane(pane)
-            .and_then(|pane| match &pane.content {
-                PaneContent::PullRequest(pr) => self
-                    .pages
-                    .pull_requests
-                    .details
-                    .get(pr.detail.id())
-                    .map(|detail| detail.item().clone()),
-                PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::AgentChat(_) => None,
-            });
+            .and_then(|pane| pane.content.as_pull_request())
+            .and_then(|pr| self.pr_detail(pr.detail.id()))
+            .map(|detail| detail.item().clone());
         if let Some(item) = item {
             self.show_page(super::Page::PullRequests, cx);
             self.open_pr_detail(item, window, cx);

@@ -328,7 +328,7 @@ pub(in crate::workspace) fn render_layout(
                     .flex_1()
                     .min_h(px(0.))
                     .overflow_hidden()
-                    .when_some(pane.content.wrapper_focus_handle(), |d, fh| {
+                    .when_some(pane.content.behavior().wrapper_focus_handle(), |d, fh| {
                         d.track_focus(fh)
                     })
                     .child(render_pane_file_viewer(id, f, file_send, cx)),

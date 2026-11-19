@@ -206,6 +206,14 @@ is read beside a chat goes aside: files, diffs and a pull request
   facts (`plan_open`, `GroupFacts::goes_beside`); the workspace only carries
   the plan out. A new rule is a row in its table of cases.
 - **A pane's id** is `PaneId`, minted from 1: the default names no pane.
+- **What is true of every pane kind** (title, focus handle, cwd, unsaved
+  edits, running work, account, rail icon, which group hosts it) is
+  `PaneBehavior` (`main_area/pane/behavior.rs`), one `impl` per kind with
+  defaults for what does not apply. Ask through `pane.content.behavior()` or
+  the `Pane` method that wraps it; reach one kind's own data with
+  `as_terminal()` / `as_file()` / `as_agent_chat()` / `as_pull_request()`.
+  Match on `PaneContent` only where kinds must differ in what they draw or
+  save, so the compiler asks about a new kind exactly there.
 
 ## Error Reporting
 

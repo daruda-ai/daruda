@@ -11,7 +11,6 @@ use gpui::Context;
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::annotation_dialog::{AnnotationDialog, AnnotationDialogTarget};
-use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_terminal::session::interval_tree::{LineRange, MarkId};
 
@@ -156,10 +155,7 @@ impl Workspace {
             .panes
             .iter()
             .find(|p| p.id == pane_id)?;
-        match &pane.content {
-            PaneContent::Terminal(t) => Some(t.view.clone()),
-            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => None,
-        }
+        pane.terminal_view().cloned()
     }
 
     fn report_pane_missing(&mut self, site: &str, pane_id: PaneId, cx: &mut Context<Self>) {

@@ -4,12 +4,8 @@ use daruda_agent::{AgentOutcome, SessionStatus};
 use daruda_store::project::LaneRef;
 use gpui::{App, Context, SharedString, Window};
 
-use crate::ui::icons;
 use crate::workspace::main_area::pane_tree::PaneId;
-use crate::workspace::{
-    Workspace,
-    main_area::{pane::PaneContent, tab_ops::PaneEntry},
-};
+use crate::workspace::{Workspace, main_area::tab_ops::PaneEntry};
 
 #[derive(Clone, PartialEq)]
 pub(in crate::workspace) struct PaneSnapshot {
@@ -91,12 +87,7 @@ impl Workspace {
                 let ids = [pane.id];
                 PaneSnapshot {
                     pane: pane.id.0.into(),
-                    neutral_icon: match &pane.content {
-                        PaneContent::Terminal(_) => icons::TERMINAL,
-                        PaneContent::AgentChat(_) => icons::SESSION,
-                        PaneContent::File(_) => icons::FILE_VIEWER,
-                        PaneContent::PullRequest(_) => icons::PULL_REQUESTS,
-                    },
+                    neutral_icon: pane.content.behavior().rail_icon(),
                     title: if include_titles {
                         pane.title(cx)
                     } else {

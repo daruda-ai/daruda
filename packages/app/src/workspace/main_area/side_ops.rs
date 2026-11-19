@@ -9,7 +9,7 @@
 use daruda_store::project::LaneRef;
 use gpui::{Context, Window};
 
-use super::pane::{Pane, PaneContent, TabEntry};
+use super::pane::{Pane, TabEntry};
 use super::pane_tree::{PaneId, PaneLayout};
 use super::side_group::{GroupsShown, KeyboardIn, PanePlace, SideGroup, SideTab};
 use crate::ui::theme;
@@ -30,10 +30,7 @@ pub(in crate::workspace) struct SideDividerDrag {
 /// Whether the side group takes `pane`: what is read beside a chat, not
 /// the chat or a shell.
 pub(in crate::workspace) fn side_hosts(pane: &Pane) -> bool {
-    matches!(
-        pane.content,
-        PaneContent::File(_) | PaneContent::PullRequest(_)
-    )
+    pane.content.behavior().hosting().aside()
 }
 
 impl Workspace {
@@ -164,8 +161,8 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Whether the side tab at `index` can sit among the tabs: a file can;
-    /// a pull request is read only beside them.
+    /// Whether the side tab at `index` can sit among the tabs: its kind
+    /// says (a file can; a pull request is read only beside them).
     pub(in crate::workspace) fn side_tab_can_go_back(&self, index: usize) -> bool {
         let runtime = self.active_runtime();
         runtime
@@ -173,7 +170,7 @@ impl Workspace {
             .tabs()
             .get(index)
             .and_then(|tab| runtime.panes.iter().find(|pane| pane.id == tab.pane))
-            .is_some_and(Pane::is_file)
+            .is_some_and(|pane| pane.content.behavior().hosting().among_tabs())
     }
 
     /// Bring the side tab at `index` back among the tabs and move into it.

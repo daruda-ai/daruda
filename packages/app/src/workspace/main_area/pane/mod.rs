@@ -2,6 +2,7 @@
 //! draining have separate lifecycle modules behind this public boundary.
 
 mod accounts;
+pub(in crate::workspace) mod behavior;
 mod session_restore;
 pub(in crate::workspace) use session_restore::SessionRestore;
 mod output;
@@ -227,82 +228,29 @@ impl FontMetricsKey {
     }
 }
 
-impl PaneContent {
-    /// Focus handle for the outer pane-wrapper div's `track_focus` call.
-    /// Returns `Some` for content variants rendered as a plain div tree
-    /// (no inner GPUI `Entity` that manages its own `track_focus`), and
-    /// `None` for variants whose inner `Entity<T>` calls `track_focus` in
-    /// its own `Render` implementation.
-    ///
-    /// **Recipe 7 checklist** — when adding a new variant:
-    /// - `Some(&handle)` → content rendered as a plain `div()` tree.
-    /// - `None` → content is a GPUI `Entity<T>` whose `T::render` calls
-    ///   `track_focus` itself (like `Terminal` via `TerminalView`).
-    pub(in crate::workspace) fn wrapper_focus_handle(&self) -> Option<&FocusHandle> {
-        match self {
-            PaneContent::Terminal(_) => None,
-            PaneContent::File(f) => Some(&f.focus_handle),
-            // The `AgentChatView` entity tracks its own focus handle in its
-            // `Render` impl (like `Terminal` via `TerminalView`), so the
-            // wrapper div must not double-track it.
-            PaneContent::AgentChat(_) => None,
-            PaneContent::PullRequest(pr) => Some(&pr.focus_handle),
-        }
-    }
-}
-
 impl Pane {
-    /// Title shown in the tab strip, pane header, and status bar. AgentChat
-    /// content has no cache to go stale (see [`AgentChatContent`]'s doc
-    /// comment): it reads the live session title, falling back to the first
-    /// prompt, then to "New {agent name}" — the same precedence the in-pane
-    /// activity bar uses (`daruda_chat::agent_chat_helpers::activity_bar_title`).
+    /// Title shown in the tab strip, pane header, and status bar.
     pub(in crate::workspace) fn title(&self, cx: &App) -> SharedString {
-        match &self.content {
-            PaneContent::Terminal(t) => t.cached_title.clone(),
-            PaneContent::File(f) => f.cached_title.clone(),
-            PaneContent::AgentChat(ac) => {
-                let v = ac.view.read(cx);
-                daruda_chat::agent_chat_helpers::activity_bar_title(v.session_title(), v.items())
-                    .map(SharedString::from)
-                    .unwrap_or_else(|| {
-                        crate::surface::strings::common::new_agent_chat_named(v.agent_name()).into()
-                    })
-            }
-            PaneContent::PullRequest(pr) => pr.label.clone(),
-        }
+        self.content.behavior().title(cx)
     }
 
     /// Refresh pane-title caches whose fallback text follows the active
     /// locale. Content-derived titles are left untouched.
     pub(in crate::workspace) fn refresh_locale_dependent_title(&mut self, cx: &App) {
-        match &mut self.content {
-            PaneContent::Terminal(t) => {
-                let title = t.view.read(cx).terminal_title().into_owned();
-                if t.cached_title.as_ref() != title {
-                    t.cached_title = title.into();
-                }
+        if let Some(terminal) = self.content.as_terminal_mut() {
+            let title = terminal.view.read(cx).terminal_title().into_owned();
+            if terminal.cached_title.as_ref() != title {
+                terminal.cached_title = title.into();
             }
-            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => {}
         }
     }
 
     /// Filesystem cwd if the content tracks one (Terminal: from OSC 7;
     /// File: the file's parent directory). The Files-view "show parent
-    /// of focused file" affordance reuses this.
-    ///
-    /// **AgentChat is `None` for `PaneCwd::Remote`.** This is a local
-    /// filesystem accessor — every consumer expects a real path on this
-    /// machine. A remote pane's cwd string leaking through would reach
-    /// `spawn_pty`'s existence check, silently fall back to `$HOME`, and skip
-    /// the lane-local fallback tier.
+    /// of focused file" affordance reuses this. Always a path on this
+    /// machine: see [`PaneBehavior::cwd`].
     pub(in crate::workspace) fn cwd(&self) -> Option<&Path> {
-        match &self.content {
-            PaneContent::Terminal(t) => t.cached_cwd.as_deref(),
-            PaneContent::File(f) => f.view.path.parent(),
-            PaneContent::AgentChat(ac) => ac.cwd.as_ref().and_then(PaneCwd::as_local),
-            PaneContent::PullRequest(_) => None,
-        }
+        self.content.behavior().cwd()
     }
 
     /// Last path component of `cwd`, for compact display in
@@ -312,15 +260,15 @@ impl Pane {
     }
 
     pub(super) fn is_terminal(&self) -> bool {
-        matches!(self.content, PaneContent::Terminal(_))
+        self.content.as_terminal().is_some()
     }
 
     pub(in crate::workspace) fn is_file(&self) -> bool {
-        matches!(self.content, PaneContent::File(_))
+        self.content.as_file().is_some()
     }
 
     pub(super) fn is_agent_chat(&self) -> bool {
-        matches!(self.content, PaneContent::AgentChat(_))
+        self.content.as_agent_chat().is_some()
     }
 
     pub(in crate::workspace) fn file_path(&self) -> Option<PathBuf> {
@@ -328,16 +276,8 @@ impl Pane {
     }
 
     /// Focus handle the pane gives to the window when activated.
-    /// File panes return their pane-level handle; the find-panel input
-    /// has its own handle that takes priority while the panel is open
-    /// (search uses `track_focus(&search_input.focus_handle())`).
     pub(in crate::workspace) fn focus_handle(&self, cx: &App) -> FocusHandle {
-        match &self.content {
-            PaneContent::Terminal(t) => t.view.read(cx).focus_handle().clone(),
-            PaneContent::File(f) => f.focus_handle.clone(),
-            PaneContent::AgentChat(ac) => ac.view.read(cx).focus_handle(cx),
-            PaneContent::PullRequest(pr) => pr.focus_handle.clone(),
-        }
+        self.content.behavior().focus_handle(cx)
     }
 
     /// Typed accessor for sites that legitimately need the
@@ -346,10 +286,7 @@ impl Pane {
     /// walker rendering a Terminal pane). Returns `None` when the
     /// content is not a terminal.
     pub(in crate::workspace) fn terminal_view(&self) -> Option<&Entity<TerminalView>> {
-        match &self.content {
-            PaneContent::Terminal(t) => Some(&t.view),
-            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => None,
-        }
+        self.content.as_terminal().map(|terminal| &terminal.view)
     }
 
     /// The account a Terminal pane runs under, in persisted form
@@ -359,58 +296,37 @@ impl Pane {
     pub(in crate::workspace) fn terminal_account_id(
         &self,
     ) -> Option<daruda_store::accounts::AccountId> {
-        match &self.content {
-            PaneContent::Terminal(t) => t.account.to_persisted(),
-            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => None,
-        }
+        self.content
+            .as_terminal()
+            .and_then(|terminal| terminal.account.to_persisted())
     }
 
-    /// The account selection for either account-tracking pane kind
-    /// (Terminal or AgentChat). `None` means the pane kind doesn't track an
-    /// account at all (File/TaskEdit — the status bar hides the slot rather
-    /// than showing a misleading "System"); `Some(sel)` is the pane's own
-    /// [`AccountSelection`](daruda_store::accounts::AccountSelection). Single
-    /// accessor behind the status bar's account slot and the account-switcher
-    /// handler, so the two don't each re-derive this match.
+    /// The account selection for an account-tracking pane kind (Terminal or
+    /// AgentChat); `None` for a kind that tracks none. Single accessor
+    /// behind the status bar's account slot and the account-switcher
+    /// handler, so the two don't each re-derive it.
     pub(in crate::workspace) fn account_selection(
         &self,
     ) -> Option<daruda_store::accounts::AccountSelection> {
-        match &self.content {
-            PaneContent::Terminal(t) => Some(t.account),
-            PaneContent::AgentChat(ac) => Some(ac.account),
-            PaneContent::File(_) | PaneContent::PullRequest(_) => None,
-        }
+        self.content.behavior().account_selection()
     }
 
     /// Immutable accessor for the file-viewer state.
     pub(in crate::workspace) fn file_content(&self) -> Option<&FileContent> {
-        match &self.content {
-            PaneContent::File(f) => Some(f),
-            PaneContent::Terminal(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => {
-                None
-            }
-        }
+        self.content.as_file()
     }
 
     /// Mutable accessor for the file-viewer state. Used by action
     /// handlers that want to update the focused pane's file viewer
     /// (search, scroll, mode toggle).
     pub(in crate::workspace) fn file_content_mut(&mut self) -> Option<&mut FileContent> {
-        match &mut self.content {
-            PaneContent::File(f) => Some(f),
-            PaneContent::Terminal(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => {
-                None
-            }
-        }
+        self.content.as_file_mut()
     }
 
     /// Immutable accessor for the AgentChat pane wrapper. Used by the layout
     /// serializer to persist the anchored lane cwd (cx-free).
     pub(in crate::workspace) fn agent_chat_content(&self) -> Option<&AgentChatContent> {
-        match &self.content {
-            PaneContent::AgentChat(ac) => Some(ac),
-            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::PullRequest(_) => None,
-        }
+        self.content.as_agent_chat()
     }
 
     /// Mutable counterpart to `agent_chat_content`. Used by session restore
@@ -418,10 +334,7 @@ impl Pane {
     /// `account_id` from the persisted `SerializedAgentChatContent` — the
     /// constructor path itself has no override to seed with.
     pub(in crate::workspace) fn agent_chat_content_mut(&mut self) -> Option<&mut AgentChatContent> {
-        match &mut self.content {
-            PaneContent::AgentChat(ac) => Some(ac),
-            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::PullRequest(_) => None,
-        }
+        self.content.as_agent_chat_mut()
     }
 
     /// The AgentChat pane's view entity. Used by the Workspace ops + pump (via
@@ -429,51 +342,26 @@ impl Pane {
     /// builder to read `turn.is_in_flight()`. Mutation goes through `view.update`,
     /// which notifies the view's own cached subtree.
     pub(in crate::workspace) fn agent_chat_view(&self) -> Option<&Entity<AgentChatView>> {
-        match &self.content {
-            PaneContent::AgentChat(ac) => Some(&ac.view),
-            PaneContent::Terminal(_) | PaneContent::File(_) | PaneContent::PullRequest(_) => None,
-        }
+        self.content.as_agent_chat().map(|chat| &chat.view)
     }
 
-    /// True when the pane holds unsaved user edits. A File pane in Raw mode
-    /// diffs its editor against the text it loaded; Terminal and AgentChat
-    /// have no editable buffer.
+    /// True when the pane holds unsaved user edits.
     ///
     /// Also what takes a tab out of the left dock's replaceable scratch slot —
     /// see [`crate::workspace::Workspace::preview_tab_index`].
     pub(in crate::workspace) fn is_dirty(&self, cx: &App) -> bool {
-        match &self.content {
-            PaneContent::Terminal(_) => false,
-            PaneContent::File(f) => {
-                f.view.holds_editable_buffer() && *f.editor_state.read(cx).text() != f.saved_text
-            }
-            PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => false,
-        }
+        self.content.behavior().is_dirty(cx)
     }
 
     /// True when closing the pane would stop work in progress: a job in a
     /// terminal's foreground, or an agent turn.
     pub(in crate::workspace) fn runs_work(&self, cx: &App) -> bool {
-        match &self.content {
-            PaneContent::Terminal(t) => {
-                !t.exited
-                    && (t.view.read(cx).session().command_is_running()
-                        || t.master.as_deref().is_some_and(|master| {
-                            daruda_terminal::pty::runs_foreground_job(master, t.shell_pid)
-                        }))
-            }
-            PaneContent::AgentChat(ac) => ac.view.read(cx).is_busy(),
-            PaneContent::File(_) | PaneContent::PullRequest(_) => false,
-        }
+        self.content.behavior().runs_work(cx)
     }
 
     /// True when the pane's `save` path is meaningful for the user.
     pub(super) fn can_save(&self) -> bool {
-        match &self.content {
-            PaneContent::Terminal(_) => false,
-            PaneContent::File(f) => f.view.holds_editable_buffer() && f.view.path.is_absolute(),
-            PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => false,
-        }
+        self.content.behavior().can_save()
     }
 
     /// True when the tab strip should paint a small `●` next to the
@@ -502,16 +390,15 @@ impl Pane {
         new_title: String,
         new_cwd: Option<PathBuf>,
     ) -> bool {
-        match &mut self.content {
-            PaneContent::Terminal(t) => t.update_cached(new_title, new_cwd),
-            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => false,
-        }
+        self.content
+            .as_terminal_mut()
+            .is_some_and(|terminal| terminal.update_cached(new_title, new_cwd))
     }
 
     /// Compute grid dimensions and propagate to the underlying
-    /// transport. Per-content dispatch — Terminal resizes the PTY +
-    /// view; File content has no grid to resize and returns `true`
-    /// (counts as "measured") so workspace doesn't keep retrying.
+    /// transport. A terminal resizes its PTY and view; any other kind has
+    /// no grid to resize and counts as measured, so the workspace does
+    /// not keep retrying.
     pub(super) fn resize(
         &self,
         avail_w: f32,
@@ -521,12 +408,9 @@ impl Pane {
         window: &mut Window,
         cx: &mut Context<Workspace>,
     ) -> bool {
-        match &self.content {
-            PaneContent::Terminal(t) => {
-                t.resize_to_fit(avail_w, avail_h, pane_header_h, cache, window, cx)
-            }
-            PaneContent::File(_) | PaneContent::AgentChat(_) | PaneContent::PullRequest(_) => true,
-        }
+        self.content.as_terminal().is_none_or(|terminal| {
+            terminal.resize_to_fit(avail_w, avail_h, pane_header_h, cache, window, cx)
+        })
     }
 }
 
