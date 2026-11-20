@@ -53,7 +53,7 @@ fn pane(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) ->
     pane.agent_chat_view().unwrap().update(cx, |view, _| {
         view.set_status_for_test(AgentSessionStatus::Connected)
     });
-    let tab_id = ws.alloc_id();
+    let tab_id = ws.alloc_tab_id();
     ws.active_runtime_mut().panes.push(pane);
     ws.active_runtime_mut().tabs.push(TabEntry {
         id: tab_id,

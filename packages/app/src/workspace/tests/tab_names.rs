@@ -8,7 +8,7 @@ fn with_agent_tab(
 ) -> (
     gpui::WindowHandle<gpui_component::Root>,
     gpui::Entity<Workspace>,
-    u64,
+    crate::workspace::main_area::tab_strip::TabId,
     crate::workspace::main_area::pane_tree::PaneId,
 ) {
     let (wh, ws) = build_workspace(cx);

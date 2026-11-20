@@ -21,7 +21,7 @@ impl Workspace {
             .filter_map(|&i| tabs.get(i))
             .flat_map(|tab| tab.layout.pane_ids())
             .collect();
-        let tab_ids: Vec<u64> = indices
+        let tab_ids: Vec<crate::workspace::main_area::tab_strip::TabId> = indices
             .iter()
             .filter_map(|&i| tabs.get(i).map(|tab| tab.id))
             .collect();
@@ -41,7 +41,10 @@ impl Workspace {
         });
     }
 
-    fn tab_index_by_id(&self, tab_id: u64) -> Option<usize> {
+    fn tab_index_by_id(
+        &self,
+        tab_id: crate::workspace::main_area::tab_strip::TabId,
+    ) -> Option<usize> {
         self.active_runtime()
             .tabs
             .iter()

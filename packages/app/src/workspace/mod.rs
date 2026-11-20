@@ -571,6 +571,11 @@ impl Workspace {
         main_area::pane_tree::PaneId(self.alloc_id())
     }
 
+    /// A new tab's id, out of the counter panes take theirs from.
+    fn alloc_tab_id(&mut self) -> main_area::tab_strip::TabId {
+        main_area::tab_strip::TabId(self.alloc_id())
+    }
+
     fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;

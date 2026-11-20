@@ -218,7 +218,7 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
                 cx,
             );
             let id = pane.id;
-            let tab_id = ws.alloc_id();
+            let tab_id = ws.alloc_tab_id();
             ws.active_runtime_mut().panes.push(pane);
             ws.active_runtime_mut()
                 .tabs

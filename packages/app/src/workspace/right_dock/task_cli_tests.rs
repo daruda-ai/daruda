@@ -168,7 +168,7 @@ fn snapshot_pane(
         }));
         v.set_status_for_test(AgentSessionStatus::Connected);
     });
-    let tab_id = ws.alloc_id();
+    let tab_id = ws.alloc_tab_id();
     ws.active_runtime_mut().panes.push(pane);
     ws.active_runtime_mut().tabs.push(TabEntry {
         id: tab_id,

@@ -38,7 +38,7 @@ const TAB_HOVER_SWITCH_DELAY: Duration = Duration::from_millis(600);
 /// Minimal + Clone; transient drag state lives in `MainAreaContext`.
 #[derive(Clone)]
 pub(in crate::workspace) struct TabDrag {
-    pub tab_id: u64,
+    pub tab_id: crate::workspace::main_area::tab_strip::TabId,
     pub title: SharedString,
 }
 
@@ -123,7 +123,7 @@ impl Workspace {
     /// the tab row.
     pub(in crate::workspace) fn update_tab_drag_from_move(
         &mut self,
-        cell_tab_id: u64,
+        cell_tab_id: crate::workspace::main_area::tab_strip::TabId,
         cell_index: usize,
         event: &DragMoveEvent<TabDrag>,
         window: &mut Window,
@@ -152,7 +152,7 @@ impl Workspace {
     /// happening to leave the tab row in the same frame.
     pub(in crate::workspace) fn release_tab_drag_state_owned_by(
         &mut self,
-        cell_tab_id: u64,
+        cell_tab_id: crate::workspace::main_area::tab_strip::TabId,
         cx: &mut Context<Self>,
     ) {
         let mut changed = false;
@@ -181,7 +181,7 @@ impl Workspace {
     /// call this entry point directly.
     pub(in crate::workspace) fn arm_tab_hover_switch(
         &mut self,
-        tab_id: u64,
+        tab_id: crate::workspace::main_area::tab_strip::TabId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -211,7 +211,7 @@ impl Workspace {
     /// landing moves nothing, so the drag ends as abandoned.
     pub(in crate::workspace) fn drop_tab_onto_bar(
         &mut self,
-        dragged_tab_id: u64,
+        dragged_tab_id: crate::workspace::main_area::tab_strip::TabId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

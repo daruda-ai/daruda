@@ -225,7 +225,7 @@ impl Workspace {
                                 .get(&stab.last_focused_pane)
                                 .copied()
                                 .unwrap_or_else(|| layout.first_leaf());
-                            let tab_id = self.alloc_id();
+                            let tab_id = self.alloc_tab_id();
                             if ix < swt.active_tab_index {
                                 kept_before_active += 1;
                             }

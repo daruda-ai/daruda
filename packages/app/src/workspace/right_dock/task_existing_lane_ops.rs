@@ -218,7 +218,7 @@ impl Workspace {
         let (local, remote, host) = self.lane_cwds(lane);
         let pane = self.create_new_agent_chat_pane(agent, local, remote, host, mode, window, cx);
         let pane_id = pane.id;
-        let tab_id = self.alloc_id();
+        let tab_id = self.alloc_tab_id();
         let rt = self.main_area.runtimes.entry(lane).or_default();
         let first = rt.tabs.is_empty();
         rt.panes.push(pane);

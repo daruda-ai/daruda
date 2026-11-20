@@ -2,7 +2,7 @@ use super::*;
 
 fn tab(id: u64) -> SideTab {
     SideTab {
-        id,
+        id: id.into(),
         pane: (id * 10).into(),
         user_label: None,
     }
@@ -17,7 +17,7 @@ fn group(ids: &[u64]) -> SideGroup {
 }
 
 fn ids(group: &SideGroup) -> Vec<u64> {
-    group.tabs().iter().map(|tab| tab.id).collect()
+    group.tabs().iter().map(|tab| tab.id.0).collect()
 }
 
 #[test]
@@ -51,12 +51,16 @@ fn removing_a_tab_keeps_the_right_one_shown() {
         let mut group = group(tabs);
         group.activate(shown);
         assert_eq!(
-            group.remove(removed).map(|tab| tab.id),
+            group.remove(removed).map(|tab| tab.id.0),
             Some(tabs[removed]),
             "{label}"
         );
         assert_eq!(ids(&group), left, "{label}");
-        assert_eq!(group.active_tab().map(|tab| tab.id), shown_after, "{label}");
+        assert_eq!(
+            group.active_tab().map(|tab| tab.id.0),
+            shown_after,
+            "{label}"
+        );
     }
     assert!(group(&[1]).remove(4).is_none());
 }
@@ -76,9 +80,9 @@ fn moving_a_tab_keeps_the_shown_one_shown() {
     group.activate(0);
     assert!(group.move_tab(0, 2));
     assert_eq!(ids(&group), [2, 3, 1]);
-    assert_eq!(group.active_tab().map(|tab| tab.id), Some(1));
+    assert_eq!(group.active_tab().map(|tab| tab.id.0), Some(1));
     assert!(group.move_tab(0, 1));
-    assert_eq!(group.active_tab().map(|tab| tab.id), Some(1));
+    assert_eq!(group.active_tab().map(|tab| tab.id.0), Some(1));
     assert!(!group.move_tab(1, 1));
     assert!(!group.move_tab(0, 3));
 }

@@ -95,7 +95,7 @@ impl Workspace {
             }
         };
         let pane_id = pane.id;
-        let tab_id = self.alloc_id();
+        let tab_id = self.alloc_tab_id();
 
         self.active_runtime_mut().panes.push(pane);
         self.active_runtime_mut().tabs.push(TabEntry {
@@ -373,7 +373,10 @@ impl Workspace {
     /// that tab is gone (closed mid-drag) or already active. Skips history
     /// for the same reason the preview hops do — the unwind is part of the
     /// look-ahead, not navigation the user performed.
-    pub(super) fn restore_active_tab_by_id(&mut self, tab_id: u64) -> bool {
+    pub(super) fn restore_active_tab_by_id(
+        &mut self,
+        tab_id: crate::workspace::main_area::tab_strip::TabId,
+    ) -> bool {
         let Some(index) = self
             .active_runtime()
             .tabs

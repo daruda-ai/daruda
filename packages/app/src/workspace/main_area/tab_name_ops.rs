@@ -12,7 +12,7 @@ impl Workspace {
     /// Name tab `tab_id` in the active lane, or clear its name with `None`.
     pub(in crate::workspace) fn rename_tab(
         &mut self,
-        tab_id: u64,
+        tab_id: crate::workspace::main_area::tab_strip::TabId,
         name: Option<String>,
         cx: &mut Context<Self>,
     ) {
@@ -35,7 +35,7 @@ impl Workspace {
     pub(in crate::workspace) fn on_tab_press(
         &mut self,
         index: usize,
-        tab_id: u64,
+        tab_id: crate::workspace::main_area::tab_strip::TabId,
         click_count: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -56,7 +56,7 @@ impl Workspace {
     /// must not freeze today's cwd into a name.
     pub(in crate::workspace) fn open_rename_tab_dialog(
         &mut self,
-        tab_id: u64,
+        tab_id: crate::workspace::main_area::tab_strip::TabId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

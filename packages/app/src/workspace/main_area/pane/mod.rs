@@ -427,7 +427,7 @@ pub(super) fn cwd_basename(cwd: Option<&std::path::Path>) -> Option<SharedString
 
 #[allow(dead_code)]
 pub(in crate::workspace) struct TabEntry {
-    pub(in crate::workspace) id: u64,
+    pub(in crate::workspace) id: crate::workspace::main_area::tab_strip::TabId,
     pub(in crate::workspace) layout: PaneLayout,
     pub(in crate::workspace) last_focused_pane: PaneId,
     /// User-set title (Window > Edit Tab Title…). `None` means the

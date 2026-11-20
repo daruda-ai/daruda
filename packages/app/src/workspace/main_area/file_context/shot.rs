@@ -65,7 +65,7 @@ impl Workspace {
                 cx,
             );
             let id = pane.id;
-            let tab_id = self.alloc_id();
+            let tab_id = self.alloc_tab_id();
             self.active_runtime_mut().panes.push(pane);
             self.active_runtime_mut().tabs.push(TabEntry {
                 id: tab_id,
@@ -99,7 +99,7 @@ impl Workspace {
             let end = SAMPLE_SOURCE.rfind("    }").expect("sample end") + "    }".len();
             state.set_selected_range(start..end, cx);
         });
-        let tab_id = self.alloc_id();
+        let tab_id = self.alloc_tab_id();
         self.active_runtime_mut().panes.push(pane);
         self.active_runtime_mut().tabs.push(TabEntry {
             id: tab_id,

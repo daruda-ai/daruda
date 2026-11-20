@@ -215,7 +215,7 @@ impl Workspace {
     /// persist). Every exit settles the drag through `finish_tab_drag`.
     pub(in crate::workspace) fn drop_tab_onto_pane(
         &mut self,
-        dragged_tab_id: u64,
+        dragged_tab_id: crate::workspace::main_area::tab_strip::TabId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

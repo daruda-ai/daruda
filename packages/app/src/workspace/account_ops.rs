@@ -330,7 +330,7 @@ impl Workspace {
         };
 
         let pane_id = new_pane.id;
-        let tab_id = self.alloc_id();
+        let tab_id = self.alloc_tab_id();
         self.active_runtime_mut().panes.push(new_pane);
         self.active_runtime_mut().tabs.push(TabEntry {
             id: tab_id,

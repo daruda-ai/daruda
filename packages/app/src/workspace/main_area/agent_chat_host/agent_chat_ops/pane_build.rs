@@ -365,7 +365,7 @@ impl Workspace {
             cx,
         );
         let pane_id = pane.id;
-        let tab_id = self.alloc_id();
+        let tab_id = self.alloc_tab_id();
         self.active_runtime_mut().panes.push(pane);
         self.active_runtime_mut().tabs.push(TabEntry {
             id: tab_id,
@@ -400,7 +400,7 @@ impl Workspace {
         account: daruda_store::accounts::AccountSelection,
         agent_id: String,
     ) {
-        let tab_id = self.alloc_id();
+        let tab_id = self.alloc_tab_id();
         let rt = self.active_runtime_mut();
         if !rt.tabs.is_empty() {
             rt.tab_history.push(rt.active_tab_index);

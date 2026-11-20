@@ -259,9 +259,10 @@ async fn tab_move_actions_and_history_indices(cx: &mut TestAppContext) {
         });
     })
     .unwrap();
-    let ids: Vec<u64> = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime().tabs.iter().map(|t| t.id).collect()
-    });
+    let ids: Vec<crate::workspace::main_area::tab_strip::TabId> = workspace
+        .read_with(cx, |ws, _| {
+            ws.active_runtime().tabs.iter().map(|t| t.id).collect()
+        });
     assert_eq!(ids.len(), 3);
 
     // Active tab is index 2; move it left → index 1.

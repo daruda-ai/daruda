@@ -67,7 +67,7 @@ impl Workspace {
                 kept_before_active += 1;
             }
             tabs.push(SideTab {
-                id: self.alloc_id(),
+                id: self.alloc_tab_id(),
                 pane,
                 user_label: stab
                     .user_label

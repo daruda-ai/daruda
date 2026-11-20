@@ -93,7 +93,7 @@ impl Workspace {
                     }),
                 };
                 let tab = SideTab {
-                    id: self.alloc_id(),
+                    id: self.alloc_tab_id(),
                     pane: pane.id,
                     user_label: None,
                 };

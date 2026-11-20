@@ -54,9 +54,10 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
     })
     .unwrap();
 
-    let ids_before: Vec<u64> = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime().tabs.iter().map(|t| t.id).collect()
-    });
+    let ids_before: Vec<crate::workspace::main_area::tab_strip::TabId> = workspace
+        .read_with(cx, |ws, _| {
+            ws.active_runtime().tabs.iter().map(|t| t.id).collect()
+        });
     assert_eq!(ids_before.len(), 3);
     assert_ne!(ids_before[0], ids_before[1]);
     assert_ne!(ids_before[0], ids_before[2]);
@@ -120,9 +121,10 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
     })
     .unwrap();
 
-    let ids_after: Vec<u64> = workspace.read_with(cx, |ws, _| {
-        ws.active_runtime().tabs.iter().map(|t| t.id).collect()
-    });
+    let ids_after: Vec<crate::workspace::main_area::tab_strip::TabId> = workspace
+        .read_with(cx, |ws, _| {
+            ws.active_runtime().tabs.iter().map(|t| t.id).collect()
+        });
     assert_eq!(ids_after, vec![ids_before[0], ids_before[2]]);
     workspace.read_with(cx, |ws, _| {
         assert_eq!(

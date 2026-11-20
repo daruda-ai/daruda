@@ -148,7 +148,7 @@ fn exact_loading_survives_workspace_restore_without_persisting_navigation(cx: &m
                     }),
                 };
                 let pane_id = pane.id;
-                let tab_id = ws.alloc_id();
+                let tab_id = ws.alloc_tab_id();
                 ws.active_runtime_mut().panes.push(pane);
                 ws.active_runtime_mut().tabs.push(TabEntry {
                     id: tab_id,

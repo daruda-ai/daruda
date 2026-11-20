@@ -62,7 +62,7 @@ fn busy_pane_off_screen_with(
                 );
                 let pane_id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
-                let tab_id = ws.alloc_id();
+                let tab_id = ws.alloc_tab_id();
                 ws.active_runtime_mut().tabs.push(TabEntry {
                     id: tab_id,
                     layout: PaneLayout::Pane(pane_id),

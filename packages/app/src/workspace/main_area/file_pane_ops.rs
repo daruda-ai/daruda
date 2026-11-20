@@ -201,7 +201,10 @@ impl Workspace {
     }
 
     /// The id of the tab at `place`, in whichever strip it is.
-    pub(in crate::workspace) fn tab_id_at(&self, place: PanePlace) -> Option<u64> {
+    pub(in crate::workspace) fn tab_id_at(
+        &self,
+        place: PanePlace,
+    ) -> Option<crate::workspace::main_area::tab_strip::TabId> {
         let runtime = self.active_runtime();
         match place {
             PanePlace::Tab(index) => runtime.tabs.get(index).map(|tab| tab.id),

@@ -38,7 +38,7 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
                     );
                     let pane_id = pane.id;
                     ws.active_runtime_mut().panes.push(pane);
-                    let tab_id = ws.alloc_id();
+                    let tab_id = ws.alloc_tab_id();
                     ws.active_runtime_mut().tabs.push(TabEntry {
                         id: tab_id,
                         layout: PaneLayout::Pane(pane_id),

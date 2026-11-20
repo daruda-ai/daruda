@@ -270,7 +270,7 @@ impl Workspace {
             self.focus_pane(next_focus, window, cx);
         }
 
-        let new_tab_id = self.alloc_id();
+        let new_tab_id = self.alloc_tab_id();
         let insert_at = insert_at.min(self.active_runtime().tabs.len());
         self.active_runtime_mut().tabs.insert(
             insert_at,
@@ -313,7 +313,7 @@ impl Workspace {
     /// below is then guaranteed to succeed.
     pub(in crate::workspace) fn merge_tab_into_pane(
         &mut self,
-        source_tab_id: u64,
+        source_tab_id: crate::workspace::main_area::tab_strip::TabId,
         target_pane_id: PaneId,
         direction: SplitDirection,
         before: bool,

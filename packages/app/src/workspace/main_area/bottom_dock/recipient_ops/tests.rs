@@ -19,7 +19,7 @@ async fn file_review_input_switch_preserves_the_file_and_each_draft(cx: &mut Tes
                 let other = ws.create_pane(window, cx).expect("second input pane");
                 let other_id = other.id;
                 ws.active_runtime_mut().panes.push(other);
-                let tab_id = ws.alloc_id();
+                let tab_id = ws.alloc_tab_id();
                 ws.active_runtime_mut()
                     .tabs
                     .push(crate::workspace::main_area::pane::TabEntry {
@@ -40,7 +40,7 @@ async fn file_review_input_switch_preserves_the_file_and_each_draft(cx: &mut Tes
                 );
                 let file_id = file.id;
                 ws.active_runtime_mut().panes.push(file);
-                let tab_id = ws.alloc_id();
+                let tab_id = ws.alloc_tab_id();
                 ws.active_runtime_mut()
                     .tabs
                     .push(crate::workspace::main_area::pane::TabEntry {

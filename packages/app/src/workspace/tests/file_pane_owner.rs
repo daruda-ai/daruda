@@ -260,7 +260,7 @@ fn a_restored_pane_outside_its_lane_restores_read_only(cx: &mut TestAppContext) 
                 cx,
             );
             let pane_id = pane.id;
-            let tab_id = ws.alloc_id();
+            let tab_id = ws.alloc_tab_id();
             let runtime = ws.active_runtime_mut();
             runtime.panes.push(pane);
             runtime

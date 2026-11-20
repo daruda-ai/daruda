@@ -178,7 +178,7 @@ async fn the_busy_file_recipient_button_queues_instead_of_stopping(cx: &mut Test
                 );
                 let id = chat.id;
                 ws.active_runtime_mut().panes.push(chat);
-                let tab_id = ws.alloc_id();
+                let tab_id = ws.alloc_tab_id();
                 ws.active_runtime_mut().tabs.push(TabEntry {
                     id: tab_id,
                     layout: PaneLayout::Pane(id),
@@ -260,7 +260,7 @@ fn fixture(
                     .editor_state
                     .update(cx, |state, cx| state.set_value(SOURCE, window, cx));
                 ws.active_runtime_mut().panes.push(file);
-                let tab_id = ws.alloc_id();
+                let tab_id = ws.alloc_tab_id();
                 ws.active_runtime_mut().tabs.push(TabEntry {
                     id: tab_id,
                     layout: PaneLayout::Pane(id),

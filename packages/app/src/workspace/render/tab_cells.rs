@@ -13,7 +13,7 @@ pub(in crate::workspace) struct TabCell {
     pub(super) index: usize,
     /// The stable `TabEntry` id: the drag payload's identity, surviving a
     /// reorder.
-    pub(super) id: u64,
+    pub(super) id: crate::workspace::main_area::tab_strip::TabId,
     pub(in crate::workspace) is_active: bool,
     /// The tab's label, prefixed with the dirty dot when a pane in it holds
     /// unsaved edits.

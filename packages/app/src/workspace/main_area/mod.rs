@@ -29,6 +29,7 @@ pub(in crate::workspace) mod side_ops;
 pub(in crate::workspace) mod tab_drag_ops;
 mod tab_name_ops;
 pub(in crate::workspace) mod tab_ops;
+pub(in crate::workspace) mod tab_strip;
 mod terminal_exit_ops;
 
 pub(in crate::workspace) use context::MainAreaContext;

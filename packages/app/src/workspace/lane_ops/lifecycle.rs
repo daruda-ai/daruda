@@ -257,7 +257,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> PaneId {
         let pane_id = pane.id;
-        let tab_id = self.alloc_id();
+        let tab_id = self.alloc_tab_id();
         let tab = pane::TabEntry {
             id: tab_id,
             layout: PaneLayout::Pane(pane_id),

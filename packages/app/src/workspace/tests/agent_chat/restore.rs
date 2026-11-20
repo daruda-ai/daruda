@@ -168,7 +168,7 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                 );
                 let titled_id = titled.id;
                 ws.active_runtime_mut().panes.push(titled);
-                let titled_tab_id = ws.alloc_id();
+                let titled_tab_id = ws.alloc_tab_id();
                 ws.active_runtime_mut().tabs.push(TabEntry {
                     id: titled_tab_id,
                     layout: PaneLayout::Pane(titled_id),
@@ -212,7 +212,7 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                 );
                 let pane_id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
-                let tab_id = ws.alloc_id();
+                let tab_id = ws.alloc_tab_id();
                 ws.active_runtime_mut().tabs.push(TabEntry {
                     id: tab_id,
                     layout: PaneLayout::Pane(pane_id),
@@ -374,7 +374,7 @@ async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppC
                 );
                 let pane_id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
-                let tab_id = ws.alloc_id();
+                let tab_id = ws.alloc_tab_id();
                 ws.active_runtime_mut().tabs.push(TabEntry {
                     id: tab_id,
                     layout: PaneLayout::Pane(pane_id),
@@ -477,7 +477,7 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
                 );
                 let pane_id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
-                let tab_id = ws.alloc_id();
+                let tab_id = ws.alloc_tab_id();
                 ws.active_runtime_mut().tabs.push(TabEntry {
                     id: tab_id,
                     layout: PaneLayout::Pane(pane_id),

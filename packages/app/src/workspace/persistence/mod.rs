@@ -43,7 +43,7 @@ pub(in crate::workspace) struct LaneRuntime {
     /// thing the user is doing right now, and a restored session is not in
     /// the middle of it. A restored tab is simply committed, so the first
     /// skim after a restart opens one new tab and reuses it from then on.
-    pub preview_tab_id: Option<u64>,
+    pub preview_tab_id: Option<crate::workspace::main_area::tab_strip::TabId>,
     /// The tabs shown beside these: files, diffs and a pull request kept
     /// in view while the tabs on the left change.
     pub side: crate::workspace::main_area::side_group::SideGroup,

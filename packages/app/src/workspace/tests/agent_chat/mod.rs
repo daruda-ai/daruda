@@ -171,7 +171,7 @@ fn open_agent_chat_pane_on(
     let pane = ws.create_agent_chat_pane(cwd, None, agent_id.to_string(), None, window, cx);
     let pane_id = pane.id;
     ws.active_runtime_mut().panes.push(pane);
-    let tab_id = ws.alloc_id();
+    let tab_id = ws.alloc_tab_id();
     ws.active_runtime_mut().tabs.push(TabEntry {
         id: tab_id,
         layout: PaneLayout::Pane(pane_id),

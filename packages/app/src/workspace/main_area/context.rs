@@ -53,15 +53,15 @@ pub(in crate::workspace) struct MainAreaContext {
     /// Tab currently armed to switch-on-hover during a `TabDrag`, and the
     /// cancellable timer task backing it. Overwriting drops the previous
     /// `Task`, which cancels it (mirrors GPUI's own tooltip-delay mechanism).
-    pub tab_hover_switch: Option<(u64, Task<()>)>,
+    pub tab_hover_switch: Option<(super::tab_strip::TabId, Task<()>)>,
     /// Live reorder-insertion index while a `TabDrag` is over the tab bar,
     /// tagged with the tab cell that set it so only that cell releases it
     /// again. `None` = not currently hovering a tab cell.
-    pub tab_reorder_preview: Option<(u64, usize)>,
+    pub tab_reorder_preview: Option<(super::tab_strip::TabId, usize)>,
     /// Tab that was active before the in-flight drag's first hover preview,
     /// by id (indices shift under reorder/close). `finish_tab_drag` restores
     /// it unless the drag committed a drop. `None` = nothing to unwind.
-    pub tab_preview_restore: Option<u64>,
+    pub tab_preview_restore: Option<super::tab_strip::TabId>,
 }
 
 impl MainAreaContext {
