@@ -191,20 +191,25 @@ is read beside a chat goes aside: files, diffs and a pull request
   zoomed pane hide the side tabs, and a width too narrow for both draws the
   group the keyboard is in. Pane sizes follow `groups_layout()`, which ignores
   what covers the groups, so a zoom or a page resizes nothing.
-- **One open path:** `open_file_pane` decides the group (`opens_beside`: the
-  keyboard already aside, or `file_viewer.open_beside` with a tab to be beside)
-  and the reuse (`preview_slot`, one scratch tab across both groups).
+- **One open path:** `open_file_pane` gathers the facts and carries out the
+  plan: the group (the keyboard already aside, or `file_viewer.open_beside`
+  with a tab to be beside) and the reuse (`preview_slot`, one scratch tab
+  across both groups).
 - **A pull request pane** (`PaneContent::PullRequest`,
   `pages/pull_requests/pane.rs`) holds one of the window's open details
   (`PrDetails`, `pages/pull_requests/details.rs`) through a `DetailHold` it
   owns. The page showing the same pull request holds the same detail. A detail
   is over when its last hold is dropped, so no path that removes a pane has to
-  release it; code given a detail's id finds it with `pr_detail(id)`, never
-  through the one the page shows. A worktree has one such pane, retargeted by
+  release it. What an ended detail leaves (its review place, its drafts on
+  disk) is settled by `Workspace::settle_pr_details` alone. Code given a
+  detail's id finds it with `pr_detail(id)`, never through the one the page
+  shows. A worktree has one such pane, retargeted by
   the next pull request; it is not saved with the layout.
 - **Where an open goes** is decided by `main_area/open_plan.rs` from plain
   facts (`plan_open`, `GroupFacts::goes_beside`); the workspace only carries
-  the plan out. A new rule is a row in its table of cases.
+  the plan out. A new rule is a row in its table of cases. The plan does not
+  predict what a close leaves behind: `OpenPlan::Replace` closes the scratch
+  tab and asks `goes_beside` again from the facts that are then true.
 - **A pane's id** is `PaneId`, minted from 1: the default names no pane.
 - **What is true of every pane kind** (title, focus handle, cwd, unsaved
   edits, running work, account, rail icon, which group hosts it) is
