@@ -38,11 +38,14 @@ pub(in crate::workspace) struct LaneRuntime {
     /// zed's `Pane::preview_item_id`: two preview tabs is not a state that
     /// needs representing.
     ///
-    /// Not serialized, for the reason the tabs shown before are not: previewing is a
-    /// thing the user is doing right now, and a restored session is not in
-    /// the middle of it. A restored tab is simply committed, so the first
+    /// Not serialized, for the reason the tabs shown before are not:
+    /// previewing is a thing the user is doing right now, and a restored
+    /// session is not in the middle of it. A restored tab is simply committed, so the first
     /// skim after a restart opens one new tab and reuses it from then on.
-    pub preview_tab_id: Option<TabId>,
+    ///
+    /// Private: claimed and released through [`Self::claim_preview`] and
+    /// [`Self::release_preview`].
+    preview_tab_id: Option<TabId>,
     /// The tabs shown beside these: files, diffs and a pull request kept
     /// in view while the tabs on the left change.
     pub side: crate::workspace::main_area::side_group::SideGroup,
@@ -52,6 +55,34 @@ pub(in crate::workspace) struct LaneRuntime {
 }
 
 impl LaneRuntime {
+    /// A worktree opened with one tab of one pane, the keyboard in it.
+    pub(in crate::workspace) fn of_one_tab(tab: pane::TabEntry, pane: pane::Pane) -> Self {
+        Self {
+            focused_pane_id: pane.id,
+            tabs: TabStrip::restored(vec![tab], 0),
+            panes: vec![pane],
+            ..Self::default()
+        }
+    }
+
+    /// The scratch tab: the one a later skim replaces, if it is still open.
+    pub(in crate::workspace) fn preview_tab(&self) -> Option<TabId> {
+        self.preview_tab_id
+    }
+
+    /// Make `tab` the scratch tab; the one that was is kept as it is.
+    pub(in crate::workspace) fn claim_preview(&mut self, tab: TabId) {
+        self.preview_tab_id = Some(tab);
+    }
+
+    /// `tab` is kept from now on: entered, moved by hand or gone. Another
+    /// tab's claim stands.
+    pub(in crate::workspace) fn release_preview(&mut self, tab: TabId) {
+        if self.preview_tab_id == Some(tab) {
+            self.preview_tab_id = None;
+        }
+    }
+
     /// Where `pane` sits: a side tab, or a tab's split tree.
     pub(in crate::workspace) fn place_of(&self, pane: pane_tree::PaneId) -> Option<PanePlace> {
         self.side

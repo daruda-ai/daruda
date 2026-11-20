@@ -174,7 +174,7 @@ impl Workspace {
     /// every consumer wants [`Self::preview_slot`]'s answer.
     fn recorded_preview_slot(&self) -> Option<(PanePlace, PaneId)> {
         let runtime = self.active_runtime();
-        let preview_id = runtime.preview_tab_id?;
+        let preview_id = runtime.preview_tab()?;
         let (place, pane_id) = match runtime
             .side
             .tabs()

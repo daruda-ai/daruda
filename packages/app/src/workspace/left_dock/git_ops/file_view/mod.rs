@@ -151,7 +151,7 @@ impl Workspace {
             return;
         }
         if let Some(tab_id) = self.tab_id_at(place) {
-            self.active_runtime_mut().preview_tab_id = Some(tab_id);
+            self.active_runtime_mut().claim_preview(tab_id);
         }
     }
 
@@ -160,10 +160,7 @@ impl Workspace {
         let Some(tab_id) = self.tab_id_at(place) else {
             return;
         };
-        let rt = self.active_runtime_mut();
-        if rt.preview_tab_id == Some(tab_id) {
-            rt.preview_tab_id = None;
-        }
+        self.active_runtime_mut().release_preview(tab_id);
     }
 
     /// Walking into a pane is a commit: the tab holding it stops being the

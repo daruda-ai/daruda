@@ -11,7 +11,6 @@ use crate::workspace::LaneRuntime;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane_tree::PaneId;
-use crate::workspace::main_area::tab_strip::TabStrip;
 
 impl Workspace {
     /// True when the target lane can be removed via `git worktree
@@ -260,14 +259,7 @@ impl Workspace {
         let pane_id = pane.id;
         let tab_id = self.alloc_tab_id();
         let tab = pane::TabEntry::single(tab_id, pane_id);
-        let runtime = LaneRuntime {
-            preview_tab_id: None,
-            tabs: TabStrip::restored(vec![tab], 0),
-            panes: vec![pane],
-            focused_pane_id: pane_id,
-            side: Default::default(),
-            keyboard: Default::default(),
-        };
+        let runtime = LaneRuntime::of_one_tab(tab, pane);
         self.register_created_lane(plan, project_id, Some(runtime), reveal, window, cx);
         pane_id
     }

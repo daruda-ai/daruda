@@ -225,9 +225,7 @@ impl Workspace {
         };
         let tab = self.unlist_tab(tab_index);
         let runtime = self.active_runtime_mut();
-        if runtime.preview_tab_id == Some(tab.id) {
-            runtime.preview_tab_id = None;
-        }
+        runtime.release_preview(tab.id);
         let last = runtime.side.open(SideTab {
             id: tab.id,
             pane,
@@ -279,9 +277,7 @@ impl Workspace {
             return false;
         };
         // Moved by hand is kept: it is no longer the scratch tab.
-        if runtime.preview_tab_id == Some(tab.id) {
-            runtime.preview_tab_id = None;
-        }
+        runtime.release_preview(tab.id);
         let mut entry = TabEntry::single(tab.id, tab.pane);
         entry.user_label = tab.user_label;
         runtime.tabs.push(entry);
