@@ -7,12 +7,13 @@ use gpui::{Context, SharedString, Window};
 use super::pane_tree::PaneId;
 use crate::surface::strings;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::tab_strip::TabId;
 
 impl Workspace {
     /// Name tab `tab_id` in the active lane, or clear its name with `None`.
     pub(in crate::workspace) fn rename_tab(
         &mut self,
-        tab_id: crate::workspace::main_area::tab_strip::TabId,
+        tab_id: TabId,
         name: Option<String>,
         cx: &mut Context<Self>,
     ) {
@@ -35,7 +36,7 @@ impl Workspace {
     pub(in crate::workspace) fn on_tab_press(
         &mut self,
         index: usize,
-        tab_id: crate::workspace::main_area::tab_strip::TabId,
+        tab_id: TabId,
         click_count: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -56,7 +57,7 @@ impl Workspace {
     /// must not freeze today's cwd into a name.
     pub(in crate::workspace) fn open_rename_tab_dialog(
         &mut self,
-        tab_id: crate::workspace::main_area::tab_strip::TabId,
+        tab_id: TabId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

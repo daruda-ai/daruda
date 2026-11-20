@@ -20,6 +20,7 @@ use crate::workspace::Workspace;
 use super::pane::TabEntry;
 use super::pane_tree::{DropHalf, PaneId, collect_pane_rects, compute_drop_half, rearrange_pane};
 use super::tab_drag_ops::TabDrag;
+use crate::workspace::main_area::tab_strip::TabId;
 
 /// Drag payload carried by GPUI while a Pane header is dragged. Minimal
 /// + Clone; transient hover state lives in `MainAreaContext.pane_drop_hover`.
@@ -211,7 +212,7 @@ impl Workspace {
     /// persist). Every exit settles the drag through `finish_tab_drag`.
     pub(in crate::workspace) fn drop_tab_onto_pane(
         &mut self,
-        dragged_tab_id: crate::workspace::main_area::tab_strip::TabId,
+        dragged_tab_id: TabId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

@@ -18,6 +18,7 @@ use gpui::Window;
 use crate::workspace::main_area::pane_tree::{DropHalf, PaneId};
 
 use super::*;
+use crate::workspace::main_area::tab_strip::TabId;
 
 fn make_workspace_with_project(
     cx: &mut TestAppContext,
@@ -130,7 +131,7 @@ async fn drop_tab_onto_bar_reorders_dragged_tab_before_first(cx: &mut TestAppCon
         ws.add_tab(window, cx);
         ws.add_tab(window, cx);
     });
-    let ids: Vec<crate::workspace::main_area::tab_strip::TabId> = ws.read_with(cx, |ws, _| {
+    let ids: Vec<TabId> = ws.read_with(cx, |ws, _| {
         ws.active_runtime().tabs.iter().map(|t| t.id).collect()
     });
     assert_eq!(ids.len(), 3, "expected 3 tabs after two add_tab calls");
@@ -146,10 +147,7 @@ async fn drop_tab_onto_bar_reorders_dragged_tab_before_first(cx: &mut TestAppCon
     });
     cx.run_until_parked();
 
-    let (after_ids, after_panes): (
-        Vec<crate::workspace::main_area::tab_strip::TabId>,
-        Vec<PaneId>,
-    ) = ws.read_with(cx, |ws, _| {
+    let (after_ids, after_panes): (Vec<TabId>, Vec<PaneId>) = ws.read_with(cx, |ws, _| {
         ws.active_runtime()
             .tabs
             .iter()

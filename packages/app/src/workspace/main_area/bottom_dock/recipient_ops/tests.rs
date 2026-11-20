@@ -1,3 +1,4 @@
+use crate::workspace::main_area::tab_strip::TabHistory;
 use crate::workspace::tests::build_workspace_with;
 use gpui::{AppContext as _, TestAppContext};
 
@@ -20,14 +21,9 @@ async fn file_review_input_switch_preserves_the_file_and_each_draft(cx: &mut Tes
                 let other_id = other.id;
                 ws.active_runtime_mut().panes.push(other);
                 let tab_id = ws.alloc_tab_id();
-                ws.active_runtime_mut()
-                    .tabs
-                    .push(crate::workspace::main_area::pane::TabEntry {
-                        id: tab_id,
-                        layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(other_id),
-                        last_focused_pane: other_id,
-                        user_label: None,
-                    });
+                ws.active_runtime_mut().tabs.push(
+                    crate::workspace::main_area::pane::TabEntry::single(tab_id, other_id),
+                );
                 let root = ws.active_lane().expect("lane").path.clone();
                 let file = ws.create_file_pane(
                     crate::workspace::main_area::file_view_pane::FileOrigin::Lane,
@@ -41,19 +37,13 @@ async fn file_review_input_switch_preserves_the_file_and_each_draft(cx: &mut Tes
                 let file_id = file.id;
                 ws.active_runtime_mut().panes.push(file);
                 let tab_id = ws.alloc_tab_id();
+                ws.active_runtime_mut().tabs.push(
+                    crate::workspace::main_area::pane::TabEntry::single(tab_id, file_id),
+                );
+                let last_tab = ws.active_runtime().tabs.len() - 1;
                 ws.active_runtime_mut()
                     .tabs
-                    .push(crate::workspace::main_area::pane::TabEntry {
-                        id: tab_id,
-                        layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(file_id),
-                        last_focused_pane: file_id,
-                        user_label: None,
-                    });
-                let last_tab = ws.active_runtime().tabs.len() - 1;
-                ws.active_runtime_mut().tabs.activate(
-                    last_tab,
-                    crate::workspace::main_area::tab_strip::TabHistory::Skip,
-                );
+                    .activate(last_tab, TabHistory::Skip);
                 ws.docks.bottom.update(cx, |dock, _| dock.open());
                 ws.set_focused_pane(file_id, window, cx);
                 ws.select_bottom_input_pane(other_id, window, cx);

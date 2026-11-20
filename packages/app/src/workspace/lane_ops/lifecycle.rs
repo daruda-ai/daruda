@@ -10,7 +10,8 @@ use crate::lane::availability::LaneAvailability;
 use crate::workspace::LaneRuntime;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane;
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::main_area::tab_strip::TabStrip;
 
 impl Workspace {
     /// True when the target lane can be removed via `git worktree
@@ -258,15 +259,10 @@ impl Workspace {
     ) -> PaneId {
         let pane_id = pane.id;
         let tab_id = self.alloc_tab_id();
-        let tab = pane::TabEntry {
-            id: tab_id,
-            layout: PaneLayout::Pane(pane_id),
-            last_focused_pane: pane_id,
-            user_label: None,
-        };
+        let tab = pane::TabEntry::single(tab_id, pane_id);
         let runtime = LaneRuntime {
             preview_tab_id: None,
-            tabs: crate::workspace::main_area::tab_strip::TabStrip::restored(vec![tab], 0),
+            tabs: TabStrip::restored(vec![tab], 0),
             panes: vec![pane],
             focused_pane_id: pane_id,
             side: Default::default(),

@@ -9,7 +9,6 @@ use super::*;
 #[gpui::test]
 async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut TestAppContext) {
     use crate::workspace::main_area::pane::TabEntry;
-    use crate::workspace::main_area::pane_tree::PaneLayout;
 
     let before = daruda_config::Config::default();
     let project_root = std::env::temp_dir().join(format!(
@@ -39,12 +38,9 @@ async fn a_config_reload_moves_an_untouched_panes_transcript_settings(cx: &mut T
                     let pane_id = pane.id;
                     ws.active_runtime_mut().panes.push(pane);
                     let tab_id = ws.alloc_tab_id();
-                    ws.active_runtime_mut().tabs.push(TabEntry {
-                        id: tab_id,
-                        layout: PaneLayout::Pane(pane_id),
-                        last_focused_pane: pane_id,
-                        user_label: None,
-                    });
+                    ws.active_runtime_mut()
+                        .tabs
+                        .push(TabEntry::single(tab_id, pane_id));
                     pane_id
                 };
                 let untouched_id = open(ws, window, cx);

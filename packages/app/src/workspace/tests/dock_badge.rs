@@ -33,12 +33,9 @@ fn failed_agent_and_a_second_lane(
             let pane_id = pane.id;
             ws.active_runtime_mut().panes.push(pane);
             let tab_id = ws.alloc_tab_id();
-            ws.active_runtime_mut().tabs.push(TabEntry {
-                id: tab_id,
-                layout: PaneLayout::Pane(pane_id),
-                last_focused_pane: pane_id,
-                user_label: None,
-            });
+            ws.active_runtime_mut()
+                .tabs
+                .push(TabEntry::single(tab_id, pane_id));
             super::agent_chat::agent_view(ws, pane_id).update(cx, |v, _| {
                 v.set_status_for_test(daruda_chat::view::AgentSessionStatus::Error {
                     message: "adapter exited".into(),

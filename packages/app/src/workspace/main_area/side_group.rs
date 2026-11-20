@@ -12,6 +12,7 @@
 use gpui::SharedString;
 
 use super::pane_tree::{DIVIDER_PX, PaneId};
+use crate::workspace::main_area::tab_strip::TabId;
 
 /// The share of the width the group opens with.
 const DEFAULT_RATIO: f32 = 0.45;
@@ -20,7 +21,7 @@ const MIN_RATIO: f32 = 0.15;
 const MAX_RATIO: f32 = 0.85;
 
 pub(in crate::workspace) struct SideTab {
-    pub(in crate::workspace) id: crate::workspace::main_area::tab_strip::TabId,
+    pub(in crate::workspace) id: TabId,
     pub(in crate::workspace) pane: PaneId,
     pub(in crate::workspace) user_label: Option<SharedString>,
 }

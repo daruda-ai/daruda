@@ -134,7 +134,6 @@ async fn codex_acp_title_survives_pane_close_for_recent_sessions(cx: &mut TestAp
 #[gpui::test]
 async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut TestAppContext) {
     use crate::workspace::main_area::pane::TabEntry;
-    use crate::workspace::main_area::pane_tree::PaneLayout;
 
     let config = daruda_config::Config::default();
     // Per-process root: a fixed path makes the restore assertions depend on
@@ -169,12 +168,9 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                 let titled_id = titled.id;
                 ws.active_runtime_mut().panes.push(titled);
                 let titled_tab_id = ws.alloc_tab_id();
-                ws.active_runtime_mut().tabs.push(TabEntry {
-                    id: titled_tab_id,
-                    layout: PaneLayout::Pane(titled_id),
-                    last_focused_pane: titled_id,
-                    user_label: None,
-                });
+                ws.active_runtime_mut()
+                    .tabs
+                    .push(TabEntry::single(titled_tab_id, titled_id));
                 let view = ws
                     .agent_chat_view(titled_id)
                     .cloned()
@@ -213,12 +209,9 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
                 let pane_id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 let tab_id = ws.alloc_tab_id();
-                ws.active_runtime_mut().tabs.push(TabEntry {
-                    id: tab_id,
-                    layout: PaneLayout::Pane(pane_id),
-                    last_focused_pane: pane_id,
-                    user_label: None,
-                });
+                ws.active_runtime_mut()
+                    .tabs
+                    .push(TabEntry::single(tab_id, pane_id));
                 ws.snapshot_for_disk(cx)
             })
         })
@@ -346,7 +339,6 @@ async fn agent_chat_agent_id_restore_handles_present_and_removed_owner(cx: &mut 
 #[gpui::test]
 async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppContext) {
     use crate::workspace::main_area::pane::TabEntry;
-    use crate::workspace::main_area::pane_tree::PaneLayout;
 
     let before = daruda_config::Config::default();
     let project_root = std::env::temp_dir().join(format!(
@@ -375,12 +367,9 @@ async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppC
                 let pane_id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 let tab_id = ws.alloc_tab_id();
-                ws.active_runtime_mut().tabs.push(TabEntry {
-                    id: tab_id,
-                    layout: PaneLayout::Pane(pane_id),
-                    last_focused_pane: pane_id,
-                    user_label: None,
-                });
+                ws.active_runtime_mut()
+                    .tabs
+                    .push(TabEntry::single(tab_id, pane_id));
                 ws.snapshot_for_disk(cx)
             })
         })
@@ -449,7 +438,6 @@ async fn an_untouched_pane_keeps_following_the_config_defaults(cx: &mut TestAppC
 #[gpui::test]
 async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppContext) {
     use crate::workspace::main_area::pane::TabEntry;
-    use crate::workspace::main_area::pane_tree::PaneLayout;
 
     let config = daruda_config::Config::default();
     let project_root = std::env::temp_dir().join(format!(
@@ -478,12 +466,9 @@ async fn a_model_pick_is_remembered_and_survives_a_restore(cx: &mut TestAppConte
                 let pane_id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 let tab_id = ws.alloc_tab_id();
-                ws.active_runtime_mut().tabs.push(TabEntry {
-                    id: tab_id,
-                    layout: PaneLayout::Pane(pane_id),
-                    last_focused_pane: pane_id,
-                    user_label: None,
-                });
+                ws.active_runtime_mut()
+                    .tabs
+                    .push(TabEntry::single(tab_id, pane_id));
                 // Advertise the option set the pick lands on, through the same
                 // host fold a live session's event takes.
                 let view = agent_view(ws, pane_id);

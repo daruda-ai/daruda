@@ -12,7 +12,7 @@ use gpui::{AppContext as _, TestAppContext};
 
 use super::super::build_workspace_with;
 use crate::workspace::main_area::pane::TabEntry;
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_acp::{
     AcpEvent, AcpSessionHandle, QuestionField, QuestionFieldKind, QuestionOption, QuestionRequest,
 };
@@ -68,12 +68,9 @@ fn asked(
                 let pane_id = pane.id;
                 ws.active_runtime_mut().panes.push(pane);
                 let tab_id = ws.alloc_tab_id();
-                ws.active_runtime_mut().tabs.push(TabEntry {
-                    id: tab_id,
-                    layout: PaneLayout::Pane(pane_id),
-                    last_focused_pane: pane_id,
-                    user_label: None,
-                });
+                ws.active_runtime_mut()
+                    .tabs
+                    .push(TabEntry::single(tab_id, pane_id));
                 pane_id
             })
         })

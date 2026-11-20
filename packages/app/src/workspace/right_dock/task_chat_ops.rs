@@ -12,7 +12,7 @@ use crate::runs::{GlobalTasks, RunsHost};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, TabEntry};
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::main_area::pane_tree::PaneId;
 
 fn matches_session(chat: &AgentChatContent, execution: &TaskExecution, cx: &gpui::App) -> bool {
     execution.session_id.is_some()
@@ -323,12 +323,9 @@ impl Workspace {
         let pane_id = pane.id;
         let tab_id = self.alloc_tab_id();
         self.active_runtime_mut().panes.push(pane);
-        self.active_runtime_mut().tabs.push(TabEntry {
-            id: tab_id,
-            layout: PaneLayout::Pane(pane_id),
-            last_focused_pane: pane_id,
-            user_label: None,
-        });
+        self.active_runtime_mut()
+            .tabs
+            .push(TabEntry::single(tab_id, pane_id));
         self.reveal_task_chat(lane, pane_id, window, cx);
         self.mutate_durable(cx, |_, _| {});
         Ok(pane_id)

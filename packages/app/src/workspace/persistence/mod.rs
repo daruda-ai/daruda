@@ -13,6 +13,8 @@ use crate::workspace::main_area::pane_tree::{self as pane_tree};
 use daruda_transcript::fold_mode::FoldMode;
 
 use crate::workspace::main_area::side_group::{KeyboardIn, PanePlace};
+use crate::workspace::main_area::tab_strip::TabId;
+use crate::workspace::main_area::tab_strip::TabStrip;
 
 mod rebuild;
 mod restore;
@@ -25,7 +27,7 @@ mod save;
 #[derive(Default)]
 pub(in crate::workspace) struct LaneRuntime {
     /// The tabs, the one shown and the ones shown before it.
-    pub tabs: crate::workspace::main_area::tab_strip::TabStrip,
+    pub tabs: TabStrip,
     pub panes: Vec<pane::Pane>,
     pub focused_pane_id: pane_tree::PaneId,
     /// Id of the tab a left-dock preview opened, among these or the side
@@ -40,7 +42,7 @@ pub(in crate::workspace) struct LaneRuntime {
     /// thing the user is doing right now, and a restored session is not in
     /// the middle of it. A restored tab is simply committed, so the first
     /// skim after a restart opens one new tab and reuses it from then on.
-    pub preview_tab_id: Option<crate::workspace::main_area::tab_strip::TabId>,
+    pub preview_tab_id: Option<TabId>,
     /// The tabs shown beside these: files, diffs and a pull request kept
     /// in view while the tabs on the left change.
     pub side: crate::workspace::main_area::side_group::SideGroup,

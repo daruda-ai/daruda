@@ -120,10 +120,7 @@ fn continuation_preserves_identity_reuses_exact_panes_and_returns_to_evidence(
 
 #[gpui::test]
 fn exact_loading_survives_workspace_restore_without_persisting_navigation(cx: &mut TestAppContext) {
-    use crate::workspace::main_area::{
-        pane::{SessionRestore, TabEntry},
-        pane_tree::PaneLayout,
-    };
+    use crate::workspace::main_area::pane::{SessionRestore, TabEntry};
     let root = tempfile::tempdir().unwrap();
     let project = daruda_store::project::Project::from_path(root.path());
     let config = daruda_config::Config::default();
@@ -150,12 +147,9 @@ fn exact_loading_survives_workspace_restore_without_persisting_navigation(cx: &m
                 let pane_id = pane.id;
                 let tab_id = ws.alloc_tab_id();
                 ws.active_runtime_mut().panes.push(pane);
-                ws.active_runtime_mut().tabs.push(TabEntry {
-                    id: tab_id,
-                    layout: PaneLayout::Pane(pane_id),
-                    last_focused_pane: pane_id,
-                    user_label: None,
-                });
+                ws.active_runtime_mut()
+                    .tabs
+                    .push(TabEntry::single(tab_id, pane_id));
                 ws.snapshot_for_disk(cx)
             })
         })

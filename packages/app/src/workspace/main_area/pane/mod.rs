@@ -27,6 +27,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use super::side_group::KeyboardIn;
+use super::tab_strip::TabId;
 use daruda_store::project::PaneCwd;
 use daruda_terminal::view::{TerminalInput, TerminalLayout, TerminalView};
 use daruda_terminal::{TerminalDims, TerminalSession};
@@ -427,12 +428,24 @@ pub(super) fn cwd_basename(cwd: Option<&std::path::Path>) -> Option<SharedString
 
 #[allow(dead_code)]
 pub(in crate::workspace) struct TabEntry {
-    pub(in crate::workspace) id: crate::workspace::main_area::tab_strip::TabId,
+    pub(in crate::workspace) id: TabId,
     pub(in crate::workspace) layout: PaneLayout,
     pub(in crate::workspace) last_focused_pane: PaneId,
     /// User-set title (Window > Edit Tab Title…). `None` means the
     /// tab strip falls back to the focused pane's auto-derived title.
     pub(in crate::workspace) user_label: Option<SharedString>,
+}
+
+impl TabEntry {
+    /// A tab of one pane, named by the pane.
+    pub(in crate::workspace) fn single(id: TabId, pane: PaneId) -> Self {
+        Self {
+            id,
+            layout: PaneLayout::Pane(pane),
+            last_focused_pane: pane,
+            user_label: None,
+        }
+    }
 }
 
 /// All the cwd sources `resolve_default_cwd` chooses between.

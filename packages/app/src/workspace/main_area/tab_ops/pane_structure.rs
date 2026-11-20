@@ -6,9 +6,10 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 use crate::workspace::main_area::pane::TabEntry;
 use crate::workspace::main_area::pane_tree::{
-    PaneId, PaneLayout, SplitDirection, insert_node_at, insert_split_at, remove_pane_from_layout,
+    PaneId, SplitDirection, insert_node_at, insert_split_at, remove_pane_from_layout,
 };
 use crate::workspace::main_area::side_group::PanePlace;
+use crate::workspace::main_area::tab_strip::TabId;
 use gpui::{Context, Window};
 
 impl Workspace {
@@ -264,15 +265,9 @@ impl Workspace {
 
         let new_tab_id = self.alloc_tab_id();
         let insert_at = insert_at.min(self.active_runtime().tabs.len());
-        self.active_runtime_mut().tabs.insert(
-            insert_at,
-            TabEntry {
-                id: new_tab_id,
-                layout: PaneLayout::Pane(pane_id),
-                last_focused_pane: pane_id,
-                user_label: None,
-            },
-        );
+        self.active_runtime_mut()
+            .tabs
+            .insert(insert_at, TabEntry::single(new_tab_id, pane_id));
 
         self.activate_tab(insert_at, window, cx);
         self.resize_all_tabs(window, cx);
@@ -301,7 +296,7 @@ impl Workspace {
     /// below is then guaranteed to succeed.
     pub(in crate::workspace) fn merge_tab_into_pane(
         &mut self,
-        source_tab_id: crate::workspace::main_area::tab_strip::TabId,
+        source_tab_id: TabId,
         target_pane_id: PaneId,
         direction: SplitDirection,
         before: bool,
@@ -311,12 +306,7 @@ impl Workspace {
         if self.active_lane_is_inaccessible() {
             return false;
         }
-        let Some(src_index) = self
-            .active_runtime()
-            .tabs
-            .iter()
-            .position(|t| t.id == source_tab_id)
-        else {
+        let Some(src_index) = self.active_runtime().tabs.position_of_id(source_tab_id) else {
             return false;
         };
         let active_index = self.active_runtime().tabs.active_index();

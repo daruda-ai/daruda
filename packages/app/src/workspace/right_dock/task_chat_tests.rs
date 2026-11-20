@@ -55,12 +55,9 @@ fn pane(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) ->
     });
     let tab_id = ws.alloc_tab_id();
     ws.active_runtime_mut().panes.push(pane);
-    ws.active_runtime_mut().tabs.push(TabEntry {
-        id: tab_id,
-        layout: PaneLayout::Pane(id),
-        last_focused_pane: id,
-        user_label: None,
-    });
+    ws.active_runtime_mut()
+        .tabs
+        .push(TabEntry::single(tab_id, id));
     id
 }
 

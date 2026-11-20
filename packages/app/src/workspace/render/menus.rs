@@ -3,6 +3,7 @@
 use crate::ui::{PopupMenu, PopupMenuItem};
 
 use super::Workspace;
+use crate::workspace::main_area::tab_strip::TabId;
 
 /// Builds a workspace-scoped `PopupMenuItem` that upgrades the weak
 /// workspace reference and runs `f`. `PopupMenu` dismisses itself after
@@ -133,7 +134,7 @@ pub(super) fn build_new_tab_menu(
 /// Menu data is captured with the tab cell, before the menu can open.
 pub(super) struct TabMenuData {
     index: usize,
-    tab_id: crate::workspace::main_area::tab_strip::TabId,
+    tab_id: TabId,
     tab_count: usize,
     is_orchestrator: bool,
     /// One pane of a kind the side tabs take.
@@ -145,7 +146,7 @@ pub(super) struct TabMenuData {
 impl TabMenuData {
     pub(super) fn new(
         index: usize,
-        tab_id: crate::workspace::main_area::tab_strip::TabId,
+        tab_id: TabId,
         tab_count: usize,
         is_orchestrator: bool,
         can_go_aside: bool,

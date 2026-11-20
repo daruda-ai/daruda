@@ -265,12 +265,9 @@ fn a_restored_pane_outside_its_lane_restores_read_only(cx: &mut TestAppContext) 
             runtime.panes.push(pane);
             runtime
                 .tabs
-                .push(crate::workspace::main_area::pane::TabEntry {
-                    id: tab_id,
-                    layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(pane_id),
-                    last_focused_pane: pane_id,
-                    user_label: None,
-                });
+                .push(crate::workspace::main_area::pane::TabEntry::single(
+                    tab_id, pane_id,
+                ));
         });
     })
     .unwrap();

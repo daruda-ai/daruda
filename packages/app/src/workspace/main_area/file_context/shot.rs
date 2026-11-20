@@ -6,6 +6,7 @@ use super::super::{
     pane_tree::PaneLayout,
 };
 use crate::workspace::Workspace;
+use crate::workspace::main_area::tab_strip::TabHistory;
 use daruda_store::project::PaneCwd;
 use gpui::{Context, Point, Window, px};
 
@@ -101,17 +102,13 @@ impl Workspace {
         });
         let tab_id = self.alloc_tab_id();
         self.active_runtime_mut().panes.push(pane);
-        self.active_runtime_mut().tabs.push(TabEntry {
-            id: tab_id,
-            layout: PaneLayout::Pane(id),
-            last_focused_pane: id,
-            user_label: None,
-        });
+        self.active_runtime_mut()
+            .tabs
+            .push(TabEntry::single(tab_id, id));
         let last_tab = self.active_runtime().tabs.len() - 1;
-        self.active_runtime_mut().tabs.activate(
-            last_tab,
-            crate::workspace::main_area::tab_strip::TabHistory::Skip,
-        );
+        self.active_runtime_mut()
+            .tabs
+            .activate(last_tab, TabHistory::Skip);
         self.set_focused_pane(id, window, cx);
         self.select_bottom_input_pane(targets[1], window, cx);
         self.input_dock.input.update(cx, |state, cx| {

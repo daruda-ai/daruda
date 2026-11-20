@@ -6,6 +6,7 @@ use gpui::{App, Hsla, SharedString};
 use crate::ui::theme;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::TabEntry;
+use crate::workspace::main_area::tab_strip::TabId;
 use crate::workspace::tab_indicator::TabIndicator;
 
 /// One tab's cell in the tab strip.
@@ -13,7 +14,7 @@ pub(in crate::workspace) struct TabCell {
     pub(super) index: usize,
     /// The stable `TabEntry` id: the drag payload's identity, surviving a
     /// reorder.
-    pub(super) id: crate::workspace::main_area::tab_strip::TabId,
+    pub(super) id: TabId,
     pub(in crate::workspace) is_active: bool,
     /// The tab's label, prefixed with the dirty dot when a pane in it holds
     /// unsaved edits.

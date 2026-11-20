@@ -8,6 +8,7 @@ use super::{asked, question};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::main_area::tab_strip::TabHistory;
 
 fn ask(ws: &gpui::Entity<Workspace>, pane: PaneId, id: u64, cx: &mut TestAppContext) {
     let _ = crate::platform::notifications::take_recorded_for_test();
@@ -69,10 +70,7 @@ fn a_question_notifies_like_a_permission_request(cx: &mut TestAppContext) {
             .iter()
             .position(|tab| tab.layout.contains(pane))
             .expect("the pane's tab");
-        runtime.tabs.activate(
-            index,
-            crate::workspace::main_area::tab_strip::TabHistory::Skip,
-        );
+        runtime.tabs.activate(index, TabHistory::Skip);
         runtime.focused_pane_id = pane;
     });
     assert!(ws.read_with(cx, |ws, _| ws.pane_on_screen(pane)));

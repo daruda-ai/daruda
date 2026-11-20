@@ -7,7 +7,6 @@ use gpui::{Context, Window};
 use crate::workspace::Workspace;
 use crate::workspace::layout::snap::RestorableSession;
 use crate::workspace::main_area::pane::TabEntry;
-use crate::workspace::main_area::pane_tree::PaneLayout;
 
 impl Workspace {
     /// Restore `session` into a new pane, switching to its Lane first if
@@ -116,12 +115,9 @@ impl Workspace {
         let pane_id = pane.id;
         let tab_id = self.alloc_tab_id();
         self.active_runtime_mut().panes.push(pane);
-        self.active_runtime_mut().tabs.open(TabEntry {
-            id: tab_id,
-            layout: PaneLayout::Pane(pane_id),
-            last_focused_pane: pane_id,
-            user_label: None,
-        });
+        self.active_runtime_mut()
+            .tabs
+            .open(TabEntry::single(tab_id, pane_id));
         if !self.docks.bottom.read(cx).is_open {
             self.docks.bottom.update(cx, |d, cx| {
                 d.toggle();

@@ -15,6 +15,7 @@ use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{self, TabEntry};
 use crate::workspace::main_area::pane_tree::{self as pane_tree};
 use crate::workspace::main_area::side_group::SideGroup;
+use crate::workspace::main_area::tab_strip::TabStrip;
 
 impl Workspace {
     /// Restore from the UUID-keyed disk shape (from
@@ -303,10 +304,7 @@ impl Workspace {
                 }
                 let runtime = LaneRuntime {
                     preview_tab_id: None,
-                    tabs: crate::workspace::main_area::tab_strip::TabStrip::restored(
-                        tabs,
-                        wt_active_tab,
-                    ),
+                    tabs: TabStrip::restored(tabs, wt_active_tab),
                     panes: scratch,
                     focused_pane_id: focused,
                     side,

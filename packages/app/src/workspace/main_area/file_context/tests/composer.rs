@@ -19,12 +19,9 @@ pub(super) fn add_selected_context(
     let target = pane.id;
     ws.active_runtime_mut().panes.push(pane);
     let tab_id = ws.alloc_tab_id();
-    ws.active_runtime_mut().tabs.push(TabEntry {
-        id: tab_id,
-        layout: PaneLayout::Pane(target),
-        last_focused_pane: target,
-        user_label: None,
-    });
+    ws.active_runtime_mut()
+        .tabs
+        .push(TabEntry::single(tab_id, target));
     ws.select_bottom_input_pane(target, window, cx);
     ws.focused_file_content()
         .unwrap()

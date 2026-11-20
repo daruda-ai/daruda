@@ -165,19 +165,15 @@ fn open_agent_chat_pane_on(
     cx: &mut gpui::Context<Workspace>,
 ) -> PaneId {
     use crate::workspace::main_area::pane::TabEntry;
-    use crate::workspace::main_area::pane_tree::PaneLayout;
 
     let cwd = ws.active_lane().map(|w| PaneCwd::Local(w.path.clone()));
     let pane = ws.create_agent_chat_pane(cwd, None, agent_id.to_string(), None, window, cx);
     let pane_id = pane.id;
     ws.active_runtime_mut().panes.push(pane);
     let tab_id = ws.alloc_tab_id();
-    ws.active_runtime_mut().tabs.push(TabEntry {
-        id: tab_id,
-        layout: PaneLayout::Pane(pane_id),
-        last_focused_pane: pane_id,
-        user_label: None,
-    });
+    ws.active_runtime_mut()
+        .tabs
+        .push(TabEntry::single(tab_id, pane_id));
     pane_id
 }
 

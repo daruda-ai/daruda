@@ -16,7 +16,7 @@ use crate::lane::availability::LaneAvailability;
 use crate::runs::GlobalTasks;
 use crate::workspace::lane_ops::LaneReveal;
 use crate::workspace::main_area::pane::TabEntry;
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::{ChatOpen, Workspace};
 
 /// An existing lane a start was checked against, before it is recorded.
@@ -222,12 +222,7 @@ impl Workspace {
         let rt = self.main_area.runtimes.entry(lane).or_default();
         let first = rt.tabs.is_empty();
         rt.panes.push(pane);
-        rt.tabs.push(TabEntry {
-            id: tab_id,
-            layout: PaneLayout::Pane(pane_id),
-            last_focused_pane: pane_id,
-            user_label: None,
-        });
+        rt.tabs.push(TabEntry::single(tab_id, pane_id));
         // A lane with nothing open shows this tab when the user goes there.
         if first {
             rt.focused_pane_id = pane_id;

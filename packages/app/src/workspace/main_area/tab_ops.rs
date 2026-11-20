@@ -5,10 +5,11 @@ mod pane_structure;
 use gpui::{Context, Window};
 
 use super::pane::TabEntry;
-use super::pane_tree::{PaneId, PaneLayout};
+use super::pane_tree::PaneId;
 use super::tab_strip::TabHistory;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
+use crate::workspace::main_area::tab_strip::TabId;
 
 /// What content a newly split-off pane should hold. Keeps the split entry
 /// point free of a `bool`/`Option` flag pair (an invalid state would be
@@ -89,12 +90,9 @@ impl Workspace {
         let tab_id = self.alloc_tab_id();
 
         self.active_runtime_mut().panes.push(pane);
-        self.active_runtime_mut().tabs.open(TabEntry {
-            id: tab_id,
-            layout: PaneLayout::Pane(pane_id),
-            last_focused_pane: pane_id,
-            user_label: None,
-        });
+        self.active_runtime_mut()
+            .tabs
+            .open(TabEntry::single(tab_id, pane_id));
         self.set_focused_pane(pane_id, window, cx);
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
@@ -297,16 +295,8 @@ impl Workspace {
     /// that tab is gone (closed mid-drag) or already active. Skips history
     /// for the same reason the preview hops do — the unwind is part of the
     /// look-ahead, not navigation the user performed.
-    pub(super) fn restore_active_tab_by_id(
-        &mut self,
-        tab_id: crate::workspace::main_area::tab_strip::TabId,
-    ) -> bool {
-        let Some(index) = self
-            .active_runtime()
-            .tabs
-            .iter()
-            .position(|t| t.id == tab_id)
-        else {
+    pub(super) fn restore_active_tab_by_id(&mut self, tab_id: TabId) -> bool {
+        let Some(index) = self.active_runtime().tabs.position_of_id(tab_id) else {
             return false;
         };
         self.switch_shown_tab(index, TabHistory::Skip).is_some()

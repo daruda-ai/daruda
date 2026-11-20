@@ -5,7 +5,7 @@
 use super::*;
 use crate::workspace::ChatOpen;
 use crate::workspace::main_area::pane::TabEntry;
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_config::{AgentDefinition, ModeChoice, SessionPreferences};
 use daruda_store::project::PaneCwd;
 use gpui::Entity;
@@ -216,12 +216,9 @@ fn push_chat(
     let pane_id = pane.id;
     ws.active_runtime_mut().panes.push(pane);
     let tab_id = ws.alloc_tab_id();
-    ws.active_runtime_mut().tabs.push(TabEntry {
-        id: tab_id,
-        layout: PaneLayout::Pane(pane_id),
-        last_focused_pane: pane_id,
-        user_label: None,
-    });
+    ws.active_runtime_mut()
+        .tabs
+        .push(TabEntry::single(tab_id, pane_id));
     pane_id
 }
 

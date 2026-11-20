@@ -2,13 +2,14 @@
 //! a remote message about an agent running in it.
 
 use super::*;
+use crate::workspace::main_area::tab_strip::TabId;
 
 fn with_agent_tab(
     cx: &mut TestAppContext,
 ) -> (
     gpui::WindowHandle<gpui_component::Root>,
     gpui::Entity<Workspace>,
-    crate::workspace::main_area::tab_strip::TabId,
+    TabId,
     crate::workspace::main_area::pane_tree::PaneId,
 ) {
     let (wh, ws) = build_workspace(cx);

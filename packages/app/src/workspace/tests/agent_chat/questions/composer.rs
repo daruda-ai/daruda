@@ -13,7 +13,8 @@ use gpui::{Entity, TestAppContext, VisualTestContext};
 use super::super::super::build_workspace_with;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::TabEntry;
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::main_area::tab_strip::TabHistory;
 
 pub(super) fn field(
     key: &str,
@@ -138,12 +139,9 @@ pub(super) fn add_pane(ws: &Entity<Workspace>, vcx: &mut VisualTestContext) -> P
             let pane_id = pane.id;
             ws.active_runtime_mut().panes.push(pane);
             let tab_id = ws.alloc_tab_id();
-            ws.active_runtime_mut().tabs.push(TabEntry {
-                id: tab_id,
-                layout: PaneLayout::Pane(pane_id),
-                last_focused_pane: pane_id,
-                user_label: None,
-            });
+            ws.active_runtime_mut()
+                .tabs
+                .push(TabEntry::single(tab_id, pane_id));
             pane_id
         })
     });
@@ -1201,10 +1199,7 @@ fn show_question_tab(ws: &Entity<Workspace>, vcx: &mut VisualTestContext) {
         ws.update(cx, |ws, cx| {
             let runtime = ws.active_runtime_mut();
             let last_tab = runtime.tabs.len() - 1;
-            runtime.tabs.activate(
-                last_tab,
-                crate::workspace::main_area::tab_strip::TabHistory::Skip,
-            );
+            runtime.tabs.activate(last_tab, TabHistory::Skip);
             ws.main_area.pending_resize = true;
             cx.notify();
         })

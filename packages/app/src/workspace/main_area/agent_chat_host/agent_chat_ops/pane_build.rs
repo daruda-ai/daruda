@@ -9,7 +9,7 @@ use crate::agent::launch_resolve::{AgentLaunchSpec, account_recipe_for_connect};
 use crate::surface::strings as s;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::pane::{AgentChatContent, Pane, PaneContent, TabEntry};
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::main_area::pane_tree::PaneId;
 use daruda_chat::transcript_defaults::TranscriptDefaults;
 use daruda_chat::view::{AgentChatView, AgentSessionStatus};
 use daruda_config::{AgentLaunch, ModeChoice};
@@ -367,12 +367,9 @@ impl Workspace {
         let pane_id = pane.id;
         let tab_id = self.alloc_tab_id();
         self.active_runtime_mut().panes.push(pane);
-        self.active_runtime_mut().tabs.open(TabEntry {
-            id: tab_id,
-            layout: PaneLayout::Pane(pane_id),
-            last_focused_pane: pane_id,
-            user_label: None,
-        });
+        self.active_runtime_mut()
+            .tabs
+            .open(TabEntry::single(tab_id, pane_id));
         // The live session connects lazily via `focus_pane` below. The prompt
         // input lives in the bottom dock; open the dock first so it's visible
         // before `focus_pane` activates the input panel and moves focus to it.
@@ -409,12 +406,7 @@ impl Workspace {
                 agent_id,
             }),
         });
-        rt.tabs.open(TabEntry {
-            id: tab_id,
-            layout: PaneLayout::Pane(pane_id),
-            last_focused_pane: pane_id,
-            user_label: None,
-        });
+        rt.tabs.open(TabEntry::single(tab_id, pane_id));
     }
 
     /// Focus a freshly inserted Agent chat pane and settle the layout around

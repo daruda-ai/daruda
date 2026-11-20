@@ -47,7 +47,7 @@ use crate::workspace::main_area::agent_chat_host::agent_chat_handoff_ops::{
 };
 use crate::workspace::main_area::pane;
 use crate::workspace::main_area::pane::TabEntry;
-use crate::workspace::main_area::pane_tree::{PaneId, PaneLayout};
+use crate::workspace::main_area::pane_tree::PaneId;
 
 /// Why a switch leaves the pane alone and opens a new one — the sentence the
 /// confirm dialog shows. Its [`NewPaneKind`] follows from it, so a Terminal
@@ -332,12 +332,9 @@ impl Workspace {
         let pane_id = new_pane.id;
         let tab_id = self.alloc_tab_id();
         self.active_runtime_mut().panes.push(new_pane);
-        self.active_runtime_mut().tabs.open(TabEntry {
-            id: tab_id,
-            layout: PaneLayout::Pane(pane_id),
-            last_focused_pane: pane_id,
-            user_label: None,
-        });
+        self.active_runtime_mut()
+            .tabs
+            .open(TabEntry::single(tab_id, pane_id));
 
         if kind == NewPaneKind::AgentChat && !self.docks.bottom.read(cx).is_open {
             self.docks.bottom.update(cx, |d, cx| {

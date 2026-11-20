@@ -1,12 +1,12 @@
 use super::super::{
     file_view_pane::{DiffSource, FileOrigin},
     pane::{PaneContent, TabEntry},
-    pane_tree::PaneLayout,
 };
 mod composer;
 mod navigation;
 mod submission;
 use super::*;
+use crate::workspace::main_area::tab_strip::TabHistory;
 use crate::workspace::tests::build_workspace_with;
 use gpui::{
     AnyWindowHandle, AppContext as _, Entity, MouseButton, TestAppContext, VisualTestContext,
@@ -179,12 +179,9 @@ async fn the_busy_file_recipient_button_queues_instead_of_stopping(cx: &mut Test
                 let id = chat.id;
                 ws.active_runtime_mut().panes.push(chat);
                 let tab_id = ws.alloc_tab_id();
-                ws.active_runtime_mut().tabs.push(TabEntry {
-                    id: tab_id,
-                    layout: PaneLayout::Pane(id),
-                    last_focused_pane: id,
-                    user_label: None,
-                });
+                ws.active_runtime_mut()
+                    .tabs
+                    .push(TabEntry::single(tab_id, id));
                 ws.maybe_connect_agent_chat(id, cx);
                 ws.agent_chat_view(id)
                     .unwrap()
@@ -261,17 +258,13 @@ fn fixture(
                     .update(cx, |state, cx| state.set_value(SOURCE, window, cx));
                 ws.active_runtime_mut().panes.push(file);
                 let tab_id = ws.alloc_tab_id();
-                ws.active_runtime_mut().tabs.push(TabEntry {
-                    id: tab_id,
-                    layout: PaneLayout::Pane(id),
-                    last_focused_pane: id,
-                    user_label: None,
-                });
+                ws.active_runtime_mut()
+                    .tabs
+                    .push(TabEntry::single(tab_id, id));
                 let last_tab = ws.active_runtime().tabs.len() - 1;
-                ws.active_runtime_mut().tabs.activate(
-                    last_tab,
-                    crate::workspace::main_area::tab_strip::TabHistory::Skip,
-                );
+                ws.active_runtime_mut()
+                    .tabs
+                    .activate(last_tab, TabHistory::Skip);
                 ws.set_focused_pane(id, window, cx);
                 ws.activate_bottom_input(cx);
                 (id, owner)

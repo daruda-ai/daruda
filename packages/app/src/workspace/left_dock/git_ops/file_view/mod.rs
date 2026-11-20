@@ -574,12 +574,9 @@ impl Workspace {
         let runtime = self.active_runtime_mut();
         let last_tab = runtime
             .tabs
-            .open(crate::workspace::main_area::pane::TabEntry {
-                id: tab_id,
-                layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(pane_id),
-                last_focused_pane: pane_id,
-                user_label: None,
-            });
+            .open(crate::workspace::main_area::pane::TabEntry::single(
+                tab_id, pane_id,
+            ));
         self.mark_preview_tab(PanePlace::Tab(last_tab), intent);
         self.set_focused_pane(pane_id, window, cx);
         self.bump_activity(pane_id);

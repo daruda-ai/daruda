@@ -222,12 +222,9 @@ async fn parked_lane_agent_status_reaches_left_dock_aggregate(cx: &mut TestAppCo
             ws.active_runtime_mut().panes.push(pane);
             ws.active_runtime_mut()
                 .tabs
-                .push(crate::workspace::main_area::pane::TabEntry {
-                    id: tab_id,
-                    layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(id),
-                    last_focused_pane: id,
-                    user_label: None,
-                });
+                .push(crate::workspace::main_area::pane::TabEntry::single(
+                    tab_id, id,
+                ));
             agent_view(ws, id).update(cx, |v, _| {
                 v.set_status_for_test(AgentSessionStatus::Connected);
                 v.set_turn_in_flight();

@@ -7,7 +7,6 @@ use crate::runs::seed::{SeedEnd, SeedRun, commit_now};
 use crate::workspace::main_area::agent_chat_host::agent_chat_event_ops::PumpStep;
 use crate::workspace::main_area::pane::{Pane, PaneContent, TabEntry};
 use crate::workspace::main_area::pane_input_ops::{PaneTextInput, PaneTextIntent};
-use crate::workspace::main_area::pane_tree::PaneLayout;
 use daruda_agent::pty_tracker::{ProcessExited, PtyBinding};
 use daruda_chat::view::{AgentSessionStatus, LoadIntent, PromptDispatch};
 use daruda_store::project::PaneCwd;
@@ -170,12 +169,9 @@ fn snapshot_pane(
     });
     let tab_id = ws.alloc_tab_id();
     ws.active_runtime_mut().panes.push(pane);
-    ws.active_runtime_mut().tabs.push(TabEntry {
-        id: tab_id,
-        layout: PaneLayout::Pane(id),
-        last_focused_pane: id,
-        user_label: None,
-    });
+    ws.active_runtime_mut()
+        .tabs
+        .push(TabEntry::single(tab_id, id));
     id
 }
 

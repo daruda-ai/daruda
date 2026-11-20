@@ -11,6 +11,7 @@ use super::Workspace;
 use super::main_area::bottom_dock::QueuedInputCache;
 use super::main_area::pane::{PaneContent, TabEntry};
 use super::main_area::pane_tree::PaneId;
+use crate::workspace::main_area::tab_strip::TabHistory;
 use daruda_chat::view::AgentChatView;
 
 /// The orchestrator session this window hosts, and what showing its tab
@@ -257,10 +258,9 @@ impl Workspace {
             .iter()
             .position(|tab| self.is_orchestrator_tab(tab))
             .expect("inserted tab");
-        self.active_runtime_mut().tabs.activate(
-            index,
-            crate::workspace::main_area::tab_strip::TabHistory::Skip,
-        );
+        self.active_runtime_mut()
+            .tabs
+            .activate(index, TabHistory::Skip);
         // Remembered, not dropped: hiding restores it.
         self.orchestrator.zoom_to_restore = self.main_area.take_zoomed_pane();
         self.main_area.pane_drop_hover = None;

@@ -3,6 +3,7 @@
 use crate::workspace::Workspace;
 use crate::workspace::dirty_items::DirtyItem;
 use crate::workspace::main_area::pane_tree::PaneId;
+use crate::workspace::main_area::tab_strip::TabId;
 use gpui::{Context, Window};
 
 impl Workspace {
@@ -21,7 +22,7 @@ impl Workspace {
             .filter_map(|&i| tabs.get(i))
             .flat_map(|tab| tab.layout.pane_ids())
             .collect();
-        let tab_ids: Vec<crate::workspace::main_area::tab_strip::TabId> = indices
+        let tab_ids: Vec<TabId> = indices
             .iter()
             .filter_map(|&i| tabs.get(i).map(|tab| tab.id))
             .collect();
@@ -41,14 +42,8 @@ impl Workspace {
         });
     }
 
-    fn tab_index_by_id(
-        &self,
-        tab_id: crate::workspace::main_area::tab_strip::TabId,
-    ) -> Option<usize> {
-        self.active_runtime()
-            .tabs
-            .iter()
-            .position(|tab| tab.id == tab_id)
+    fn tab_index_by_id(&self, tab_id: TabId) -> Option<usize> {
+        self.active_runtime().tabs.position_of_id(tab_id)
     }
 
     fn close_tabs_checking_edits(

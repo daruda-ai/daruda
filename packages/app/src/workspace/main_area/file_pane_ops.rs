@@ -8,6 +8,7 @@ use super::pane_tree::{PaneId, PaneLayout};
 use super::side_group::PanePlace;
 use crate::path_ext::PathExt as _;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::tab_strip::TabId;
 
 impl Workspace {
     // ---- Focused-pane file-viewer accessors ----
@@ -201,10 +202,7 @@ impl Workspace {
     }
 
     /// The id of the tab at `place`, in whichever strip it is.
-    pub(in crate::workspace) fn tab_id_at(
-        &self,
-        place: PanePlace,
-    ) -> Option<crate::workspace::main_area::tab_strip::TabId> {
+    pub(in crate::workspace) fn tab_id_at(&self, place: PanePlace) -> Option<TabId> {
         let runtime = self.active_runtime();
         match place {
             PanePlace::Tab(index) => runtime.tabs.get(index).map(|tab| tab.id),
