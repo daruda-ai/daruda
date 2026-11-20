@@ -373,3 +373,51 @@ fn a_pull_request_opened_again_at_once_comes_back_to_its_place(cx: &mut TestAppC
         assert_eq!(detail.tab(), PrTab::Description);
     });
 }
+
+/// A runtime dropped whole takes its pull request pane with it: the
+/// teardown every such path shares settles what the pane's detail leaves.
+#[gpui::test]
+fn tearing_a_runtime_down_whole_settles_its_pull_request(cx: &mut TestAppContext) {
+    let (f, _gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    let id = panes(&f, cx)[0].0;
+    let key = f.ws.read_with(cx, |ws, _| {
+        ws.pages.pull_requests.details.get(id).unwrap().key()
+    });
+    act(&f, cx, move |ws, window, cx| {
+        ws.forget_runtime_panes(|dropped| *dropped == lane, window, cx);
+        *ws.active_runtime_mut() = crate::workspace::LaneRuntime::default();
+    });
+    f.ws.read_with(cx, |ws, _| {
+        let page = &ws.pages.pull_requests;
+        assert_eq!(page.details.len(), 0);
+        assert!(page.progress.place(&key).is_some(), "its place is kept");
+    });
+}
+
+/// What the workspace asks of every pane, answered by a shell and by a
+/// pull request pane: where each may sit, and what draws its focus.
+#[gpui::test]
+fn each_pane_kind_answers_for_itself(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::pane::behavior::PaneHosting;
+    let (f, _gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    f.ws.read_with(cx, |ws, cx| {
+        // (kind, hosting, the wrapper tracks its focus, an account, saves)
+        let cases = [
+            ("a shell", PaneHosting::Tabs, false, true, false),
+            ("a pull request", PaneHosting::Side, true, false, false),
+        ];
+        let panes = &ws.active_runtime().panes;
+        assert_eq!(panes.len(), cases.len());
+        for (pane, (label, hosting, wrapped, account, saves)) in panes.iter().zip(cases) {
+            let kind = pane.content.behavior();
+            assert_eq!(kind.hosting(), hosting, "{label}");
+            assert_eq!(kind.wrapper_focus_handle().is_some(), wrapped, "{label}");
+            assert_eq!(kind.account_selection().is_some(), account, "{label}");
+            assert_eq!(kind.can_save(), saves, "{label}");
+            assert!(!kind.is_dirty(cx), "{label}");
+            assert!(!kind.title(cx).is_empty(), "{label}");
+        }
+    });
+}
