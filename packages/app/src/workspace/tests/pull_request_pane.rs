@@ -14,7 +14,7 @@ use super::pull_request_detail::{detail, item, open, repo, window};
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::side_group::GroupsShown;
 use crate::workspace::pages::Page;
-use crate::workspace::pages::pull_requests::detail::{PrDetailId, PrOpening};
+use crate::workspace::pages::pull_requests::detail::{PrDetailId, PrOpening, PrTab};
 
 /// The worktree with a shell tab, off the page, wide enough for both groups.
 fn worktree(cx: &mut TestAppContext) -> (GitFixture, FakeGh, LaneRef) {
@@ -285,5 +285,91 @@ fn with_no_tab_to_be_beside_the_pull_request_opens_on_the_page(cx: &mut TestAppC
     assert!(panes(&f, cx).is_empty());
     f.ws.read_with(cx, |ws, _| {
         assert_eq!(ws.active_page(), Some(Page::PullRequests))
+    });
+}
+
+/// The worktree's pull request pane, closed the way its tab's button does.
+fn close_pane(
+    ws: &mut super::Workspace,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<super::Workspace>,
+) {
+    let pane = ws
+        .active_runtime()
+        .panes
+        .iter()
+        .find(|pane| pane.content.as_pull_request().is_some())
+        .expect("a pull request pane")
+        .id;
+    let index = ws.active_runtime().side.position_of(pane).unwrap();
+    ws.close_side_tab(index, window, cx);
+}
+
+/// What a closed pane's detail leaves is settled once the pane is gone:
+/// the place to come back to is recorded, and what was typed is on disk.
+#[gpui::test]
+fn closing_the_pane_settles_what_its_detail_leaves(cx: &mut TestAppContext) {
+    use crate::github::DraftStore;
+    use daruda_store::review_drafts::load_review_drafts_in;
+    let dir = tempfile::tempdir().unwrap();
+    cx.update(|cx| DraftStore::install_at(dir.path().to_owned(), cx));
+    let (f, gh, lane) = worktree(cx);
+    gh.set_account(
+        "github.com",
+        daruda_github::availability::GhAccount {
+            login: "me".into(),
+            source: daruda_github::availability::CredentialSource::Env("GH_TOKEN".into()),
+        },
+    );
+    f.ws.update(cx, |ws, cx| ws.recheck_gh("github.com", cx));
+    cx.update(crate::github::PrPoller::tick);
+    cx.run_until_parked();
+    open_pane(&f, lane, item(7, "feat"), cx);
+    let id = panes(&f, cx)[0].0;
+    let key = f.ws.update(cx, |ws, cx| {
+        ws.select_pr_detail_tab(id, PrTab::Description, cx);
+        ws.pages.pull_requests.details.get(id).unwrap().key()
+    });
+    let owner = cx.update(|cx| DraftStore::owner(&repo(), 7, cx)).unwrap();
+    cx.update(|cx| DraftStore::set_reply(&owner, "thread", Some("Kept".into()), cx));
+    assert!(
+        load_review_drafts_in(dir.path()).unwrap().prs.is_empty(),
+        "not written while it is being typed"
+    );
+
+    act(&f, cx, close_pane);
+    f.ws.read_with(cx, |ws, _| {
+        let page = &ws.pages.pull_requests;
+        assert_eq!(page.details.len(), 0);
+        assert_eq!(
+            page.progress.place(&key).map(|place| place.tab),
+            Some(PrTab::Description)
+        );
+    });
+    assert_eq!(load_review_drafts_in(dir.path()).unwrap().prs.len(), 1);
+}
+
+/// Closed and opened again within one update, the pull request comes back
+/// to the tab it was left at: what the closed detail leaves is settled
+/// before the next one is made, not only once the update is over.
+#[gpui::test]
+fn a_pull_request_opened_again_at_once_comes_back_to_its_place(cx: &mut TestAppContext) {
+    let (f, _gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    let id = panes(&f, cx)[0].0;
+    f.ws.update(cx, |ws, cx| {
+        ws.select_pr_detail_tab(id, PrTab::Description, cx)
+    });
+    cx.run_until_parked();
+
+    act(&f, cx, move |ws, window, cx| {
+        close_pane(ws, window, cx);
+        ws.open_pr_pane(lane, item(7, "feat"), PrOpening::default(), window, cx);
+    });
+    let again = panes(&f, cx)[0].0;
+    assert_ne!(again, id, "a new detail");
+    f.ws.read_with(cx, |ws, _| {
+        let detail = ws.pages.pull_requests.details.get(again).unwrap();
+        assert_eq!(detail.tab(), PrTab::Description);
     });
 }

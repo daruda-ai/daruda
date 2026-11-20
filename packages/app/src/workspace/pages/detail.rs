@@ -320,6 +320,7 @@ impl Workspace {
         // What was typed in a pull request's detail is on disk before it is
         // gone from view.
         if id.page() == Page::PullRequests {
+            self.settle_pr_details(cx);
             crate::github::DraftStore::flush(cx);
         }
         cx.notify();

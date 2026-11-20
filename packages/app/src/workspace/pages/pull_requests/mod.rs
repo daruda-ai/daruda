@@ -115,22 +115,22 @@ impl PullRequestsPage {
         std::mem::take(&mut self.reveal_pending)
     }
 
-    /// Show `next` as the detail, or none; the one it replaces leaves its
-    /// place in the review progress to come back to.
+    /// Show `next` as the detail, or none. The one it replaces ends unless
+    /// something else holds it; `Workspace::settle_pr_details` then settles
+    /// what it leaves behind.
     pub(in crate::workspace) fn replace_detail(&mut self, next: Option<PrDetailState>) {
         let next = next.map(|detail| self.details.open(detail));
         self.show_detail(next);
     }
 
-    /// Show over the list the detail `next` holds, or none. The one it
-    /// replaces ends unless something else holds it.
+    /// Show over the list the detail `next` holds, or none.
     pub(in crate::workspace) fn show_detail(&mut self, next: Option<details::DetailHold>) {
         self.details.show_on_page(next);
-        self.settle_ended_details();
     }
 
     /// Details nothing holds any more leave their place in the review
-    /// progress to come back to. `true` when any ended.
+    /// progress to come back to. `true` when any ended. Called only by
+    /// `Workspace::settle_pr_details`, which also writes their drafts.
     pub(in crate::workspace) fn settle_ended_details(&mut self) -> bool {
         let ended = self.details.take_ended();
         for gone in &ended {

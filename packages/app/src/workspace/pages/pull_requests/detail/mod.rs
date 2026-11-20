@@ -560,9 +560,10 @@ impl Workspace {
     /// Put `item`'s detail on the page: the one already open for that
     /// pull request (a worktree's pane holds it), else a new one.
     fn install_pr_detail(&mut self, item: PrListItem, opening: PrOpening, cx: &mut Context<Self>) {
-        let (hold, reads) = self.pr_detail_for(item, opening);
+        let (hold, reads) = self.pr_detail_for(item, opening, cx);
         let id = hold.id();
         self.pages.pull_requests.show_detail(Some(hold));
+        self.settle_pr_details(cx);
         self.start_pr_detail(id, reads, cx);
         cx.notify();
     }
@@ -575,7 +576,12 @@ impl Workspace {
         &mut self,
         item: PrListItem,
         opening: PrOpening,
+        cx: &mut gpui::App,
     ) -> (DetailHold, PrDetailStart) {
+        // A detail that ended earlier in this update has not been settled
+        // yet: its place is recorded first, so this pull request opened
+        // again comes back to it.
+        self.settle_pr_details(cx);
         let page = &mut self.pages.pull_requests;
         let open = page
             .details

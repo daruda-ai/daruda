@@ -67,7 +67,7 @@ impl Workspace {
             return;
         }
         let number = item.pr.number;
-        let (hold, start) = self.pr_detail_for(item, opening);
+        let (hold, start) = self.pr_detail_for(item, opening, cx);
         let id = hold.id();
         let index = match self.pr_pane() {
             Some((pane_id, _)) => {
