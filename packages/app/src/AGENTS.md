@@ -206,6 +206,12 @@ is read beside a chat goes aside: files, diffs and a pull request
   reuse (`preview_slot`, one scratch tab across both groups). A pull request,
   which only the side tabs hold, needs any tab on the left
   (`side_only_goes_beside`).
+- **Where a dragged tab lands** is `plan_tab_drop` (`main_area/tab_drop_plan.rs`),
+  for the insertion line and for the drop alike: a drop that would be refused
+  claims no slot and draws nothing. The slot a drag is over names its strip
+  (`DropSlot`); a strip uses only a slot of its own, else its end. The drag's
+  transient state is `MainAreaContext::tab_drag`, taken down by
+  `finish_tab_drag` alone.
 - **A close among the tabs leaves the keyboard in a side tab** when it is
   there (`refocus_tabs_after_close`): the tabs' focused pane is updated, the
   keyboard is not taken.

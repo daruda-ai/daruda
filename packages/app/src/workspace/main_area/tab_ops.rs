@@ -284,8 +284,8 @@ impl Workspace {
         // of where the drag started.
         let pre_drag = self.active_runtime().tabs.active_tab().map(|t| t.id);
         if self.switch_shown_tab(index, TabHistory::Skip).is_some() {
-            if self.main_area.tab_preview_restore.is_none() {
-                self.main_area.tab_preview_restore = pre_drag;
+            if self.main_area.tab_drag.preview_restore.is_none() {
+                self.main_area.tab_drag.preview_restore = pre_drag;
             }
             cx.notify();
         }

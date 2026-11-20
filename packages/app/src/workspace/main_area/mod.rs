@@ -27,6 +27,7 @@ pub(in crate::workspace) mod resize;
 pub(in crate::workspace) mod side_group;
 pub(in crate::workspace) mod side_ops;
 pub(in crate::workspace) mod tab_drag_ops;
+pub(in crate::workspace) mod tab_drop_plan;
 mod tab_name_ops;
 pub(in crate::workspace) mod tab_ops;
 pub(in crate::workspace) mod tab_strip;
@@ -303,7 +304,7 @@ pub(in crate::workspace) fn render_layout(
                     },
                 ))
                 .on_drop::<TabDrag>(cx.listener(move |this, d: &TabDrag, window, cx| {
-                    this.drop_tab_onto_pane(d.tab_id, window, cx)
+                    this.drop_tab_onto_pane(d.tab_id, id, window, cx)
                 }))
                 // First child, so its hitbox is behind everything the pane paints.
                 .child(pane_press::blocked_press_layer(id, cx));

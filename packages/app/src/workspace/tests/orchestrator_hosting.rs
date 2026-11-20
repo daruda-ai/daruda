@@ -1,4 +1,5 @@
 use super::{PaneId, Workspace};
+use crate::workspace::main_area::tab_drop_plan::{DropSlot, Strip};
 use crate::workspace::main_area::tab_strip::TabHistory;
 use crate::workspace::tests::build_workspace;
 use crate::workspace::tests::build_workspace_with;
@@ -6,6 +7,15 @@ use daruda_store::accounts::{AccountId, AccountSelection};
 use futures::{FutureExt as _, StreamExt as _};
 use gpui::{AppContext as _, TestAppContext};
 use gpui::{Context, Window};
+
+/// The slot before the tab at `index` of the tabs, as the cell `owner` set it.
+fn tabs_slot(owner: crate::workspace::main_area::tab_strip::TabId, index: usize) -> DropSlot {
+    DropSlot {
+        strip: Strip::Tabs,
+        owner,
+        index,
+    }
+}
 
 fn seed(ws: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) -> PaneId {
     ws.seed_orchestrator_chat_pane_unrevealed_for_test(
@@ -364,8 +374,8 @@ fn orchestrator_tab_rejects_split_merge_and_drag(cx: &mut TestAppContext) {
                 window,
                 cx
             ));
-            ws.main_area.tab_reorder_preview = Some((tab, 0));
-            ws.drop_tab_onto_bar(tab, window, cx);
+            ws.main_area.tab_drag.slot = Some(tabs_slot(tab, 0));
+            ws.drop_tab_onto_strip(Strip::Tabs, tab, window, cx);
             assert_eq!(ws.active_runtime().tabs[1].id, tab);
             assert_eq!(ws.active_runtime().tabs[1].layout.pane_ids(), vec![pane]);
         })

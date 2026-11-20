@@ -9,6 +9,7 @@ use super::menus::{TabMenuData, build_new_tab_menu, tab_context_menu_items};
 use super::tab_cells::{self, TabCell};
 use crate::workspace::main_area::pane_drag_ops::PaneHeaderDrag;
 use crate::workspace::main_area::tab_drag_ops::{TabDrag, TabDragGhost};
+use crate::workspace::main_area::tab_drop_plan::Strip;
 use crate::workspace::root_menu::RootContextMenuExt as _;
 use crate::workspace::{TAB_BAR_HEIGHT, Workspace};
 
@@ -39,7 +40,12 @@ impl Workspace {
         // Rendered as a border on the adjacent cell (or the "+" button for
         // the end slot) rather than an absolute-positioned overlay, so it
         // never has to re-derive the tab bar's flex-computed x offsets.
-        let tab_reorder_preview = self.main_area.tab_reorder_preview.map(|(_, index)| index);
+        let tab_reorder_preview = self
+            .main_area
+            .tab_drag
+            .slot
+            .filter(|slot| slot.strip == Strip::Tabs)
+            .map(|slot| slot.index);
         let tab_count = tab_cells.len();
         div()
             .flex()
@@ -122,7 +128,7 @@ impl Workspace {
             // `cx.stop_propagation()`, so this container-level listener only
             // runs when no cell caught it.
             .on_drop::<TabDrag>(cx.listener(|this, d: &TabDrag, window, cx| {
-                this.drop_tab_onto_bar(d.tab_id, window, cx);
+                this.drop_tab_onto_strip(Strip::Tabs, d.tab_id, window, cx);
             }))
     }
 
@@ -164,12 +170,13 @@ impl Workspace {
         // every value derives from data already in scope for this tab —
         // no live `Workspace` read needed at menu-open time.
         let ws = cx.entity().downgrade();
+        let goes_aside = self.tab_can_go_aside(i);
         let menu_data = TabMenuData::new(
             i,
             tab_id,
             tab_count,
             is_orchestrator,
-            self.tab_can_go_aside(i),
+            goes_aside,
             file_path.as_deref(),
             worktree_root.as_deref(),
         );
@@ -216,6 +223,7 @@ impl Workspace {
                     TabDrag {
                         tab_id,
                         title: drag_title,
+                        goes_aside,
                     },
                     |d, offset, _window, cx| {
                         cx.new(|_| TabDragGhost {
@@ -227,11 +235,11 @@ impl Workspace {
             })
             .on_drag_move::<TabDrag>(cx.listener(
                 move |this, event: &DragMoveEvent<TabDrag>, window, cx| {
-                    this.update_tab_drag_from_move(tab_id, i, event, window, cx);
+                    this.update_tab_drag_from_move(Strip::Tabs, tab_id, i, event, window, cx);
                 },
             ))
             .on_drop::<TabDrag>(cx.listener(move |this, d: &TabDrag, window, cx| {
-                this.drop_tab_onto_bar(d.tab_id, window, cx);
+                this.drop_tab_onto_strip(Strip::Tabs, d.tab_id, window, cx);
             }))
             .root_context_menu(ws.clone(), move |menu, _window, _cx| {
                 tab_context_menu_items(&ws, &menu_data)

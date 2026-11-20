@@ -6,7 +6,7 @@ use super::*;
 use crate::workspace::main_area::side_group::GroupsShown;
 use crate::workspace::main_area::tab_ops::OpenIntent;
 
-type Fixture = (
+pub(super) type Fixture = (
     gpui::WindowHandle<Workspace>,
     gpui::Entity<Workspace>,
     tempfile::TempDir,
@@ -14,7 +14,7 @@ type Fixture = (
 
 /// A workspace whose worktree has its first tab and `names` open as file
 /// tabs after it, wide enough for both groups.
-fn with_files(cx: &mut TestAppContext, names: &[&str]) -> Fixture {
+pub(super) fn with_files(cx: &mut TestAppContext, names: &[&str]) -> Fixture {
     let (wh, ws, temp) = build_workspace_with_temp_project(cx);
     cx.update(|cx| {
         crate::window_registry::WindowRegistry::register(wh.into(), ws.downgrade(), cx);
@@ -42,7 +42,7 @@ fn with_files(cx: &mut TestAppContext, names: &[&str]) -> Fixture {
     (wh, ws, temp)
 }
 
-fn act(
+pub(super) fn act(
     f: &Fixture,
     cx: &mut TestAppContext,
     op: impl FnOnce(&mut Workspace, &mut gpui::Window, &mut gpui::Context<Workspace>),
@@ -56,7 +56,7 @@ fn act(
 }
 
 /// The paths the side tabs show, in order, by file name.
-fn side_files(f: &Fixture, cx: &mut TestAppContext) -> Vec<String> {
+pub(super) fn side_files(f: &Fixture, cx: &mut TestAppContext) -> Vec<String> {
     f.1.read_with(cx, |ws, _| {
         let runtime = ws.active_runtime();
         runtime

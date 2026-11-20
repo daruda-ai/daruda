@@ -26,6 +26,9 @@ use gpui::{
 
 use crate::ui::theme;
 use crate::workspace::Workspace;
+use crate::workspace::main_area::tab_drop_plan::{
+    Dragged, DropSlot, DropTarget, Strip, TabDropPlan, plan_tab_drop,
+};
 use crate::workspace::main_area::tab_strip::TabId;
 
 /// Hover delay before the tab under the cursor becomes the active preview
@@ -41,6 +44,10 @@ const TAB_HOVER_SWITCH_DELAY: Duration = Duration::from_millis(600);
 pub(in crate::workspace) struct TabDrag {
     pub tab_id: TabId,
     pub title: SharedString,
+    /// A tab of the strip on the left that the side tabs take, as it was
+    /// when picked up: what tints the side tabs' pane while it is over
+    /// them. The drop itself asks again.
+    pub goes_aside: bool,
 }
 
 /// Floating ghost rendered next to the cursor during a tab drag — mirrors
@@ -118,12 +125,38 @@ fn cell_drag_action(
 }
 
 impl Workspace {
-    /// Called from each tab cell's own `on_drag_move`. The cell classifies
-    /// the cursor itself: claim the drag while over it, stand aside while
-    /// another slot holds it, release its own state once the cursor leaves
-    /// the tab row.
+    /// The dragged tab as it is now: its strip, its place there, and
+    /// whether the other strip takes it. `None` once it is gone, and for
+    /// the orchestrator's tab, which stays where it is.
+    pub(in crate::workspace) fn dragged_tab(&self, tab_id: TabId) -> Option<Dragged> {
+        let runtime = self.active_runtime();
+        if let Some(index) = runtime.tabs.position_of_id(tab_id) {
+            return (!self.is_orchestrator_tab(&runtime.tabs[index])).then(|| Dragged {
+                from: Strip::Tabs,
+                index,
+                can_cross: self.tab_can_go_aside(index),
+            });
+        }
+        let index = runtime
+            .side
+            .tabs()
+            .iter()
+            .position(|tab| tab.id == tab_id)?;
+        Some(Dragged {
+            from: Strip::Side,
+            index,
+            can_cross: self.side_tab_can_go_back(index),
+        })
+    }
+
+    /// Called from each tab cell's own `on_drag_move`, in either strip. The
+    /// cell classifies the cursor itself: claim the drag while over it,
+    /// stand aside while another slot holds it, release its own state once
+    /// the cursor leaves the tab row. A slot the dragged tab would be
+    /// refused at is not claimed, so nothing is drawn there.
     pub(in crate::workspace) fn update_tab_drag_from_move(
         &mut self,
+        strip: Strip,
         cell_tab_id: TabId,
         cell_index: usize,
         event: &DragMoveEvent<TabDrag>,
@@ -136,14 +169,46 @@ impl Workspace {
         let h = f32::from(event.bounds.size.height);
         match cell_drag_action(local_x, local_y, w, h, theme::TAB_BAR_HEIGHT, cell_index) {
             CellDragAction::Insert(target_index) => {
-                if self.main_area.tab_reorder_preview != Some((cell_tab_id, target_index)) {
-                    self.main_area.tab_reorder_preview = Some((cell_tab_id, target_index));
-                    cx.notify();
+                let dragged = self.dragged_tab(event.drag(cx).tab_id);
+                self.claim_tab_drop_slot(strip, cell_tab_id, target_index, dragged, cx);
+                // Looking at a tab before dropping is for choosing the pane
+                // to merge into: only the tabs on the left have panes to.
+                if strip == Strip::Tabs {
+                    self.arm_tab_hover_switch(cell_tab_id, window, cx);
                 }
-                self.arm_tab_hover_switch(cell_tab_id, window, cx);
             }
             CellDragAction::Hold => {}
             CellDragAction::Release => self.release_tab_drag_state_owned_by(cell_tab_id, cx),
+        }
+    }
+
+    /// Record the slot the cell `owner` of `strip` found the drag over,
+    /// when the dragged tab can be put there; else let go of what this cell
+    /// had claimed.
+    pub(in crate::workspace) fn claim_tab_drop_slot(
+        &mut self,
+        strip: Strip,
+        owner: TabId,
+        index: usize,
+        dragged: Option<Dragged>,
+        cx: &mut Context<Self>,
+    ) {
+        let taken = dragged.is_some_and(|dragged| {
+            plan_tab_drop(dragged, DropTarget::Slot(strip, index)) != TabDropPlan::Refuse
+        });
+        let slot = DropSlot {
+            strip,
+            owner,
+            index,
+        };
+        if taken {
+            if self.main_area.tab_drag.slot != Some(slot) {
+                self.main_area.tab_drag.slot = Some(slot);
+                cx.notify();
+            }
+        } else if self.main_area.tab_drag.slot.map(|slot| slot.owner) == Some(owner) {
+            self.main_area.tab_drag.slot = None;
+            cx.notify();
         }
     }
 
@@ -157,12 +222,19 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let mut changed = false;
-        if self.main_area.tab_reorder_preview.map(|(owner, _)| owner) == Some(cell_tab_id) {
-            self.main_area.tab_reorder_preview = None;
+        if self.main_area.tab_drag.slot.map(|slot| slot.owner) == Some(cell_tab_id) {
+            self.main_area.tab_drag.slot = None;
             changed = true;
         }
-        if self.main_area.tab_hover_switch.as_ref().map(|(id, _)| *id) == Some(cell_tab_id) {
-            self.main_area.tab_hover_switch = None; // drops (cancels) the timer
+        if self
+            .main_area
+            .tab_drag
+            .hover_switch
+            .as_ref()
+            .map(|(id, _)| *id)
+            == Some(cell_tab_id)
+        {
+            self.main_area.tab_drag.hover_switch = None; // drops (cancels) the timer
             changed = true;
         }
         if changed {
@@ -186,61 +258,112 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.main_area.tab_hover_switch.as_ref().map(|(id, _)| *id) == Some(tab_id) {
+        if self
+            .main_area
+            .tab_drag
+            .hover_switch
+            .as_ref()
+            .map(|(id, _)| *id)
+            == Some(tab_id)
+        {
             return; // already counting down for this tab
         }
         let weak = cx.weak_entity();
         let task = window.spawn(cx, async move |cx| {
             cx.background_executor().timer(TAB_HOVER_SWITCH_DELAY).await;
             weak.update(cx, |ws, cx| {
-                let still_armed =
-                    ws.main_area.tab_hover_switch.as_ref().map(|(id, _)| *id) == Some(tab_id);
+                let still_armed = ws
+                    .main_area
+                    .tab_drag
+                    .hover_switch
+                    .as_ref()
+                    .map(|(id, _)| *id)
+                    == Some(tab_id);
                 if still_armed && let Some(idx) = ws.active_runtime().tabs.position_of_id(tab_id) {
                     ws.switch_tab_for_drag_preview(idx, cx);
                 }
             })
             .ok();
         });
-        self.main_area.tab_hover_switch = Some((tab_id, task)); // drops (cancels) the old one
+        self.main_area.tab_drag.hover_switch = Some((tab_id, task)); // drops (cancels) the old one
     }
 
-    /// Called from a tab cell's `on_drop`. Splices the tab to the live
-    /// reorder-preview slot, persisted through `mutate_durable_in` (unlike
-    /// the preview switch). No armed slot, an unknown tab, or a same-position
-    /// landing moves nothing, so the drag ends as abandoned.
-    pub(in crate::workspace) fn drop_tab_onto_bar(
+    /// Called from a tab cell's `on_drop`, or its strip's when no cell took
+    /// the drop. The tab lands at the slot the drag was over in `strip`, or
+    /// after the strip's last tab when it was over none of its slots: a
+    /// slot left set by the other strip's cells is not this strip's.
+    /// Persisted, unlike the preview switch. A drop that moves nothing ends
+    /// the drag as abandoned.
+    pub(in crate::workspace) fn drop_tab_onto_strip(
+        &mut self,
+        strip: Strip,
+        dragged_tab_id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = match self.main_area.tab_drag.slot {
+            Some(slot) if slot.strip == strip => DropTarget::Slot(strip, slot.index),
+            _ => DropTarget::End(strip),
+        };
+        let committed = self.drop_tab_at(dragged_tab_id, target, window, cx);
+        self.finish_tab_drag(committed, cx);
+        cx.notify();
+    }
+
+    /// Called when a tab is let go over what the side tabs show: it joins
+    /// them, when they take it.
+    pub(in crate::workspace) fn drop_tab_onto_side_content(
         &mut self,
         dragged_tab_id: TabId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .active_runtime()
-            .tabs
-            .iter()
-            .any(|tab| tab.id == dragged_tab_id && self.is_orchestrator_tab(tab))
-        {
-            self.finish_tab_drag(false, cx);
-            return;
-        }
-        let target_index = self.main_area.tab_reorder_preview.map(|(_, index)| index);
-        let from = self.active_runtime().tabs.position_of_id(dragged_tab_id);
-        let committed = match (target_index, from) {
-            (Some(target_index), Some(from)) => {
-                let to = if target_index > from {
-                    target_index - 1
-                } else {
-                    target_index
-                };
-                to != from && {
-                    self.mutate_durable_in(window, cx, |ws, _window, cx| ws.move_tab(from, to, cx));
-                    true
-                }
-            }
-            _ => false,
-        };
+        let committed = self.drop_tab_at(dragged_tab_id, DropTarget::SideContent, window, cx);
         self.finish_tab_drag(committed, cx);
         cx.notify();
+    }
+
+    /// Carry out the drop of a tab on a strip or on the side tabs' pane.
+    /// `false` when nothing moved. A drop on a pane of the tabs is
+    /// `drop_tab_onto_pane`, which has the half it was over.
+    fn drop_tab_at(
+        &mut self,
+        dragged_tab_id: TabId,
+        target: DropTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(dragged) = self.dragged_tab(dragged_tab_id) else {
+            return false;
+        };
+        match plan_tab_drop(dragged, target) {
+            TabDropPlan::Reorder {
+                strip: Strip::Tabs,
+                from,
+                to,
+            } => self.mutate_durable_in(window, cx, |ws, _, cx| ws.move_tab(from, to, cx)),
+            TabDropPlan::Reorder {
+                strip: Strip::Side,
+                from,
+                to,
+            } => self.mutate_durable(cx, |ws, cx| ws.move_side_tab(from, to, cx)),
+            TabDropPlan::SendAside { tab, at } => {
+                self.mutate_durable_in(window, cx, |ws, window, cx| {
+                    ws.send_tab_aside_to(tab, at, window, cx)
+                })
+            }
+            TabDropPlan::SendBack { side, at } => {
+                self.mutate_durable_in(window, cx, |ws, window, cx| {
+                    ws.send_side_tab_back_to(side, at, window, cx)
+                })
+            }
+            TabDropPlan::Merge { .. }
+            | TabDropPlan::MergeFromAside { .. }
+            | TabDropPlan::Refuse => {
+                return false;
+            }
+        }
+        true
     }
 
     /// Escape while any drag is in flight cancels it, mirroring zed's
@@ -286,9 +409,9 @@ impl Workspace {
         // Every `.take()` runs unconditionally: `||` would short-circuit past
         // the later fields whenever an earlier one was set (hovering a cell
         // sets two), stranding a stale indicator on screen.
-        let had_hover_switch = self.main_area.tab_hover_switch.take().is_some();
-        let had_reorder_preview = self.main_area.tab_reorder_preview.take().is_some();
-        let restore_target = self.main_area.tab_preview_restore.take();
+        let had_hover_switch = self.main_area.tab_drag.hover_switch.take().is_some();
+        let had_reorder_preview = self.main_area.tab_drag.slot.take().is_some();
+        let restore_target = self.main_area.tab_drag.preview_restore.take();
 
         let restored = match restore_target {
             Some(tab_id) if !committed => self.restore_active_tab_by_id(tab_id),

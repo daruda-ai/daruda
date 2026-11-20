@@ -2,8 +2,8 @@
 //! shown, and the divider that sets its share of the width.
 
 use gpui::{
-    AnyElement, App, Context, CursorStyle, MouseButton, MouseDownEvent, SharedString, div,
-    prelude::*, px,
+    AnyElement, App, Context, CursorStyle, DragMoveEvent, MouseButton, MouseDownEvent,
+    SharedString, div, prelude::*, px,
 };
 
 use super::menus::{SideTabKind, side_tab_context_menu_items};
@@ -13,6 +13,9 @@ use crate::ui::theme;
 use crate::workspace::main_area::pane::PaneContent;
 use crate::workspace::main_area::pane_tree::{DIVIDER_PX, PaneLayout};
 use crate::workspace::main_area::side_group::PanePlace;
+use crate::workspace::main_area::tab_drag_ops::{TabDrag, TabDragGhost};
+use crate::workspace::main_area::tab_drop_plan::Strip;
+use crate::workspace::main_area::tab_strip::TabId;
 use crate::workspace::main_area::{render_hosted_pane, render_layout};
 use crate::workspace::root_menu::RootContextMenuExt as _;
 use crate::workspace::{TAB_BAR_HEIGHT, Workspace};
@@ -21,6 +24,7 @@ use crate::workspace::{TAB_BAR_HEIGHT, Workspace};
 /// entity is read while it is.
 struct SideCell {
     index: usize,
+    id: TabId,
     label: SharedString,
     title: SharedString,
     is_active: bool,
@@ -58,6 +62,7 @@ impl Workspace {
                 };
                 SideCell {
                     index,
+                    id: tab.id,
                     label,
                     title,
                     is_active: index == side.active_index(),
@@ -100,6 +105,15 @@ impl Workspace {
         } = tab_strip_colors(cx);
         let cells = self.side_cells(cx);
         let count = cells.len();
+        // Where a dragged tab would be put among these, as the tab bar
+        // draws it: a line before the cell, or after the last one.
+        let insert_at = self
+            .main_area
+            .tab_drag
+            .slot
+            .filter(|slot| slot.strip == Strip::Side)
+            .map(|slot| slot.index);
+        let insertion_line = colors.tab_insertion_line_color;
         // Where the keyboard is reads from the strip: the shown tab of the
         // group without it is drawn as an inactive one.
         let focused = self.keyboard_is_aside();
@@ -114,8 +128,11 @@ impl Workspace {
             .children(
                 cells
                     .into_iter()
-                    .map(|cell| self.build_side_cell(cell, count, focused, &colors, cx)),
+                    .map(|cell| self.build_side_cell(cell, count, focused, insert_at, &colors, cx)),
             )
+            .child(div().h_full().when(insert_at == Some(count), |d| {
+                d.border_l_2().border_color(insertion_line)
+            }))
             .child(
                 crate::ui::button_icon("hide-side-tabs", crate::ui::icons::CHEVRON_RIGHT, cx)
                     .tooltip(crate::surface::strings::common::side_tabs_hide())
@@ -133,7 +150,11 @@ impl Workspace {
                     .size_full()
                     .border_b_1()
                     .border_color(bar_border),
-            );
+            )
+            // Let go on the strip clear of its cells: after the last tab.
+            .on_drop::<TabDrag>(cx.listener(|this, d: &TabDrag, window, cx| {
+                this.drop_tab_onto_strip(Strip::Side, d.tab_id, window, cx);
+            }));
         let runtime = self.active_runtime();
         let content = match runtime.side.active_pane().and_then(|id| {
             runtime
@@ -168,7 +189,25 @@ impl Workspace {
             .size_full()
             .min_w_0()
             .child(strip)
-            .child(div().flex_1().min_h_0().w_full().flex().child(content))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .flex()
+                    // A tab the side tabs take, held over what they show.
+                    .drag_over::<TabDrag>(|style, drag, _, cx| {
+                        if drag.goes_aside {
+                            style.bg(theme::current(cx).terminal_drop_target_bg)
+                        } else {
+                            style
+                        }
+                    })
+                    .on_drop::<TabDrag>(cx.listener(|this, d: &TabDrag, window, cx| {
+                        this.drop_tab_onto_side_content(d.tab_id, window, cx);
+                    }))
+                    .child(content),
+            )
             .into_any_element()
     }
 
@@ -177,11 +216,13 @@ impl Workspace {
         cell: SideCell,
         count: usize,
         group_focused: bool,
+        insert_at: Option<usize>,
         colors: &TabCellColors,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let SideCell {
             index,
+            id,
             label,
             title,
             is_active,
@@ -203,8 +244,33 @@ impl Workspace {
                     ws.request_close_side_tab(index, window, cx)
                 });
             }));
+        let drag_title = label.clone();
         tab_cell_frame(("side-tab", index))
             .debug_selector(move || format!("side-tab-{index}"))
+            .when(insert_at == Some(index), |d| {
+                d.border_l_2().border_color(colors.tab_insertion_line_color)
+            })
+            .on_drag(
+                TabDrag {
+                    tab_id: id,
+                    title: drag_title,
+                    goes_aside: false,
+                },
+                |d, offset, _window, cx| {
+                    cx.new(|_| TabDragGhost {
+                        title: d.title.clone(),
+                        offset,
+                    })
+                },
+            )
+            .on_drag_move::<TabDrag>(cx.listener(
+                move |this, event: &DragMoveEvent<TabDrag>, window, cx| {
+                    this.update_tab_drag_from_move(Strip::Side, id, index, event, window, cx);
+                },
+            ))
+            .on_drop::<TabDrag>(cx.listener(move |this, d: &TabDrag, window, cx| {
+                this.drop_tab_onto_strip(Strip::Side, d.tab_id, window, cx);
+            }))
             .when(is_active, |d| {
                 d.bg(colors.tab_active_file_chrome_bg)
                     .text_color(if group_focused {

@@ -9,6 +9,7 @@
 //! (`compute_pane_drop_hover`) and one hover slot. Transient hover state is
 //! the single source of truth in `MainAreaContext.pane_drop_hover`.
 
+use crate::workspace::main_area::tab_drop_plan::{DropTarget, TabDropPlan, plan_tab_drop};
 use gpui::{
     Context, DragMoveEvent, IntoElement, Pixels, Point, Render, SharedString, Window, div,
     prelude::*, px,
@@ -142,8 +143,17 @@ impl Workspace {
             }
             return;
         }
-        let active_index = self.active_runtime().tabs.active_index();
-        let Some(active_tab) = self.active_runtime().tabs.get(active_index) else {
+        // A tab that cannot sit among the tabs merges into none of them.
+        let merges = self.dragged_tab(dragged_tab_id).is_some_and(|dragged| {
+            plan_tab_drop(dragged, DropTarget::PaneHalf) != TabDropPlan::Refuse
+        });
+        if !merges {
+            if self.main_area.pane_drop_hover.take().is_some() {
+                cx.notify();
+            }
+            return;
+        }
+        let Some(active_tab) = self.active_runtime().tabs.active_tab() else {
             return;
         };
         // Self-merge: the dragged tab is the one currently showing this
@@ -213,9 +223,16 @@ impl Workspace {
     pub(in crate::workspace) fn drop_tab_onto_pane(
         &mut self,
         dragged_tab_id: TabId,
+        onto: PaneId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The pane the side tabs show takes a tab whole, with no half to it.
+        if self.pane_is_aside(onto) {
+            self.main_area.pane_drop_hover = None;
+            self.drop_tab_onto_side_content(dragged_tab_id, window, cx);
+            return;
+        }
         // Keyboard zoom can fire between the last on_drag_move and this drop.
         // Mirror the guard in update_tab_merge_hover_from_move: never merge
         // into the full tree while a synthetic single-leaf zoom layout is
@@ -231,7 +248,21 @@ impl Workspace {
             cx.notify();
             return;
         };
+        let plan = self
+            .dragged_tab(dragged_tab_id)
+            .map(|dragged| plan_tab_drop(dragged, DropTarget::PaneHalf));
         let merged = self.mutate_durable_in(window, cx, |ws, window, cx| {
+            match plan {
+                Some(TabDropPlan::Merge { .. }) => {}
+                // Among the tabs first, without showing it, then merged
+                // like any of them.
+                Some(TabDropPlan::MergeFromAside { side }) => {
+                    if !ws.list_side_tab_among_tabs(side) {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
             ws.merge_tab_into_pane(
                 dragged_tab_id,
                 target,

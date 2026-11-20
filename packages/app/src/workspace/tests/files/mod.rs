@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 mod lanes;
 mod panel_focus;
+mod side_tab_drag;
 mod side_tabs;
 mod tree;
 mod viewer;

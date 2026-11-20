@@ -6,6 +6,8 @@ use gpui::Task;
 use super::pane::Pane;
 use super::pane_menu::ResourceRightClick;
 use super::pane_tree::{DropHalf, PaneId};
+use super::tab_drop_plan::DropSlot;
+use super::tab_strip::TabId;
 use crate::workspace::LaneRuntime;
 use crate::workspace::layout::ops::{DividerDrag, PopupMenuDeploy};
 
@@ -52,18 +54,24 @@ pub(in crate::workspace) struct MainAreaContext {
     /// the pane under the cursor and which half it would split. Single
     /// source of truth for the drop-overlay; `None` = no active hover.
     pub pane_drop_hover: Option<(PaneId, DropHalf)>,
-    /// Tab currently armed to switch-on-hover during a `TabDrag`, and the
-    /// cancellable timer task backing it. Overwriting drops the previous
-    /// `Task`, which cancels it (mirrors GPUI's own tooltip-delay mechanism).
-    pub tab_hover_switch: Option<(super::tab_strip::TabId, Task<()>)>,
-    /// Live reorder-insertion index while a `TabDrag` is over the tab bar,
-    /// tagged with the tab cell that set it so only that cell releases it
-    /// again. `None` = not currently hovering a tab cell.
-    pub tab_reorder_preview: Option<(super::tab_strip::TabId, usize)>,
-    /// Tab that was active before the in-flight drag's first hover preview,
-    /// by id (indices shift under reorder/close). `finish_tab_drag` restores
-    /// it unless the drag committed a drop. `None` = nothing to unwind.
-    pub tab_preview_restore: Option<super::tab_strip::TabId>,
+    /// What a tab drag in flight has set — see [`TabDragState`].
+    pub tab_drag: TabDragState,
+}
+
+/// The transient state of one tab drag. `Workspace::finish_tab_drag` is the
+/// one place it is taken down.
+#[derive(Default)]
+pub(in crate::workspace) struct TabDragState {
+    /// Tab armed to switch-on-hover, and the cancellable timer task backing
+    /// it. Overwriting drops the previous `Task`, which cancels it (mirrors
+    /// GPUI's own tooltip-delay mechanism).
+    pub hover_switch: Option<(TabId, Task<()>)>,
+    /// The slot of either strip the drag is over, tagged with the cell
+    /// that set it so only that cell releases it again.
+    pub slot: Option<DropSlot>,
+    /// Tab that was shown before the drag's first hover preview, by id.
+    /// Restored unless the drag committed a drop.
+    pub preview_restore: Option<TabId>,
 }
 
 impl MainAreaContext {

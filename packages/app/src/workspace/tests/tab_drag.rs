@@ -18,7 +18,17 @@ use gpui::Window;
 use crate::workspace::main_area::pane_tree::{DropHalf, PaneId};
 
 use super::*;
+use crate::workspace::main_area::tab_drop_plan::{DropSlot, Strip};
 use crate::workspace::main_area::tab_strip::TabId;
+
+/// The slot before the tab at `index` of the tabs, as the cell `owner` set it.
+fn tabs_slot(owner: TabId, index: usize) -> DropSlot {
+    DropSlot {
+        strip: Strip::Tabs,
+        owner,
+        index,
+    }
+}
 
 fn make_workspace_with_project(
     cx: &mut TestAppContext,
@@ -115,7 +125,7 @@ async fn switch_tab_for_drag_preview_skips_persistence(cx: &mut TestAppContext) 
             active_after,
             "a no-op cancel must not unwind the preview"
         );
-        assert!(ws.main_area.tab_preview_restore.is_some());
+        assert!(ws.main_area.tab_drag.preview_restore.is_some());
     });
 }
 
@@ -142,8 +152,8 @@ async fn drop_tab_onto_bar_reorders_dragged_tab_before_first(cx: &mut TestAppCon
     // `DragMoveEvent` can't be constructed outside `gpui` (private fields),
     // so only the drop half of the flow is exercised here.
     in_window(wh, &ws, cx, |ws, window, cx| {
-        ws.main_area.tab_reorder_preview = Some((ids[0], 0));
-        ws.drop_tab_onto_bar(dragged_id, window, cx);
+        ws.main_area.tab_drag.slot = Some(tabs_slot(ids[0], 0));
+        ws.drop_tab_onto_strip(Strip::Tabs, dragged_id, window, cx);
     });
     cx.run_until_parked();
 
@@ -162,8 +172,8 @@ async fn drop_tab_onto_bar_reorders_dragged_tab_before_first(cx: &mut TestAppCon
 
     // The drop must also settle transient drag state.
     ws.read_with(cx, |ws, _| {
-        assert!(ws.main_area.tab_reorder_preview.is_none());
-        assert!(ws.main_area.tab_hover_switch.is_none());
+        assert!(ws.main_area.tab_drag.slot.is_none());
+        assert!(ws.main_area.tab_drag.hover_switch.is_none());
     });
 
     // And, unlike the preview switch, it must persist — `SerializedTab`
@@ -389,7 +399,8 @@ async fn drop_tab_onto_pane_keeps_committed_preview_and_restores_refused_merge(
         // Hover-preview tab 0, then drop the dragged tab onto tab 0's pane.
         ws.switch_tab_for_drag_preview(0, cx);
         ws.main_area.pane_drop_hover = Some((target_pane, DropHalf::East));
-        ws.drop_tab_onto_pane(dragged_id, window, cx);
+        let onto = ws.active_runtime().focused_pane_id;
+        ws.drop_tab_onto_pane(dragged_id, onto, window, cx);
     });
     cx.run_until_parked();
 
@@ -399,8 +410,8 @@ async fn drop_tab_onto_pane_keeps_committed_preview_and_restores_refused_merge(
             1,
             "the dragged tab merged into the previewed tab"
         );
-        assert!(ws.main_area.tab_preview_restore.is_none());
-        assert!(ws.main_area.tab_hover_switch.is_none());
+        assert!(ws.main_area.tab_drag.preview_restore.is_none());
+        assert!(ws.main_area.tab_drag.hover_switch.is_none());
     });
 
     let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_merge_refused");
@@ -414,7 +425,8 @@ async fn drop_tab_onto_pane_keeps_committed_preview_and_restores_refused_merge(
         ws.switch_tab_for_drag_preview(0, cx);
         // A pane id that exists in no tab — `merge_tab_into_pane` bails.
         ws.main_area.pane_drop_hover = Some((PaneId(u64::MAX), DropHalf::East));
-        ws.drop_tab_onto_pane(dragged_id, window, cx);
+        let onto = ws.active_runtime().focused_pane_id;
+        ws.drop_tab_onto_pane(dragged_id, onto, window, cx);
     });
     cx.run_until_parked();
 
@@ -447,14 +459,14 @@ async fn releasing_a_cell_cancels_the_countdown_it_armed(cx: &mut TestAppContext
 
     in_window(wh, &ws, cx, |ws, window, cx| {
         ws.arm_tab_hover_switch(hovered_id, window, cx);
-        ws.main_area.tab_reorder_preview = Some((hovered_id, 0));
+        ws.main_area.tab_drag.slot = Some(tabs_slot(hovered_id, 0));
         // Cursor moves off the cell (down into the pane area).
         ws.release_tab_drag_state_owned_by(hovered_id, cx);
     });
 
     ws.read_with(cx, |ws, _| {
-        assert!(ws.main_area.tab_hover_switch.is_none());
-        assert!(ws.main_area.tab_reorder_preview.is_none());
+        assert!(ws.main_area.tab_drag.hover_switch.is_none());
+        assert!(ws.main_area.tab_drag.slot.is_none());
     });
 
     cx.executor().advance_clock(Duration::from_millis(1000));
@@ -474,17 +486,21 @@ async fn releasing_a_cell_cancels_the_countdown_it_armed(cx: &mut TestAppContext
     in_window(wh, &ws, cx, |ws, window, cx| {
         // The entered cell claims the drag...
         ws.arm_tab_hover_switch(entered_id, window, cx);
-        ws.main_area.tab_reorder_preview = Some((entered_id, 1));
+        ws.main_area.tab_drag.slot = Some(tabs_slot(entered_id, 1));
         // ...and the cell just left runs afterwards in the same frame.
         ws.release_tab_drag_state_owned_by(left_id, cx);
     });
 
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.main_area.tab_hover_switch.as_ref().map(|(id, _)| *id),
+            ws.main_area
+                .tab_drag
+                .hover_switch
+                .as_ref()
+                .map(|(id, _)| *id),
             Some(entered_id),
             "the entered cell's countdown must survive its neighbour's release"
         );
-        assert_eq!(ws.main_area.tab_reorder_preview, Some((entered_id, 1)));
+        assert_eq!(ws.main_area.tab_drag.slot, Some(tabs_slot(entered_id, 1)));
     });
 }

@@ -208,6 +208,18 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.send_tab_aside_to(tab_index, None, window, cx);
+    }
+
+    /// Send the tab at `tab_index` to the side group, before the side tab
+    /// at `at` or last, and move into it.
+    pub(in crate::workspace) fn send_tab_aside_to(
+        &mut self,
+        tab_index: usize,
+        at: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(pane) = self.pane_to_send_aside(tab_index) else {
             return;
         };
@@ -216,11 +228,14 @@ impl Workspace {
         if runtime.preview_tab_id == Some(tab.id) {
             runtime.preview_tab_id = None;
         }
-        runtime.side.open(SideTab {
+        let last = runtime.side.open(SideTab {
             id: tab.id,
             pane,
             user_label: tab.user_label,
         });
+        if let Some(at) = at {
+            runtime.side.move_tab(last, at.min(last));
+        }
         // The tabs left behind keep a focused pane of their own.
         if let Some(focused) = self.active_tab_mut().map(|tab| tab.last_focused_pane) {
             self.set_focused_pane(focused, window, cx);
@@ -249,28 +264,57 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.send_side_tab_back_to(index, None, window, cx);
+    }
+
+    /// Take the side tab at `index` out and list it last among the tabs,
+    /// leaving the tab on show as it is: for a caller about to give its
+    /// pane another place. `false` when its kind stays aside.
+    pub(in crate::workspace) fn list_side_tab_among_tabs(&mut self, index: usize) -> bool {
         if !self.side_tab_can_go_back(index) {
-            return;
+            return false;
         }
-        let Some(tab) = self.active_runtime_mut().side.remove(index) else {
-            return;
-        };
         let runtime = self.active_runtime_mut();
+        let Some(tab) = runtime.side.remove(index) else {
+            return false;
+        };
         // Moved by hand is kept: it is no longer the scratch tab.
         if runtime.preview_tab_id == Some(tab.id) {
             runtime.preview_tab_id = None;
         }
-        runtime.tabs.open(TabEntry {
-            id: tab.id,
-            layout: PaneLayout::Pane(tab.pane),
-            last_focused_pane: tab.pane,
-            user_label: tab.user_label,
-        });
+        let mut entry = TabEntry::single(tab.id, tab.pane);
+        entry.user_label = tab.user_label;
+        runtime.tabs.push(entry);
+        true
+    }
+
+    /// Bring the side tab at `index` back among the tabs, before the tab at
+    /// `at` or last, and move into it.
+    pub(in crate::workspace) fn send_side_tab_back_to(
+        &mut self,
+        index: usize,
+        at: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.list_side_tab_among_tabs(index) {
+            return;
+        }
+        let runtime = self.active_runtime_mut();
+        let last = runtime.tabs.len() - 1;
+        let pane = runtime.tabs[last].last_focused_pane;
+        runtime.tabs.activate(
+            last,
+            crate::workspace::main_area::tab_strip::TabHistory::Record,
+        );
+        if let Some(at) = at {
+            runtime.tabs.move_tab(last, at.min(last));
+        }
         self.main_area.set_zoomed_pane(None);
-        self.set_focused_pane(tab.pane, window, cx);
-        self.bump_activity(tab.pane);
+        self.set_focused_pane(pane, window, cx);
+        self.bump_activity(pane);
         self.resize_all_tabs(window, cx);
-        self.focus_pane(tab.pane, window, cx);
+        self.focus_pane(pane, window, cx);
         cx.notify();
     }
 
