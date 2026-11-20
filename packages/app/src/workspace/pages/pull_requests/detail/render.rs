@@ -645,7 +645,7 @@ fn side(id: PrDetailId, view: &SideView, cx: &Context<Workspace>) -> AnyElement 
         .children(view.stack.as_ref().map(|stack| {
             section(
                 s::side_stack(),
-                super::stack_render::stack(view.item.0.clone(), stack, cx),
+                super::stack_render::stack(id, view.item.0.clone(), stack, cx),
                 cx,
             )
         }))

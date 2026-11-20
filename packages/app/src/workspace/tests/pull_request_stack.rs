@@ -62,7 +62,10 @@ fn a_stacked_pull_request_shows_its_stack_and_goes_to_the_others(cx: &mut TestAp
     );
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| {
-        f.ws.update(cx, |ws, cx| ws.open_pr_in_daruda(repo(), 6, window, cx));
+        f.ws.update(cx, |ws, cx| {
+            let shown = ws.pages.pull_requests.detail().unwrap().id();
+            ws.open_stack_entry(shown, repo(), 6, window, cx)
+        });
     });
     cx.run_until_parked();
     assert_eq!(

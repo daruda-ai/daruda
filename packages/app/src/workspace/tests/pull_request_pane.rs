@@ -421,3 +421,43 @@ fn each_pane_kind_answers_for_itself(cx: &mut TestAppContext) {
         }
     });
 }
+
+/// A pull request of the stack is opened where the stack is being read:
+/// from the worktree's pane it takes the pane, and the page stays closed.
+#[gpui::test]
+fn a_stack_entry_pressed_in_the_pane_opens_in_the_pane(cx: &mut TestAppContext) {
+    let (f, _gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    let id = panes(&f, cx)[0].0;
+    act(&f, cx, move |ws, window, cx| {
+        ws.open_stack_entry(id, repo(), 8, window, cx);
+        ws.main_area.groups_width = 1400.0;
+    });
+    let held = panes(&f, cx);
+    assert_eq!(held.iter().map(|(_, n)| *n).collect::<Vec<_>>(), [8]);
+    f.ws.read_with(cx, |ws, _| assert!(ws.active_page().is_none()));
+
+    // Pressed on the page, it is the page's detail that changes.
+    let on_page = held[0].0;
+    act(&f, cx, move |ws, window, cx| {
+        let pane = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|pane| pane.content.as_pull_request().is_some())
+            .unwrap()
+            .id;
+        ws.open_pr_pane_on_page(pane, window, cx);
+        ws.open_stack_entry(on_page, repo(), 7, window, cx);
+    });
+    f.ws.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_page(), Some(Page::PullRequests));
+        let shown = ws
+            .pages
+            .pull_requests
+            .detail()
+            .expect("a detail on the page");
+        assert_eq!(shown.item().pr.number, 7);
+    });
+    assert_eq!(panes(&f, cx)[0].1, 8, "the pane keeps its own");
+}

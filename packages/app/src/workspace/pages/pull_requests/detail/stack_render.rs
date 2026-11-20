@@ -4,12 +4,18 @@
 use daruda_github::{PrState, RepoId};
 use gpui::{AnyElement, Context, div, prelude::*, px};
 
+use super::PrDetailId;
 use super::view::StackView;
 use crate::surface::strings::{git as git_s, pull_requests as s};
 use crate::ui::{Disableable as _, button_compact, theme};
 use crate::workspace::Workspace;
 
-pub(super) fn stack(repo: RepoId, view: &StackView, cx: &Context<Workspace>) -> AnyElement {
+pub(super) fn stack(
+    id: PrDetailId,
+    repo: RepoId,
+    view: &StackView,
+    cx: &Context<Workspace>,
+) -> AnyElement {
     let t = theme::current(cx);
     let note = |text: String| {
         div()
@@ -55,7 +61,7 @@ pub(super) fn stack(repo: RepoId, view: &StackView, cx: &Context<Workspace>) -> 
                 row.disabled(true).into_any_element()
             } else {
                 row.on_click(cx.listener(move |ws, _, window, cx| {
-                    ws.open_pr_in_daruda(repo.clone(), number, window, cx)
+                    ws.open_stack_entry(id, repo.clone(), number, window, cx)
                 }))
                 .into_any_element()
             }

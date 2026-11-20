@@ -110,12 +110,13 @@ impl Workspace {
         Ok((repo, address))
     }
 
-    /// `repo#number`, opened here: the Git panel's entries, which name it
-    /// when they are drawn rather than look it up when clicked.
-    pub(in crate::workspace) fn open_pr_in_daruda(
+    /// `repo#number`, shown at `to`: what an entry that names its pull
+    /// request when it is drawn opens, rather than look one up when pressed.
+    pub(in crate::workspace) fn open_pr_at(
         &mut self,
         repo: RepoId,
         number: u64,
+        to: PrDestination,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -125,7 +126,7 @@ impl Workspace {
             number,
             target: None,
         };
-        self.open_pr_by_address(repo, address, PrDestination::Page, window, cx);
+        self.open_pr_by_address(repo, address, to, window, cx);
     }
 
     /// `repo#number`, the pull request the worktree on screen works on,
@@ -138,12 +139,6 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let address = PrAddress {
-            repo: Some(repo.clone()),
-            host_unknown: false,
-            number,
-            target: None,
-        };
         // The rule a file follows, but for a tab only the side tabs hold;
         // the click enters what it opens.
         let entry = crate::workspace::main_area::tab_ops::PaneEntry::Enter;
@@ -152,7 +147,26 @@ impl Workspace {
         } else {
             PrDestination::Page
         };
-        self.open_pr_by_address(repo, address, to, window, cx);
+        self.open_pr_at(repo, number, to, window, cx);
+    }
+
+    /// Another pull request of the stack detail `from` shows, opened where
+    /// `from` is being read: in the worktree's pane it takes the pane, on
+    /// the page it takes the detail's place.
+    pub(in crate::workspace) fn open_stack_entry(
+        &mut self,
+        from: super::detail::PrDetailId,
+        repo: RepoId,
+        number: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let to = if self.shown_pr_pane_detail() == Some(from) {
+            PrDestination::Beside(self.active)
+        } else {
+            PrDestination::Page
+        };
+        self.open_pr_at(repo, number, to, window, cx);
     }
 
     /// Read `repo#number`, then show it at `to` with the tab `address`

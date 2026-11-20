@@ -1,5 +1,6 @@
 use gpui::{TestAppContext, VisualTestContext};
 
+use super::PrDestination;
 use crate::workspace::pages::Page;
 use crate::workspace::pages::pull_requests::detail::PrTab;
 use crate::workspace::tests::pull_request_detail::{repo, window};
@@ -148,7 +149,9 @@ fn the_git_panel_opens_the_same_detail(cx: &mut TestAppContext) {
     };
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| {
-        f.ws.update(cx, |ws, cx| ws.open_pr_in_daruda(repo(), 7, window, cx));
+        f.ws.update(cx, |ws, cx| {
+            ws.open_pr_at(repo(), 7, PrDestination::Page, window, cx)
+        });
     });
     cx.run_until_parked();
     assert_eq!(shown(cx), Some((repo(), 7)));
@@ -156,7 +159,9 @@ fn the_git_panel_opens_the_same_detail(cx: &mut TestAppContext) {
     f.ws.update(cx, |ws, cx| ws.show_page(Page::Tasks, cx));
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| {
-        f.ws.update(cx, |ws, cx| ws.open_pr_in_daruda(repo(), 7, window, cx));
+        f.ws.update(cx, |ws, cx| {
+            ws.open_pr_at(repo(), 7, PrDestination::Page, window, cx)
+        });
     });
     cx.run_until_parked();
     assert_eq!(shown(cx), Some((repo(), 7)));
@@ -229,7 +234,9 @@ fn a_link_read_leaves_the_shown_details_own_read(cx: &mut TestAppContext) {
     let (f, _gh, _) = window(cx);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
     vcx.update(|window, cx| {
-        f.ws.update(cx, |ws, cx| ws.open_pr_in_daruda(repo(), 7, window, cx));
+        f.ws.update(cx, |ws, cx| {
+            ws.open_pr_at(repo(), 7, PrDestination::Page, window, cx)
+        });
     });
     cx.run_until_parked();
     let (item, shown) = f.ws.read_with(cx, |ws, _| {
