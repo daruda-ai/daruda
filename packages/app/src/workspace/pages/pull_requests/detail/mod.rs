@@ -967,18 +967,26 @@ impl Workspace {
         }
     }
 
-    /// Go to the worktree working on the shown pull request.
+    /// Go to the worktree working on the shown pull request, and take the
+    /// pull request along: beside the worktree's tabs, where one opened
+    /// from its Git panel would go.
     pub(in crate::workspace) fn open_pr_detail_lane(
         &mut self,
         id: PrDetailId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let lane = self
-            .pr_detail(id)
-            .and_then(|d| self.pr_detail_lane(&d.item));
-        if let Some(lane) = lane {
-            self.activate_lane(lane.lane, window, cx);
+        let Some(detail) = self.pr_detail(id) else {
+            return;
+        };
+        let item = detail.item().clone();
+        let Some(lane) = self.pr_detail_lane(&detail.item) else {
+            return;
+        };
+        self.activate_lane(lane.lane, window, cx);
+        let entry = crate::workspace::main_area::tab_ops::PaneEntry::Enter;
+        if self.active == lane.lane && self.group_facts().side_only_goes_beside(entry) {
+            self.open_pr_pane(lane.lane, item, PrOpening::default(), window, cx);
         }
     }
 

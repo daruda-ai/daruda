@@ -461,3 +461,24 @@ fn a_stack_entry_pressed_in_the_pane_opens_in_the_pane(cx: &mut TestAppContext) 
     });
     assert_eq!(panes(&f, cx)[0].1, 8, "the pane keeps its own");
 }
+
+/// The page's button to the pull request's worktree takes the pull request
+/// along: it is read there beside the tabs, on the detail the page showed.
+#[gpui::test]
+fn going_to_the_worktree_from_the_page_takes_the_pull_request_along(cx: &mut TestAppContext) {
+    let (f, _gh, _lane) = worktree(cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    open(&f, item(7, "feat"), cx);
+    cx.run_until_parked();
+    let id =
+        f.ws.read_with(cx, |ws, _| ws.pages.pull_requests.detail().unwrap().id());
+    act(&f, cx, move |ws, window, cx| {
+        ws.open_pr_detail_lane(id, window, cx);
+        ws.main_area.groups_width = 1400.0;
+    });
+    assert_eq!(panes(&f, cx), [(id, 7)]);
+    f.ws.read_with(cx, |ws, _| {
+        assert!(ws.active_page().is_none());
+        assert!(ws.keyboard_is_aside());
+    });
+}
