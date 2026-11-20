@@ -30,7 +30,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.open_file_input_for_shot(FileInputShot::Selection, window, cx);
-        let file_tab = self.active_runtime().active_tab_index;
+        let file_tab = self.active_runtime().tabs.active_index();
         self.send_tab_aside(file_tab, window, cx);
         // The sample's selection popover is placed for the file among the
         // tabs; it runs deferred, so it is taken down after it.
@@ -107,7 +107,11 @@ impl Workspace {
             last_focused_pane: id,
             user_label: None,
         });
-        self.active_runtime_mut().active_tab_index = self.active_runtime().tabs.len() - 1;
+        let last_tab = self.active_runtime().tabs.len() - 1;
+        self.active_runtime_mut().tabs.activate(
+            last_tab,
+            crate::workspace::main_area::tab_strip::TabHistory::Skip,
+        );
         self.set_focused_pane(id, window, cx);
         self.select_bottom_input_pane(targets[1], window, cx);
         self.input_dock.input.update(cx, |state, cx| {

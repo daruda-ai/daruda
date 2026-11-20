@@ -305,7 +305,7 @@ impl Workspace {
             return Vec::new();
         }
 
-        let active_tab = self.active_runtime().active_tab_index;
+        let active_tab = self.active_runtime().tabs.active_index();
         self.active_runtime()
             .panes
             .iter()

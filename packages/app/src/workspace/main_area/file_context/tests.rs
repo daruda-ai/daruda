@@ -267,7 +267,11 @@ fn fixture(
                     last_focused_pane: id,
                     user_label: None,
                 });
-                ws.active_runtime_mut().active_tab_index = ws.active_runtime().tabs.len() - 1;
+                let last_tab = ws.active_runtime().tabs.len() - 1;
+                ws.active_runtime_mut().tabs.activate(
+                    last_tab,
+                    crate::workspace::main_area::tab_strip::TabHistory::Skip,
+                );
                 ws.set_focused_pane(id, window, cx);
                 ws.activate_bottom_input(cx);
                 (id, owner)

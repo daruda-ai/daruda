@@ -266,10 +266,8 @@ impl Workspace {
         };
         let runtime = LaneRuntime {
             preview_tab_id: None,
-            tabs: vec![tab],
+            tabs: crate::workspace::main_area::tab_strip::TabStrip::restored(vec![tab], 0),
             panes: vec![pane],
-            active_tab_index: 0,
-            tab_history: Vec::new(),
             focused_pane_id: pane_id,
             side: Default::default(),
             keyboard: Default::default(),

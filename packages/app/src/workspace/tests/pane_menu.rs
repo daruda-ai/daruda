@@ -136,14 +136,14 @@ async fn send_pane_selection_activates_the_target_tab_and_pane(cx: &mut TestAppC
             // Go back to the source tab so the send has to switch tabs.
             ws.activate_tab(0, window, cx);
             ws.set_focused_pane(source, window, cx);
-            assert_eq!(ws.active_runtime().active_tab_index, 0);
+            assert_eq!(ws.active_runtime().tabs.active_index(), 0);
 
             let delivered =
                 ws.send_pane_selection_to(target, SharedString::from("cargo test"), window, cx);
 
             assert!(delivered, "the target pane accepted the text");
             assert_eq!(
-                ws.active_runtime().active_tab_index,
+                ws.active_runtime().tabs.active_index(),
                 1,
                 "the target's tab is brought forward"
             );

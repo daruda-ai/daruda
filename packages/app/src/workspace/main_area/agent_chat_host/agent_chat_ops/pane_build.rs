@@ -367,16 +367,12 @@ impl Workspace {
         let pane_id = pane.id;
         let tab_id = self.alloc_tab_id();
         self.active_runtime_mut().panes.push(pane);
-        self.active_runtime_mut().tabs.push(TabEntry {
+        self.active_runtime_mut().tabs.open(TabEntry {
             id: tab_id,
             layout: PaneLayout::Pane(pane_id),
             last_focused_pane: pane_id,
             user_label: None,
         });
-        let cur_tab = self.active_runtime().active_tab_index;
-        self.active_runtime_mut().tab_history.push(cur_tab);
-        let last_tab = self.active_runtime().tabs.len() - 1;
-        self.active_runtime_mut().active_tab_index = last_tab;
         // The live session connects lazily via `focus_pane` below. The prompt
         // input lives in the bottom dock; open the dock first so it's visible
         // before `focus_pane` activates the input panel and moves focus to it.
@@ -402,9 +398,6 @@ impl Workspace {
     ) {
         let tab_id = self.alloc_tab_id();
         let rt = self.active_runtime_mut();
-        if !rt.tabs.is_empty() {
-            rt.tab_history.push(rt.active_tab_index);
-        }
         rt.panes.push(Pane {
             id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {
@@ -416,13 +409,12 @@ impl Workspace {
                 agent_id,
             }),
         });
-        rt.tabs.push(TabEntry {
+        rt.tabs.open(TabEntry {
             id: tab_id,
             layout: PaneLayout::Pane(pane_id),
             last_focused_pane: pane_id,
             user_label: None,
         });
-        rt.active_tab_index = rt.tabs.len() - 1;
     }
 
     /// Focus a freshly inserted Agent chat pane and settle the layout around

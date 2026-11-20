@@ -11,7 +11,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.seed_left_dock_for_shot(false, false, false, window, cx);
-        let active_tab = self.active_runtime().active_tab_index;
+        let active_tab = self.active_runtime().tabs.active_index();
         self.open_agent_chat_pane_seeded(
             None,
             |view, window, cx| view.seed_transcript(Vec::new(), window, cx),

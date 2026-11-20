@@ -257,7 +257,10 @@ impl Workspace {
             .iter()
             .position(|tab| self.is_orchestrator_tab(tab))
             .expect("inserted tab");
-        self.active_runtime_mut().active_tab_index = index;
+        self.active_runtime_mut().tabs.activate(
+            index,
+            crate::workspace::main_area::tab_strip::TabHistory::Skip,
+        );
         // Remembered, not dropped: hiding restores it.
         self.orchestrator.zoom_to_restore = self.main_area.zoomed_pane_id.take();
         self.main_area.pane_drop_hover = None;
@@ -319,20 +322,10 @@ impl Workspace {
             };
             rt.tabs.remove(index);
             rt.panes.retain(|pane| pane.id != id);
-            super::main_area::tab_ops::rebase_tab_history_after_removal(&mut rt.tab_history, index);
-            rt.active_tab_index = if rt.active_tab_index == index {
-                rt.tab_history
-                    .pop()
-                    .filter(|i| *i < rt.tabs.len())
-                    .unwrap_or(index)
-            } else {
-                rt.active_tab_index - usize::from(rt.active_tab_index > index)
-            }
-            .min(rt.tabs.len().saturating_sub(1));
             if rt.focused_pane_id == id {
                 rt.focused_pane_id = rt
                     .tabs
-                    .get(rt.active_tab_index)
+                    .active_tab()
                     .map_or(PaneId::NONE, |tab| tab.last_focused_pane);
             }
         }

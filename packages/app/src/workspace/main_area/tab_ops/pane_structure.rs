@@ -1,7 +1,7 @@
 //! Pane-tree structure inside a tab: splitting, zooming, closing a pane, and
 //! moving panes between tabs.
 
-use super::{NewPaneKind, rebase_tab_history_after_insertion, rebase_tab_history_after_removal};
+use super::NewPaneKind;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 use crate::workspace::main_area::pane::TabEntry;
@@ -28,7 +28,7 @@ impl Workspace {
         {
             return;
         }
-        if self.active_runtime().active_tab_index != tab_index {
+        if self.active_runtime().tabs.active_index() != tab_index {
             self.activate_tab(tab_index, window, cx);
         }
         self.split_focused_pane_kind(kind, direction, window, cx);
@@ -145,7 +145,7 @@ impl Workspace {
         self.active_runtime_mut().panes.push(new_pane);
 
         let focused = self.active_runtime().focused_pane_id;
-        for tab in &mut self.active_runtime_mut().tabs {
+        for tab in self.active_runtime_mut().tabs.iter_mut() {
             if insert_split_at(&mut tab.layout, focused, direction, new_pane_id, false) {
                 tab.last_focused_pane = new_pane_id;
                 break;
@@ -206,18 +206,15 @@ impl Workspace {
         }
         // A pane removal invalidates any in-flight drop-hover target.
         self.main_area.pane_drop_hover = None;
-        remove_pane_from_layout(
-            &mut self.active_runtime_mut().tabs[tab_index].layout,
-            pane_id,
-        );
+        remove_pane_from_layout(&mut self.tab_at_mut(tab_index).layout, pane_id);
         self.forget_panes(&[pane_id], cx);
         release_pane_images(&mut self.active_runtime_mut().panes, &[pane_id], window, cx);
         self.active_runtime_mut().panes.retain(|p| p.id != pane_id);
 
-        if tab_index == self.active_runtime().active_tab_index {
+        if tab_index == self.active_runtime().tabs.active_index() {
             self.refocus_tabs_after_close(next_focus, window, cx);
         }
-        self.active_runtime_mut().tabs[tab_index].last_focused_pane = next_focus;
+        self.tab_at_mut(tab_index).last_focused_pane = next_focus;
         self.resize_all_tabs(window, cx);
         cx.notify();
     }
@@ -260,12 +257,9 @@ impl Workspace {
             .unwrap_or_else(|| self.active_runtime().tabs[tab_index].layout.first_leaf());
 
         self.main_area.pane_drop_hover = None;
-        remove_pane_from_layout(
-            &mut self.active_runtime_mut().tabs[tab_index].layout,
-            pane_id,
-        );
-        self.active_runtime_mut().tabs[tab_index].last_focused_pane = next_focus;
-        if tab_index == self.active_runtime().active_tab_index {
+        remove_pane_from_layout(&mut self.tab_at_mut(tab_index).layout, pane_id);
+        self.tab_at_mut(tab_index).last_focused_pane = next_focus;
+        if tab_index == self.active_runtime().tabs.active_index() {
             self.set_focused_pane(next_focus, window, cx);
             self.focus_pane(next_focus, window, cx);
         }
@@ -281,10 +275,6 @@ impl Workspace {
                 user_label: None,
             },
         );
-        rebase_tab_history_after_insertion(&mut self.active_runtime_mut().tab_history, insert_at);
-        if self.active_runtime().active_tab_index >= insert_at {
-            self.active_runtime_mut().active_tab_index += 1;
-        }
 
         self.activate_tab(insert_at, window, cx);
         self.resize_all_tabs(window, cx);
@@ -331,7 +321,7 @@ impl Workspace {
         else {
             return false;
         };
-        let active_index = self.active_runtime().active_tab_index;
+        let active_index = self.active_runtime().tabs.active_index();
         if self.is_orchestrator_tab(&self.active_runtime().tabs[src_index])
             || self.is_orchestrator_pane(target_pane_id)
         {
@@ -347,16 +337,14 @@ impl Workspace {
             return false; // target pane closed between hover and drop
         }
 
-        let source = self.active_runtime_mut().tabs.remove(src_index);
-        rebase_tab_history_after_removal(&mut self.active_runtime_mut().tab_history, src_index);
-        if self.active_runtime().active_tab_index > src_index {
-            self.active_runtime_mut().active_tab_index -= 1;
-        }
-        let active_index = self.active_runtime().active_tab_index;
+        let Some(source) = self.active_runtime_mut().tabs.remove(src_index) else {
+            return false;
+        };
+        let active_index = self.active_runtime().tabs.active_index();
         let last_focused = source.last_focused_pane;
 
         let inserted = insert_node_at(
-            &mut self.active_runtime_mut().tabs[active_index].layout,
+            &mut self.tab_at_mut(active_index).layout,
             target_pane_id,
             direction,
             source.layout,
@@ -371,7 +359,7 @@ impl Workspace {
             return false;
         }
 
-        self.active_runtime_mut().tabs[active_index].last_focused_pane = last_focused;
+        self.tab_at_mut(active_index).last_focused_pane = last_focused;
         self.set_focused_pane(last_focused, window, cx);
         self.focus_pane(last_focused, window, cx);
         self.resize_all_tabs(window, cx);

@@ -149,14 +149,14 @@ async fn tab_commands_follow_the_keyboard_into_the_side_tabs(cx: &mut TestAppCon
 
     // Next Tab wraps inside the side tabs; the tabs on the left stay.
     let left =
-        f.1.read_with(cx, |ws, _| ws.active_runtime().active_tab_index);
+        f.1.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index());
     act(&f, cx, |ws, window, cx| {
         ws.on_next_tab(&crate::workspace::NextTab, window, cx)
     });
     f.1.read_with(cx, |ws, _| {
         let runtime = ws.active_runtime();
         assert_eq!(runtime.side.active_index(), 0);
-        assert_eq!(runtime.active_tab_index, left);
+        assert_eq!(runtime.tabs.active_index(), left);
     });
 
     // Move Tab Right reorders the side tabs.
@@ -208,7 +208,7 @@ async fn a_side_tab_comes_back_among_the_tabs(cx: &mut TestAppContext) {
         let runtime = ws.active_runtime();
         assert!(runtime.side.is_empty());
         assert_eq!(runtime.tabs.len(), 2);
-        assert_eq!(runtime.active_tab_index, 1);
+        assert_eq!(runtime.tabs.active_index(), 1);
         assert_eq!(runtime.focused_pane_id, aside);
     });
 }
@@ -728,7 +728,7 @@ async fn closing_a_tab_leaves_the_keyboard_where_it_is(cx: &mut TestAppContext) 
     f.1.read_with(cx, |ws, _| assert!(ws.keyboard_is_aside()));
     // The tab shown on the left is closed: a.txt's.
     act(&f, cx, |ws, window, cx| {
-        let shown = ws.active_runtime().active_tab_index;
+        let shown = ws.active_runtime().tabs.active_index();
         ws.close_tab_at(shown, window, cx);
         ws.main_area.groups_width = 1200.0;
     });

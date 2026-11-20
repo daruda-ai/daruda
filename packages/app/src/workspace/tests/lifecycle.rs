@@ -42,7 +42,7 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
 
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().tabs.len(), 1);
-        assert_eq!(ws.active_runtime().active_tab_index, 0);
+        assert_eq!(ws.active_runtime().tabs.active_index(), 0);
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -70,7 +70,7 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().active_tab_index, 0)
+        assert_eq!(ws.active_runtime().tabs.active_index(), 0)
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -80,7 +80,7 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().active_tab_index, 2)
+        assert_eq!(ws.active_runtime().tabs.active_index(), 2)
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -90,7 +90,7 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().active_tab_index, 0)
+        assert_eq!(ws.active_runtime().tabs.active_index(), 0)
     });
 
     // Out-of-bounds is a no-op
@@ -101,7 +101,7 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().active_tab_index, 0)
+        assert_eq!(ws.active_runtime().tabs.active_index(), 0)
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -111,7 +111,7 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().active_tab_index, 2)
+        assert_eq!(ws.active_runtime().tabs.active_index(), 2)
     });
 
     cx.update_window(window_handle.into(), |_, window, cx| {
@@ -128,7 +128,7 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
     assert_eq!(ids_after, vec![ids_before[0], ids_before[2]]);
     workspace.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.active_runtime().active_tab_index,
+            ws.active_runtime().tabs.active_index(),
             1,
             "closing a non-active tab preserves the active tab"
         );
@@ -143,7 +143,7 @@ async fn tab_add_close_switching_and_ids_share_one_three_tab_fixture(cx: &mut Te
 
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().tabs.len(), 1);
-        assert_eq!(ws.active_runtime().active_tab_index, 0);
+        assert_eq!(ws.active_runtime().tabs.active_index(), 0);
         assert_eq!(ws.active_runtime().tabs[0].id, ids_before[0]);
     });
 }

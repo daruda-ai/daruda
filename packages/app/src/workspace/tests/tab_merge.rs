@@ -14,7 +14,7 @@ async fn merge_tab_into_pane_handles_noops_then_lands_two_leaf_split(cx: &mut Te
     let (window_handle, workspace) = build_workspace(cx);
 
     let (only_tab_id, only_pane_id) = workspace.read_with(cx, |ws, _| {
-        let idx = ws.active_runtime().active_tab_index;
+        let idx = ws.active_runtime().tabs.active_index();
         (
             ws.active_runtime().tabs[idx].id,
             ws.active_runtime().panes[0].id,
@@ -60,13 +60,13 @@ async fn merge_tab_into_pane_handles_noops_then_lands_two_leaf_split(cx: &mut Te
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().tabs.len(), 2);
         assert_eq!(ws.active_runtime().panes.len(), 2);
-        assert_eq!(ws.active_runtime().active_tab_index, 1);
+        assert_eq!(ws.active_runtime().tabs.active_index(), 1);
     });
 
     let (active_before, history_before, tab1_id) = workspace.read_with(cx, |ws, _| {
         (
-            ws.active_runtime().active_tab_index,
-            ws.active_runtime().tab_history.clone(),
+            ws.active_runtime().tabs.active_index(),
+            ws.active_runtime().tabs.recent().to_vec(),
             ws.active_runtime().tabs[1].id,
         )
     });
@@ -98,8 +98,8 @@ async fn merge_tab_into_pane_handles_noops_then_lands_two_leaf_split(cx: &mut Te
         assert_eq!(ws.active_runtime().tabs[0].id, tab0_id);
         assert_eq!(ws.active_runtime().tabs[0].layout.first_leaf(), pane_a);
         assert_eq!(ws.active_runtime().tabs[1].id, tab1_id);
-        assert_eq!(ws.active_runtime().active_tab_index, active_before);
-        assert_eq!(ws.active_runtime().tab_history, history_before);
+        assert_eq!(ws.active_runtime().tabs.active_index(), active_before);
+        assert_eq!(ws.active_runtime().tabs.recent(), history_before);
     });
 
     // Drag tab 0 (holding pane_a) onto tab 1's pane_b, East half: Horizontal
@@ -145,6 +145,6 @@ async fn merge_tab_into_pane_handles_noops_then_lands_two_leaf_split(cx: &mut Te
         // one that ends up focused, not the target's prior focus.
         assert_eq!(ws.active_runtime().tabs[0].last_focused_pane, pane_a);
         assert_eq!(ws.active_runtime().focused_pane_id, pane_a);
-        assert_eq!(ws.active_runtime().active_tab_index, 0);
+        assert_eq!(ws.active_runtime().tabs.active_index(), 0);
     });
 }

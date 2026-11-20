@@ -303,10 +303,11 @@ impl Workspace {
                 }
                 let runtime = LaneRuntime {
                     preview_tab_id: None,
-                    tabs,
+                    tabs: crate::workspace::main_area::tab_strip::TabStrip::restored(
+                        tabs,
+                        wt_active_tab,
+                    ),
                     panes: scratch,
-                    active_tab_index: wt_active_tab,
-                    tab_history: Vec::new(),
                     focused_pane_id: focused,
                     side,
                     keyboard: Default::default(),

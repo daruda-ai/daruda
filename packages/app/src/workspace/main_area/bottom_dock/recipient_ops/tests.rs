@@ -49,7 +49,11 @@ async fn file_review_input_switch_preserves_the_file_and_each_draft(cx: &mut Tes
                         last_focused_pane: file_id,
                         user_label: None,
                     });
-                ws.active_runtime_mut().active_tab_index = ws.active_runtime().tabs.len() - 1;
+                let last_tab = ws.active_runtime().tabs.len() - 1;
+                ws.active_runtime_mut().tabs.activate(
+                    last_tab,
+                    crate::workspace::main_area::tab_strip::TabHistory::Skip,
+                );
                 ws.docks.bottom.update(cx, |dock, _| dock.open());
                 ws.set_focused_pane(file_id, window, cx);
                 ws.select_bottom_input_pane(other_id, window, cx);

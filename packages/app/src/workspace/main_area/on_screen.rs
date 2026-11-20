@@ -28,7 +28,7 @@ impl Workspace {
         if !shown.draws_tabs() {
             return false;
         }
-        let Some(tab) = runtime.tabs.get(runtime.active_tab_index) else {
+        let Some(tab) = runtime.tabs.active_tab() else {
             return false;
         };
         if !tab.layout.contains(pane_id) {

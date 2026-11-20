@@ -65,7 +65,7 @@ fn continuation_preserves_identity_reuses_exact_panes_and_returns_to_evidence(
         );
         ws.attach_flow_session(origin.clone(), binding.clone(), window, cx);
         assert!(
-            ws.active_runtime().tabs[ws.active_runtime().active_tab_index]
+            ws.active_runtime().tabs[ws.active_runtime().tabs.active_index()]
                 .layout
                 .contains(pane)
         );

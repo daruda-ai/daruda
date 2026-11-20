@@ -175,7 +175,7 @@ fn close_active_tab(
 ) {
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let index = ws.active_runtime().active_tab_index;
+            let index = ws.active_runtime().tabs.active_index();
             ws.request_close_tab(index, window, cx);
         });
     })

@@ -313,11 +313,7 @@ impl Workspace {
         anchor_px: f32,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab) = self
-            .active_runtime()
-            .tabs
-            .get(self.active_runtime().active_tab_index)
-        else {
+        let Some(tab) = self.active_runtime().tabs.active_tab() else {
             return;
         };
         let Some((direction, start_left_ratio)) = find_divider(&tab.layout, left_first_leaf) else {

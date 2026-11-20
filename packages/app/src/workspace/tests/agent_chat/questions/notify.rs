@@ -64,11 +64,15 @@ fn a_question_notifies_like_a_permission_request(cx: &mut TestAppContext) {
 
     ws.update(cx, |ws, _| {
         let runtime = ws.active_runtime_mut();
-        runtime.active_tab_index = runtime
+        let index = runtime
             .tabs
             .iter()
             .position(|tab| tab.layout.contains(pane))
             .expect("the pane's tab");
+        runtime.tabs.activate(
+            index,
+            crate::workspace::main_area::tab_strip::TabHistory::Skip,
+        );
         runtime.focused_pane_id = pane;
     });
     assert!(ws.read_with(cx, |ws, _| ws.pane_on_screen(pane)));

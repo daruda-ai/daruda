@@ -71,7 +71,7 @@ impl Workspace {
                 TabCell {
                     index: i,
                     id: tab.id,
-                    is_active: i == runtime.active_tab_index,
+                    is_active: i == runtime.tabs.active_index(),
                     label,
                     title: base_label,
                     file_path,

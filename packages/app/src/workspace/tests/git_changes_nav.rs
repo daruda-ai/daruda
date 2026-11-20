@@ -662,12 +662,12 @@ async fn closing_the_scratch_tab_leaves_the_next_preview_intact(cx: &mut TestApp
     let scratch = ws.read_with(cx, |ws, cx| ws.preview_tab_index(cx));
     assert_eq!(
         scratch,
-        Some(ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index))
+        Some(ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index()))
     );
 
     cx.update_window(w.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let idx = ws.active_runtime().active_tab_index;
+            let idx = ws.active_runtime().tabs.active_index();
             ws.close_tab_at(idx, window, cx);
         });
     })

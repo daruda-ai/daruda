@@ -83,7 +83,7 @@ async fn a_graph_leaf_from_an_older_session_drops_out_of_its_tab(cx: &mut TestAp
         let tabs = &ws2.active_runtime().tabs;
         assert_eq!(tabs.len(), 2, "the graph-only tabs are gone");
         assert_eq!(
-            ws2.active_runtime().active_tab_index,
+            ws2.active_runtime().tabs.active_index(),
             0,
             "the tab that was active is still the active one"
         );

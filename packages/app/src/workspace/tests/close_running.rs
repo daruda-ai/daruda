@@ -48,7 +48,7 @@ fn close_active_tab(
 ) {
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let index = ws.active_runtime().active_tab_index;
+            let index = ws.active_runtime().tabs.active_index();
             ws.request_close_tab(index, window, cx);
         });
     })
@@ -175,7 +175,7 @@ async fn a_tab_that_moved_under_the_prompt_is_still_the_one_closed(cx: &mut Test
     start_turn(&ws, pane_id, cx);
     let (tabs_before, left_neighbour) = ws.read_with(cx, |ws, _| {
         let rt = ws.active_runtime();
-        let left = rt.tabs[rt.active_tab_index - 1].layout.pane_ids();
+        let left = rt.tabs[rt.tabs.active_index() - 1].layout.pane_ids();
         (rt.tabs.len(), left)
     });
     close_active_tab(wh, &ws, cx);
@@ -183,7 +183,7 @@ async fn a_tab_that_moved_under_the_prompt_is_still_the_one_closed(cx: &mut Test
     // A tab to the left goes away while the question is up.
     cx.update_window(wh.into(), |_, window, cx| {
         ws.update(cx, |ws, cx| {
-            let index = ws.active_runtime().active_tab_index - 1;
+            let index = ws.active_runtime().tabs.active_index() - 1;
             ws.close_tab_at(index, window, cx);
         });
     })

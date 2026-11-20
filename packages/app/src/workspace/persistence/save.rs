@@ -63,7 +63,7 @@ impl Workspace {
                         return s;
                     };
                     let (tabs_src, panes_src, active_idx) =
-                        (&rt.tabs, &rt.panes, rt.active_tab_index);
+                        (&rt.tabs, &rt.panes, rt.tabs.active_index());
                     s.tabs = tabs_src
                         .iter()
                         .filter(|tab| !self.is_orchestrator_tab(tab))

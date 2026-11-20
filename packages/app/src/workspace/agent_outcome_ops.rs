@@ -121,9 +121,10 @@ impl Workspace {
     ) {
         use daruda_chat::shot_transcript::working_transcript;
 
-        let first_tab = self.active_runtime().active_tab_index;
+        let first_tab = self.active_runtime().tabs.active_index();
         let label_last_tab = |ws: &mut Self, label: &'static str| {
-            if let Some(tab) = ws.active_runtime_mut().tabs.last_mut() {
+            let last = ws.active_runtime().tabs.len().saturating_sub(1);
+            if let Some(tab) = ws.active_runtime_mut().tabs.tab_mut(last) {
                 tab.user_label = Some(label.into());
             }
         };

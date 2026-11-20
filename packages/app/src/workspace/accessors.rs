@@ -125,7 +125,7 @@ impl Workspace {
         let runtime = self.active_runtime();
         runtime
             .tabs
-            .get(runtime.active_tab_index)
+            .active_tab()
             .is_some_and(|tab| tab.layout.contains(runtime.focused_pane_id))
     }
 

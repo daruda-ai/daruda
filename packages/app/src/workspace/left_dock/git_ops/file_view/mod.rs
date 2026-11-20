@@ -185,17 +185,14 @@ impl Workspace {
     /// a shell or a chat.
     fn work_shown(&self) -> bool {
         let runtime = self.active_runtime();
-        runtime
-            .tabs
-            .get(runtime.active_tab_index)
-            .is_some_and(|tab| {
-                tab.layout.pane_ids().iter().any(|id| {
-                    runtime
-                        .panes
-                        .iter()
-                        .any(|pane| pane.id == *id && !pane.content.behavior().hosting().aside())
-                })
+        runtime.tabs.active_tab().is_some_and(|tab| {
+            tab.layout.pane_ids().iter().any(|id| {
+                runtime
+                    .panes
+                    .iter()
+                    .any(|pane| pane.id == *id && !pane.content.behavior().hosting().aside())
             })
+        })
     }
 
     pub(in crate::workspace) fn group_facts(&self) -> GroupFacts {
@@ -522,7 +519,7 @@ impl Workspace {
         let runtime = self.active_runtime_mut();
         match place {
             PanePlace::Tab(index) => {
-                if let Some(tab) = runtime.tabs.get_mut(index) {
+                if let Some(tab) = runtime.tabs.tab_mut(index) {
                     tab.user_label = None;
                 }
             }
@@ -575,18 +572,14 @@ impl Workspace {
             return pane_id;
         }
         let runtime = self.active_runtime_mut();
-        runtime
+        let last_tab = runtime
             .tabs
-            .push(crate::workspace::main_area::pane::TabEntry {
+            .open(crate::workspace::main_area::pane::TabEntry {
                 id: tab_id,
                 layout: crate::workspace::main_area::pane_tree::PaneLayout::Pane(pane_id),
                 last_focused_pane: pane_id,
                 user_label: None,
             });
-        let from = runtime.active_tab_index;
-        runtime.tab_history.push(from);
-        let last_tab = runtime.tabs.len() - 1;
-        runtime.active_tab_index = last_tab;
         self.mark_preview_tab(PanePlace::Tab(last_tab), intent);
         self.set_focused_pane(pane_id, window, cx);
         self.bump_activity(pane_id);

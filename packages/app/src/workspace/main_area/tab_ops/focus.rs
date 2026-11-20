@@ -171,11 +171,7 @@ impl Workspace {
     /// update site for `set_dim_amount` (MVU one-way flow); notifies only the
     /// changed views (Pitfall #10: a `.cached()` view must be dirtied).
     pub(in crate::workspace) fn refresh_pane_dimming(&mut self, cx: &mut Context<Self>) {
-        let Some(tab) = self
-            .active_runtime()
-            .tabs
-            .get(self.active_runtime().active_tab_index)
-        else {
+        let Some(tab) = self.active_runtime().tabs.active_tab() else {
             return;
         };
         let split = tab.layout.leaf_count() > 1 && self.main_area.zoomed_pane_id.is_none();
@@ -306,11 +302,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab) = self
-            .active_runtime()
-            .tabs
-            .get(self.active_runtime().active_tab_index)
-        else {
+        let Some(tab) = self.active_runtime().tabs.active_tab() else {
             return;
         };
         let (w, h) = self.main_area.last_viewport.unwrap_or((1.0, 1.0));

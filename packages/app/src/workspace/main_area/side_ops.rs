@@ -56,7 +56,7 @@ impl Workspace {
         let zoomed = self.main_area.zoomed_pane_id.is_some_and(|zoomed| {
             runtime
                 .tabs
-                .get(runtime.active_tab_index)
+                .active_tab()
                 .is_some_and(|tab| tab.layout.contains(zoomed))
         });
         if zoomed {
@@ -191,17 +191,12 @@ impl Workspace {
         if runtime.preview_tab_id == Some(tab.id) {
             runtime.preview_tab_id = None;
         }
-        let from = runtime.active_tab_index;
-        if !runtime.tabs.is_empty() {
-            runtime.tab_history.push(from);
-        }
-        runtime.tabs.push(TabEntry {
+        runtime.tabs.open(TabEntry {
             id: tab.id,
             layout: PaneLayout::Pane(tab.pane),
             last_focused_pane: tab.pane,
             user_label: tab.user_label,
         });
-        runtime.active_tab_index = runtime.tabs.len() - 1;
         self.main_area.zoomed_pane_id = None;
         self.set_focused_pane(tab.pane, window, cx);
         self.bump_activity(tab.pane);
@@ -394,7 +389,7 @@ impl Workspace {
             let index = self.active_runtime().side.active_index();
             self.send_side_tab_back(index, window, cx);
         } else {
-            let index = self.active_runtime().active_tab_index;
+            let index = self.active_runtime().tabs.active_index();
             self.send_tab_aside(index, window, cx);
         }
     }

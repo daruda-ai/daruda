@@ -62,7 +62,7 @@ impl Workspace {
                 ws.request_close_side_tab(index, window, cx);
                 return;
             }
-            let idx = ws.active_runtime().active_tab_index;
+            let idx = ws.active_runtime().tabs.active_index();
             ws.request_close_tab(idx, window, cx);
         });
     }
@@ -78,7 +78,7 @@ impl Workspace {
         }
         if self.active_runtime().tabs.len() > 1 {
             self.activate_tab(
-                (self.active_runtime().active_tab_index + 1) % self.active_runtime().tabs.len(),
+                (self.active_runtime().tabs.active_index() + 1) % self.active_runtime().tabs.len(),
                 window,
                 cx,
             );
@@ -95,10 +95,10 @@ impl Workspace {
             return;
         }
         if self.active_runtime().tabs.len() > 1 {
-            let idx = if self.active_runtime().active_tab_index == 0 {
+            let idx = if self.active_runtime().tabs.active_index() == 0 {
                 self.active_runtime().tabs.len() - 1
             } else {
-                self.active_runtime().active_tab_index - 1
+                self.active_runtime().tabs.active_index() - 1
             };
             self.activate_tab(idx, window, cx);
         }
@@ -436,7 +436,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable_in(window, cx, |ws, window, cx| {
-            let idx = ws.active_runtime().active_tab_index;
+            let idx = ws.active_runtime().tabs.active_index();
             let indices: Vec<usize> = (0..ws.active_runtime().tabs.len())
                 .rev()
                 .filter(|&i| i != idx)
@@ -452,7 +452,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.mutate_durable_in(window, cx, |ws, window, cx| {
-            let idx = ws.active_runtime().active_tab_index;
+            let idx = ws.active_runtime().tabs.active_index();
             let indices: Vec<usize> = (idx + 1..ws.active_runtime().tabs.len()).rev().collect();
             ws.request_close_tabs_bulk(indices, window, cx);
         });
@@ -551,7 +551,7 @@ impl Workspace {
         if self.shift_side_tab(-1, cx) {
             return;
         }
-        let from = self.active_runtime().active_tab_index;
+        let from = self.active_runtime().tabs.active_index();
         if from > 0 {
             self.mutate_durable(cx, |ws, cx| {
                 ws.move_tab(from, from - 1, cx);
@@ -568,7 +568,7 @@ impl Workspace {
         if self.shift_side_tab(1, cx) {
             return;
         }
-        let from = self.active_runtime().active_tab_index;
+        let from = self.active_runtime().tabs.active_index();
         if from + 1 < self.active_runtime().tabs.len() {
             self.mutate_durable(cx, |ws, cx| {
                 ws.move_tab(from, from + 1, cx);

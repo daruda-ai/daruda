@@ -92,7 +92,7 @@ impl Workspace {
         best_target(
             self.lane_chats(lane, cx),
             runtime.focused_pane_id,
-            runtime.active_tab_index,
+            runtime.tabs.active_index(),
         )
     }
 

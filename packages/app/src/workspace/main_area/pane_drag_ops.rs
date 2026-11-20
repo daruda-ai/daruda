@@ -107,11 +107,7 @@ impl Workspace {
         let w = f32::from(event.bounds.size.width);
         let h = f32::from(event.bounds.size.height);
 
-        let Some(tab) = self
-            .active_runtime()
-            .tabs
-            .get(self.active_runtime().active_tab_index)
-        else {
+        let Some(tab) = self.active_runtime().tabs.active_tab() else {
             return;
         };
         // Don't highlight the dragged pane itself.
@@ -145,7 +141,7 @@ impl Workspace {
             }
             return;
         }
-        let active_index = self.active_runtime().active_tab_index;
+        let active_index = self.active_runtime().tabs.active_index();
         let Some(active_tab) = self.active_runtime().tabs.get(active_index) else {
             return;
         };

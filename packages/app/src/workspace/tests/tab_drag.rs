@@ -60,7 +60,7 @@ async fn switch_tab_for_drag_preview_skips_persistence(cx: &mut TestAppContext) 
     let wh = make_workspace_with_project(cx, "/tmp/daruda_tab_drag_preview_persist");
     let ws = wh.root(cx).unwrap();
 
-    // Land on a durable baseline: 2 tabs, active_tab_index = 0. `add_tab`
+    // Land on a durable baseline: 2 tabs, the first one shown. `add_tab`
     // itself isn't durable-wrapped (matches production call sites), so
     // route back through `activate_tab` — the durable sibling of the
     // method under test — to get a real on-disk snapshot to diff against.
@@ -80,7 +80,7 @@ async fn switch_tab_for_drag_preview_skips_persistence(cx: &mut TestAppContext) 
     });
     cx.run_until_parked();
 
-    let active_after = ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index);
+    let active_after = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index());
     assert_eq!(
         active_after, 1,
         "preview switch must still change the in-memory active tab"
@@ -96,7 +96,7 @@ async fn switch_tab_for_drag_preview_skips_persistence(cx: &mut TestAppContext) 
     ws.update(cx, |ws, cx| {
         ws.switch_tab_for_drag_preview(5, cx);
     });
-    let after_noop = ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index);
+    let after_noop = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index());
     assert_eq!(
         after_noop, active_after,
         "out-of-range preview index must be a no-op"
@@ -110,7 +110,7 @@ async fn switch_tab_for_drag_preview_skips_persistence(cx: &mut TestAppContext) 
     });
     ws.read_with(cx, |ws, _| {
         assert_eq!(
-            ws.active_runtime().active_tab_index,
+            ws.active_runtime().tabs.active_index(),
             active_after,
             "a no-op cancel must not unwind the preview"
         );
@@ -204,7 +204,7 @@ async fn arming_hover_switch_on_a_new_tab_cancels_the_previous_countdown(cx: &mu
         (tabs[0].id, tabs[2].id)
     });
     assert_eq!(
-        ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
+        ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index()),
         2
     );
 
@@ -213,7 +213,7 @@ async fn arming_hover_switch_on_a_new_tab_cancels_the_previous_countdown(cx: &mu
     // moving off A before A's delay elapses). Re-arming on the active tab
     // is deliberately a no-op target — `switch_active_tab_index` short-
     // circuits when the index already matches — so the only way
-    // `active_tab_index` can move after the delay is if A's supposedly
+    // the tab shown can move after the delay is if A's supposedly
     // superseded timer still fires. This isolates "did overwriting
     // `tab_hover_switch` actually cancel A" from "which of the two fired
     // last", which a same-target A/B re-arm can't distinguish (both would
@@ -226,7 +226,7 @@ async fn arming_hover_switch_on_a_new_tab_cancels_the_previous_countdown(cx: &mu
     cx.executor().advance_clock(Duration::from_millis(1000));
     cx.run_until_parked();
 
-    let active = ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index);
+    let active = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index());
     assert_eq!(
         active, 2,
         "tab A's superseded hover timer must not fire once a different tab is armed"
@@ -248,7 +248,7 @@ async fn hover_switch_fires_after_the_delay_elapses(cx: &mut TestAppContext) {
     // Still within the delay — no switch yet.
     cx.executor().advance_clock(Duration::from_millis(100));
     cx.run_until_parked();
-    let mid = ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index);
+    let mid = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index());
     assert_eq!(
         mid, 1,
         "hover switch must not fire before the delay elapses"
@@ -256,7 +256,7 @@ async fn hover_switch_fires_after_the_delay_elapses(cx: &mut TestAppContext) {
 
     cx.executor().advance_clock(Duration::from_millis(600));
     cx.run_until_parked();
-    let after = ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index);
+    let after = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index());
     assert_eq!(
         after, 0,
         "hover switch must fire once the delay has elapsed"
@@ -275,7 +275,7 @@ async fn hover_switch_fires_after_the_delay_elapses(cx: &mut TestAppContext) {
     ws.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().tabs.len(), 1);
         assert_eq!(
-            ws.active_runtime().active_tab_index,
+            ws.active_runtime().tabs.active_index(),
             0,
             "a stale hover switch must leave the surviving tab active"
         );
@@ -296,7 +296,7 @@ async fn finish_tab_drag_restores_abandoned_and_keeps_committed(cx: &mut TestApp
     });
     // Three tabs, index 2 active (add_tab activates the new tab).
     assert_eq!(
-        ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
+        ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index()),
         2
     );
 
@@ -305,7 +305,7 @@ async fn finish_tab_drag_restores_abandoned_and_keeps_committed(cx: &mut TestApp
         ws.switch_tab_for_drag_preview(1, cx);
     });
     assert_eq!(
-        ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
+        ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index()),
         1,
         "preview must move the active tab while the drag is live"
     );
@@ -315,7 +315,7 @@ async fn finish_tab_drag_restores_abandoned_and_keeps_committed(cx: &mut TestApp
     });
 
     assert_eq!(
-        ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
+        ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index()),
         2,
         "an abandoned drag must restore the pre-drag active tab, not the last preview hop"
     );
@@ -326,13 +326,13 @@ async fn finish_tab_drag_restores_abandoned_and_keeps_committed(cx: &mut TestApp
     });
 
     assert_eq!(
-        ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
+        ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index()),
         0,
         "a committed drop must keep the tab the drop landed on"
     );
 }
 
-/// `close_tab_at` picks its successor by popping `tab_history`, so a drag
+/// `close_tab_at` picks its successor from the tabs shown before it, so a drag
 /// preview that leaves entries there redirects a later close. With A/B/C and
 /// the user having just come B→C, previewing A and abandoning the drag must
 /// leave closing C going back to B.
@@ -361,7 +361,7 @@ async fn abandoned_drag_leaves_no_trace_in_tab_history(cx: &mut TestAppContext) 
 
     let active_id = ws.read_with(cx, |ws, _| {
         let rt = ws.active_runtime();
-        rt.tabs[rt.active_tab_index].id
+        rt.tabs[rt.tabs.active_index()].id
     });
     assert_eq!(
         active_id, tab_b,
@@ -423,7 +423,7 @@ async fn drop_tab_onto_pane_keeps_committed_preview_and_restores_refused_merge(
     ws.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().tabs.len(), 2, "nothing merged");
         assert_eq!(
-            ws.active_runtime().active_tab_index,
+            ws.active_runtime().tabs.active_index(),
             1,
             "a refused merge must unwind the preview"
         );
@@ -444,7 +444,7 @@ async fn releasing_a_cell_cancels_the_countdown_it_armed(cx: &mut TestAppContext
         ws.add_tab(window, cx);
     });
     let hovered_id = ws.read_with(cx, |ws, _| ws.active_runtime().tabs[0].id);
-    let active_before = ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index);
+    let active_before = ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index());
     assert_eq!(active_before, 1);
 
     in_window(wh, &ws, cx, |ws, window, cx| {
@@ -463,7 +463,7 @@ async fn releasing_a_cell_cancels_the_countdown_it_armed(cx: &mut TestAppContext
     cx.run_until_parked();
 
     assert_eq!(
-        ws.read_with(cx, |ws, _| ws.active_runtime().active_tab_index),
+        ws.read_with(cx, |ws, _| ws.active_runtime().tabs.active_index()),
         active_before,
         "a released cell's countdown must not switch tabs after the cursor left it"
     );

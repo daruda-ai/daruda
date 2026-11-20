@@ -64,7 +64,7 @@ async fn chooser_preserves_width_and_selects_the_exact_background_tab(cx: &mut T
             assert!(ws.docks.session_chooser.is_none());
             assert_eq!(ws.active_runtime().focused_pane_id, first);
             assert!(
-                ws.active_runtime().tabs[ws.active_runtime().active_tab_index]
+                ws.active_runtime().tabs[ws.active_runtime().tabs.active_index()]
                     .layout
                     .contains(first)
             );

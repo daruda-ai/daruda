@@ -388,7 +388,7 @@ fn start_new_worktree_task(
             lane,
             orchestrator_in_front: active
                 .tabs
-                .get(active.active_tab_index)
+                .get(active.tabs.active_index())
                 .is_some_and(|tab| ws.is_orchestrator_tab(tab))
                 && active.focused_pane_id == orchestrator,
             modes,

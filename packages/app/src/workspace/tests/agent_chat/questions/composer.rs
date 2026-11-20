@@ -1200,7 +1200,11 @@ fn show_question_tab(ws: &Entity<Workspace>, vcx: &mut VisualTestContext) {
     vcx.update(|_, cx| {
         ws.update(cx, |ws, cx| {
             let runtime = ws.active_runtime_mut();
-            runtime.active_tab_index = runtime.tabs.len() - 1;
+            let last_tab = runtime.tabs.len() - 1;
+            runtime.tabs.activate(
+                last_tab,
+                crate::workspace::main_area::tab_strip::TabHistory::Skip,
+            );
             ws.main_area.pending_resize = true;
             cx.notify();
         })

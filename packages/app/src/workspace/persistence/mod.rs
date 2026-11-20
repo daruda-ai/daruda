@@ -24,12 +24,9 @@ mod save;
 /// rather than moving any fields.
 #[derive(Default)]
 pub(in crate::workspace) struct LaneRuntime {
-    pub tabs: Vec<pane::TabEntry>,
+    /// The tabs, the one shown and the ones shown before it.
+    pub tabs: crate::workspace::main_area::tab_strip::TabStrip,
     pub panes: Vec<pane::Pane>,
-    pub active_tab_index: usize,
-    /// Tab navigation history (most-recent-last). Not serialized — a
-    /// session-only convenience; starts empty on every app launch.
-    pub tab_history: Vec<usize>,
     pub focused_pane_id: pane_tree::PaneId,
     /// Id of the tab a left-dock preview opened, among these or the side
     /// tabs, if one is still open. The
@@ -39,7 +36,7 @@ pub(in crate::workspace) struct LaneRuntime {
     /// zed's `Pane::preview_item_id`: two preview tabs is not a state that
     /// needs representing.
     ///
-    /// Not serialized, for the reason `tab_history` is not: previewing is a
+    /// Not serialized, for the reason the tabs shown before are not: previewing is a
     /// thing the user is doing right now, and a restored session is not in
     /// the middle of it. A restored tab is simply committed, so the first
     /// skim after a restart opens one new tab and reuses it from then on.
@@ -128,11 +125,17 @@ impl Workspace {
             .expect("active runtime always present")
     }
 
-    /// `get_mut` of the active lane's currently-active tab. Hoists the index
-    /// read out of the mutable borrow so callers don't have to.
+    /// The active lane's tab on show.
     pub(in crate::workspace) fn active_tab_mut(&mut self) -> Option<&mut TabEntry> {
-        let idx = self.active_runtime().active_tab_index;
-        self.active_runtime_mut().tabs.get_mut(idx)
+        self.active_runtime_mut().tabs.active_tab_mut()
+    }
+
+    /// The active lane's tab at `index`, which the caller found there.
+    pub(in crate::workspace) fn tab_at_mut(&mut self, index: usize) -> &mut TabEntry {
+        self.active_runtime_mut()
+            .tabs
+            .tab_mut(index)
+            .expect("the caller found the tab at this index")
     }
 }
 

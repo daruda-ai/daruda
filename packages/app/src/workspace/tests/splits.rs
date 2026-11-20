@@ -202,7 +202,7 @@ async fn detach_pane_noops_for_single_leaf_and_succeeds_from_split(cx: &mut Test
         assert_eq!(ws.active_runtime().panes.len(), 2);
 
         // The new tab was activated and holds keyboard focus.
-        assert_eq!(ws.active_runtime().active_tab_index, 1);
+        assert_eq!(ws.active_runtime().tabs.active_index(), 1);
         assert_eq!(ws.active_runtime().focused_pane_id, pane_b);
     });
 
@@ -273,7 +273,7 @@ async fn tab_move_actions_and_history_indices(cx: &mut TestAppContext) {
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().active_tab_index, 1);
+        assert_eq!(ws.active_runtime().tabs.active_index(), 1);
         assert_eq!(ws.active_runtime().tabs[1].id, ids[2]);
         assert_eq!(ws.active_runtime().tabs[2].id, ids[1]);
     });
@@ -286,7 +286,7 @@ async fn tab_move_actions_and_history_indices(cx: &mut TestAppContext) {
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().active_tab_index, 2);
+        assert_eq!(ws.active_runtime().tabs.active_index(), 2);
         assert_eq!(ws.active_runtime().tabs[2].id, ids[2]);
     });
 
@@ -299,8 +299,8 @@ async fn tab_move_actions_and_history_indices(cx: &mut TestAppContext) {
     })
     .unwrap();
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().active_tab_index, 0);
-        assert_eq!(ws.active_runtime().tab_history.last(), Some(&1));
+        assert_eq!(ws.active_runtime().tabs.active_index(), 0);
+        assert_eq!(ws.active_runtime().tabs.recent().last(), Some(&ids[1]));
     });
 
     // Move tab A (0) to tail position (2): [A,B,C] → [B,C,A]
@@ -317,19 +317,11 @@ async fn tab_move_actions_and_history_indices(cx: &mut TestAppContext) {
         assert_eq!(ws.active_runtime().tabs[1].id, ids[2]); // C
         assert_eq!(ws.active_runtime().tabs[2].id, ids[0]); // A
 
-        // active_tab_index was 0 (A), which moved to 2.
-        assert_eq!(ws.active_runtime().active_tab_index, 2);
+        // The tab shown was A at 0, which moved to 2.
+        assert_eq!(ws.active_runtime().tabs.active_index(), 2);
 
-        // History had entry 1 (B) at the top → B is now index 0 (shifted down).
-        // All history entries that referenced A (old 0) map to new 2.
-        // All history entries that referenced indices >0 and ≤2 shift −1.
-        // Original history (top-down): [..., 2(C), 0(A), 1(B)]
-        //   2(C) → from<to (0<2) && 2>0 && 2<=2 → 2−1 = 1 ✓
-        //   0(A) → idx==from → to = 2 ✓
-        //   1(B) → from<to (0<2) && 1>0 && 1<=2 → 1−1 = 0 ✓
-        assert!(ws.active_runtime().tab_history.contains(&2)); // A's new position
-        assert!(ws.active_runtime().tab_history.contains(&0)); // B's new position
-        assert!(ws.active_runtime().tab_history.contains(&1)); // C's new position
+        // The tabs shown before are kept by id, so the move leaves them be.
+        assert_eq!(ws.active_runtime().tabs.recent().last(), Some(&ids[1]));
     });
 
     // Same three-tab fixture: closing a non-active tab first prunes the history
@@ -344,7 +336,7 @@ async fn tab_move_actions_and_history_indices(cx: &mut TestAppContext) {
     .unwrap();
 
     workspace.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().active_tab_index, 1);
+        assert_eq!(ws.active_runtime().tabs.active_index(), 1);
     });
 
     // Close tab 2 first — this removes the history entry pointing at 2,
@@ -357,7 +349,7 @@ async fn tab_move_actions_and_history_indices(cx: &mut TestAppContext) {
     .unwrap();
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().tabs.len(), 2);
-        assert_eq!(ws.active_runtime().active_tab_index, 1); // active tab 1 unaffected (index < 2)
+        assert_eq!(ws.active_runtime().tabs.active_index(), 1); // active tab 1 unaffected (index < 2)
     });
 
     // Close active tab 1 — history has [0] which is valid → should navigate to 0.
@@ -369,7 +361,7 @@ async fn tab_move_actions_and_history_indices(cx: &mut TestAppContext) {
     .unwrap();
     workspace.read_with(cx, |ws, _| {
         assert_eq!(ws.active_runtime().tabs.len(), 1);
-        assert_eq!(ws.active_runtime().active_tab_index, 0);
+        assert_eq!(ws.active_runtime().tabs.active_index(), 0);
     });
 }
 

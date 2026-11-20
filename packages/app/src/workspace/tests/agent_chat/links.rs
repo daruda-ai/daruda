@@ -55,7 +55,7 @@ async fn rendered_chat_links_open_outside_files_as_read_only_references(cx: &mut
                     );
                 });
                 ws.reveal_new_agent_chat_pane(pane, window, cx);
-                (pane, ws.active_runtime().active_tab_index)
+                (pane, ws.active_runtime().tabs.active_index())
             })
         })
         .unwrap();

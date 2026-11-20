@@ -261,7 +261,7 @@ impl Workspace {
             return false;
         };
 
-        if self.active_runtime().active_tab_index != tab_index {
+        if self.active_runtime().tabs.active_index() != tab_index {
             self.activate_tab(tab_index, window, cx);
         }
         self.focus_pane_on_click(to, window, cx);

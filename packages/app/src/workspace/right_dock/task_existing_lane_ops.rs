@@ -230,7 +230,6 @@ impl Workspace {
         });
         // A lane with nothing open shows this tab when the user goes there.
         if first {
-            rt.active_tab_index = 0;
             rt.focused_pane_id = pane_id;
         }
         self.bump_activity(pane_id);

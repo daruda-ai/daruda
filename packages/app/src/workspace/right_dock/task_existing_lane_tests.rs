@@ -396,7 +396,7 @@ fn an_orchestrator_start_in_the_shown_lane_keeps_its_tab_in_front(cx: &mut TestA
         let rt = ws.active_runtime();
         assert_eq!(rt.tabs.len(), tabs + 1);
         assert!(
-            ws.is_orchestrator_tab(&rt.tabs[rt.active_tab_index]),
+            ws.is_orchestrator_tab(&rt.tabs[rt.tabs.active_index()]),
             "the orchestrator's tab stays in front"
         );
         assert_eq!(rt.focused_pane_id, orchestrator);

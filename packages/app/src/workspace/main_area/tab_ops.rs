@@ -6,6 +6,7 @@ use gpui::{Context, Window};
 
 use super::pane::TabEntry;
 use super::pane_tree::{PaneId, PaneLayout};
+use super::tab_strip::TabHistory;
 use crate::workspace::Workspace;
 use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 
@@ -16,16 +17,6 @@ use crate::workspace::main_area::file_view_pane::images::release_pane_images;
 pub(in crate::workspace) enum NewPaneKind {
     Terminal,
     AgentChat,
-}
-
-/// Whether a tab switch leaves a trail in `tab_history`, which
-/// `close_tab_at` pops to choose the next tab. Drag previews and their
-/// unwind pass `Skip`: they are visual look-aheads, and recording them
-/// would let an abandoned drag redirect a later close.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TabHistory {
-    Record,
-    Skip,
 }
 
 /// Whether activating a pane also moves the user into it.
@@ -98,17 +89,12 @@ impl Workspace {
         let tab_id = self.alloc_tab_id();
 
         self.active_runtime_mut().panes.push(pane);
-        self.active_runtime_mut().tabs.push(TabEntry {
+        self.active_runtime_mut().tabs.open(TabEntry {
             id: tab_id,
             layout: PaneLayout::Pane(pane_id),
             last_focused_pane: pane_id,
             user_label: None,
         });
-
-        let cur_tab = self.active_runtime().active_tab_index;
-        self.active_runtime_mut().tab_history.push(cur_tab);
-        let last_tab = self.active_runtime().tabs.len() - 1;
-        self.active_runtime_mut().active_tab_index = last_tab;
         self.set_focused_pane(pane_id, window, cx);
         self.bump_activity(pane_id);
         self.focus_pane(pane_id, window, cx);
@@ -199,41 +185,14 @@ impl Workspace {
     /// shown after it. Its panes stay in the runtime: the caller drops them
     /// or gives them another place. The caller checked the index.
     pub(super) fn unlist_tab(&mut self, index: usize) -> TabEntry {
-        let tab = self.active_runtime_mut().tabs.remove(index);
-
-        // Adjust history for the removed tab: drop direct references to it
-        // and shift all higher indices down by one so they remain valid.
-        rebase_tab_history_after_removal(&mut self.active_runtime_mut().tab_history, index);
-
-        if self.active_runtime().tabs.is_empty() {
-            let runtime = self.active_runtime_mut();
-            runtime.tab_history.clear();
-            runtime.active_tab_index = 0;
+        let runtime = self.active_runtime_mut();
+        let tab = runtime
+            .tabs
+            .remove(index)
+            .expect("the caller checked the index");
+        if runtime.tabs.is_empty() {
             runtime.focused_pane_id = PaneId::NONE;
-            return tab;
         }
-
-        // Choose next active tab. Prefer the most-recent history entry;
-        // fall back to the nearest neighbor when history is empty.
-        let new_active = if self.active_runtime().active_tab_index == index {
-            // Pop history to find a valid destination. Entries that fall
-            // outside the current tab count (e.g. pointing at a tab that was
-            // already closed in the same session) are silently discarded;
-            // they can never be navigated to anyway.
-            let mut found = None;
-            while let Some(prev) = self.active_runtime_mut().tab_history.pop() {
-                if prev < self.active_runtime().tabs.len() {
-                    found = Some(prev);
-                    break;
-                }
-            }
-            found.unwrap_or_else(|| index.min(self.active_runtime().tabs.len() - 1))
-        } else if self.active_runtime().active_tab_index > index {
-            self.active_runtime().active_tab_index - 1
-        } else {
-            self.active_runtime().active_tab_index
-        };
-        self.active_runtime_mut().active_tab_index = new_active;
         tab
     }
 
@@ -260,7 +219,7 @@ impl Workspace {
         if let Some(focused) = self
             .active_runtime()
             .tabs
-            .get(self.active_runtime().active_tab_index)
+            .active_tab()
             .map(|tab| tab.last_focused_pane)
         {
             self.refocus_tabs_after_close(focused, window, cx);
@@ -270,36 +229,18 @@ impl Workspace {
     }
 
     /// Shared core behind `activate_tab` and `switch_tab_for_drag_preview`:
-    /// the guard, zoom/hover-clear, tab-history push + cap, and the
-    /// `active_tab_index` write. Returns the new tab's `last_focused_pane`
-    /// on a real switch, `None` on a no-op (out-of-range or already
-    /// active) — callers branch on that to decide whether to focus/persist.
+    /// the switch itself and the zoom and drag hover it clears. Returns the
+    /// new tab's `last_focused_pane` on a real switch, `None` on a no-op
+    /// (out-of-range or already active): callers branch on that to decide
+    /// whether to focus and persist.
     fn switch_active_tab_index(&mut self, index: usize, history: TabHistory) -> Option<PaneId> {
-        if index >= self.active_runtime().tabs.len()
-            || index == self.active_runtime().active_tab_index
-        {
+        if !self.active_runtime_mut().tabs.activate(index, history) {
             return None;
         }
         self.main_area.zoomed_pane_id = None;
         // Drop any in-flight drag hover so a stale half-fill overlay does
         // not linger on the newly-activated tab. The caller's notify covers it.
         self.main_area.pane_drop_hover = None;
-        if history == TabHistory::Record {
-            // Skip consecutive duplicates (A→B→A→B toggling should not fill history).
-            if self.active_runtime().tab_history.last()
-                != Some(&self.active_runtime().active_tab_index)
-            {
-                let cur_tab = self.active_runtime().active_tab_index;
-                self.active_runtime_mut().tab_history.push(cur_tab);
-            }
-            // Cap size to bound memory use across long sessions.
-            const TAB_HISTORY_CAP: usize = 64;
-            if self.active_runtime().tab_history.len() > TAB_HISTORY_CAP {
-                let drain_to = self.active_runtime().tab_history.len() - TAB_HISTORY_CAP;
-                self.active_runtime_mut().tab_history.drain(..drain_to);
-            }
-        }
-        self.active_runtime_mut().active_tab_index = index;
         Some(self.active_runtime().tabs[index].last_focused_pane)
     }
 
@@ -353,11 +294,7 @@ impl Workspace {
         // Stash on the first hop only — later hops must not overwrite it, or
         // an abandoned drag would unwind to the last tab passed over instead
         // of where the drag started.
-        let pre_drag = self
-            .active_runtime()
-            .tabs
-            .get(self.active_runtime().active_tab_index)
-            .map(|t| t.id);
+        let pre_drag = self.active_runtime().tabs.active_tab().map(|t| t.id);
         if self
             .switch_active_tab_index(index, TabHistory::Skip)
             .is_some()
@@ -395,38 +332,9 @@ impl Workspace {
         to: usize,
         cx: &mut Context<Self>,
     ) {
-        if from == to
-            || from >= self.active_runtime().tabs.len()
-            || to >= self.active_runtime().tabs.len()
-        {
-            return;
+        if self.active_runtime_mut().tabs.move_tab(from, to) {
+            cx.notify();
         }
-        let tab = self.active_runtime_mut().tabs.remove(from);
-        self.active_runtime_mut().tabs.insert(to, tab);
-        if self.active_runtime().active_tab_index == from {
-            self.active_runtime_mut().active_tab_index = to;
-        } else {
-            // Adjust active index for the shift.
-            let a = self.active_runtime().active_tab_index;
-            self.active_runtime_mut().active_tab_index = if from < a && to >= a {
-                a - 1
-            } else if from > a && to <= a {
-                a + 1
-            } else {
-                a
-            };
-        }
-        // Adjust history indices to track the reorder.
-        for idx in &mut self.active_runtime_mut().tab_history {
-            if *idx == from {
-                *idx = to;
-            } else if from < to && *idx > from && *idx <= to {
-                *idx -= 1;
-            } else if from > to && *idx >= to && *idx < from {
-                *idx += 1;
-            }
-        }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn bump_activity(&mut self, pane_id: PaneId) {
@@ -487,31 +395,4 @@ impl Workspace {
     // ---- Split management ----
 
     // ---- Dirty-checked close entry points ----
-}
-
-/// Symmetric inverse of the tab_history shift in `close_tab_at`: a new tab
-/// pushed into the list at `inserted_index` shifts every later slot up by
-/// one, so every history entry `>= inserted_index` must move up by one to
-/// keep pointing at the tab it originally referenced.
-fn rebase_tab_history_after_insertion(history: &mut [usize], inserted_index: usize) {
-    for idx in history {
-        if *idx >= inserted_index {
-            *idx += 1;
-        }
-    }
-}
-
-/// Shared by `close_tab_at` and `merge_tab_into_pane` — both remove one tab
-/// by index. Drops any history entries pointing at the removed index and
-/// shifts every higher index down by one so the remainder stay valid.
-pub(in crate::workspace) fn rebase_tab_history_after_removal(
-    history: &mut Vec<usize>,
-    removed_index: usize,
-) {
-    history.retain(|&i| i != removed_index);
-    for idx in history.iter_mut() {
-        if *idx > removed_index {
-            *idx -= 1;
-        }
-    }
 }

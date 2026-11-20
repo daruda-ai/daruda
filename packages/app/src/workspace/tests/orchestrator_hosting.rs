@@ -354,7 +354,9 @@ fn orchestrator_tab_rejects_split_merge_and_drag(cx: &mut TestAppContext) {
                 window,
                 cx
             ));
-            ws.active_runtime_mut().active_tab_index = 0;
+            ws.active_runtime_mut()
+                .tabs
+                .activate(0, crate::workspace::main_area::tab_strip::TabHistory::Skip);
             assert!(!ws.merge_tab_into_pane(
                 tab,
                 user_pane,
@@ -409,7 +411,10 @@ fn visible_orchestrator_is_excluded_from_persisted_tab_indices(cx: &mut TestAppC
             ws.open_agent_chat_pane_for_test(window, cx);
             assert_eq!(ws.active_runtime().tabs.len(), 3);
             for (active, expected) in [(0, 0), (1, 1), (2, 1)] {
-                ws.active_runtime_mut().active_tab_index = active;
+                ws.active_runtime_mut().tabs.activate(
+                    active,
+                    crate::workspace::main_area::tab_strip::TabHistory::Skip,
+                );
                 ws.active_runtime_mut().focused_pane_id =
                     ws.active_runtime().tabs[active].last_focused_pane;
                 let (saved_workspace, projects) = ws.snapshot_for_disk(cx);
@@ -420,8 +425,10 @@ fn visible_orchestrator_is_excluded_from_persisted_tab_indices(cx: &mut TestAppC
                 assert_ne!(saved_workspace.focused_pane_id, pane);
             }
             // Filtering a trailing active slot clamps to the preceding user tab.
-            ws.active_runtime_mut().tabs.swap(1, 2);
-            ws.active_runtime_mut().active_tab_index = 2;
+            ws.active_runtime_mut().tabs.move_tab(1, 2);
+            ws.active_runtime_mut()
+                .tabs
+                .activate(2, crate::workspace::main_area::tab_strip::TabHistory::Skip);
             let (_, projects) = ws.snapshot_for_disk(cx);
             assert_eq!(projects[0].lanes[0].active_tab_index, 1);
         })

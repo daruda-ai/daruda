@@ -308,7 +308,7 @@ fn test_restore_state_rebuilds_multiple_tabs(cx: &mut TestAppContext) {
         assert_eq!(ws.active_runtime().tabs.len(), 3);
         assert_eq!(ws.active_runtime().panes.len(), 3);
         // Active tab index preserved.
-        assert_eq!(ws.active_runtime().active_tab_index, 2);
+        assert_eq!(ws.active_runtime().tabs.active_index(), 2);
         // Focused pane is a valid leaf of the active tab.
         let active_leaves = ws.active_runtime().tabs[2].layout.pane_ids();
         assert!(active_leaves.contains(&ws.active_runtime().focused_pane_id));
@@ -363,7 +363,7 @@ fn test_restore_state_clamps_out_of_range_active_tab(cx: &mut TestAppContext) {
     });
     let ws = window_handle.root(cx).unwrap();
     ws.read_with(cx, |ws, _| {
-        assert_eq!(ws.active_runtime().active_tab_index, 0);
+        assert_eq!(ws.active_runtime().tabs.active_index(), 0);
     });
 }
 

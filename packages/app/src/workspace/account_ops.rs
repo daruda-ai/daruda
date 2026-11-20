@@ -332,16 +332,12 @@ impl Workspace {
         let pane_id = new_pane.id;
         let tab_id = self.alloc_tab_id();
         self.active_runtime_mut().panes.push(new_pane);
-        self.active_runtime_mut().tabs.push(TabEntry {
+        self.active_runtime_mut().tabs.open(TabEntry {
             id: tab_id,
             layout: PaneLayout::Pane(pane_id),
             last_focused_pane: pane_id,
             user_label: None,
         });
-        let cur_tab = self.active_runtime().active_tab_index;
-        self.active_runtime_mut().tab_history.push(cur_tab);
-        let last_tab = self.active_runtime().tabs.len() - 1;
-        self.active_runtime_mut().active_tab_index = last_tab;
 
         if kind == NewPaneKind::AgentChat && !self.docks.bottom.read(cx).is_open {
             self.docks.bottom.update(cx, |d, cx| {

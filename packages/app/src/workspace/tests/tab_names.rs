@@ -20,7 +20,7 @@ fn with_agent_tab(
     cx.run_until_parked();
     let (tab_id, pane_id) = ws.read_with(cx, |ws, _| {
         let rt = ws.active_runtime();
-        (rt.tabs[rt.active_tab_index].id, rt.focused_pane_id)
+        (rt.tabs[rt.tabs.active_index()].id, rt.focused_pane_id)
     });
     (wh, ws, tab_id, pane_id)
 }
@@ -28,7 +28,7 @@ fn with_agent_tab(
 fn active_label(ws: &gpui::Entity<Workspace>, cx: &mut TestAppContext) -> String {
     ws.read_with(cx, |ws, cx| {
         let rt = ws.active_runtime();
-        ws.tab_label(&rt.tabs[rt.active_tab_index], cx)
+        ws.tab_label(&rt.tabs[rt.tabs.active_index()], cx)
             .unwrap_or_default()
             .to_string()
     })
@@ -102,7 +102,7 @@ async fn a_pane_in_a_parked_lane_still_knows_its_tab_name(cx: &mut TestAppContex
     cx.run_until_parked();
     let (tab_id, pane) = ws.read_with(cx, |ws, _| {
         let rt = ws.active_runtime();
-        (rt.tabs[rt.active_tab_index].id, rt.focused_pane_id)
+        (rt.tabs[rt.tabs.active_index()].id, rt.focused_pane_id)
     });
     ws.update(cx, |ws, cx| {
         ws.rename_tab(tab_id, Some("parked".into()), cx)

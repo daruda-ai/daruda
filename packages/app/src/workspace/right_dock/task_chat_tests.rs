@@ -123,7 +123,7 @@ fn task_chat_open_selects_existing_tab_without_duplicate_or_reconnect(cx: &mut T
             let rt = ws.active_runtime();
             assert_eq!(rt.panes.len(), count);
             assert_eq!(rt.focused_pane_id, pane);
-            assert!(rt.tabs[rt.active_tab_index].layout.contains(pane));
+            assert!(rt.tabs[rt.tabs.active_index()].layout.contains(pane));
             assert!(matches!(
                 ws.agent_chat_view(pane).unwrap().read(cx).status(),
                 AgentSessionStatus::Connected
@@ -458,9 +458,13 @@ fn task_chat_closed_pane_reopens_exact_session_without_execution_ownership(
                 let id = task(cx);
                 bind(ws, &id, pane, cx);
                 ws.active_runtime_mut().panes.retain(|p| p.id != pane);
-                ws.active_runtime_mut()
+                let index = ws
+                    .active_runtime()
                     .tabs
-                    .retain(|tab| !tab.layout.contains(pane));
+                    .iter()
+                    .position(|tab| tab.layout.contains(pane))
+                    .expect("the pane's tab");
+                ws.active_runtime_mut().tabs.remove(index);
                 ws.open_task_chat(&id, window, cx);
                 let reopened = ws.active_runtime().focused_pane_id;
                 assert_ne!(reopened, pane);

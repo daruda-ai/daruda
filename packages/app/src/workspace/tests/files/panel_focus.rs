@@ -492,7 +492,7 @@ async fn the_scratch_tab_is_identifiable_until_it_is_edited(cx: &mut TestAppCont
     ws.read_with(cx, |ws, cx| {
         assert_eq!(
             ws.preview_tab_index(cx),
-            Some(ws.active_runtime().active_tab_index),
+            Some(ws.active_runtime().tabs.active_index()),
             "a previewed file's tab must be marked as the scratch one"
         );
     });

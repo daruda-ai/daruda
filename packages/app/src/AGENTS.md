@@ -169,12 +169,16 @@ needs a `// SAFETY:`-style comment naming the reason.
 
 ## Tab Groups
 
-A worktree has two tab groups: its tabs (`LaneRuntime::tabs`, each a split
-tree) and its side tabs (`LaneRuntime::side`, `main_area/side_group.rs`),
-drawn to their right. A side tab is one pane; nothing splits there. Only what
+A worktree has two tab groups: its tabs (`LaneRuntime::tabs`, a `TabStrip` in
+`main_area/tab_strip.rs`, each tab a split tree) and its side tabs
+(`LaneRuntime::side`, `main_area/side_group.rs`), drawn to their right. A side tab is one pane; nothing splits there. Only what
 is read beside a chat goes aside: files, diffs and a pull request
 (`side_hosts`). Both groups' panes live in `LaneRuntime::panes`.
 
+- **A strip's order and its shown tab change through the strip.** `TabStrip`
+  reads as its tabs in order; `push` adds a tab, `open` adds and shows it,
+  `remove`, `activate`, `insert` and `move_tab` do the rest, on any worktree's
+  runtime. The tabs shown before are kept by id, so nothing is rebased.
 - **`focused_pane_id` is always a pane of the active tab**, or none when the
   worktree has no tab. A side pane never becomes it. Splitting, zooming and the
   bottom input act on it.

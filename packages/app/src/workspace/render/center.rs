@@ -53,11 +53,7 @@ pub(super) fn render_center_content(
         .filter(|a| *a != LaneAvailability::Present)
     {
         inaccessible_empty_state(availability, cx)
-    } else if let Some(tab) = ws
-        .active_runtime()
-        .tabs
-        .get(ws.active_runtime().active_tab_index)
-    {
+    } else if let Some(tab) = ws.active_runtime().tabs.active_tab() {
         let file_send = ws.file_send_action();
         let actual_has_splits = tab.layout.leaf_count() > 1;
         if let Some(zoomed_id) = ws.main_area.zoomed_pane_id {
