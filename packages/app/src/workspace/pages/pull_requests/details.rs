@@ -10,7 +10,7 @@
 //! the detail is over when the last hold is dropped, however its owner
 //! went away. No path that removes a pane has to remember to let go.
 
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use daruda_github::RepoId;
 
@@ -21,8 +21,8 @@ use super::detail::{PrDetailId, PrDetailState};
 #[derive(Clone)]
 pub(in crate::workspace) struct DetailHold {
     id: PrDetailId,
-    /// Shared with the detail's entry, whose count of it is the holds
-    /// alive. Never read: it is here to be dropped.
+    /// Shared among the holds on one detail, whose entry watches it. Never
+    /// read: it is here to be dropped.
     _held: Rc<()>,
 }
 
@@ -34,13 +34,14 @@ impl DetailHold {
 
 struct Open {
     state: PrDetailState,
-    /// The entry's own share; any count above one is a hold alive.
-    held: Rc<()>,
+    /// What the holds share. The entry owns none of it, so it is gone
+    /// exactly when the last hold is.
+    held: Weak<()>,
 }
 
 impl Open {
     fn is_held(&self) -> bool {
-        Rc::strong_count(&self.held) > 1
+        self.held.strong_count() > 0
     }
 }
 
@@ -96,25 +97,21 @@ impl PrDetails {
     /// from it, is alive.
     pub(in crate::workspace) fn open(&mut self, detail: PrDetailState) -> DetailHold {
         let held = Rc::new(());
-        let hold = DetailHold {
-            id: detail.id(),
-            _held: held.clone(),
-        };
+        let id = detail.id();
         self.open.push(Open {
             state: detail,
-            held,
+            held: Rc::downgrade(&held),
         });
-        hold
+        DetailHold { id, _held: held }
     }
 
     /// Another hold on the open detail `id`. `None` when it is not open.
     pub(in crate::workspace) fn hold(&self, id: PrDetailId) -> Option<DetailHold> {
-        self.held()
-            .find(|open| open.state.id() == id)
-            .map(|open| DetailHold {
-                id,
-                _held: open.held.clone(),
-            })
+        let open = self.open.iter().find(|open| open.state.id() == id)?;
+        Some(DetailHold {
+            id,
+            _held: open.held.upgrade()?,
+        })
     }
 
     /// Show on the page the detail `next` holds, or nothing. The page lets
