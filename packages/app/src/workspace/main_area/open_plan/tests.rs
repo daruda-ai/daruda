@@ -4,6 +4,7 @@ const ROOMY: GroupFacts = GroupFacts {
     keyboard_aside: false,
     beside_setting: true,
     tabs: 2,
+    work_shown: true,
     fits_both: true,
 };
 
@@ -28,7 +29,20 @@ fn what_goes_beside_the_tabs() {
         ),
         (
             "no tab to be beside",
-            GroupFacts { tabs: 0, ..ROOMY },
+            GroupFacts {
+                tabs: 0,
+                work_shown: false,
+                ..ROOMY
+            },
+            Enter,
+            false,
+        ),
+        (
+            "files alone shown: it joins them",
+            GroupFacts {
+                work_shown: false,
+                ..ROOMY
+            },
             Enter,
             false,
         ),
@@ -40,6 +54,7 @@ fn what_goes_beside_the_tabs() {
                 keyboard_aside: true,
                 beside_setting: false,
                 tabs: 0,
+                work_shown: false,
                 fits_both: false,
             },
             Preview,
@@ -49,6 +64,19 @@ fn what_goes_beside_the_tabs() {
     for (label, facts, entry, beside) in cases {
         assert_eq!(facts.goes_beside(entry), beside, "{label}");
     }
+    // What only the side tabs hold needs a tab to be beside, of any kind.
+    let files_shown = GroupFacts {
+        work_shown: false,
+        ..ROOMY
+    };
+    assert!(files_shown.side_only_goes_beside(Enter));
+    assert!(
+        !GroupFacts {
+            tabs: 0,
+            ..files_shown
+        }
+        .side_only_goes_beside(Enter)
+    );
 }
 
 #[test]
@@ -117,8 +145,8 @@ fn an_open_shows_refills_or_makes_a_tab() {
             new(true),
         ),
         (
-            // Where the new tab goes is not decided here: closing the
-            // scratch tab brings the keyboard back among the tabs.
+            // Where the new tab goes is not decided here, but once the
+            // scratch tab is closed.
             "the keyboard aside, the scratch tab among the tabs",
             Preview,
             facts(None, Some(left), keyboard_aside),

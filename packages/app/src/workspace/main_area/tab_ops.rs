@@ -237,6 +237,23 @@ impl Workspace {
         tab
     }
 
+    /// Make `pane` the tabs' focused pane once what was focused there is
+    /// gone. The keyboard goes with it, unless it is in a side tab: a close
+    /// among the tabs does not take the keyboard from what is read beside
+    /// them.
+    pub(in crate::workspace) fn refocus_tabs_after_close(
+        &mut self,
+        pane: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_focused_pane(pane, window, cx);
+        if !self.keyboard_is_aside() {
+            self.bump_activity(pane);
+            self.focus_pane(pane, window, cx);
+        }
+    }
+
     /// Move into the pane the tab now shown was last used in. With no tab
     /// left, the keyboard goes to the tabs beside them, if any.
     pub(super) fn focus_active_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -246,9 +263,7 @@ impl Workspace {
             .get(self.active_runtime().active_tab_index)
             .map(|tab| tab.last_focused_pane)
         {
-            self.set_focused_pane(focused, window, cx);
-            self.bump_activity(focused);
-            self.focus_pane(focused, window, cx);
+            self.refocus_tabs_after_close(focused, window, cx);
         } else {
             self.focus_side_group(window, cx);
         }

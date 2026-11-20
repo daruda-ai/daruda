@@ -215,9 +215,7 @@ impl Workspace {
         self.active_runtime_mut().panes.retain(|p| p.id != pane_id);
 
         if tab_index == self.active_runtime().active_tab_index {
-            self.set_focused_pane(next_focus, window, cx);
-            self.bump_activity(next_focus);
-            self.focus_pane(next_focus, window, cx);
+            self.refocus_tabs_after_close(next_focus, window, cx);
         }
         self.active_runtime_mut().tabs[tab_index].last_focused_pane = next_focus;
         self.resize_all_tabs(window, cx);

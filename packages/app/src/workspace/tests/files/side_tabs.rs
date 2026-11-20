@@ -619,7 +619,9 @@ async fn a_skim_in_a_narrow_window_opens_where_it_is_seen(cx: &mut TestAppContex
     assert!(side_files(&f, cx).is_empty());
     f.1.read_with(cx, |ws, _| assert_eq!(ws.active_runtime().tabs.len(), 2));
 
+    // Beside the shell, not the file just skimmed.
     act(&f, cx, |ws, window, cx| {
+        ws.activate_tab(0, window, cx);
         ws.open_files_entry(lane, "b.txt".into(), OpenIntent::Enter, window, cx);
         ws.main_area.groups_width = 400.0;
     });
@@ -641,12 +643,11 @@ async fn a_skim_takes_its_scratch_tab_with_it_to_the_other_group(cx: &mut TestAp
         assert_eq!(ws.active_runtime().tabs.len(), 2);
         assert_eq!(ws.preview_tab_index(cx), Some(1));
     });
-    // Then files open beside the tabs.
-    f.1.update(cx, |ws, _| {
-        ws.mirrors.file_viewer_open_beside = true;
-        ws.main_area.groups_width = 1200.0;
-    });
+    // Then files open beside the tabs, skimmed from the shell.
     act(&f, cx, |ws, window, cx| {
+        ws.mirrors.file_viewer_open_beside = true;
+        ws.activate_tab(0, window, cx);
+        ws.main_area.groups_width = 1200.0;
         ws.open_files_entry(lane, "b.txt".into(), OpenIntent::Preview, window, cx)
     });
     assert_eq!(side_files(&f, cx), ["b.txt"]);
@@ -671,11 +672,11 @@ async fn a_skim_takes_its_scratch_tab_with_it_to_the_other_group(cx: &mut TestAp
     f.1.read_with(cx, |ws, _| assert_eq!(ws.active_runtime().tabs.len(), 2));
 }
 
-/// Closing the scratch tab left among the tabs brings the keyboard back to
-/// them, so the skim that closed it is placed by where the keyboard then
-/// is, not by where it was when the row was pressed.
+/// A skim made with the keyboard in a side tab stays beside the tabs:
+/// closing the scratch tab left among them does not bring the keyboard
+/// back, so the file opens where it is being read.
 #[gpui::test]
-async fn a_skim_is_placed_after_its_scratch_tab_is_closed(cx: &mut TestAppContext) {
+async fn a_skim_from_aside_stays_aside_as_its_scratch_tab_closes(cx: &mut TestAppContext) {
     let f = with_files(cx, &["a.txt"]);
     let lane = f.1.read_with(cx, |ws, _| ws.active_ref());
     act(&f, cx, |ws, window, cx| ws.send_tab_aside(1, window, cx));
@@ -700,16 +701,72 @@ async fn a_skim_is_placed_after_its_scratch_tab_is_closed(cx: &mut TestAppContex
             OpenIntent::Preview,
             window,
             cx,
-        )
-    });
-    assert_eq!(side_files(&f, cx), ["a.txt"], "not opened aside");
-    f.1.read_with(cx, |ws, cx| {
-        assert!(!ws.keyboard_is_aside());
-        assert_eq!(
-            ws.active_runtime().tabs.len(),
-            2,
-            "b.txt's tab was replaced"
         );
-        assert_eq!(ws.preview_tab_index(cx), Some(1));
+        ws.main_area.groups_width = 1200.0;
     });
+    assert_eq!(side_files(&f, cx), ["a.txt", "nested.txt"]);
+    f.1.read_with(cx, |ws, _| {
+        let runtime = ws.active_runtime();
+        assert!(ws.keyboard_is_aside(), "the close took no keyboard");
+        assert_eq!(runtime.tabs.len(), 1, "b.txt's scratch tab is gone");
+        assert!(
+            ws.has_focused_pane(),
+            "the tabs' focused pane is still one of theirs"
+        );
+    });
+}
+
+/// A tab closed among the tabs while the keyboard is in a side tab leaves
+/// it there; closed with the keyboard among them, the next tab takes it.
+#[gpui::test]
+async fn closing_a_tab_leaves_the_keyboard_where_it_is(cx: &mut TestAppContext) {
+    let f = with_files(cx, &["a.txt", "b.txt"]);
+    act(&f, cx, |ws, window, cx| {
+        ws.send_tab_aside(2, window, cx);
+        ws.main_area.groups_width = 1200.0;
+    });
+    f.1.read_with(cx, |ws, _| assert!(ws.keyboard_is_aside()));
+    // The tab shown on the left is closed: a.txt's.
+    act(&f, cx, |ws, window, cx| {
+        let shown = ws.active_runtime().active_tab_index;
+        ws.close_tab_at(shown, window, cx);
+        ws.main_area.groups_width = 1200.0;
+    });
+    f.1.read_with(cx, |ws, _| {
+        assert!(ws.keyboard_is_aside());
+        assert!(ws.has_focused_pane());
+    });
+
+    act(&f, cx, |ws, window, cx| {
+        ws.focus_tabs_group(window, cx);
+        ws.add_tab(window, cx);
+        ws.close_tab_at(0, window, cx);
+    });
+    f.1.read_with(cx, |ws, _| {
+        assert!(!ws.keyboard_is_aside());
+        assert!(ws.has_focused_pane());
+    });
+}
+
+/// The side tabs are for reading beside work. With a file shown on the
+/// left there is no work to read beside, so the next file joins the tabs;
+/// from a shell it opens beside.
+#[gpui::test]
+async fn a_file_opens_beside_work_and_among_files(cx: &mut TestAppContext) {
+    let f = with_files(cx, &["a.txt"]);
+    let lane = f.1.read_with(cx, |ws, _| ws.active_ref());
+    f.1.update(cx, |ws, _| ws.mirrors.file_viewer_open_beside = true);
+    // a.txt's tab is the one shown.
+    act(&f, cx, |ws, window, cx| {
+        ws.open_files_entry(lane, "b.txt".into(), OpenIntent::Enter, window, cx);
+        ws.main_area.groups_width = 1200.0;
+    });
+    assert!(side_files(&f, cx).is_empty());
+    f.1.read_with(cx, |ws, _| assert_eq!(ws.active_runtime().tabs.len(), 3));
+
+    act(&f, cx, |ws, window, cx| {
+        ws.activate_tab(0, window, cx);
+        ws.open_files_entry(lane, "sub/nested.txt".into(), OpenIntent::Enter, window, cx);
+    });
+    assert_eq!(side_files(&f, cx), ["nested.txt"]);
 }

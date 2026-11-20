@@ -144,9 +144,10 @@ impl Workspace {
             number,
             target: None,
         };
-        // The same rule a file follows; the click enters what it opens.
+        // The rule a file follows, but for a tab only the side tabs hold;
+        // the click enters what it opens.
         let entry = crate::workspace::main_area::tab_ops::PaneEntry::Enter;
-        let to = if self.group_facts().goes_beside(entry) {
+        let to = if self.group_facts().side_only_goes_beside(entry) {
             PrDestination::Beside(self.active)
         } else {
             PrDestination::Page

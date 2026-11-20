@@ -181,11 +181,29 @@ impl Workspace {
 
     /// What the two tab groups are like now, for deciding where an open
     /// goes (`open_plan`).
+    /// Whether the tab shown on the left holds a pane only the tabs take:
+    /// a shell or a chat.
+    fn work_shown(&self) -> bool {
+        let runtime = self.active_runtime();
+        runtime
+            .tabs
+            .get(runtime.active_tab_index)
+            .is_some_and(|tab| {
+                tab.layout.pane_ids().iter().any(|id| {
+                    runtime
+                        .panes
+                        .iter()
+                        .any(|pane| pane.id == *id && !pane.content.behavior().hosting().aside())
+                })
+            })
+    }
+
     pub(in crate::workspace) fn group_facts(&self) -> GroupFacts {
         GroupFacts {
             keyboard_aside: self.keyboard_is_aside(),
             beside_setting: self.mirrors.file_viewer_open_beside,
             tabs: self.active_runtime().tabs.len(),
+            work_shown: self.work_shown(),
             fits_both: SideGroup::fits_beside(
                 self.main_area.groups_width,
                 crate::ui::theme::TAB_GROUP_MIN_WIDTH,
@@ -403,8 +421,9 @@ impl Workspace {
             OpenPlan::New { beside } => self.push_file_tab(&open, beside, intent, window, cx),
             OpenPlan::Replace((_, scratch)) => {
                 self.close_pane_by_id(scratch, window, cx);
-                // Asked once the scratch tab is gone: the close moved the
-                // keyboard, and took a tab only if the pane was alone in it.
+                // Asked once the scratch tab is gone: the close took a tab
+                // only if the pane was alone in it, and the keyboard with
+                // it only if it was there.
                 let beside = self.group_facts().goes_beside(intent.pane_entry());
                 self.push_file_tab(&open, beside, intent, window, cx)
             }

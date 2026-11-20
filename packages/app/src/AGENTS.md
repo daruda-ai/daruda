@@ -193,8 +193,13 @@ is read beside a chat goes aside: files, diffs and a pull request
   what covers the groups, so a zoom or a page resizes nothing.
 - **One open path:** `open_file_pane` gathers the facts and carries out the
   plan: the group (the keyboard already aside, or `file_viewer.open_beside`
-  with a tab to be beside) and the reuse (`preview_slot`, one scratch tab
-  across both groups).
+  with work shown on the left: a shell or a chat, not files alone) and the
+  reuse (`preview_slot`, one scratch tab across both groups). A pull request,
+  which only the side tabs hold, needs any tab on the left
+  (`side_only_goes_beside`).
+- **A close among the tabs leaves the keyboard in a side tab** when it is
+  there (`refocus_tabs_after_close`): the tabs' focused pane is updated, the
+  keyboard is not taken.
 - **A pull request pane** (`PaneContent::PullRequest`,
   `pages/pull_requests/pane.rs`) holds one of the window's open details
   (`PrDetails`, `pages/pull_requests/details.rs`) through a `DetailHold` it

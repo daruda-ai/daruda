@@ -17,22 +17,37 @@ pub(in crate::workspace) struct GroupFacts {
     pub(in crate::workspace) beside_setting: bool,
     /// How many tabs the worktree has on the left.
     pub(in crate::workspace) tabs: usize,
+    /// The tab shown on the left holds work: a shell or a chat, not files
+    /// alone.
+    pub(in crate::workspace) work_shown: bool,
     /// The width holds both groups at their least widths.
     pub(in crate::workspace) fits_both: bool,
 }
 
 impl GroupFacts {
-    /// Whether what is opened goes to the side tabs: where the keyboard
-    /// already is, or where the setting sends it. With no tab on the left
-    /// there is nothing to open beside, so it opens there. Where only one
-    /// group fits, an open that leaves the keyboard where it is would land
-    /// in the group not drawn, so only one that enters goes aside.
+    /// Whether a file opened goes to the side tabs: where the keyboard
+    /// already is, or where the setting sends it. The side tabs are for
+    /// reading beside work, so with files alone shown on the left, or no
+    /// tab there, it opens among the tabs.
     pub(in crate::workspace) fn goes_beside(&self, entry: PaneEntry) -> bool {
+        self.beside(entry, self.work_shown)
+    }
+
+    /// The same for what only the side tabs hold, a pull request: any tab
+    /// on the left is enough to be beside.
+    pub(in crate::workspace) fn side_only_goes_beside(&self, entry: PaneEntry) -> bool {
+        self.beside(entry, self.tabs > 0)
+    }
+
+    /// Where only one group fits, an open that leaves the keyboard where
+    /// it is would land in the group not drawn, so only one that enters
+    /// goes aside.
+    fn beside(&self, entry: PaneEntry, company: bool) -> bool {
         if self.keyboard_aside {
             return true;
         }
         let seen = entry == PaneEntry::Enter || self.fits_both;
-        self.beside_setting && self.tabs > 0 && seen
+        self.beside_setting && company && seen
     }
 }
 
@@ -62,8 +77,8 @@ pub(in crate::workspace) enum OpenPlan {
     /// A new tab, after the scratch tab left in the other group is closed:
     /// one preview is on screen at a time, and none is left behind as a tab
     /// nobody chose to keep. Which group the new tab joins is asked again
-    /// once the scratch tab is gone, since closing it moves the keyboard
-    /// and may or may not take a tab with it.
+    /// once the scratch tab is gone, since closing it may take a tab, or
+    /// the keyboard, with it.
     Replace(Slot),
 }
 
