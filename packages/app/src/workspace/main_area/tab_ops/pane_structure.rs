@@ -202,9 +202,6 @@ impl Workspace {
             .prev_pane(pane_id)
             .unwrap_or_else(|| self.active_runtime().tabs[tab_index].layout.first_leaf());
 
-        if self.main_area.zoomed_pane() == Some(pane_id) {
-            self.main_area.set_zoomed_pane(None);
-        }
         // A pane removal invalidates any in-flight drop-hover target.
         self.main_area.pane_drop_hover = None;
         remove_pane_from_layout(&mut self.tab_at_mut(tab_index).layout, pane_id);
@@ -236,7 +233,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.active_lane_is_inaccessible() || self.main_area.zoomed_pane().is_some() {
+        if self.active_lane_is_inaccessible() || self.tab_pane_zoomed() {
             return false;
         }
         let Some(tab_index) = self

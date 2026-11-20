@@ -74,15 +74,34 @@ fn each_tab_shown_before_is_remembered_once() {
 
 #[test]
 fn a_look_ahead_leaves_no_trail() {
-    let mut strip = strip(&[1, 2, 3]);
-    let before = recent(&strip);
-    assert!(strip.activate(0, TabHistory::Skip));
-    assert_eq!(shown(&strip), Some(1));
-    assert_eq!(recent(&strip), [2], "the tab looked at is no longer behind");
+    // 4 then 1 were left, 1 last; 3 is shown.
+    let mut strip = strip(&[1, 2, 3, 4]);
+    visit(&mut strip, &[1, 3]);
+    assert_eq!(recent(&strip), [2, 4, 1]);
+
+    // Looking at 4 and coming back is not a visit.
+    assert!(strip.activate(3, TabHistory::Skip));
+    assert_eq!(shown(&strip), Some(4));
     assert!(strip.activate(2, TabHistory::Skip));
-    assert_eq!(shown(&strip), Some(3));
-    assert_eq!(recent(&strip), [2]);
-    assert_eq!(before, [1, 2]);
+    assert_eq!(recent(&strip), [2, 4, 1]);
+
+    // So closing goes back the way the user came: 1, then 4.
+    strip.remove(2);
+    assert_eq!(shown(&strip), Some(1));
+    let at = strip.active_index();
+    strip.remove(at);
+    assert_eq!(shown(&strip), Some(4));
+}
+
+#[test]
+fn a_tab_looked_at_and_closed_is_not_gone_back_to() {
+    let mut strip = strip(&[1, 2, 3]);
+    assert!(strip.activate(0, TabHistory::Skip));
+    // Tab 1 is shown and still among the ones left.
+    let at = strip.active_index();
+    assert_eq!(strip.remove(at).map(|tab| tab.id.0), Some(1));
+    assert_eq!(shown(&strip), Some(2));
+    assert!(!recent(&strip).contains(&1));
 }
 
 #[test]
@@ -107,10 +126,6 @@ fn removing_a_tab_settles_which_is_shown() {
         assert!(
             !recent(&strip).contains(&gone.unwrap()),
             "{label}: a closed tab is not gone back to"
-        );
-        assert!(
-            !recent(&strip).contains(&shown_after),
-            "{label}: the shown tab is not behind itself"
         );
     }
 }

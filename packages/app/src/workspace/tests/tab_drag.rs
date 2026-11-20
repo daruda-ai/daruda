@@ -211,7 +211,7 @@ async fn arming_hover_switch_on_a_new_tab_cancels_the_previous_countdown(cx: &mu
     // Arm the hover timer on tab A (would switch to index 0), then
     // immediately re-arm on the *already-active* tab (mirrors the drag
     // moving off A before A's delay elapses). Re-arming on the active tab
-    // is deliberately a no-op target — `switch_active_tab_index` short-
+    // is deliberately a no-op target — `switch_shown_tab` short-
     // circuits when the index already matches — so the only way
     // the tab shown can move after the delay is if A's supposedly
     // superseded timer still fires. This isolates "did overwriting

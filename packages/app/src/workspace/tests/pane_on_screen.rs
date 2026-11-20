@@ -111,4 +111,16 @@ async fn a_zoom_left_in_another_lane_hides_nothing_here(cx: &mut TestAppContext)
         !on_screen(&ws, first, cx) && !on_screen(&ws, second, cx),
         "the parked lane's panes are out of view"
     );
+
+    // Nor does it stand in the way of this lane's own panes: one of a split
+    // here still comes away into a tab of its own.
+    let (_, split_off) = split(wh, &ws, cx);
+    let detached = cx
+        .update_window(wh.into(), |_, window, cx| {
+            ws.update(cx, |ws, cx| {
+                ws.detach_pane_to_new_tab(split_off, 1, window, cx)
+            })
+        })
+        .unwrap();
+    assert!(detached, "a zoom elsewhere refused a pane of this lane");
 }

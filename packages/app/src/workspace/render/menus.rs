@@ -215,7 +215,9 @@ pub(super) fn side_tab_context_menu_items(
                 s::ctx::zoom_pane()
             },
             false,
-            move |this, win, cx| this.toggle_side_zoom(index, win, cx),
+            move |this, win, cx| {
+                this.mutate_durable_in(win, cx, |ws, win, cx| ws.toggle_side_zoom(index, win, cx));
+            },
         ),
         PopupMenuItem::separator(),
         ws_popup_menu_item(

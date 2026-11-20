@@ -31,8 +31,9 @@ pub(in crate::workspace) struct TabStrip {
     tabs: Vec<TabEntry>,
     /// The tab shown; 0 when there is none.
     active: usize,
-    /// Tabs shown before the one shown now, most recent last, each once and
-    /// never the one shown. By id, so moving a tab leaves it as it is.
+    /// Tabs the user left for another, most recent last, each once. By id,
+    /// so moving a tab leaves it as it is. A look-ahead changes nothing
+    /// here, so the tab shown can be among them.
     recent: Vec<TabId>,
 }
 
@@ -117,6 +118,7 @@ impl TabStrip {
             self.active = 0;
             self.recent.clear();
         } else if index == self.active {
+            // The tab gone back to is shown as one arrived at, not left.
             let back = self.recent.pop().and_then(|id| self.position_of_id(id));
             self.active = back.unwrap_or_else(|| index.min(self.tabs.len() - 1));
         } else if index < self.active {
@@ -153,9 +155,12 @@ impl TabStrip {
             .flatten()
             .map(|tab| tab.id);
         self.active = index;
+        if history == TabHistory::Skip {
+            return;
+        }
         let shown = self.tabs[index].id;
         self.recent.retain(|id| *id != shown);
-        if let (TabHistory::Record, Some(leaving)) = (history, leaving) {
+        if let Some(leaving) = leaving {
             self.recent.retain(|id| *id != leaving);
             self.recent.push(leaving);
         }

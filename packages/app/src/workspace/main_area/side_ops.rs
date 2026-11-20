@@ -94,6 +94,12 @@ impl Workspace {
         }
     }
 
+    /// A pane of the tab on show is drawn alone: its tab's split tree is
+    /// not what is on screen, so nothing is dragged into it or dimmed in it.
+    pub(in crate::workspace) fn tab_pane_zoomed(&self) -> bool {
+        matches!(self.zoom_scope(), ZoomScope::TabPane(_))
+    }
+
     /// Give the side tabs the whole area with the tab at `index` on show,
     /// or give it back when they have it. The keyboard goes into them: a
     /// zoom is of what is being read.

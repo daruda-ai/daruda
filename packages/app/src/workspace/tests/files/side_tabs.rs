@@ -856,11 +856,36 @@ async fn a_zoom_is_of_one_group_and_of_what_is_on_show(cx: &mut TestAppContext) 
     });
 
     // A tab opened and shown: the zoomed pane's tab is no longer on show.
-    f.1.update(cx, |ws, _| ws.main_area.set_zoomed_pane(Some(shell)));
     act(&f, cx, |ws, window, cx| ws.add_tab(window, cx));
     f.1.update(cx, |ws, _| ws.main_area.set_zoomed_pane(Some(shell)));
     f.1.read_with(cx, |ws, _| {
         assert_eq!(ws.zoom_scope(), ZoomScope::None);
         assert!(ws.pane_on_screen(ws.active_runtime().focused_pane_id));
+    });
+}
+
+/// A tab shown without the keyboard going to it, as a row of the sessions
+/// list shows one, is not left hidden under zoomed side tabs.
+#[gpui::test]
+async fn a_tab_shown_from_a_list_comes_out_from_under_zoomed_side_tabs(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::tab_ops::PaneEntry;
+
+    let f = with_files(cx, &["a.txt"]);
+    act(&f, cx, |ws, window, cx| ws.send_tab_aside(1, window, cx));
+    act(&f, cx, |ws, window, cx| ws.add_tab(window, cx));
+    act(&f, cx, |ws, window, cx| ws.toggle_side_zoom(0, window, cx));
+    f.1.read_with(cx, |ws, _| assert_eq!(ws.groups_shown(), GroupsShown::Side));
+
+    act(&f, cx, |ws, window, cx| {
+        ws.activate_tab_as(0, PaneEntry::Preview, window, cx)
+    });
+    f.1.update(cx, |ws, _| ws.main_area.groups_width = 1200.0);
+    f.1.read_with(cx, |ws, _| {
+        assert_eq!(ws.active_runtime().tabs.active_index(), 0);
+        assert!(
+            ws.groups_shown().draws_tabs(),
+            "the tab asked for is in view"
+        );
+        assert!(ws.pane_on_screen(ws.active_runtime().tabs[0].last_focused_pane));
     });
 }

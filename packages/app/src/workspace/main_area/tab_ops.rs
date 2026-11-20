@@ -125,12 +125,6 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let pane_ids: Vec<PaneId> = self.active_runtime().panes.iter().map(|p| p.id).collect();
-        if pane_ids
-            .iter()
-            .any(|&id| self.main_area.zoomed_pane() == Some(id))
-        {
-            self.main_area.set_zoomed_pane(None);
-        }
         self.main_area.pane_drop_hover = None;
         self.forget_panes(&pane_ids, cx);
         release_pane_images(&mut self.active_runtime_mut().panes, &pane_ids, window, cx);
@@ -166,12 +160,6 @@ impl Workspace {
 
         let tab = self.unlist_tab(index);
         let pane_ids = tab.layout.pane_ids();
-        if pane_ids
-            .iter()
-            .any(|&id| self.main_area.zoomed_pane() == Some(id))
-        {
-            self.main_area.set_zoomed_pane(None);
-        }
         self.forget_panes(&pane_ids, cx);
         release_pane_images(&mut self.active_runtime_mut().panes, &pane_ids, window, cx);
         self.active_runtime_mut()
@@ -233,11 +221,13 @@ impl Workspace {
     /// new tab's `last_focused_pane` on a real switch, `None` on a no-op
     /// (out-of-range or already active): callers branch on that to decide
     /// whether to focus and persist.
-    fn switch_active_tab_index(&mut self, index: usize, history: TabHistory) -> Option<PaneId> {
+    fn switch_shown_tab(&mut self, index: usize, history: TabHistory) -> Option<PaneId> {
         if !self.active_runtime_mut().tabs.activate(index, history) {
             return None;
         }
+        // A tab asked to be shown is not left under a zoom, of either group.
         self.main_area.set_zoomed_pane(None);
+        self.active_runtime_mut().side.set_zoomed(false);
         // Drop any in-flight drag hover so a stale half-fill overlay does
         // not linger on the newly-activated tab. The caller's notify covers it.
         self.main_area.pane_drop_hover = None;
@@ -262,7 +252,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(focused) = self.switch_active_tab_index(index, TabHistory::Record) else {
+        let Some(focused) = self.switch_shown_tab(index, TabHistory::Record) else {
             return;
         };
         // Switching tabs changes the focused pane — route through the
@@ -295,10 +285,7 @@ impl Workspace {
         // an abandoned drag would unwind to the last tab passed over instead
         // of where the drag started.
         let pre_drag = self.active_runtime().tabs.active_tab().map(|t| t.id);
-        if self
-            .switch_active_tab_index(index, TabHistory::Skip)
-            .is_some()
-        {
+        if self.switch_shown_tab(index, TabHistory::Skip).is_some() {
             if self.main_area.tab_preview_restore.is_none() {
                 self.main_area.tab_preview_restore = pre_drag;
             }
@@ -322,8 +309,7 @@ impl Workspace {
         else {
             return false;
         };
-        self.switch_active_tab_index(index, TabHistory::Skip)
-            .is_some()
+        self.switch_shown_tab(index, TabHistory::Skip).is_some()
     }
 
     pub(in crate::workspace) fn move_tab(

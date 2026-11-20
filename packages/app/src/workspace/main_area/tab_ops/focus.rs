@@ -66,7 +66,7 @@ impl Workspace {
     /// pane / tab / lane / project) calls, keeping `InputDock::drafts` free of
     /// dead entries.
     /// Forget every per-pane record the workspace keeps for panes that are
-    /// going away — tracking, unseen outcomes, focus recency, input draft.
+    /// going away — tracking, unseen outcomes, focus recency, input draft, a zoom on one of them.
     /// The one call each teardown (pane, tab, lane, project) makes, so none
     /// of them forgets a smaller set than the others.
     pub(in crate::workspace) fn forget_panes(
@@ -74,6 +74,14 @@ impl Workspace {
         pane_ids: &[PaneId],
         cx: &mut Context<Self>,
     ) {
+        // A zoom on a pane that is going zooms nothing.
+        if self
+            .main_area
+            .zoomed_pane()
+            .is_some_and(|zoomed| pane_ids.contains(&zoomed))
+        {
+            self.main_area.set_zoomed_pane(None);
+        }
         self.release_pane_tracking(pane_ids, cx);
         self.settle_pr_details_after(pane_ids, cx);
         for id in pane_ids {
@@ -174,7 +182,7 @@ impl Workspace {
         let Some(tab) = self.active_runtime().tabs.active_tab() else {
             return;
         };
-        let split = tab.layout.leaf_count() > 1 && self.main_area.zoomed_pane().is_none();
+        let split = tab.layout.leaf_count() > 1 && !self.tab_pane_zoomed();
         let focused = self.active_runtime().focused_pane_id;
         let pane_ids = tab.layout.pane_ids();
 
