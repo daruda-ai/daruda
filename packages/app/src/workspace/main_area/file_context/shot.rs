@@ -40,6 +40,24 @@ impl Workspace {
         });
     }
 
+    /// The first tab held over the side tabs' first slot, as its cell
+    /// would claim it mid-drag.
+    pub(in crate::workspace) fn hold_tab_over_side_slot_for_shot(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        use crate::workspace::main_area::tab_drop_plan::{DropSlot, Strip};
+        let Some(owner) = self.active_runtime().side.tabs().first().map(|tab| tab.id) else {
+            return;
+        };
+        self.main_area.tab_drag.slot = Some(DropSlot {
+            strip: Strip::Side,
+            owner,
+            index: 0,
+        });
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn open_file_input_for_shot(
         &mut self,
         shot: FileInputShot,

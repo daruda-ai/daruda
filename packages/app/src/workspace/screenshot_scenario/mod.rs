@@ -187,6 +187,12 @@ pub(crate) enum ScreenshotScenario {
     /// A file in the side tabs beside an agent chat: the two strips, the
     /// divider and the widths, which no unit test can see.
     SideTabs,
+    /// The side tabs zoomed over the tabs beside them: that the file takes
+    /// the whole area and its strip stays.
+    SideTabsZoomed,
+    /// A tab held over the side tabs' first slot: where the insertion line
+    /// is drawn, which only a drag in flight shows.
+    SideTabsDrop,
     /// A pull request's detail in the side tabs, beside the worktree's
     /// tabs: how it fits a pane's width.
     PullRequestPane,
@@ -700,6 +706,18 @@ pub(crate) fn drive(
         }
         ScreenshotScenario::SideTabs => {
             workspace.update(cx, |ws, cx| ws.open_side_tabs_for_shot(window, cx));
+        }
+        ScreenshotScenario::SideTabsZoomed => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_side_tabs_for_shot(window, cx);
+                ws.toggle_side_zoom(0, window, cx);
+            });
+        }
+        ScreenshotScenario::SideTabsDrop => {
+            workspace.update(cx, |ws, cx| {
+                ws.open_side_tabs_for_shot(window, cx);
+                ws.hold_tab_over_side_slot_for_shot(cx);
+            });
         }
         ScreenshotScenario::PaneContextMenu => {
             workspace.update(cx, |ws, cx| {
