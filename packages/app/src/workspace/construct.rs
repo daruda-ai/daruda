@@ -153,7 +153,7 @@ impl Workspace {
             uuid: daruda_store::project::WorkspaceUuid::new(),
             main_area: main_area::MainAreaContext::default(),
             orchestrator: orchestrator_ops::OrchestratorHost::default(),
-            // From 1: `PaneId::default()` (0) names no pane, so a runtime
+            // From 1: `PaneId::NONE` (0) names no pane, so a runtime
             // with nothing focused cannot be taken for one focused on its
             // first pane.
             next_id: 1,

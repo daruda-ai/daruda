@@ -214,7 +214,7 @@ fn seeded_account(data: &StatusBarData) -> super::AccountSlot {
     let pane_id = data
         .account
         .as_ref()
-        .map_or(PaneId::default(), |slot| slot.pane_id);
+        .map_or(PaneId::NONE, |slot| slot.pane_id);
     super::AccountSlot::resolve(
         pane_id,
         selected,

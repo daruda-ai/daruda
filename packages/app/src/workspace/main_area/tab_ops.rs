@@ -209,7 +209,7 @@ impl Workspace {
             let runtime = self.active_runtime_mut();
             runtime.tab_history.clear();
             runtime.active_tab_index = 0;
-            runtime.focused_pane_id = PaneId::default();
+            runtime.focused_pane_id = PaneId::NONE;
             return tab;
         }
 

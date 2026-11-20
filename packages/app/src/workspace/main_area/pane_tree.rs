@@ -18,6 +18,12 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub(crate) struct PaneId(pub(crate) u64);
 
+impl PaneId {
+    /// No pane: what a runtime with nothing focused holds, and what fills a
+    /// slot for the moment its pane is being moved.
+    pub(crate) const NONE: Self = Self(0);
+}
+
 impl From<u64> for PaneId {
     fn from(id: u64) -> Self {
         Self(id)
@@ -262,7 +268,8 @@ fn try_insert_node_at(
                 children.insert(slot, new_node);
             } else {
                 // Case B: wrap target in a new Split.
-                let target_leaf = std::mem::replace(&mut children[i], PaneLayout::Pane(PaneId(0)));
+                let target_leaf =
+                    std::mem::replace(&mut children[i], PaneLayout::Pane(PaneId::NONE));
                 let inner = if before {
                     vec![new_node, target_leaf]
                 } else {
@@ -443,7 +450,7 @@ pub(in crate::workspace) fn cleanup_after_remove(layout: &mut PaneLayout) {
             }
             let parent_share = ratios[i];
             let (mut inner_children, inner_ratios) =
-                match std::mem::replace(&mut children[i], PaneLayout::Pane(PaneId(0))) {
+                match std::mem::replace(&mut children[i], PaneLayout::Pane(PaneId::NONE)) {
                     PaneLayout::Split {
                         children: ic,
                         ratios: ir,

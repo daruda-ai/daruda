@@ -246,7 +246,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Pane {
-        let pane_id = PaneId(self.alloc_id());
+        let pane_id = self.alloc_pane_id();
 
         let cached_title = path
             .file_name()

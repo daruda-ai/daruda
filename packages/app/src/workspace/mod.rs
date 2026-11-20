@@ -565,6 +565,12 @@ impl Workspace {
         cx.notify();
     }
 
+    /// A new pane's id. Tabs, lanes and details take theirs from
+    /// `alloc_id`, out of the same counter.
+    fn alloc_pane_id(&mut self) -> main_area::pane_tree::PaneId {
+        main_area::pane_tree::PaneId(self.alloc_id())
+    }
+
     fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;

@@ -273,7 +273,7 @@ impl Workspace {
                         .copied()
                         .filter(|id| leaves.as_ref().is_some_and(|l| l.contains(id)))
                         .unwrap_or_else(|| {
-                            focused_tab.map(|t| t.last_focused_pane).unwrap_or_default()
+                            focused_tab.map_or(pane_tree::PaneId::NONE, |t| t.last_focused_pane)
                         })
                 } else {
                     tabs.get(wt_active_tab)

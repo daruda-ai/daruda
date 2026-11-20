@@ -34,8 +34,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Pane, PaneSpawnError> {
-        let pane_id = self.alloc_id();
-        self.spawn_terminal_pane(pane_id.into(), cwd, account, prepared, window, cx)
+        let pane_id = self.alloc_pane_id();
+        self.spawn_terminal_pane(pane_id, cwd, account, prepared, window, cx)
     }
 
     /// Spawn a shell for the pane `pane_id` — a new one, or one whose shell

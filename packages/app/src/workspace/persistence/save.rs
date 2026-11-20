@@ -115,7 +115,7 @@ impl Workspace {
                         focused_pane_id = s
                             .tabs
                             .get(s.active_tab_index)
-                            .map_or(PaneId::default(), |tab| tab.last_focused_pane.into());
+                            .map_or(PaneId::NONE, |tab| tab.last_focused_pane.into());
                     }
                     s
                 })

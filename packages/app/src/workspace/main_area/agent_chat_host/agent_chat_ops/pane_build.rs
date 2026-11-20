@@ -128,7 +128,7 @@ impl Workspace {
                 },
             ),
         };
-        let pane_id = self.alloc_id();
+        let pane_id = self.alloc_pane_id();
         let window_handle = window.window_handle();
         // Only this agent's own auth domain has a default that may apply
         // here — and only when this cwd is actually local: a managed
@@ -161,7 +161,7 @@ impl Workspace {
             let agent_name = agent_name.clone();
             move |cx| {
                 AgentChatView::new(
-                    pane_id,
+                    pane_id.0,
                     window_handle,
                     cwd,
                     status,
@@ -176,7 +176,7 @@ impl Workspace {
                 )
             }
         });
-        self.subscribe_agent_chat(pane_id.into(), &view, window, cx);
+        self.subscribe_agent_chat(pane_id, &view, window, cx);
         let preferred_editor = self.mirrors.preferred_editor.clone();
         let question_timeout = self.question_timeout_for(&agent_id);
         view.update(cx, |view, cx| {
@@ -184,7 +184,7 @@ impl Workspace {
             view.set_question_timeout(question_timeout, cx);
         });
         Pane {
-            id: pane_id.into(),
+            id: pane_id,
             content: PaneContent::AgentChat(AgentChatContent {
                 cli_resume: None,
                 restore: Default::default(),
