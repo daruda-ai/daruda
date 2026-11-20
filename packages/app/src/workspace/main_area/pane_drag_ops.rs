@@ -96,7 +96,7 @@ impl Workspace {
         // Zoom mode renders a synthetic single-leaf layout, but the rects
         // below come from the full tree — hit-testing would target a hidden
         // pane. Disable drag-to-split while a pane is zoomed.
-        if self.main_area.zoomed_pane_id.is_some() {
+        if self.main_area.zoomed_pane().is_some() {
             if self.main_area.pane_drop_hover.take().is_some() {
                 cx.notify();
             }
@@ -135,7 +135,7 @@ impl Workspace {
         // Mirrors update_pane_drag_from_move's zoom guard: the rects below
         // come from the full tree, but zoom renders a synthetic single-leaf
         // layout — hit-testing would target a hidden pane.
-        if self.main_area.zoomed_pane_id.is_some() {
+        if self.main_area.zoomed_pane().is_some() {
             if self.main_area.pane_drop_hover.take().is_some() {
                 cx.notify();
             }
@@ -178,7 +178,7 @@ impl Workspace {
         // Keyboard zoom can fire between the last on_drag_move and this drop.
         // Mirror the guard in update_pane_drag_from_move: never rearrange the
         // full tree while a synthetic single-leaf zoom layout is showing.
-        if self.main_area.zoomed_pane_id.is_some() {
+        if self.main_area.zoomed_pane().is_some() {
             if self.main_area.pane_drop_hover.take().is_some() {
                 cx.notify();
             }
@@ -219,7 +219,7 @@ impl Workspace {
         // Mirror the guard in update_tab_merge_hover_from_move: never merge
         // into the full tree while a synthetic single-leaf zoom layout is
         // showing.
-        if self.main_area.zoomed_pane_id.is_some() {
+        if self.main_area.zoomed_pane().is_some() {
             self.main_area.pane_drop_hover = None;
             self.finish_tab_drag(false, cx);
             cx.notify();

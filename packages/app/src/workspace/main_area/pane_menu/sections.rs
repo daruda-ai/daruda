@@ -210,9 +210,13 @@ fn common_tail(ctx: &PaneMenuContext) -> Vec<MenuEntry> {
         ),
     ];
 
-    if let PaneRole::InSplit { zoomed } = &ctx.role {
+    let zoomed = match &ctx.role {
+        PaneRole::InSplit { zoomed } => Some(*zoomed),
+        PaneRole::Solo => ctx.hides_side,
+    };
+    if let Some(zoomed) = zoomed {
         let pane_id = ctx.pane_id;
-        let label = if *zoomed {
+        let label = if zoomed {
             s::ctx::unzoom_pane()
         } else {
             s::ctx::zoom_pane()

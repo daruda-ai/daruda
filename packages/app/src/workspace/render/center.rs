@@ -56,37 +56,21 @@ pub(super) fn render_center_content(
     } else if let Some(tab) = ws.active_runtime().tabs.active_tab() {
         let file_send = ws.file_send_action();
         let actual_has_splits = tab.layout.leaf_count() > 1;
-        if let Some(zoomed_id) = ws.main_area.zoomed_pane_id {
-            if tab.layout.pane_ids().contains(&zoomed_id) {
-                let leaf = PaneLayout::Pane(zoomed_id);
-                render_layout(
-                    &leaf,
-                    &ws.active_runtime().panes,
-                    zoomed_id,
-                    true,
-                    SharedString::from(ws.mirrors.font_family.clone()),
-                    None,
-                    ws.main_area.pane_drop_hover,
-                    dragged_divider,
-                    &file_send,
-                    cx,
-                )
-            } else {
-                render_layout(
-                    &tab.layout,
-                    &ws.active_runtime().panes,
-                    ws.active_runtime().focused_pane_id,
-                    actual_has_splits,
-                    SharedString::from(ws.mirrors.font_family.clone()),
-                    ws.main_area.zoomed_pane_id,
-                    ws.main_area.pane_drop_hover,
-                    dragged_divider,
-                    &file_send,
-                    cx,
-                )
-            }
-        } else {
-            render_layout(
+        match ws.zoom_scope() {
+            crate::workspace::main_area::side_ops::ZoomScope::TabPane(zoomed_id) => render_layout(
+                &PaneLayout::Pane(zoomed_id),
+                &ws.active_runtime().panes,
+                zoomed_id,
+                true,
+                SharedString::from(ws.mirrors.font_family.clone()),
+                None,
+                ws.main_area.pane_drop_hover,
+                dragged_divider,
+                &file_send,
+                cx,
+            ),
+            crate::workspace::main_area::side_ops::ZoomScope::SidePane(_)
+            | crate::workspace::main_area::side_ops::ZoomScope::None => render_layout(
                 &tab.layout,
                 &ws.active_runtime().panes,
                 ws.active_runtime().focused_pane_id,
@@ -97,7 +81,7 @@ pub(super) fn render_center_content(
                 dragged_divider,
                 &file_send,
                 cx,
-            )
+            ),
         }
     } else if ws.active_lane().is_some() {
         // A `Present` active lane with no tabs — the user closed them all

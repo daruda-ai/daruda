@@ -183,6 +183,7 @@ pub(super) fn side_tab_context_menu_items(
     index: usize,
     count: usize,
     kind: SideTabKind,
+    zoomed: bool,
 ) -> Vec<PopupMenuItem> {
     use crate::surface::strings as s;
     let first = match kind {
@@ -206,6 +207,16 @@ pub(super) fn side_tab_context_menu_items(
     };
     vec![
         first,
+        ws_popup_menu_item(
+            ws.clone(),
+            if zoomed {
+                s::ctx::unzoom_pane()
+            } else {
+                s::ctx::zoom_pane()
+            },
+            false,
+            move |this, win, cx| this.toggle_side_zoom(index, win, cx),
+        ),
         PopupMenuItem::separator(),
         ws_popup_menu_item(
             ws.clone(),

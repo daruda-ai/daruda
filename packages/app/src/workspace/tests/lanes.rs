@@ -1035,7 +1035,8 @@ fn activate_inaccessible_lane_persists_active_ref(cx: &mut TestAppContext) {
 
             ws.on_toggle_zoom_pane(&ToggleZoomPane, window, cx);
             assert_eq!(
-                ws.main_area.zoomed_pane_id, None,
+                ws.main_area.zoomed_pane(),
+                None,
                 "zoom must stay None when focused_pane_id matches no real pane"
             );
         });

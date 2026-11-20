@@ -115,6 +115,7 @@ impl Workspace {
         }
         let snapshot = self.pane_menu_kind_and_selection(pane_id, window, cx)?;
         let role = self.pane_role(pane_id);
+        let hides_side = self.solo_zoom_hides_side(pane_id);
         let lane = if self.active_lane_is_inaccessible() {
             LaneAccess::Inaccessible
         } else {
@@ -127,6 +128,7 @@ impl Workspace {
         Some(PaneMenuContext {
             pane_id,
             role,
+            hides_side,
             lane,
             selection: snapshot.selection,
             click,
@@ -276,11 +278,27 @@ impl Workspace {
         };
         if tab.layout.leaf_count() > 1 {
             PaneRole::InSplit {
-                zoomed: self.main_area.zoomed_pane_id == Some(pane_id),
+                zoomed: self.zoom_scope()
+                    == crate::workspace::main_area::side_ops::ZoomScope::TabPane(pane_id),
             }
         } else {
             PaneRole::Solo
         }
+    }
+
+    /// For the pane shown alone in the tab on show: whether it is zoomed,
+    /// when a zoom of it has the side tabs to hide or is hiding them.
+    fn solo_zoom_hides_side(&self, pane_id: PaneId) -> Option<bool> {
+        use crate::workspace::main_area::side_group::GroupsShown;
+        use crate::workspace::main_area::side_ops::ZoomScope;
+        let zoomed = self.zoom_scope() == ZoomScope::TabPane(pane_id);
+        let beside = matches!(self.groups_shown(), GroupsShown::Both { .. })
+            && self
+                .active_runtime()
+                .tabs
+                .active_tab()
+                .is_some_and(|tab| tab.layout.contains(pane_id));
+        (zoomed || beside).then_some(zoomed)
     }
 
     pub(super) fn pane_menu_action_context(

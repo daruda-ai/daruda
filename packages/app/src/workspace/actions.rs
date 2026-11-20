@@ -461,11 +461,18 @@ impl Workspace {
     pub(in crate::workspace) fn on_toggle_zoom_pane(
         &mut self,
         _: &ToggleZoomPane,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let pane_id = self.active_runtime().focused_pane_id;
-        self.toggle_zoom_pane(pane_id, cx);
+        // What is being read is what is zoomed: the side tabs while the
+        // keyboard is in them.
+        let pane_id = self.keyboard_pane();
+        match self.active_runtime().place_of(pane_id) {
+            Some(crate::workspace::main_area::side_group::PanePlace::Side(index)) => {
+                self.toggle_side_zoom(index, window, cx)
+            }
+            _ => self.toggle_zoom_pane(pane_id, cx),
+        }
     }
 
     // ---- Command palette ----

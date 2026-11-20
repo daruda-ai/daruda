@@ -189,6 +189,7 @@ impl Workspace {
             kind,
         } = cell;
         let ws = cx.entity().downgrade();
+        let zoomed = self.active_runtime().side.is_zoomed();
         let (inactive_bg, inactive_text, hover_bg) = (
             colors.tab_inactive_bg,
             colors.tab_inactive_text,
@@ -235,7 +236,7 @@ impl Workspace {
                 }),
             )
             .root_context_menu(ws.clone(), move |menu, _window, _cx| {
-                side_tab_context_menu_items(&ws, index, count, kind)
+                side_tab_context_menu_items(&ws, index, count, kind, zoomed)
                     .into_iter()
                     .fold(menu, |menu, item| menu.item(item))
             })

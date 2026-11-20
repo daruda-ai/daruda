@@ -34,10 +34,9 @@ impl Workspace {
         if !tab.layout.contains(pane_id) {
             return false;
         }
-        // A zoom only hides this tab's other panes when the zoomed pane is in
-        // it; one left over from another lane zooms nothing here.
-        match self.main_area.zoomed_pane_id {
-            Some(zoomed) if tab.layout.contains(zoomed) => zoomed == pane_id,
+        // A zoomed pane of this tab hides its other panes.
+        match self.zoom_scope() {
+            super::side_ops::ZoomScope::TabPane(zoomed) => zoomed == pane_id,
             _ => true,
         }
     }

@@ -44,14 +44,15 @@ impl Workspace {
         // Zoom is meaningless without a real pane. A 0-pane lane (e.g. the
         // inaccessible empty-state) has `focused_pane_id` at its default,
         // which matches no pane — guard so we never stamp
-        // `zoomed_pane_id = Some(<bogus id>)` and zoom an empty viewport.
+        // a zoom on an id no pane has, and zoom an empty viewport.
         if !self.active_runtime().panes.iter().any(|p| p.id == pane_id) {
             return;
         }
-        if self.main_area.zoomed_pane_id == Some(pane_id) {
-            self.main_area.zoomed_pane_id = None;
+        if self.main_area.zoomed_pane() == Some(pane_id) {
+            self.main_area.set_zoomed_pane(None);
         } else {
-            self.main_area.zoomed_pane_id = Some(pane_id);
+            self.main_area.set_zoomed_pane(Some(pane_id));
+            self.active_runtime_mut().side.set_zoomed(false);
         }
         // A zoom change swaps the layout out from under any in-flight drag
         // hover; drop it so a stale half-fill overlay does not linger.
@@ -201,8 +202,8 @@ impl Workspace {
             .prev_pane(pane_id)
             .unwrap_or_else(|| self.active_runtime().tabs[tab_index].layout.first_leaf());
 
-        if self.main_area.zoomed_pane_id == Some(pane_id) {
-            self.main_area.zoomed_pane_id = None;
+        if self.main_area.zoomed_pane() == Some(pane_id) {
+            self.main_area.set_zoomed_pane(None);
         }
         // A pane removal invalidates any in-flight drop-hover target.
         self.main_area.pane_drop_hover = None;
@@ -235,7 +236,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.active_lane_is_inaccessible() || self.main_area.zoomed_pane_id.is_some() {
+        if self.active_lane_is_inaccessible() || self.main_area.zoomed_pane().is_some() {
             return false;
         }
         let Some(tab_index) = self

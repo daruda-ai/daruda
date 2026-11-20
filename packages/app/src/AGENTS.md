@@ -180,8 +180,8 @@ is read beside a chat goes aside: files, diffs and a pull request
   `remove`, `activate`, `insert` and `move_tab` do the rest, on any worktree's
   runtime. The tabs shown before are kept by id, so nothing is rebased.
 - **`focused_pane_id` is always a pane of the active tab**, or none when the
-  worktree has no tab. A side pane never becomes it. Splitting, zooming and the
-  bottom input act on it.
+  worktree has no tab. A side pane never becomes it. Splitting and the bottom
+  input act on it.
 - **Which group the keyboard is in** is `LaneRuntime::keyboard`
   (`KeyboardIn`), written only by `Workspace::focus_pane`. Read it through
   `keyboard_is_aside()`; it is in the side tabs only while they are drawn.
@@ -191,9 +191,14 @@ is read beside a chat goes aside: files, diffs and a pull request
   keyboard uses `shown_file_view()`.
 - **Where a pane sits** is `LaneRuntime::place_of(pane) -> PanePlace`. Do not
   search `tabs` alone for a pane that may be a file or a pull request.
-- **What is drawn** is `groups_shown()`: a page, an unavailable worktree and a
-  zoomed pane hide the side tabs, and a width too narrow for both draws the
-  group the keyboard is in. Pane sizes follow `groups_layout()`, which ignores
+- **What is drawn** is `groups_shown()`: a page and an unavailable worktree
+  hide the side tabs, a zoom draws one group alone, and a width too narrow for
+  both draws the group the keyboard is in.
+- **What is zoomed** is `zoom_scope()`: a pane of the tab on show
+  (`MainAreaContext::zoomed_pane`, which may name a pane that is not on show)
+  or the side tabs (`SideGroup::is_zoomed`). Do not check a zoom against the
+  tabs anywhere else. The zoom command acts on `keyboard_pane()`; the tabs
+  taking the keyboard give the area back. Pane sizes follow `groups_layout()`, which ignores
   what covers the groups, so a zoom or a page resizes nothing.
 - **One open path:** `open_file_pane` gathers the facts and carries out the
   plan: the group (the keyboard already aside, or `file_viewer.open_beside`

@@ -183,6 +183,9 @@ pub(super) enum PaneMenuKind {
 pub(super) struct PaneMenuContext {
     pub(super) pane_id: PaneId,
     pub(super) role: PaneRole,
+    /// For a pane alone in its tab: `Some` when zooming it hides the side
+    /// tabs beside it, holding whether it is zoomed now.
+    pub(super) hides_side: Option<bool>,
     pub(super) lane: LaneAccess,
     /// Captured *before* focus moves to the menu target, because clicking a
     /// menu item is a left-click outside the text block and clears the live

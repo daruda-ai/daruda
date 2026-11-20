@@ -536,18 +536,19 @@ fn showing_and_hiding_the_tab_restores_the_users_zoom(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         workspace.update(cx, |ws, cx| {
             let zoomed = ws.active_runtime().focused_pane_id;
-            ws.main_area.zoomed_pane_id = Some(zoomed);
+            ws.main_area.set_zoomed_pane(Some(zoomed));
             seed(ws, window, cx);
 
             assert!(ws.show_orchestrator_tab(window, cx));
             assert_eq!(
-                ws.main_area.zoomed_pane_id, None,
+                ws.main_area.zoomed_pane(),
+                None,
                 "the tab has to be visible, so the zoom stands down"
             );
 
             ws.hide_orchestrator_tab(window, cx);
             assert_eq!(
-                ws.main_area.zoomed_pane_id,
+                ws.main_area.zoomed_pane(),
                 Some(zoomed),
                 "and comes back when the tab goes away"
             );

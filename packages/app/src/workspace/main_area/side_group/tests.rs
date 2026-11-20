@@ -168,3 +168,32 @@ fn a_divider_moved_left_widens_the_side_group() {
     assert_eq!(SideGroup::ratio_after_drag(0.4, 100.0, 1001.0), Some(0.3));
     assert_eq!(SideGroup::ratio_after_drag(0.4, 10.0, 1.0), None);
 }
+
+#[test]
+fn a_zoom_needs_a_pane_on_show() {
+    let mut empty = SideGroup::default();
+    empty.set_zoomed(true);
+    assert!(!empty.is_zoomed(), "nothing to zoom");
+
+    let mut group = group(&[1, 2]);
+    group.set_zoomed(true);
+    assert!(group.is_zoomed());
+    group.activate(0);
+    assert!(
+        group.is_zoomed(),
+        "the group is zoomed, whichever tab shows"
+    );
+
+    group.set_collapsed(true);
+    assert!(!group.is_zoomed());
+    group.set_collapsed(false);
+    assert!(!group.is_zoomed(), "hiding it gave the area back");
+
+    group.set_zoomed(true);
+    group.remove(0);
+    assert!(group.is_zoomed());
+    group.remove(0);
+    assert!(!group.is_zoomed());
+    group.open(tab(3));
+    assert!(!group.is_zoomed(), "a group opened again is not zoomed");
+}

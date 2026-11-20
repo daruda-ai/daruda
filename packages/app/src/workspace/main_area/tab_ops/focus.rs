@@ -174,7 +174,7 @@ impl Workspace {
         let Some(tab) = self.active_runtime().tabs.active_tab() else {
             return;
         };
-        let split = tab.layout.leaf_count() > 1 && self.main_area.zoomed_pane_id.is_none();
+        let split = tab.layout.leaf_count() > 1 && self.main_area.zoomed_pane().is_none();
         let focused = self.active_runtime().focused_pane_id;
         let pane_ids = tab.layout.pane_ids();
 

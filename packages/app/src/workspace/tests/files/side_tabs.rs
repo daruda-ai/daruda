@@ -271,7 +271,7 @@ async fn hidden_side_tabs_stay_open_and_a_zoom_or_a_page_takes_the_whole_area(
 
     f.1.update(cx, |ws, _| {
         ws.main_area.groups_width = 1200.0;
-        ws.main_area.zoomed_pane_id = Some(shell);
+        ws.main_area.set_zoomed_pane(Some(shell));
     });
     f.1.read_with(cx, |ws, _| assert_eq!(ws.groups_shown(), GroupsShown::Tabs));
 }
@@ -334,13 +334,13 @@ async fn a_zoomed_pane_takes_the_file_commands_from_the_hidden_side_tabs(cx: &mu
         let runtime = ws.active_runtime();
         (runtime.focused_pane_id, runtime.side.active_pane().unwrap())
     });
-    f.1.update(cx, |ws, _| ws.main_area.zoomed_pane_id = Some(left));
+    f.1.update(cx, |ws, _| ws.main_area.set_zoomed_pane(Some(left)));
     f.1.read_with(cx, |ws, _| {
         assert!(!ws.keyboard_is_aside());
         assert_eq!(ws.keyboard_pane(), left);
     });
     // Unzoomed, the keyboard is where it was left.
-    f.1.update(cx, |ws, _| ws.main_area.zoomed_pane_id = None);
+    f.1.update(cx, |ws, _| ws.main_area.set_zoomed_pane(None));
     f.1.read_with(cx, |ws, _| assert_eq!(ws.keyboard_pane(), aside));
 }
 
@@ -769,4 +769,98 @@ async fn a_file_opens_beside_work_and_among_files(cx: &mut TestAppContext) {
         ws.open_files_entry(lane, "sub/nested.txt".into(), OpenIntent::Enter, window, cx);
     });
     assert_eq!(side_files(&f, cx), ["nested.txt"]);
+}
+
+/// Zooming what is read beside the tabs gives the side tabs the whole area,
+/// whichever of them is shown, until the tabs take the keyboard back.
+#[gpui::test]
+async fn zooming_a_side_tab_hides_the_tabs_until_they_take_the_keyboard(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::side_ops::ZoomScope;
+
+    let f = with_files(cx, &["a.txt", "b.txt"]);
+    act(&f, cx, |ws, window, cx| ws.send_tab_aside(2, window, cx));
+    act(&f, cx, |ws, window, cx| ws.send_tab_aside(1, window, cx));
+    let shell =
+        f.1.read_with(cx, |ws, _| ws.active_runtime().focused_pane_id);
+    let side_pane = |f: &Fixture, cx: &mut TestAppContext, index: usize| {
+        f.1.read_with(cx, |ws, _| ws.active_runtime().side.tabs()[index].pane)
+    };
+    let (first, second) = (side_pane(&f, cx, 0), side_pane(&f, cx, 1));
+
+    // The keyboard is in the side tabs: the zoom command is theirs.
+    act(&f, cx, |ws, window, cx| {
+        assert!(ws.keyboard_is_aside());
+        ws.on_toggle_zoom_pane(&crate::workspace::ToggleZoomPane, window, cx)
+    });
+    f.1.update(cx, |ws, _| ws.main_area.groups_width = 1200.0);
+    f.1.read_with(cx, |ws, _| {
+        assert_eq!(ws.zoom_scope(), ZoomScope::SidePane(second));
+        assert_eq!(ws.groups_shown(), GroupsShown::Side);
+        assert!(matches!(ws.groups_layout(), GroupsShown::Both { .. }));
+        assert!(ws.pane_on_screen(second));
+        assert!(!ws.pane_on_screen(shell));
+        assert_eq!(ws.active_runtime().focused_pane_id, shell);
+    });
+
+    // Another side tab shown keeps the area.
+    act(&f, cx, |ws, window, cx| ws.activate_side_tab(0, window, cx));
+    f.1.read_with(cx, |ws, _| {
+        assert_eq!(ws.zoom_scope(), ZoomScope::SidePane(first));
+        assert_eq!(ws.groups_shown(), GroupsShown::Side);
+    });
+
+    // The tabs taking the keyboard come back into view.
+    act(&f, cx, |ws, window, cx| ws.focus_tabs_group(window, cx));
+    f.1.update(cx, |ws, _| ws.main_area.groups_width = 1200.0);
+    f.1.read_with(cx, |ws, _| {
+        assert_eq!(ws.zoom_scope(), ZoomScope::None);
+        assert!(matches!(ws.groups_shown(), GroupsShown::Both { .. }));
+        assert!(ws.pane_on_screen(shell));
+    });
+
+    // Toggled twice from a tab's menu, it comes and goes; hidden, it goes.
+    act(&f, cx, |ws, window, cx| ws.toggle_side_zoom(1, window, cx));
+    f.1.read_with(cx, |ws, _| {
+        assert_eq!(ws.zoom_scope(), ZoomScope::SidePane(second));
+        assert!(ws.keyboard_is_aside());
+    });
+    act(&f, cx, |ws, window, cx| ws.toggle_side_zoom(1, window, cx));
+    f.1.read_with(cx, |ws, _| assert_eq!(ws.zoom_scope(), ZoomScope::None));
+    act(&f, cx, |ws, window, cx| ws.toggle_side_zoom(0, window, cx));
+    act(&f, cx, |ws, window, cx| ws.toggle_side_group(window, cx));
+    f.1.read_with(cx, |ws, _| {
+        assert_eq!(ws.zoom_scope(), ZoomScope::None);
+        assert_eq!(ws.groups_shown(), GroupsShown::Tabs);
+    });
+    act(&f, cx, |ws, window, cx| ws.toggle_side_group(window, cx));
+    f.1.read_with(cx, |ws, _| assert_eq!(ws.zoom_scope(), ZoomScope::None));
+}
+
+/// One zoom at a time: a pane of the tab zoomed takes the area from the
+/// side tabs, and a zoom left in another tab zooms nothing.
+#[gpui::test]
+async fn a_zoom_is_of_one_group_and_of_what_is_on_show(cx: &mut TestAppContext) {
+    use crate::workspace::main_area::side_ops::ZoomScope;
+
+    let f = with_files(cx, &["a.txt"]);
+    act(&f, cx, |ws, window, cx| ws.send_tab_aside(1, window, cx));
+    let shell =
+        f.1.read_with(cx, |ws, _| ws.active_runtime().focused_pane_id);
+
+    act(&f, cx, |ws, window, cx| ws.toggle_side_zoom(0, window, cx));
+    act(&f, cx, |ws, _, cx| ws.toggle_zoom_pane(shell, cx));
+    f.1.read_with(cx, |ws, _| {
+        assert_eq!(ws.zoom_scope(), ZoomScope::TabPane(shell));
+        assert_eq!(ws.groups_shown(), GroupsShown::Tabs);
+        assert!(!ws.active_runtime().side.is_zoomed());
+    });
+
+    // A tab opened and shown: the zoomed pane's tab is no longer on show.
+    f.1.update(cx, |ws, _| ws.main_area.set_zoomed_pane(Some(shell)));
+    act(&f, cx, |ws, window, cx| ws.add_tab(window, cx));
+    f.1.update(cx, |ws, _| ws.main_area.set_zoomed_pane(Some(shell)));
+    f.1.read_with(cx, |ws, _| {
+        assert_eq!(ws.zoom_scope(), ZoomScope::None);
+        assert!(ws.pane_on_screen(ws.active_runtime().focused_pane_id));
+    });
 }

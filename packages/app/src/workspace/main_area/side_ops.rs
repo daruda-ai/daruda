@@ -27,6 +27,17 @@ pub(in crate::workspace) struct SideDividerDrag {
     start_ratio: f32,
 }
 
+/// What is drawn alone over the area of the worktree on show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::workspace) enum ZoomScope {
+    None,
+    /// This pane of the tab on show: its other panes and the side tabs are
+    /// hidden.
+    TabPane(PaneId),
+    /// The side tabs, showing this pane: the tabs on the left are hidden.
+    SidePane(PaneId),
+}
+
 /// Whether the side group takes `pane`: what is read beside a chat, not
 /// the chat or a shell.
 pub(in crate::workspace) fn side_hosts(pane: &Pane) -> bool {
@@ -52,17 +63,64 @@ impl Workspace {
         if self.active_page().is_some() || self.active_lane_is_inaccessible() {
             return GroupsShown::Tabs;
         }
-        let runtime = self.active_runtime();
-        let zoomed = self.main_area.zoomed_pane_id.is_some_and(|zoomed| {
-            runtime
-                .tabs
-                .active_tab()
-                .is_some_and(|tab| tab.layout.contains(zoomed))
-        });
-        if zoomed {
-            return GroupsShown::Tabs;
+        match self.zoom_scope() {
+            ZoomScope::TabPane(_) => GroupsShown::Tabs,
+            ZoomScope::SidePane(_) => GroupsShown::Side,
+            ZoomScope::None => self.groups_layout(),
         }
-        self.groups_layout()
+    }
+
+    /// What is zoomed in the worktree on show: a pane of its tab on show,
+    /// or its side tabs. The one place a zoom is checked against what is
+    /// there: a pane of another worktree, or of a tab not shown, zooms
+    /// nothing. Asks nothing of `groups_shown`, which asks this.
+    pub(in crate::workspace) fn zoom_scope(&self) -> ZoomScope {
+        let runtime = self.active_runtime();
+        if runtime.side.is_zoomed()
+            && let Some(pane) = runtime.side.shown_pane()
+        {
+            return ZoomScope::SidePane(pane);
+        }
+        match self.main_area.zoomed_pane() {
+            Some(zoomed)
+                if runtime
+                    .tabs
+                    .active_tab()
+                    .is_some_and(|tab| tab.layout.contains(zoomed)) =>
+            {
+                ZoomScope::TabPane(zoomed)
+            }
+            _ => ZoomScope::None,
+        }
+    }
+
+    /// Give the side tabs the whole area with the tab at `index` on show,
+    /// or give it back when they have it. The keyboard goes into them: a
+    /// zoom is of what is being read.
+    pub(in crate::workspace) fn toggle_side_zoom(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if index >= self.active_runtime().side.tabs().len() {
+            return;
+        }
+        let zoom = !self.active_runtime().side.is_zoomed();
+        if zoom {
+            self.main_area.set_zoomed_pane(None);
+            let side = &mut self.active_runtime_mut().side;
+            side.set_collapsed(false);
+            side.activate(index);
+            side.set_zoomed(true);
+        } else {
+            self.active_runtime_mut().side.set_zoomed(false);
+        }
+        self.main_area.pane_drop_hover = None;
+        self.resize_all_tabs(window, cx);
+        self.focus_side_group(window, cx);
+        self.refresh_pane_dimming(cx);
+        cx.notify();
     }
 
     /// The pane commands about "what I am looking at" act on: find, save,
@@ -93,6 +151,11 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The tabs taking the keyboard are brought back into view.
+        if place == KeyboardIn::Tabs && self.active_runtime().side.is_zoomed() {
+            self.active_runtime_mut().side.set_zoomed(false);
+            cx.notify();
+        }
         if self.active_runtime().keyboard == place {
             return;
         }
@@ -197,7 +260,7 @@ impl Workspace {
             last_focused_pane: tab.pane,
             user_label: tab.user_label,
         });
-        self.main_area.zoomed_pane_id = None;
+        self.main_area.set_zoomed_pane(None);
         self.set_focused_pane(tab.pane, window, cx);
         self.bump_activity(tab.pane);
         self.resize_all_tabs(window, cx);

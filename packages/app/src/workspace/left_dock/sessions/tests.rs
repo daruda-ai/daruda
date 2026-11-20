@@ -206,11 +206,11 @@ async fn selecting_a_hidden_split_session_reveals_it_and_preserves_its_own_zoom(
             ws.toggle_zoom_pane(second, cx);
             assert!(!ws.pane_on_screen(first));
             ws.activate_dock_session(ws.active, &row, window, cx);
-            assert_eq!(ws.main_area.zoomed_pane_id, None);
+            assert_eq!(ws.main_area.zoomed_pane(), None);
             assert!(ws.pane_on_screen(first));
             ws.toggle_zoom_pane(first, cx);
             ws.activate_dock_session(ws.active, &row, window, cx);
-            assert_eq!(ws.main_area.zoomed_pane_id, Some(first));
+            assert_eq!(ws.main_area.zoomed_pane(), Some(first));
             assert!(ws.pane_on_screen(first));
         })
     })

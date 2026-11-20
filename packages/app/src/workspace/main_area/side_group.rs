@@ -32,6 +32,9 @@ pub(in crate::workspace) struct SideGroup {
     ratio: f32,
     /// Hidden by the user while it still holds tabs.
     collapsed: bool,
+    /// Drawn over the whole area, the tabs on the left hidden. Of the
+    /// session only: a restored group is not zoomed.
+    zoomed: bool,
 }
 
 impl Default for SideGroup {
@@ -41,6 +44,7 @@ impl Default for SideGroup {
             active: 0,
             ratio: DEFAULT_RATIO,
             collapsed: false,
+            zoomed: false,
         }
     }
 }
@@ -156,9 +160,25 @@ impl SideGroup {
         self.collapsed
     }
 
-    /// Hide or show the group; its tabs stay open.
+    /// Hide or show the group; its tabs stay open. A hidden group is not
+    /// zoomed.
     pub(in crate::workspace) fn set_collapsed(&mut self, collapsed: bool) {
         self.collapsed = collapsed;
+        if collapsed {
+            self.zoomed = false;
+        }
+    }
+
+    /// Whether the group takes the whole area: asked for, and with a pane
+    /// on show to take it.
+    pub(in crate::workspace) fn is_zoomed(&self) -> bool {
+        self.zoomed && self.shown_pane().is_some()
+    }
+
+    /// Give the group the whole area, or give it back. Only a group with a
+    /// pane on show takes it.
+    pub(in crate::workspace) fn set_zoomed(&mut self, zoomed: bool) {
+        self.zoomed = zoomed && self.shown_pane().is_some();
     }
 
     pub(in crate::workspace) fn ratio(&self) -> f32 {
@@ -191,6 +211,9 @@ impl SideGroup {
             self.active -= 1;
         }
         self.active = self.active.min(self.tabs.len().saturating_sub(1));
+        if self.tabs.is_empty() {
+            self.zoomed = false;
+        }
         Some(tab)
     }
 

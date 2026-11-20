@@ -54,6 +54,7 @@ fn base(kind: PaneMenuKind) -> PaneMenuContext {
     PaneMenuContext {
         pane_id: PaneId(1),
         role: PaneRole::Solo,
+        hides_side: None,
         lane: LaneAccess::Accessible,
         selection: None,
         click: None,

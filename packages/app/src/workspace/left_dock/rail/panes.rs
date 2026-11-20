@@ -138,10 +138,10 @@ impl Workspace {
         self.activate_tab_as(tab, PaneEntry::Preview, window, cx);
         if self
             .main_area
-            .zoomed_pane_id
+            .zoomed_pane()
             .is_some_and(|zoomed| zoomed != pane)
         {
-            self.main_area.zoomed_pane_id = None;
+            self.main_area.set_zoomed_pane(None);
             self.main_area.pending_resize = true;
         }
         self.set_focused_pane(pane, window, cx);

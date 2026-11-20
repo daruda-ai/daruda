@@ -262,7 +262,7 @@ impl Workspace {
             crate::workspace::main_area::tab_strip::TabHistory::Skip,
         );
         // Remembered, not dropped: hiding restores it.
-        self.orchestrator.zoom_to_restore = self.main_area.zoomed_pane_id.take();
+        self.orchestrator.zoom_to_restore = self.main_area.take_zoomed_pane();
         self.main_area.pane_drop_hover = None;
         self.set_focused_pane(id, window, cx);
         if !self.docks.bottom.read(cx).is_open {
@@ -330,11 +330,12 @@ impl Workspace {
             }
         }
         // Put back the zoom the tab stood down, never the tab's own pane.
-        self.main_area.zoomed_pane_id = self
-            .orchestrator
-            .zoom_to_restore
-            .take()
-            .filter(|zoomed| *zoomed != id);
+        self.main_area.set_zoomed_pane(
+            self.orchestrator
+                .zoom_to_restore
+                .take()
+                .filter(|zoomed| *zoomed != id),
+        );
         self.main_area.pane_drop_hover = None;
         if was_focused {
             let focused = self.active_runtime().focused_pane_id;

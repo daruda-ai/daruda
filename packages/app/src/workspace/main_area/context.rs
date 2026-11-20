@@ -44,8 +44,10 @@ pub(in crate::workspace) struct MainAreaContext {
     /// The resource link a right press landed on, until that press's menu
     /// takes it — see `ResourceRightClick`.
     pub resource_right_click: Option<ResourceRightClick>,
-    /// When `Some(id)`, that pane is rendered full-size; all others hidden.
-    pub zoomed_pane_id: Option<PaneId>,
+    /// The pane of a tab drawn alone over the area. Private: whether it
+    /// zooms anything now is `Workspace::zoom_scope`, since a pane of
+    /// another worktree or of a tab not shown zooms nothing.
+    zoomed_pane_id: Option<PaneId>,
     /// Transient hover target while a Pane header is being dragged:
     /// the pane under the cursor and which half it would split. Single
     /// source of truth for the drop-overlay; `None` = no active hover.
@@ -80,5 +82,21 @@ impl MainAreaContext {
             .values_mut()
             .flat_map(|runtime| runtime.panes.iter_mut())
             .find(|pane| pane.id == id)
+    }
+}
+
+impl MainAreaContext {
+    /// The pane asked to be drawn alone, whether or not it is on screen.
+    pub(in crate::workspace) fn zoomed_pane(&self) -> Option<PaneId> {
+        self.zoomed_pane_id
+    }
+
+    pub(in crate::workspace) fn set_zoomed_pane(&mut self, pane: Option<PaneId>) {
+        self.zoomed_pane_id = pane;
+    }
+
+    /// Stand the zoom down, handing back what it was.
+    pub(in crate::workspace) fn take_zoomed_pane(&mut self) -> Option<PaneId> {
+        self.zoomed_pane_id.take()
     }
 }

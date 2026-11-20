@@ -127,9 +127,9 @@ impl Workspace {
         let pane_ids: Vec<PaneId> = self.active_runtime().panes.iter().map(|p| p.id).collect();
         if pane_ids
             .iter()
-            .any(|&id| self.main_area.zoomed_pane_id == Some(id))
+            .any(|&id| self.main_area.zoomed_pane() == Some(id))
         {
-            self.main_area.zoomed_pane_id = None;
+            self.main_area.set_zoomed_pane(None);
         }
         self.main_area.pane_drop_hover = None;
         self.forget_panes(&pane_ids, cx);
@@ -168,9 +168,9 @@ impl Workspace {
         let pane_ids = tab.layout.pane_ids();
         if pane_ids
             .iter()
-            .any(|&id| self.main_area.zoomed_pane_id == Some(id))
+            .any(|&id| self.main_area.zoomed_pane() == Some(id))
         {
-            self.main_area.zoomed_pane_id = None;
+            self.main_area.set_zoomed_pane(None);
         }
         self.forget_panes(&pane_ids, cx);
         release_pane_images(&mut self.active_runtime_mut().panes, &pane_ids, window, cx);
@@ -237,7 +237,7 @@ impl Workspace {
         if !self.active_runtime_mut().tabs.activate(index, history) {
             return None;
         }
-        self.main_area.zoomed_pane_id = None;
+        self.main_area.set_zoomed_pane(None);
         // Drop any in-flight drag hover so a stale half-fill overlay does
         // not linger on the newly-activated tab. The caller's notify covers it.
         self.main_area.pane_drop_hover = None;
