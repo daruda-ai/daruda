@@ -67,7 +67,12 @@ fn an_open_shows_refills_or_makes_a_tab() {
         beside_setting: false,
         ..ROOMY
     };
-    let new = |beside, close| OpenPlan::New { beside, close };
+    let new = |beside| OpenPlan::New { beside };
+    let keyboard_aside = GroupFacts {
+        keyboard_aside: true,
+        beside_setting: false,
+        ..ROOMY
+    };
     let cases = [
         (
             "already open: shown, whatever the rest",
@@ -79,7 +84,7 @@ fn an_open_shows_refills_or_makes_a_tab() {
             "nothing to reuse",
             Enter,
             facts(None, None, ROOMY),
-            new(true, None),
+            new(true),
         ),
         (
             "the scratch tab is where it goes",
@@ -97,29 +102,33 @@ fn an_open_shows_refills_or_makes_a_tab() {
             "a skim takes its scratch tab to the other group",
             Preview,
             facts(None, Some(left), ROOMY),
-            new(true, Some(left)),
+            OpenPlan::Replace(left),
         ),
         (
             "and back among the tabs",
             Preview,
             facts(None, Some(aside), among_tabs),
-            new(false, Some(aside)),
+            OpenPlan::Replace(aside),
         ),
         (
             "a file opened to keep leaves the preview alone",
             Commit,
             facts(None, Some(left), ROOMY),
-            new(true, None),
+            new(true),
         ),
         (
-            "the scratch tab was the last tab: nothing to be beside",
+            // Where the new tab goes is not decided here: closing the
+            // scratch tab brings the keyboard back among the tabs.
+            "the keyboard aside, the scratch tab among the tabs",
             Preview,
-            facts(
-                None,
-                Some((PanePlace::Tab(0), PaneId(11))),
-                GroupFacts { tabs: 1, ..ROOMY },
-            ),
-            new(false, Some((PanePlace::Tab(0), PaneId(11)))),
+            facts(None, Some(left), keyboard_aside),
+            OpenPlan::Replace(left),
+        ),
+        (
+            "kept with the keyboard aside: beside, the preview left alone",
+            Commit,
+            facts(None, Some(left), keyboard_aside),
+            new(true),
         ),
     ];
     for (label, intent, facts, plan) in cases {

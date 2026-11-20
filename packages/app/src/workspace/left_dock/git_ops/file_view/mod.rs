@@ -400,10 +400,12 @@ impl Workspace {
                 }
                 pane_id
             }
-            OpenPlan::New { beside, close } => {
-                if let Some((_, scratch)) = close {
-                    self.close_pane_by_id(scratch, window, cx);
-                }
+            OpenPlan::New { beside } => self.push_file_tab(&open, beside, intent, window, cx),
+            OpenPlan::Replace((_, scratch)) => {
+                self.close_pane_by_id(scratch, window, cx);
+                // Asked once the scratch tab is gone: the close moved the
+                // keyboard, and took a tab only if the pane was alone in it.
+                let beside = self.group_facts().goes_beside(intent.pane_entry());
                 self.push_file_tab(&open, beside, intent, window, cx)
             }
         };

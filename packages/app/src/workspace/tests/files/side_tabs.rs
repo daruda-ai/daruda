@@ -670,3 +670,46 @@ async fn a_skim_takes_its_scratch_tab_with_it_to_the_other_group(cx: &mut TestAp
     });
     f.1.read_with(cx, |ws, _| assert_eq!(ws.active_runtime().tabs.len(), 2));
 }
+
+/// Closing the scratch tab left among the tabs brings the keyboard back to
+/// them, so the skim that closed it is placed by where the keyboard then
+/// is, not by where it was when the row was pressed.
+#[gpui::test]
+async fn a_skim_is_placed_after_its_scratch_tab_is_closed(cx: &mut TestAppContext) {
+    let f = with_files(cx, &["a.txt"]);
+    let lane = f.1.read_with(cx, |ws, _| ws.active_ref());
+    act(&f, cx, |ws, window, cx| ws.send_tab_aside(1, window, cx));
+    // A scratch tab among the tabs, then the keyboard back aside.
+    act(&f, cx, |ws, window, cx| {
+        ws.focus_tabs_group(window, cx);
+        ws.open_files_entry(lane, "b.txt".into(), OpenIntent::Preview, window, cx);
+    });
+    act(&f, cx, |ws, window, cx| {
+        ws.main_area.groups_width = 1200.0;
+        ws.focus_side_group(window, cx);
+    });
+    f.1.read_with(cx, |ws, cx| {
+        assert!(ws.keyboard_is_aside());
+        assert_eq!(ws.preview_tab_index(cx), Some(1));
+    });
+
+    act(&f, cx, |ws, window, cx| {
+        ws.open_files_entry(
+            lane,
+            "sub/nested.txt".into(),
+            OpenIntent::Preview,
+            window,
+            cx,
+        )
+    });
+    assert_eq!(side_files(&f, cx), ["a.txt"], "not opened aside");
+    f.1.read_with(cx, |ws, cx| {
+        assert!(!ws.keyboard_is_aside());
+        assert_eq!(
+            ws.active_runtime().tabs.len(),
+            2,
+            "b.txt's tab was replaced"
+        );
+        assert_eq!(ws.preview_tab_index(cx), Some(1));
+    });
+}

@@ -57,10 +57,14 @@ pub(in crate::workspace) enum OpenPlan {
     Show(Slot),
     /// The scratch tab takes it.
     Refill(Slot),
-    /// A new tab, in the side tabs when `beside`. `close` is a scratch tab
-    /// left in the other group, which goes first: one preview is on screen
-    /// at a time, and none is left behind as a tab nobody chose to keep.
-    New { beside: bool, close: Option<Slot> },
+    /// A new tab, in the side tabs when `beside`.
+    New { beside: bool },
+    /// A new tab, after the scratch tab left in the other group is closed:
+    /// one preview is on screen at a time, and none is left behind as a tab
+    /// nobody chose to keep. Which group the new tab joins is asked again
+    /// once the scratch tab is gone, since closing it moves the keyboard
+    /// and may or may not take a tab with it.
+    Replace(Slot),
 }
 
 /// Decide what opening as `intent` does, given `facts`.
@@ -68,34 +72,15 @@ pub(in crate::workspace) fn plan_open(intent: OpenIntent, facts: &OpenFacts) -> 
     if let Some(existing) = facts.existing {
         return OpenPlan::Show(existing);
     }
-    let entry = intent.pane_entry();
-    let beside = facts.groups.goes_beside(entry);
+    let beside = facts.groups.goes_beside(intent.pane_entry());
     match facts.scratch {
         Some(scratch) if matches!(scratch.0, PanePlace::Side(_)) == beside => {
             OpenPlan::Refill(scratch)
         }
         // In the other group. Only a skim takes its scratch tab along; a
         // file opened to keep leaves the preview where it is.
-        Some(scratch) if intent.claims_preview_slot() => {
-            // Closing a scratch tab that was the last tab on the left
-            // leaves nothing to open beside.
-            let tabs = match scratch.0 {
-                PanePlace::Tab(_) => facts.groups.tabs.saturating_sub(1),
-                PanePlace::Side(_) => facts.groups.tabs,
-            };
-            let after = GroupFacts {
-                tabs,
-                ..facts.groups
-            };
-            OpenPlan::New {
-                beside: after.goes_beside(entry),
-                close: Some(scratch),
-            }
-        }
-        Some(_) | None => OpenPlan::New {
-            beside,
-            close: None,
-        },
+        Some(scratch) if intent.claims_preview_slot() => OpenPlan::Replace(scratch),
+        Some(_) | None => OpenPlan::New { beside },
     }
 }
 
