@@ -557,7 +557,7 @@ impl Workspace {
         let tab_id = self.alloc_tab_id();
         self.active_runtime_mut().panes.push(pane);
         if beside {
-            let index = self.active_runtime_mut().side.push(SideTab {
+            let index = self.active_runtime_mut().side.open(SideTab {
                 id: tab_id,
                 pane: pane_id,
                 user_label: None,

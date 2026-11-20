@@ -173,7 +173,7 @@ impl SideGroup {
 
     /// Add `tab` at the end and show it: a tab added is a tab asked for,
     /// so a collapsed group opens.
-    pub(in crate::workspace) fn push(&mut self, tab: SideTab) -> usize {
+    pub(in crate::workspace) fn open(&mut self, tab: SideTab) -> usize {
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
         self.collapsed = false;

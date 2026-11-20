@@ -99,7 +99,7 @@ impl Workspace {
                 };
                 let runtime = self.active_runtime_mut();
                 runtime.panes.push(pane);
-                Some(runtime.side.push(tab))
+                Some(runtime.side.open(tab))
             }
         };
         self.settle_pr_details(cx);

@@ -11,7 +11,7 @@ fn tab(id: u64) -> SideTab {
 fn group(ids: &[u64]) -> SideGroup {
     let mut group = SideGroup::default();
     for &id in ids {
-        group.push(tab(id));
+        group.open(tab(id));
     }
     group
 }
@@ -24,7 +24,7 @@ fn ids(group: &SideGroup) -> Vec<u64> {
 fn a_tab_added_is_the_one_shown_and_opens_a_collapsed_group() {
     let mut group = group(&[1, 2]);
     group.set_collapsed(true);
-    assert_eq!(group.push(tab(3)), 2);
+    assert_eq!(group.open(tab(3)), 2);
     assert_eq!(group.active_pane(), Some(30.into()));
     assert!(!group.is_collapsed());
 }

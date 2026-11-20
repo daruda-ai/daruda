@@ -147,7 +147,7 @@ impl Workspace {
         if runtime.preview_tab_id == Some(tab.id) {
             runtime.preview_tab_id = None;
         }
-        runtime.side.push(SideTab {
+        runtime.side.open(SideTab {
             id: tab.id,
             pane,
             user_label: tab.user_label,
