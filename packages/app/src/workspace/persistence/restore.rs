@@ -332,6 +332,11 @@ impl Workspace {
         // so the tail never panics.
         self.main_area.runtimes.entry(self.active).or_default();
 
+        // Before the empty-tabs return: tabs still open beside an emptied
+        // lane are restored and shown, and read what they show.
+        self.load_pending_file_panes(cx);
+        self.read_unread_pr_pane(cx);
+
         if self.active_runtime().tabs.is_empty() {
             // An empty active lane is a first-class state: restore never
             // auto-seeds a shell. The main area renders the empty-state and
@@ -362,9 +367,6 @@ impl Workspace {
             let target = self.active;
             self.refresh_git_status(target, cx);
         }
-
-        self.load_pending_file_panes(cx);
-        self.read_unread_pr_pane(cx);
 
         cx.notify();
     }

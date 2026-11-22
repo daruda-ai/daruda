@@ -190,11 +190,23 @@ impl Workspace {
         let Some(pr) = self.pr_pane_content_mut(pane) else {
             return;
         };
-        let PrPaneDetail::Unread(read) = &mut pr.detail else {
+        if !matches!(pr.detail, PrPaneDetail::Unread(_)) {
             return;
-        };
-        *read = PrPaneRead::Reading;
+        }
         let (repo, number) = (pr.repo.clone(), pr.number);
+        // The page has it open already: the pane shows that detail, as a
+        // pane opened now would, and nothing is read again.
+        let details = &self.pages.pull_requests.details;
+        if let Some(hold) = details.of(&repo, number).and_then(|id| details.hold(id)) {
+            if let Some(pr) = self.pr_pane_content_mut(pane) {
+                pr.detail = PrPaneDetail::Open(hold);
+            }
+            cx.notify();
+            return;
+        }
+        if let Some(pr) = self.pr_pane_content_mut(pane) {
+            pr.detail = PrPaneDetail::Unread(PrPaneRead::Reading);
+        }
         let gh = GhHost::global(cx);
         let asked = repo.clone();
         crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(

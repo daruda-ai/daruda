@@ -636,3 +636,65 @@ fn a_read_landing_after_the_pane_moved_on_is_dropped(cx: &mut TestAppContext) {
         assert_eq!(ws.pages.pull_requests.details.len(), 1, "no detail for 7");
     });
 }
+
+/// A worktree whose tabs were all closed, the pull request still beside
+/// them, reads it after a restart too.
+#[gpui::test]
+fn a_pane_beside_no_tab_is_read_after_a_restart(cx: &mut TestAppContext) {
+    let (f, gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    act(&f, cx, |ws, window, cx| {
+        while !ws.active_runtime().tabs.is_empty() {
+            ws.close_tab_at(0, window, cx);
+        }
+    });
+    let reads = gh.count(GhOp::PrDetail);
+
+    let restored = restart(&f, cx);
+    restored.read_with(cx, |ws, _| assert!(ws.active_runtime().tabs.is_empty()));
+    assert_eq!(restored_pane(&restored, cx), Some((7, None)));
+    assert_eq!(gh.count(GhOp::PrDetail), reads + 1);
+}
+
+/// A pane whose pull request the page has open shows that detail rather
+/// than read it again.
+#[gpui::test]
+fn a_pane_takes_the_detail_the_page_has_open(cx: &mut TestAppContext) {
+    let (f, gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    gh.fail(GhOp::PrDetail, daruda_github::fake::GhFailure::Timeout);
+    let window = restart_unparked(&f, cx);
+    cx.run_until_parked();
+    let restored = window.root(cx).unwrap();
+    assert!(matches!(
+        restored_pane(&restored, cx),
+        Some((7, Some(PrPaneRead::Failed(_))))
+    ));
+    gh.clear_failure(GhOp::PrDetail);
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    vcx.update(|window, cx| {
+        restored.update(cx, |ws, cx| {
+            ws.show_page(Page::PullRequests, cx);
+            ws.open_pr_detail(item(7, "feat"), window, cx);
+        })
+    });
+    cx.run_until_parked();
+    let reads = gh.count(GhOp::PrDetail);
+
+    restored.update(cx, |ws, cx| {
+        let pane = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|pane| pane.content.as_pull_request().is_some())
+            .unwrap()
+            .id;
+        ws.retry_pr_pane_read(pane, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(restored_pane(&restored, cx), Some((7, None)));
+    assert_eq!(gh.count(GhOp::PrDetail), reads, "nothing read again");
+    restored.read_with(cx, |ws, _| {
+        assert_eq!(ws.pages.pull_requests.details.len(), 1);
+    });
+}
