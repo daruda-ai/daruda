@@ -11,7 +11,7 @@ use gpui::{AppContext as _, TestAppContext, VisualTestContext};
 
 use super::GitFixture;
 use super::pull_request_detail::{detail, item, open, repo, window};
-use crate::workspace::main_area::pane::PaneContent;
+use crate::workspace::main_area::pane::{PaneContent, PrPaneDetail, PrPaneRead};
 use crate::workspace::main_area::side_group::GroupsShown;
 use crate::workspace::pages::Page;
 use crate::workspace::pages::pull_requests::detail::{PrDetailId, PrOpening, PrTab};
@@ -55,7 +55,7 @@ fn panes(f: &GitFixture, cx: &mut TestAppContext) -> Vec<(PrDetailId, u64)> {
             .panes
             .iter()
             .filter_map(|pane| match &pane.content {
-                PaneContent::PullRequest(pr) => Some(pr.detail.id()),
+                PaneContent::PullRequest(pr) => Some(pr.detail.id().expect("an open detail")),
                 _ => None,
             })
             .map(|id| {
@@ -191,14 +191,6 @@ fn the_git_panels_pull_request_opens_where_files_do(cx: &mut TestAppContext) {
         });
         assert_eq!(panes(&f, cx).len(), usize::from(beside), "beside: {beside}");
     }
-}
-
-#[gpui::test]
-fn a_pull_request_pane_is_not_kept_across_a_restart(cx: &mut TestAppContext) {
-    let (f, _gh, lane) = worktree(cx);
-    open_pane(&f, lane, item(7, "feat"), cx);
-    let (_, projects) = f.ws.read_with(cx, |ws, cx| ws.snapshot_for_disk(cx));
-    assert!(projects[0].lanes[0].side.is_none());
 }
 
 /// What the detail's buttons ask of GitHub is asked from a pane too: the
@@ -480,5 +472,167 @@ fn going_to_the_worktree_from_the_page_takes_the_pull_request_along(cx: &mut Tes
     f.ws.read_with(cx, |ws, _| {
         assert!(ws.active_page().is_none());
         assert!(ws.keyboard_is_aside());
+    });
+}
+
+/// The saved layout and a new window restored from it, its reads not
+/// landed yet.
+fn restart_unparked(
+    f: &GitFixture,
+    cx: &mut TestAppContext,
+) -> gpui::WindowHandle<super::Workspace> {
+    let (workspace_state, project_states) = f.ws.read_with(cx, |ws, cx| ws.snapshot_for_disk(cx));
+    let config = daruda_config::Config::default();
+    cx.add_window(|window, cx| {
+        let mut ws = super::Workspace::new_with_project_for_test(
+            &config,
+            None,
+            super::fresh_test_data_dir(),
+            window,
+            cx,
+        );
+        ws.restore_from_disk(&workspace_state, &project_states, window, cx);
+        ws
+    })
+}
+
+/// The saved layout and a new window restored from it, its reads landed.
+fn restart(f: &GitFixture, cx: &mut TestAppContext) -> gpui::Entity<super::Workspace> {
+    let window = restart_unparked(f, cx);
+    cx.run_until_parked();
+    window.root(cx).unwrap()
+}
+
+/// The restored worktree's pull request pane: its number and how far its
+/// read got.
+fn restored_pane(
+    ws: &gpui::Entity<super::Workspace>,
+    cx: &mut TestAppContext,
+) -> Option<(u64, Option<PrPaneRead>)> {
+    ws.read_with(cx, |ws, _| {
+        ws.active_runtime().panes.iter().find_map(|pane| {
+            let pr = pane.content.as_pull_request()?;
+            let read = match &pr.detail {
+                PrPaneDetail::Open(_) => None,
+                PrPaneDetail::Unread(read) => Some(read.clone()),
+            };
+            Some((pr.number, read))
+        })
+    })
+}
+
+/// The layout keeps which pull request the pane showed, not what it
+/// showed: after a restart the pane is where it was and reads it again,
+/// without taking the keyboard.
+#[gpui::test]
+fn a_restart_reads_the_pull_request_pane_again(cx: &mut TestAppContext) {
+    let (f, gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    let (_, project_states) = f.ws.read_with(cx, |ws, cx| ws.snapshot_for_disk(cx));
+    let side = project_states[0].lanes[0]
+        .side
+        .as_ref()
+        .expect("side tabs saved");
+    assert!(matches!(
+        &side.tabs[..],
+        [daruda_store::project::SerializedTab {
+            layout: daruda_store::project::SerializedLayout::Leaf {
+                content: daruda_store::project::SerializedPaneContent::PullRequest(pr),
+                ..
+            },
+            ..
+        }] if pr.number == 7 && (pr.owner.as_str(), pr.name.as_str()) == (repo().owner(), repo().name())
+    ));
+    let reads = gh.count(GhOp::PrDetail);
+
+    let restored = restart(&f, cx);
+    assert_eq!(restored_pane(&restored, cx), Some((7, None)));
+    assert_eq!(gh.count(GhOp::PrDetail), reads + 1);
+    restored.read_with(cx, |ws, _| {
+        let id = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find_map(|p| p.content.as_pull_request()?.detail.id());
+        let detail = ws.pages.pull_requests.details.get(id.unwrap()).unwrap();
+        assert_eq!(detail.item().pr.number, 7);
+        assert!(!ws.keyboard_is_aside());
+    });
+}
+
+/// A read that fails stays in the pane, which offers it again.
+#[gpui::test]
+fn a_restored_pane_that_cannot_read_says_so_and_tries_again(cx: &mut TestAppContext) {
+    let (f, gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    gh.fail(GhOp::PrDetail, daruda_github::fake::GhFailure::Timeout);
+
+    let restored = restart(&f, cx);
+    assert!(matches!(
+        restored_pane(&restored, cx),
+        Some((7, Some(PrPaneRead::Failed(_))))
+    ));
+
+    gh.clear_failure(GhOp::PrDetail);
+    restored.update(cx, |ws, cx| {
+        let pane = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find(|pane| pane.content.as_pull_request().is_some())
+            .unwrap()
+            .id;
+        ws.retry_pr_pane_read(pane, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(restored_pane(&restored, cx), Some((7, None)));
+}
+
+/// With GitHub off, a saved pull request pane does not come back.
+#[gpui::test]
+fn with_github_off_the_pane_is_not_restored(cx: &mut TestAppContext) {
+    let (f, gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+    let reads = gh.count(GhOp::PrDetail);
+    super::pull_request_detail::set_github_enabled(cx, false);
+
+    let restored = restart(&f, cx);
+    assert_eq!(restored_pane(&restored, cx), None);
+    assert_eq!(gh.count(GhOp::PrDetail), reads);
+}
+
+/// Another pull request opened while the restored one is still being read
+/// takes the pane; the read lands on nothing.
+#[gpui::test]
+fn a_read_landing_after_the_pane_moved_on_is_dropped(cx: &mut TestAppContext) {
+    let (f, _gh, lane) = worktree(cx);
+    open_pane(&f, lane, item(7, "feat"), cx);
+
+    let window = restart_unparked(&f, cx);
+    let restored = window.root(cx).unwrap();
+    assert!(matches!(
+        restored_pane(&restored, cx),
+        Some((7, Some(PrPaneRead::Reading)))
+    ));
+    let mut vcx = VisualTestContext::from_window(window.into(), cx);
+    vcx.update(|window, cx| {
+        restored.update(cx, |ws, cx| {
+            let lane = ws.active_ref();
+            ws.main_area.groups_width = 1400.0;
+            ws.open_pr_pane(lane, item(8, "other"), PrOpening::default(), window, cx);
+        })
+    });
+    cx.run_until_parked();
+    assert_eq!(restored_pane(&restored, cx), Some((8, None)));
+    restored.read_with(cx, |ws, _| {
+        let held = ws
+            .active_runtime()
+            .panes
+            .iter()
+            .find_map(|pane| pane.content.as_pull_request()?.detail.id())
+            .and_then(|id| ws.pages.pull_requests.details.get(id))
+            .map(|detail| detail.item().pr.number);
+        assert_eq!(held, Some(8), "the pane holds the detail it moved on to");
+        assert_eq!(ws.pages.pull_requests.details.len(), 1, "no detail for 7");
     });
 }

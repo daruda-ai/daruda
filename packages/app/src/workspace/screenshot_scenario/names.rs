@@ -76,6 +76,7 @@ const NAME_SIDE_TABS_ZOOMED: &str = "side-tabs:zoomed";
 const NAME_SIDE_TABS_DROP: &str = "side-tabs:drop";
 /// CLI token for a pull request shown in the side tabs.
 const NAME_PULL_REQUEST_PANE: &str = "pull-request-pane";
+const NAME_PULL_REQUEST_PANE_UNREAD: &str = "pull-request-pane:unread";
 /// CLI token for the mermaid-diagram lightbox scenario.
 const NAME_MERMAID_LIGHTBOX: &str = "mermaid-lightbox";
 /// CLI token for the Flows page's graph scenario.
@@ -369,6 +370,7 @@ impl ScreenshotScenario {
             NAME_SIDE_TABS_ZOOMED => Some(Self::SideTabsZoomed),
             NAME_SIDE_TABS_DROP => Some(Self::SideTabsDrop),
             NAME_PULL_REQUEST_PANE => Some(Self::PullRequestPane),
+            NAME_PULL_REQUEST_PANE_UNREAD => Some(Self::PullRequestPaneUnread),
             NAME_MERMAID_LIGHTBOX => Some(Self::MermaidLightbox),
             NAME_FLOW_GRAPH => Some(Self::FlowGraph),
             NAME_FLOW_GRAPH_RUNNING => Some(Self::FlowGraphRunning),

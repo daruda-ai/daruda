@@ -174,6 +174,8 @@ impl Workspace {
         // `Loading` content (a lane restored but never activated defers
         // its loads); fire them now that the lane is active.
         self.load_pending_file_panes(cx);
+        // Likewise a restored pull request pane's read.
+        self.read_unread_pr_pane(cx);
         self.mutate_durable(cx, |_, _| {});
         // 5. If the incoming lane's tree was modified while
         //    inactive, replay a single Bulk reload to catch up.

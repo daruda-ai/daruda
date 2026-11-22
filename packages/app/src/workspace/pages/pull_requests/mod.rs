@@ -27,6 +27,7 @@ pub(in crate::workspace) mod list;
 pub(in crate::workspace) mod navigation;
 pub(in crate::workspace) mod page_layout;
 mod pane;
+pub(in crate::workspace) mod pane_render;
 mod progress;
 mod remote_search;
 pub(in crate::workspace) mod render;

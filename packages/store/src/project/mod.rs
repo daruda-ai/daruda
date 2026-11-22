@@ -225,10 +225,15 @@ pub enum SerializedPaneContent {
     /// A flow graph an older session kept in a lane's tab. Read so the file
     /// still loads; restore drops it, and nothing writes it.
     FlowGraph(SerializedFlowGraphContent),
+    /// A pull request read in a lane's side tabs: which one, and nothing it
+    /// showed. Restore reads it from GitHub again.
+    PullRequest(SerializedPullRequestContent),
 }
 
-/// The file's own shape: a leaf is a `pane_id` plus four optional keys, at
-/// most one of the last three set.
+/// The file's own shape: a leaf is a `pane_id` plus optional keys, at most
+/// one of the content keys (`file`, `agent_chat`, `flow_graph`,
+/// `pull_request`) set. A build that predates a key ignores it and reads the
+/// leaf as a shell.
 ///
 /// Kept exactly as it was written so no state file needs migrating, and so a
 /// build without [`SerializedPaneContent`] still reads what this one writes.
@@ -246,6 +251,8 @@ enum RawLayout {
         agent_chat: Option<SerializedAgentChatContent>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         flow_graph: Option<SerializedFlowGraphContent>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pull_request: Option<SerializedPullRequestContent>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         account_id: Option<crate::accounts::AccountId>,
     },
@@ -265,6 +272,7 @@ impl From<RawLayout> for SerializedLayout {
                 file,
                 agent_chat,
                 flow_graph,
+                pull_request,
                 account_id,
             } => {
                 // First one wins, and the order is the one restore already
@@ -276,6 +284,8 @@ impl From<RawLayout> for SerializedLayout {
                     SerializedPaneContent::AgentChat(chat)
                 } else if let Some(graph) = flow_graph {
                     SerializedPaneContent::FlowGraph(graph)
+                } else if let Some(pr) = pull_request {
+                    SerializedPaneContent::PullRequest(pr)
                 } else {
                     SerializedPaneContent::Terminal { cwd, account_id }
                 };
@@ -316,8 +326,12 @@ impl From<SerializedLayout> for RawLayout {
                         SerializedPaneContent::AgentChat(ac) => Some(ac.clone()),
                         _ => None,
                     },
-                    flow_graph: match content {
-                        SerializedPaneContent::FlowGraph(fg) => Some(fg),
+                    flow_graph: match &content {
+                        SerializedPaneContent::FlowGraph(fg) => Some(fg.clone()),
+                        _ => None,
+                    },
+                    pull_request: match content {
+                        SerializedPaneContent::PullRequest(pr) => Some(pr),
                         _ => None,
                     },
                 }
@@ -382,6 +396,16 @@ fn modified_status() -> char {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SerializedFlowGraphContent {
     pub path: PathBuf,
+}
+
+/// A pull request leaf: the repository, as its host, owner and name, and
+/// the number. What the pane showed is not kept; it is read again.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SerializedPullRequestContent {
+    pub host: String,
+    pub owner: String,
+    pub name: String,
+    pub number: u64,
 }
 
 /// Private wire representation for [`PaneCwd`]. **Not** the internally

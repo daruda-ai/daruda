@@ -364,6 +364,7 @@ impl Workspace {
         }
 
         self.load_pending_file_panes(cx);
+        self.read_unread_pr_pane(cx);
 
         cx.notify();
     }

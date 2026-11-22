@@ -231,14 +231,7 @@ impl Workspace {
                 return;
             }
         };
-        let item = PrListItem {
-            repo,
-            author: detail.author.clone(),
-            head_owner: None,
-            base_branch: detail.base_branch.clone(),
-            comments: 0,
-            pr: detail.summary.clone(),
-        };
+        let item = listed(repo, &detail);
         // Comment anchors open their tab; scrolling to the comment itself
         // is not done yet, and Commits has no tab of its own.
         let tab = match address.target {
@@ -260,6 +253,19 @@ impl Workspace {
             }
             PrDestination::Beside(lane) => self.open_pr_pane(lane, item, opening, window, cx),
         }
+    }
+}
+
+/// `detail` as a row of the list would have it, for a detail opened
+/// without one.
+pub(super) fn listed(repo: RepoId, detail: &PrDetail) -> PrListItem {
+    PrListItem {
+        repo,
+        author: detail.author.clone(),
+        head_owner: None,
+        base_branch: detail.base_branch.clone(),
+        comments: 0,
+        pr: detail.summary.clone(),
     }
 }
 

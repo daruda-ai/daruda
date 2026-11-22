@@ -10,7 +10,7 @@ use super::menus::{SideTabKind, side_tab_context_menu_items};
 use super::tab_bar::{TabCellColors, TabStripColors, tab_cell_frame, tab_strip_colors};
 use crate::ui::cursor::CursorReachExt as _;
 use crate::ui::theme;
-use crate::workspace::main_area::pane::PaneContent;
+use crate::workspace::main_area::pane::{PaneContent, PrPaneDetail};
 use crate::workspace::main_area::pane_tree::{DIVIDER_PX, PaneLayout};
 use crate::workspace::main_area::side_group::PanePlace;
 use crate::workspace::main_area::tab_drag_ops::{TabDrag, TabDragGhost};
@@ -166,7 +166,12 @@ impl Workspace {
             Some((id, PaneContent::PullRequest(pr))) => render_hosted_pane(
                 id,
                 &pr.focus_handle,
-                self.staged_pr_pane(pr.detail.id(), cx),
+                match &pr.detail {
+                    PrPaneDetail::Open(hold) => self.staged_pr_pane(hold.id(), cx),
+                    PrPaneDetail::Unread(read) => Some(
+                        crate::workspace::pages::pull_requests::pane_render::unread(id, read, cx),
+                    ),
+                },
                 cx,
             ),
             Some((id, _)) => render_layout(

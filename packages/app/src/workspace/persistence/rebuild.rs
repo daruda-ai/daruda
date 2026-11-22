@@ -39,8 +39,13 @@ impl Workspace {
         let mut kept_before_active = 0;
         for (ix, stab) in saved.tabs.iter().enumerate() {
             let built_before = scratch.len();
-            let rebuilt =
-                self.rebuild_layout(&stab.layout, Some(lane_path), id_map, scratch, window, cx);
+            let rebuilt = match &stab.layout {
+                daruda_store::project::SerializedLayout::Leaf {
+                    pane_id,
+                    content: daruda_store::project::SerializedPaneContent::PullRequest(pr),
+                } => Ok(self.rebuild_pr_pane(*pane_id, pr, id_map, scratch, cx)),
+                layout => self.rebuild_layout(layout, Some(lane_path), id_map, scratch, window, cx),
+            };
             let pane = match rebuilt {
                 Ok(Some(PaneLayout::Pane(pane))) => Some(pane),
                 Ok(Some(PaneLayout::Split { .. }) | None) => None,
@@ -76,6 +81,32 @@ impl Workspace {
             });
         }
         SideGroup::restored(tabs, kept_before_active, saved.ratio, saved.collapsed)
+    }
+
+    /// A saved pull request side tab, as a pane that reads its pull request
+    /// once shown. None while GitHub is off, whose panes close, and for a
+    /// second one: a worktree has one pull request pane.
+    fn rebuild_pr_pane(
+        &mut self,
+        saved_id: u64,
+        saved: &daruda_store::project::SerializedPullRequestContent,
+        id_map: &mut HashMap<u64, pane_tree::PaneId>,
+        scratch: &mut Vec<pane::Pane>,
+        cx: &mut Context<Self>,
+    ) -> Option<PaneLayout> {
+        if !crate::github::enabled(cx)
+            || scratch
+                .iter()
+                .any(|pane| pane.content.as_pull_request().is_some())
+        {
+            return None;
+        }
+        let repo = daruda_github::RepoId::new(&saved.host, &saved.owner, &saved.name);
+        let pane = self.restored_pr_pane(repo, saved.number, cx);
+        let id = pane.id;
+        id_map.insert(saved_id, id);
+        scratch.push(pane);
+        Some(PaneLayout::Pane(id))
     }
 
     /// Recursively materialize a serialized layout into live panes. `None`
@@ -257,6 +288,9 @@ impl Workspace {
                     // lane's tab: a leaf an older session saved drops out,
                     // and its split closes up around it.
                     Content::FlowGraph(_) => return Ok(None),
+                    // Only the side tabs hold a pull request, and they
+                    // restore it themselves (`rebuild_pr_pane`).
+                    Content::PullRequest(_) => return Ok(None),
                     Content::Terminal { cwd, account_id } => {
                         let effective = effective_cwd(cwd.clone(), fallback_cwd);
                         let account = restored_terminal_account(*account_id, &self.accounts);

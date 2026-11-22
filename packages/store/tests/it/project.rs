@@ -105,6 +105,47 @@ fn legacy_leaf_without_file_field_loads_as_terminal() {
 }
 
 #[test]
+fn a_pull_request_leaf_keeps_which_pull_request_and_nothing_else() {
+    let leaf = SerializedLayout::Leaf {
+        pane_id: 7,
+        content: SerializedPaneContent::PullRequest(SerializedPullRequestContent {
+            host: "github.com".into(),
+            owner: "acme".into(),
+            name: "app".into(),
+            number: 480,
+        }),
+    };
+    let json = serde_json::to_string(&leaf).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&json).unwrap(),
+        serde_json::json!({
+            "type": "Leaf",
+            "pane_id": 7,
+            "cwd": null,
+            "pull_request": {"host": "github.com", "owner": "acme", "name": "app", "number": 480},
+        }),
+    );
+    assert_eq!(
+        serde_json::from_str::<SerializedLayout>(&json).unwrap(),
+        leaf
+    );
+}
+
+#[test]
+fn a_leaf_key_this_build_does_not_know_is_read_as_a_terminal() {
+    // How a build older than a content key reads a leaf written with it:
+    // the key is ignored, so the leaf is a shell, which the side tabs drop.
+    let newer = r#"{"type":"Leaf","pane_id":1,"cwd":null,"a_later_kind":{"x":1}}"#;
+    match serde_json::from_str::<SerializedLayout>(newer).unwrap() {
+        SerializedLayout::Leaf {
+            content: SerializedPaneContent::Terminal { cwd: None, .. },
+            ..
+        } => {}
+        other => panic!("an unknown key is ignored, got {other:?}"),
+    }
+}
+
+#[test]
 fn a_terminal_leaf_writes_no_file_or_agent_chat_key() {
     // Absent optional keys keep saved state small for the common case and
     // existing terminal/file state files byte-compatible.

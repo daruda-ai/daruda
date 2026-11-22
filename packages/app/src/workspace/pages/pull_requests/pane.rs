@@ -6,14 +6,22 @@
 //! The pane owns a hold on one of the window's open details
 //! (`details.rs`): the detail stays open while the pane does, and is let
 //! go of with the pane, however the pane goes.
+//!
+//! The layout keeps only which pull request the pane shows. Restored, the
+//! pane has no detail until that pull request is read again, once its
+//! worktree is shown; a failed read is offered again from the pane.
 
-use daruda_github::PrListItem;
+use daruda_github::{GhError, PrDetail, PrListItem, RepoId};
 use daruda_store::project::LaneRef;
 use gpui::{Context, SharedString, Window};
 
 use super::detail::{PrDetailId, PrOpening};
+use super::direct::PrDestination;
+use crate::gh_host::GhHost;
 use crate::workspace::Workspace;
-use crate::workspace::main_area::pane::{Pane, PaneContent, PrPaneContent};
+use crate::workspace::main_area::pane::{
+    Pane, PaneContent, PrPaneContent, PrPaneDetail, PrPaneRead,
+};
 use crate::workspace::main_area::pane_tree::PaneId;
 use crate::workspace::main_area::side_group::{GroupsShown, SideTab};
 
@@ -23,12 +31,19 @@ fn label(number: u64) -> SharedString {
 }
 
 impl Workspace {
-    /// The active worktree's pull request pane and the detail it holds.
-    fn pr_pane(&self) -> Option<(PaneId, PrDetailId)> {
+    /// The active worktree's pull request pane.
+    fn pr_pane(&self) -> Option<PaneId> {
         self.active_runtime()
             .panes
             .iter()
-            .find_map(|pane| Some((pane.id, pane.content.as_pull_request()?.detail.id())))
+            .find(|pane| pane.content.as_pull_request().is_some())
+            .map(|pane| pane.id)
+    }
+
+    fn pr_pane_content_mut(&mut self, pane: PaneId) -> Option<&mut PrPaneContent> {
+        self.main_area
+            .pane_mut(pane)
+            .and_then(|pane| pane.content.as_pull_request_mut())
     }
 
     /// The detail a pull request pane shows on screen now, if one does.
@@ -37,9 +52,14 @@ impl Workspace {
             return None;
         }
         let shown = self.active_runtime().side.shown_pane()?;
-        self.pr_pane()
-            .filter(|(pane, _)| *pane == shown)
-            .map(|(_, detail)| detail)
+        self.active_runtime()
+            .panes
+            .iter()
+            .find(|pane| pane.id == shown)?
+            .content
+            .as_pull_request()?
+            .detail
+            .id()
     }
 
     /// Show `item` in `lane`'s side tabs and move into it. The pull request
@@ -66,19 +86,18 @@ impl Workspace {
         if self.active_lane_is_inaccessible() {
             return;
         }
-        let number = item.pr.number;
+        let (repo, number) = (item.repo.clone(), item.pr.number);
         let (hold, start) = self.pr_detail_for(item, opening, cx);
         let id = hold.id();
         let index = match self.pr_pane() {
-            Some((pane_id, _)) => {
-                if let Some(pr) = self
-                    .main_area
-                    .pane_mut(pane_id)
-                    .and_then(|pane| pane.content.as_pull_request_mut())
-                {
+            Some(pane_id) => {
+                if let Some(pr) = self.pr_pane_content_mut(pane_id) {
                     // The hold it had is dropped: that detail ends unless
-                    // the page shows it.
-                    pr.detail = hold;
+                    // the page shows it. A read it was waiting on lands on
+                    // nothing.
+                    pr.repo = repo;
+                    pr.number = number;
+                    pr.detail = PrPaneDetail::Open(hold);
                     pr.label = label(number);
                 }
                 self.active_runtime().side.position_of(pane_id)
@@ -87,7 +106,9 @@ impl Workspace {
                 let pane = Pane {
                     id: self.alloc_pane_id(),
                     content: PaneContent::PullRequest(PrPaneContent {
-                        detail: hold,
+                        repo,
+                        number,
+                        detail: PrPaneDetail::Open(hold),
                         label: label(number),
                         focus_handle: cx.focus_handle(),
                     }),
@@ -107,6 +128,128 @@ impl Workspace {
         self.resize_all_tabs(window, cx);
         if let Some(index) = index {
             self.activate_side_tab(index, window, cx);
+        }
+        cx.notify();
+    }
+
+    /// A pull request pane as the layout kept it: `repo#number`, not read
+    /// yet.
+    pub(in crate::workspace) fn restored_pr_pane(
+        &mut self,
+        repo: RepoId,
+        number: u64,
+        cx: &mut Context<Self>,
+    ) -> Pane {
+        Pane {
+            id: self.alloc_pane_id(),
+            content: PaneContent::PullRequest(PrPaneContent {
+                repo,
+                number,
+                detail: PrPaneDetail::Unread(PrPaneRead::Waiting),
+                label: label(number),
+                focus_handle: cx.focus_handle(),
+            }),
+        }
+    }
+
+    /// The worktree on screen now: a pull request pane restored without
+    /// its pull request reads it.
+    pub(in crate::workspace) fn read_unread_pr_pane(&mut self, cx: &mut Context<Self>) {
+        let waiting = self.pr_pane().filter(|pane| {
+            self.main_area
+                .pane(*pane)
+                .and_then(|pane| pane.content.as_pull_request())
+                .is_some_and(|pr| matches!(pr.detail, PrPaneDetail::Unread(PrPaneRead::Waiting)))
+        });
+        if let Some(pane) = waiting {
+            self.send_pr_pane_read(pane, cx);
+        }
+    }
+
+    /// Read again the pull request a restored pane failed to read.
+    pub(in crate::workspace) fn retry_pr_pane_read(
+        &mut self,
+        pane: PaneId,
+        cx: &mut Context<Self>,
+    ) {
+        let failed = self
+            .main_area
+            .pane(pane)
+            .and_then(|pane| pane.content.as_pull_request())
+            .is_some_and(|pr| matches!(pr.detail, PrPaneDetail::Unread(PrPaneRead::Failed(_))));
+        if failed {
+            self.send_pr_pane_read(pane, cx);
+        }
+    }
+
+    fn send_pr_pane_read(&mut self, pane: PaneId, cx: &mut Context<Self>) {
+        // Off, nothing asks `gh`; the panes close as it is switched off.
+        if !crate::github::enabled(cx) {
+            return;
+        }
+        let Some(pr) = self.pr_pane_content_mut(pane) else {
+            return;
+        };
+        let PrPaneDetail::Unread(read) = &mut pr.detail else {
+            return;
+        };
+        *read = PrPaneRead::Reading;
+        let (repo, number) = (pr.repo.clone(), pr.number);
+        let gh = GhHost::global(cx);
+        let asked = repo.clone();
+        crate::workspace::spawn_helpers::spawn_bg_work_and_mutate(
+            cx,
+            move || gh.pr_detail(&asked, number),
+            move |ws, result, cx| ws.land_pr_pane_read(pane, repo, number, result, cx),
+        )
+        .detach();
+        cx.notify();
+    }
+
+    /// The read a restored pane sent. It lands only on the pane still
+    /// waiting for that pull request: one retargeted or closed since has
+    /// nothing to take from it.
+    fn land_pr_pane_read(
+        &mut self,
+        pane: PaneId,
+        repo: RepoId,
+        number: u64,
+        result: Result<PrDetail, GhError>,
+        cx: &mut Context<Self>,
+    ) {
+        let waiting = self
+            .main_area
+            .pane(pane)
+            .and_then(|pane| pane.content.as_pull_request())
+            .is_some_and(|pr| {
+                pr.repo == repo
+                    && pr.number == number
+                    && matches!(pr.detail, PrPaneDetail::Unread(PrPaneRead::Reading))
+            });
+        if !waiting {
+            return;
+        }
+        match result {
+            Ok(read) => {
+                let item = super::direct::listed(repo, &read);
+                let opening = PrOpening {
+                    tab: None,
+                    read: Some(Box::new(read)),
+                };
+                let (hold, start) = self.pr_detail_for(item, opening, cx);
+                let id = hold.id();
+                if let Some(pr) = self.pr_pane_content_mut(pane) {
+                    pr.detail = PrPaneDetail::Open(hold);
+                }
+                self.settle_pr_details(cx);
+                self.start_pr_detail(id, start, cx);
+            }
+            Err(e) => {
+                if let Some(pr) = self.pr_pane_content_mut(pane) {
+                    pr.detail = PrPaneDetail::Unread(PrPaneRead::Failed(e.to_string()));
+                }
+                self.report_pr_read(&e, "github.pr_detail.read", cx);
+            }
         }
         cx.notify();
     }
@@ -131,6 +274,27 @@ impl Workspace {
         };
         self.close_page(cx);
         self.open_pr_pane(self.active, item, PrOpening::default(), window, cx);
+    }
+
+    /// The pull request pane above, as a restart leaves it when its read
+    /// fails.
+    #[cfg(feature = "screenshot")]
+    pub(in crate::workspace) fn open_unread_pr_pane_for_shot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_pr_pane_for_shot(window, cx);
+        if let Some(pr) = self
+            .pr_pane()
+            .and_then(|pane| self.pr_pane_content_mut(pane))
+        {
+            pr.detail = PrPaneDetail::Unread(PrPaneRead::Failed(
+                "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)".into(),
+            ));
+        }
+        self.settle_pr_details(cx);
+        cx.notify();
     }
 
     /// Panes are going away. A pull request pane drops its hold with
@@ -200,15 +364,28 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let item = self
+        let Some(pr) = self
             .main_area
             .pane(pane)
             .and_then(|pane| pane.content.as_pull_request())
-            .and_then(|pr| self.pr_detail(pr.detail.id()))
+        else {
+            return;
+        };
+        let item = pr
+            .detail
+            .id()
+            .and_then(|id| self.pr_detail(id))
             .map(|detail| detail.item().clone());
-        if let Some(item) = item {
-            self.show_page(super::Page::PullRequests, cx);
-            self.open_pr_detail(item, window, cx);
+        match item {
+            Some(item) => {
+                self.show_page(super::Page::PullRequests, cx);
+                self.open_pr_detail(item, window, cx);
+            }
+            // Not read yet: the page reads it.
+            None => {
+                let (repo, number) = (pr.repo.clone(), pr.number);
+                self.open_pr_at(repo, number, PrDestination::Page, window, cx);
+            }
         }
     }
 }

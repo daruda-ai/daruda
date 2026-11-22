@@ -397,6 +397,14 @@ fn serialize_pane_content(
             reference: fv.origin == FileOrigin::Reference,
         });
     }
+    if let Some(pr) = pane.content.as_pull_request() {
+        return Content::PullRequest(daruda_store::project::SerializedPullRequestContent {
+            host: pr.repo.host().to_owned(),
+            owner: pr.repo.owner().to_owned(),
+            name: pr.repo.name().to_owned(),
+            number: pr.number,
+        });
+    }
     if let Some(ac) = pane.agent_chat_content() {
         let v = ac.view.read(cx);
         // Only explicit choices are written, so an untouched pane keeps

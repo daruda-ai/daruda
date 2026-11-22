@@ -196,6 +196,9 @@ pub(crate) enum ScreenshotScenario {
     /// A pull request's detail in the side tabs, beside the worktree's
     /// tabs: how it fits a pane's width.
     PullRequestPane,
+    /// A pull request pane restored without its pull request, whose read
+    /// failed: the reason and Try again in the pane.
+    PullRequestPaneUnread,
     FileInput(super::main_area::file_context::FileInputShot),
     /// Open the mermaid diagram lightbox with a wide (two-subgraph) sample —
     /// the only way to eyeball the clamp/scroll behavior a unit test can
@@ -702,6 +705,12 @@ pub(crate) fn drive(
             workspace.update(cx, |ws, cx| {
                 ws.seed_left_dock_for_shot(false, true, false, window, cx);
                 ws.open_pr_pane_for_shot(window, cx);
+            });
+        }
+        ScreenshotScenario::PullRequestPaneUnread => {
+            workspace.update(cx, |ws, cx| {
+                ws.seed_left_dock_for_shot(false, true, false, window, cx);
+                ws.open_unread_pr_pane_for_shot(window, cx);
             });
         }
         ScreenshotScenario::SideTabs => {

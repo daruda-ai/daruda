@@ -224,7 +224,10 @@ is read beside a chat goes aside: files, diffs and a pull request
   disk) is settled by `Workspace::settle_pr_details` alone. Code given a
   detail's id finds it with `pr_detail(id)`, never through the one the page
   shows. A worktree has one such pane, retargeted by
-  the next pull request; it is not saved with the layout.
+  the next pull request. The layout keeps only which pull request it is:
+  restored, the pane is `PrPaneDetail::Unread` until its worktree is shown
+  and the pull request is read again, and a read lands only on a pane still
+  waiting for that pull request.
 - **Where an open goes** is decided by `main_area/open_plan.rs` from plain
   facts (`plan_open`, `GroupFacts::goes_beside`); the workspace only carries
   the plan out. A new rule is a row in its table of cases. The plan does not

@@ -89,11 +89,45 @@ pub(in crate::workspace) enum PaneContent {
 /// window's open details (`PrDetails`), which it holds while it is open;
 /// the Pull requests page showing the same pull request shows that detail.
 pub(in crate::workspace) struct PrPaneContent {
-    /// The pane's hold on its detail: dropped with the pane.
-    pub(in crate::workspace) detail: crate::workspace::pages::pull_requests::details::DetailHold,
+    /// The pull request it shows, kept with the layout.
+    pub(in crate::workspace) repo: daruda_github::RepoId,
+    pub(in crate::workspace) number: u64,
+    pub(in crate::workspace) detail: PrPaneDetail,
     /// `#480`, for the tab strip.
     pub(in crate::workspace) label: SharedString,
     pub(in crate::workspace) focus_handle: FocusHandle,
+}
+
+/// Whether a pull request pane has its detail yet.
+pub(in crate::workspace) enum PrPaneDetail {
+    /// The pane's hold on its detail: dropped with the pane.
+    Open(crate::workspace::pages::pull_requests::details::DetailHold),
+    /// Restored with the layout and not read yet: a detail needs the pull
+    /// request as GitHub has it now, so one is opened once that is read.
+    Unread(PrPaneRead),
+}
+
+/// A restored pull request pane's read of its pull request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workspace) enum PrPaneRead {
+    /// Asked once its worktree is shown, so a restart sends no read for
+    /// worktrees nobody looks at.
+    Waiting,
+    Reading,
+    /// What `gh` said; offered again from the pane.
+    Failed(String),
+}
+
+impl PrPaneDetail {
+    /// The open detail it holds, once it has one.
+    pub(in crate::workspace) fn id(
+        &self,
+    ) -> Option<crate::workspace::pages::pull_requests::detail::PrDetailId> {
+        match self {
+            PrPaneDetail::Open(hold) => Some(hold.id()),
+            PrPaneDetail::Unread(_) => None,
+        }
+    }
 }
 
 /// PTY-backed terminal content. Owns the `TerminalView` entity, the
