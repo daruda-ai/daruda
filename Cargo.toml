@@ -17,7 +17,7 @@ gpui = { path = "vendor/zed/crates/gpui" }
 gpui_macos = { path = "vendor/zed/crates/gpui_macos" }
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.98.1"
 license = "AGPL-3.0-only"
