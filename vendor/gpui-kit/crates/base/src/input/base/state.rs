@@ -3240,10 +3240,9 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     /// Whether the text takes a wheel event moving by `delta` from the
-    /// scroll areas around it: it has room to scroll along the axis the
-    /// event mostly moves on. Unlike [`Self::overflows_along`], an event that
-    /// moves on neither axis, such as a gesture's start or end, goes to text
-    /// that can scroll vertically.
+    /// scroll areas around it: it can still scroll in the event's direction
+    /// along the axis the event mostly moves on. An event that moves on
+    /// neither axis, such as a gesture's start or end, is not taken.
     pub(super) fn takes_scroll(&self, delta: Point<Pixels>) -> bool {
         // daruda patch: claim only a scroll the text can still move by, so the
         // region around it takes over at the text's end.

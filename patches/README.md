@@ -164,9 +164,9 @@ scratch copy of `vendor/zed` with `[patch]` pointing `gpui` at the copy's
 forcing every unpause to stay paused under lldb: the window joined
 `CVDisplayLink` and kept drawing with no further `needsUpdate`.
 
-Drop the patch when upstream detects or prevents the stall. At the current
-pin upstream only adds a `MetalFrames::debug_state` snapshot; the patch was
-rebased around it and still has no upstream equivalent.
+Drop the patch when upstream detects or prevents the stall. Upstream adds
+only a `MetalFrames::debug_state` snapshot, which the patch leaves intact;
+nothing upstream detects or prevents the stall.
 
 ## Upstream GPUI fixes retained by the pin
 
@@ -605,18 +605,21 @@ Restore the deferred notify. Paired tests fail if you forget —
 ## `vendor/gpui-kit/crates/base/src/input/base/state.rs` — vendored, **the wheel chains at the text's end**
 
 A height-capped editor embedded in the agent-chat transcript must hand the
-wheel back to the transcript once it cannot scroll further. Upstream claimed a
-scroll whenever the text overflowed along the gesture's axis and stopped
-propagation unconditionally.
+wheel back to the transcript once it cannot scroll further. Upstream 0.11.0
+claims a wheel event whenever the text overflows along the event's main axis,
+and stops propagation when the offset changed, the f64 offset moved, or the
+text overflows along that axis (`overflows_along`), so overflowing text keeps
+the wheel at its end.
 
 - `takes_scroll` claims a wheel event only when the text can still move in
   that direction (offset short of the extent for a scroll toward the end,
   offset below zero for a scroll toward the start). The vertical check reads
-  the f64 offset and content height the scroll itself clamps against.
-- `on_scroll_wheel` stops propagation only when the offset actually changed
-  (the handle offset or upstream's f64 offset, which can move where the f32
-  handle rounds to the same value) or the scroll bounced. Upstream's
-  `overflows_along` claim is not applied.
+  the f64 offset and content height the scroll itself clamps against. An
+  event that moves on neither axis is not taken.
+- `on_scroll_wheel` keeps upstream's two offset checks (the handle offset, and
+  the f64 offset, which can move where the f32 handle rounds to the same
+  value) and replaces the `overflows_along` condition with whether the scroll
+  bounced, so a scroll that moves nothing propagates.
 
 Re-apply both. `packages/chat/src/view/tests/output_layout.rs`'s
 `capped_embed_wheel_chains_only_after_the_embed_is_exhausted` covers holding
