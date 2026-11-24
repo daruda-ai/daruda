@@ -4169,6 +4169,17 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 }
 
                 let p = point(p.x + prepaint.line_number_offset, p.y);
+                // daruda patch: expose gutter text to headless tests, so host
+                // gutter labels are observable like any other painted text.
+                #[cfg(feature = "test-support")]
+                if let Some(line) = lines.first() {
+                    crate::test_support::record_text(
+                        line.text.clone(),
+                        false,
+                        Bounds::new(p, size(line.width, line_height)),
+                        window,
+                    );
+                }
                 for line in lines {
                     _ = line.paint(p, line_height, TextAlign::Left, None, window, cx);
                     offset_y += line_height;

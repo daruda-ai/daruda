@@ -550,7 +550,7 @@ and to size chrome around it. All default to upstream behaviour.
 
 | Delta | Site | Detail |
 |---|---|---|
-| `LineDecoration` | `base/src/input/base/state.rs` (`LineDecoration`, `line_decorations`, `set_line_decorations`), `base/src/input/base/element.rs` (`gutter_label_len`, gutter width, row-background paint), re-exported from `component/src/input/mod.rs` | Per-buffer-row `background` fill and `gutter` label. Row backgrounds paint under everything else; host labels size the gutter to the widest one instead of the line count. The diff viewer packs its old/new line numbers into one gutter column. |
+| `LineDecoration` | `base/src/input/base/state.rs` (`LineDecoration`, `line_decorations`, `set_line_decorations`), `base/src/input/base/element.rs` (`gutter_label_len`, gutter width, row-background paint), re-exported from `component/src/input/mod.rs` | Per-buffer-row `background` fill and `gutter` label. Row backgrounds paint under everything else; host labels size the gutter to the widest one instead of the line count. The diff viewer packs its old/new line numbers into one gutter column. With `test-support`, the gutter paint also records its text for `test_support::texts`, so `tests/line_decorations.rs` can pin the labels, gutter width, and row backgrounds. |
 | Highlight override | `base/src/input/editor/decorations.rs` (`set_highlight_override`), `base/src/input/base/kind.rs` (`EditorExtras::highlight_override`) | Paints host spans through a decoration collection in place of syntax highlighting, switching the highlighter to plain `text` while installed: a synthetic +/- diff buffer is not valid source for any grammar. `None` clears the spans and restores the previous language. |
 | Layout readbacks | `base/src/input/base/state.rs` (`scroll_size`, `display_rows`, `move_cursor_to_end`) | `scroll_size` is the scrollable extent from the last layout, for a host overlaying its own thumb. `display_rows` is the soft-wrapped row count clamped by an auto-grow range, which the composer and the agent-chat embeds size from. `move_cursor_to_end` places the cursor after the last character without moving focus (history recall). |
 | One renderer for every state | `component/src/input/state.rs` (`TextInputState` public), `component/src/input/input.rs` (`Input::from_state`) | A host builds one `Input` for an `InputState`, `TextareaState`, or `EditorState` (`daruda_ui::input`'s `TextState`). |
@@ -706,8 +706,10 @@ selection, occlusion and button tests remain in `markdown/tests.rs`.
 disabled); its public-API fixture verifies independent `RenderContext` link
 opening and context capture. It also registers upstream's
 `tests/html_paragraph_ids.rs`, which guards span-less HTML paragraphs with
-inline code against sharing one element id and painting no text. Other
-upstream integration tests stay unregistered.
+inline code against sharing one element id and painting no text, and
+`tests/line_decorations.rs`, which pins the `LineDecoration` gutter labels,
+gutter width, and row backgrounds. Other upstream integration tests stay
+unregistered.
 
 ---
 

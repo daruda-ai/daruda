@@ -88,3 +88,8 @@ path = "tests/text_host.rs"
 [[test]]
 name = "html_paragraph_ids"
 path = "tests/html_paragraph_ids.rs"
+
+# daruda patch: pin host gutter labels and row backgrounds (`LineDecoration`).
+[[test]]
+name = "line_decorations"
+path = "tests/line_decorations.rs"
