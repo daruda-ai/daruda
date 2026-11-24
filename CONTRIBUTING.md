@@ -874,7 +874,6 @@ daruda/
 │   ├── vendor_gpui/            # regenerates and checks the vendor/zed override
 │   └── vt_dump/                # headless VT diagnostic CLI
 ├── vendor/                     # third-party sources, one directory per upstream
-│   ├── block/                  # patched block crate
 │   ├── ghostty/                # Ghostty v1.4.0 submodule
 │   ├── zed/                    # patched GPUI; regenerate with tools/vendor_gpui
 │   ├── gpui-kit/               # vendored gpui-component 0.11.0 crates

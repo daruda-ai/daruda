@@ -166,9 +166,9 @@ scratch copy of `vendor/zed` with `[patch]` pointing `gpui` at the copy's
 forcing every unpause to stay paused under lldb: the window joined
 `CVDisplayLink` and kept drawing with no further `needsUpdate`.
 
-Drop the patch when upstream detects or prevents the stall. Upstream adds
-only a `MetalFrames::debug_state` snapshot, which the patch leaves intact;
-nothing upstream detects or prevents the stall.
+Drop the patch when upstream detects or prevents the stall. At the pinned
+revision upstream's `MetalFrames::debug_state` only snapshots the link state,
+and the patch leaves it intact; nothing upstream detects or prevents the stall.
 
 ## Upstream GPUI fixes retained by the pin
 
@@ -749,7 +749,7 @@ fail without the hooks and the list spacing.
 ## `vendor/gpui-kit/crates/component/locales/ko.yml` — vendored, **an added file, not a patch**
 
 The only Korean the vendored widgets have. Upstream's `locales/ui.yml` carries
-`en` / `pt-BR` / `ru` / `zh-CN` / `zh-HK` / `zh-TW` / `it`, so
+`en` / `ja` / `pt-BR` / `ru` / `zh-CN` / `zh-HK` / `zh-TW` / `it`, so
 `gpui_component::set_locale("ko")` would fall back to English, and a Korean
 window would show "Cut / Copy / Paste / Select All" in every text input's
 right-click menu and "Cancel" on every confirm dialog.
