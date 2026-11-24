@@ -48,7 +48,8 @@ pub struct FileUrl {
 impl FileUrl {
     /// `None` when `link` is not a `file:` URL, or its path has no form in
     /// `style` — a Windows path needs a drive or a host, and both styles
-    /// need the decoded bytes to be UTF-8.
+    /// need the decoded bytes to be UTF-8. Whether the URL library keeps or
+    /// drops a host before a drive (versions differ) changes nothing here.
     pub fn parse(link: &str, style: PathStyle) -> Option<Self> {
         let url = url::Url::parse(link).ok()?;
         if url.scheme() != FILE_SCHEME {
@@ -73,7 +74,8 @@ impl FileUrl {
     }
 
     /// The path in the decoded style. Under Windows a named host is part of
-    /// it, as a UNC path (`\\server\share\…`).
+    /// it, as a UNC path (`\\server\share\…`), unless the path starts at a
+    /// drive: that is a disk of the host, which [`Self::host`] still names.
     pub fn path(&self) -> &str {
         &self.path
     }
@@ -116,14 +118,27 @@ fn windows_path<'a>(
     mut segments: impl Iterator<Item = &'a str>,
 ) -> Option<String> {
     let sep = PathStyle::Windows.primary_separator();
+    let first = segments.next()?;
     let mut path = String::new();
-    if let Some(host) = host {
-        path.extend([sep, sep]);
-        path.push_str(host);
-    } else {
-        path.push_str(&windows_drive(segments.next()?)?);
-    }
     let mut wrote_segment = false;
+    // A drive is a disk of the machine named, never a share on it: a shell
+    // reporting its directory writes its own host before the drive. The
+    // host stays apart to say whose disk; without a drive it is a server.
+    let drive = windows_drive(first);
+    match (&drive, host) {
+        (Some(drive), _) => path.push_str(drive),
+        (None, Some(host)) => {
+            path.extend([sep, sep]);
+            path.push_str(host);
+            path.push(sep);
+            path.push_str(
+                &percent_encoding::percent_decode_str(first)
+                    .decode_utf8()
+                    .ok()?,
+            );
+        }
+        (None, None) => return None,
+    }
     for segment in segments {
         path.push(sep);
         path.push_str(
@@ -134,7 +149,7 @@ fn windows_path<'a>(
         wrote_segment = true;
     }
     // `C:` alone is drive-relative; the URL named the drive's root.
-    if host.is_none() && !wrote_segment {
+    if drive.is_some() && !wrote_segment {
         path.push(sep);
     }
     Some(path)

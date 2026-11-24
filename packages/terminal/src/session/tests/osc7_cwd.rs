@@ -52,6 +52,13 @@ fn osc7_follows_the_windows_style() {
         Some("C:\\Users\\x")
     );
     assert_eq!(windows(b"file:///home/user"), None);
+    // A shell writes its own host before the drive: this machine's drive,
+    // and another machine's is refused like any other path of its.
+    assert_eq!(
+        windows(b"file://mymac/C:/Users/x").as_deref(),
+        Some("C:\\Users\\x")
+    );
+    assert_eq!(windows(b"file://box/C:/Users/x"), None);
 }
 
 #[test]

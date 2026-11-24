@@ -61,6 +61,20 @@ fn windows_needs_a_drive_or_a_host() {
     assert_eq!(unc.path(), "\\\\server\\share\\a.rs");
 }
 
+/// What a Windows shell reports as its directory (OSC 7): its own host name
+/// before a drive. The drive is a disk of that machine, not a share: the
+/// host stays apart to say whose disk, and the path is the drive's.
+#[test]
+fn a_host_before_a_drive_keeps_the_drive_path() {
+    let url = FileUrl::parse("file://box/C:/Users/x", PathStyle::Windows).unwrap();
+    assert_eq!(url.host(), Some("box"));
+    assert_eq!(url.path(), "C:\\Users\\x");
+    assert!(url.names_this_machine(Some("box")));
+    assert!(!url.names_this_machine(Some("other")));
+    let root = FileUrl::parse("file://box/C:", PathStyle::Windows).unwrap();
+    assert_eq!(root.path(), "C:\\");
+}
+
 #[test]
 fn a_decoded_path_is_absolute_in_its_own_style() {
     for style in [PathStyle::Posix, PathStyle::Windows] {
