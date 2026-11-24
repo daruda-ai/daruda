@@ -436,7 +436,8 @@ pub struct LineDecoration {
     /// editor background.
     pub background: Option<gpui::Hsla>,
     /// Gutter text replacing the row's sequential number. When any row sets
-    /// one, the gutter is sized to the widest entry.
+    /// one, the gutter is sized to the widest entry, widened to the line
+    /// count's width while any row still shows its number.
     pub gutter: Option<SharedString>,
 }
 

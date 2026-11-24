@@ -1,6 +1,7 @@
 //! daruda patch: host row decorations (`LineDecoration`) replace the editor's
-//! sequential line numbers with host gutter labels, size the gutter to the
-//! widest label, and paint a full-width row background.
+//! sequential line numbers with host gutter labels, size the gutter to cover
+//! the widest label and any row's fallback number, and paint a full-width row
+//! background.
 #![cfg(feature = "test-support")]
 
 #[cfg(feature = "gpui-fast")]
@@ -38,7 +39,8 @@ struct Case {
     /// Per buffer row: gutter label and background. Rows past the end keep
     /// their sequential number.
     rows: &'static [(Option<&'static str>, Option<fn() -> Hsla>)],
-    /// The gutter width in columns: the widest label, else three digits.
+    /// The gutter width in columns: the widest label, widened to the line
+    /// count's digits (at least three) when any row keeps its number.
     columns: usize,
 }
 
@@ -157,6 +159,24 @@ fn gutter_labels_replace_line_numbers_and_size_the_gutter(cx: &mut TestAppContex
             ],
             columns: 9,
         },
+        // Partial labels: rows past the decorations keep their sequential
+        // number, so even an empty label leaves the line count's width.
+        Case {
+            name: "partial labels",
+            rows: &[(Some(""), Some(add_bg))],
+            columns: 3,
+        },
+        // An unlabeled row inside the decorations also keeps its number.
+        Case {
+            name: "unlabeled row",
+            rows: &[
+                (Some("x"), None),
+                (Some("y"), None),
+                (None, Some(del_bg)),
+                (Some("z"), None),
+            ],
+            columns: 3,
+        },
         // Hidden numbers: empty labels reserve no number columns at all.
         Case {
             name: "hidden numbers",
@@ -170,18 +190,26 @@ fn gutter_labels_replace_line_numbers_and_size_the_gutter(cx: &mut TestAppContex
         },
     ];
 
+    // Equal column counts give equal gutters; more columns start the text
+    // further right.
     let mut painted: Vec<Painted> = cases.iter().map(|case| render_case(cx, case)).collect();
     painted.sort_by_key(|painted| painted.columns);
     for pair in painted.windows(2) {
+        let (narrow, wide) = (&pair[0], &pair[1]);
+        let ordered = if narrow.columns == wide.columns {
+            narrow.text_origin == wide.text_origin
+        } else {
+            narrow.text_origin < wide.text_origin
+        };
         assert!(
-            pair[0].text_origin < pair[1].text_origin,
-            "{} ({} columns) text starts at {:?}, not left of {} ({} columns) at {:?}",
-            pair[0].name,
-            pair[0].columns,
-            pair[0].text_origin,
-            pair[1].name,
-            pair[1].columns,
-            pair[1].text_origin,
+            ordered,
+            "{} ({} columns) text starts at {:?}; {} ({} columns) at {:?}",
+            narrow.name,
+            narrow.columns,
+            narrow.text_origin,
+            wide.name,
+            wide.columns,
+            wide.text_origin,
         );
     }
 }

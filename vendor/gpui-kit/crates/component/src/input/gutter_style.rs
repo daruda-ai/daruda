@@ -440,8 +440,9 @@ mod tests {
         #[gpui::test]
         fn gutter_style_shapes_host_labels_and_sizes_the_gutter(cx: &mut TestAppContext) {
             cx.update(crate::init);
-            // (name, rows, gutter columns: the widest label, else three digits)
-            let cases: [(&str, Rows, usize); 4] = [
+            // (name, rows, gutter columns: the widest label, widened to the
+            // line count's digits, at least three, when any row keeps its number)
+            let cases: [(&str, Rows, usize); 6] = [
                 ("undecorated", &[], 3),
                 // The diff viewer's packed "old new" pair; a hunk header is
                 // blank and the undecorated last row keeps its own number.
@@ -463,6 +464,21 @@ mod tests {
                         (Some("1002 1002"), None),
                     ],
                     9,
+                ),
+                // Partial labels: rows past the decorations keep their
+                // sequential number, so even an empty label leaves the line
+                // count's width.
+                ("partial labels", &[(Some(""), Some(add_bg))], 3),
+                // An unlabeled row inside the decorations also keeps its number.
+                (
+                    "unlabeled row",
+                    &[
+                        (Some("x"), None),
+                        (Some("y"), None),
+                        (None, Some(del_bg)),
+                        (Some("z"), None),
+                    ],
+                    3,
                 ),
                 // Hidden numbers: empty labels reserve no number columns.
                 (
@@ -531,14 +547,21 @@ mod tests {
                 origins.push((columns, name, painted.text_origin));
             }
 
+            // Equal column counts give equal gutters; more columns start the
+            // text further right.
             origins.sort_by_key(|(columns, ..)| *columns);
             for pair in origins.windows(2) {
                 let ((narrow, narrow_name, narrow_origin), (wide, wide_name, wide_origin)) =
                     (pair[0], pair[1]);
+                let ordered = if narrow == wide {
+                    narrow_origin == wide_origin
+                } else {
+                    narrow_origin < wide_origin
+                };
                 assert!(
-                    narrow_origin < wide_origin,
-                    "{narrow_name} ({narrow} columns) text starts at {narrow_origin:?}, \
-                     not left of {wide_name} ({wide} columns) at {wide_origin:?}",
+                    ordered,
+                    "{narrow_name} ({narrow} columns) text starts at {narrow_origin:?}; \
+                     {wide_name} ({wide} columns) at {wide_origin:?}",
                 );
             }
         }

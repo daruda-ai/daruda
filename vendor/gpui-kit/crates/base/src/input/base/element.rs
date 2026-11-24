@@ -70,13 +70,22 @@ pub(super) fn line_number_len(total_lines: usize) -> usize {
     (total_lines.max(1).ilog10() as usize + 1).clamp(MIN_LINE_NUMBER_DIGITS, MAX_LINE_NUMBER_DIGITS)
 }
 
-/// daruda patch: the widest host-supplied gutter label, in columns.
-fn gutter_label_len(decorations: &[crate::input::LineDecoration]) -> Option<usize> {
-    decorations
+/// daruda patch: gutter columns once host labels replace line numbers. The
+/// widest label sets the width; a row without one, including rows past the
+/// decorations, still paints its number, so that keeps the line count's width.
+fn gutter_len(decorations: &[crate::input::LineDecoration], total_lines: usize) -> usize {
+    let rows = &decorations[..decorations.len().min(total_lines)];
+    let widest_label = rows
         .iter()
         .filter_map(|decoration| decoration.gutter.as_ref())
         .map(|label| label.chars().count())
-        .max()
+        .max();
+    let numbered = rows.len() < total_lines || rows.iter().any(|row| row.gutter.is_none());
+    match widest_label {
+        Some(label_len) if numbered => label_len.max(line_number_len(total_lines)),
+        Some(label_len) => label_len,
+        None => line_number_len(total_lines),
+    }
 }
 
 /// Width of `digits` line-number digits, the part of the gutter that follows the line count.
@@ -1691,10 +1700,9 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
     ) -> (Pixels, Pixels) {
         // Reserve three digits for small documents, then follow the actual
         // line count up to seven digits. daruda patch: host-supplied gutter
-        // labels size the gutter to the widest one instead.
+        // labels widen or replace that width.
         let line_number_len = if state.mode.line_number() {
-            gutter_label_len(&state.line_decorations)
-                .unwrap_or_else(|| line_number_len(text.lines_len()))
+            gutter_len(&state.line_decorations, text.lines_len())
         } else {
             0
         };
