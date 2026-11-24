@@ -32,7 +32,7 @@
 //!     It never writes: `set_var` is unsound once the process is
 //!     multi-threaded, so bootstrap writes stay where the caller can prove
 //!     the process is still single-threaded.
-//!   - **Platform capabilities** ([`host`], [`path`], [`process`], [`shell`]) call the OS, because containing
+//!   - **Platform capabilities** ([`host`], [`path`], [`process`], [`shell`], [`thread_time`]) call the OS, because containing
 //!     those calls is what they exist for. The alternative is what they
 //!     replace: the same capability spelled out in every domain crate that
 //!     needs it, each growing an arm per platform. Splitting "decide" from
@@ -60,3 +60,4 @@ pub mod process;
 pub mod process_env;
 pub mod shell;
 pub mod text;
+pub mod thread_time;

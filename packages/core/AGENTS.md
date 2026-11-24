@@ -40,6 +40,7 @@ An OS call that differs by platform has one named gate; domain code calls it.
 | `std::os::unix::fs::symlink` | `daruda_core::path::symlink` |
 | `Url::{to,from}_file_path` / a `"file://"` literal | `daruda_core::file_url::{is_file_url, to_local_path, from_local_path, FileUrl}` |
 | `gethostname` / `GetComputerNameExW` | `daruda_core::host::name` |
+| `clock_gettime(CLOCK_THREAD_CPUTIME_ID)` / `GetThreadTimes` | `daruda_core::thread_time::CpuStopwatch` |
 | `env::var("HOME")` | `dirs::home_dir` (Windows has no `HOME`) |
 | User-typed program names such as `npx`, `claude`, an editor CLI | `daruda_core::process::command_on_path` (Windows PATHEXT shims) |
 | Raw equality/prefix comparisons of paths from different producers | `daruda_core::path::{same_path, is_within, strip_root}` |
@@ -77,7 +78,7 @@ Use `join_paths` for PATH construction, never a hardcoded separator.
 
 ### Allowed Regions and Exceptions
 
-- Core gates: `host`, `process`, `path`, `shell`, and the pure `file_url`.
+- Core gates: `host`, `process`, `path`, `shell`, `thread_time`, and the pure `file_url`.
 - Desktop gates: `packages/app/src/platform/`, including native window APIs
   and listening-port inspection. Workspace polling and Lane attribution
   stay in their domain modules.

@@ -1937,6 +1937,7 @@ version = "0.3.0"
 dependencies = [
  "daruda_acp",
  "daruda_config",
+ "daruda_core",
  "daruda_ui",
  "gpui",
  "rust-i18n",

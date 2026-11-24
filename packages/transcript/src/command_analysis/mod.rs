@@ -2,9 +2,10 @@
 //! Effects describe statically recognized operations, not permission decisions.
 
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use daruda_acp::{ChatItem, ToolCallItem, ToolKindView};
+use daruda_core::thread_time::CpuStopwatch;
 use tree_sitter::{Language, Node, ParseOptions, Parser, Tree};
 
 mod python;
@@ -13,6 +14,7 @@ mod rules;
 const MAX_COMMAND_BYTES: usize = 64 * 1024;
 const MAX_NODES: usize = 8192;
 const MAX_DEPTH: usize = 64;
+/// CPU time one parse may take; analysis runs on the UI thread.
 const PARSE_BUDGET: Duration = Duration::from_millis(10);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,9 +101,11 @@ fn parse(source: &str, language: Language) -> Option<Tree> {
     }
     let mut parser = Parser::new();
     parser.set_language(&language).ok()?;
-    let start = Instant::now();
+    // CPU time, not wall clock: the result is cached, so a parse cut short
+    // because the thread waited on the system would stay missing.
+    let watch = CpuStopwatch::start()?;
     let mut cancelled = |_: &tree_sitter::ParseState| {
-        if start.elapsed() > PARSE_BUDGET {
+        if watch.elapsed() > PARSE_BUDGET {
             std::ops::ControlFlow::Break(())
         } else {
             std::ops::ControlFlow::Continue(())

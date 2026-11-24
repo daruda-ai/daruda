@@ -66,7 +66,7 @@ pub enum TextRunError {
 }
 
 /// Run `command` once with `prompt` on its stdin and return what it
-/// printed. **Blocking**, for at most [`TIMEOUT`]; raising `cancelled`
+/// printed. **Blocking**, for at most 60 seconds; raising `cancelled`
 /// ends the CLI and its tree.
 ///
 /// The run's directory is new, empty and removed after, so nothing in a
