@@ -124,7 +124,7 @@ fn the_keyboard_browses_opens_and_returns_to_the_selected_row(cx: &mut TestAppCo
         "browsing resumes from it"
     );
 
-    vcx.simulate_keystrokes("cmd-f");
+    vcx.simulate_keystrokes("secondary-f");
     assert!(
         vcx.update(|window, cx| f.ws.read(cx).pr_search_focused(window, cx)),
         "the search shortcut moves the keyboard to the search"
