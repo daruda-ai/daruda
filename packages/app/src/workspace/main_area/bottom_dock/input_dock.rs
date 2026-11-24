@@ -66,6 +66,18 @@ impl InputDock {
         }
     }
 
+    /// Gives the composer the font it renders with, so a value shapes and
+    /// counts its auto-grow rows before the composer is drawn. Without it a
+    /// value set earlier waits for the first draw, and the dock height derived
+    /// from those rows trails the text by a frame.
+    pub(in crate::workspace) fn prepare_font(
+        state: &mut crate::ui::TextareaState,
+        font: &daruda_config::font::InputFontConfig,
+        cx: &mut Context<crate::ui::TextareaState>,
+    ) {
+        state.set_font_metrics(gpui::font(font.family.clone()), gpui::px(font.size), cx);
+    }
+
     pub(in crate::workspace) fn new(
         config: &daruda_config::Config,
         window: &mut Window,
@@ -81,6 +93,7 @@ impl InputDock {
                         ws.update(app, |ws, cx| ws.question_text_shortcut(text, cx))
                     })
                 });
+            Self::prepare_font(&mut state, &config.font.input, cx_state);
             state.set_placeholder(
                 crate::surface::strings::bottom_dock::input_placeholder(),
                 window,

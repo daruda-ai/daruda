@@ -9,6 +9,7 @@
 use gpui::Context;
 
 use crate::workspace::Workspace;
+use crate::workspace::main_area::bottom_dock::input_dock::InputDock;
 use daruda_chat::transcript_defaults::TranscriptDefaults;
 
 use super::ConfigMirrors;
@@ -163,11 +164,7 @@ impl Workspace {
             self.input_dock.input.update(cx, |s, cx| {
                 // WORKAROUND: input prepaint rewraps without refitting auto-grow
                 // rows - prepare only this composer's explicit font change.
-                s.set_font_metrics(
-                    gpui::font(config.font.input.family.clone()),
-                    gpui::px(config.font.input.size),
-                    cx,
-                );
+                InputDock::prepare_font(s, &config.font.input, cx);
             });
             self.sync_bottom_dock_min_to_panel(cx);
             self.main_area.pending_resize = true;
