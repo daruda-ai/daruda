@@ -911,14 +911,18 @@ fn a_worktree_made_meanwhile_takes_an_unlinked_handoff(cx: &mut TestAppContext) 
     let checkout = crate::workspace::lane_ops::lane_checkout_path(&f.root, "other");
     std::fs::create_dir_all(&checkout).unwrap();
     // Pushing `other` to o/r is what links the new worktree to #8.
-    f.fake.add_repo(FakeRepo::at(&checkout).branch("other").push_target(PushTarget {
-        remote: "origin".into(),
-        url: "git@github.com:o/r.git".into(),
-        branch: "other".into(),
-        published: true,
-        has_upstream: false,
-        review: None,
-    }));
+    f.fake.add_repo(
+        FakeRepo::at(&checkout)
+            .branch("other")
+            .push_target(PushTarget {
+                remote: "origin".into(),
+                url: "git@github.com:o/r.git".into(),
+                branch: "other".into(),
+                published: true,
+                has_upstream: false,
+                review: None,
+            }),
+    );
     cx.update_window(f.window.into(), |_, window, cx| {
         f.ws.update(cx, |ws, cx| ws.create_pr_detail_lane(id, window, cx));
     })

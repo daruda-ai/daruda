@@ -132,6 +132,11 @@ impl Workspace {
         if self.pages.pull_requests.take_reveal_pending() {
             cx.defer_in(window, |ws, _, cx| ws.reveal_pr_cursor(cx));
         }
+        // The same exception, for a linked comment a detail scrolls to: its
+        // marker records where this frame paints it, read once it has.
+        if self.pages.pull_requests.reveals_comment() {
+            cx.defer_in(window, |ws, _, cx| ws.reveal_painted_pr_comments(cx));
+        }
 
         self.reconcile_session_chooser(window, cx);
         let has_project_config = self.project_layer_overrides();

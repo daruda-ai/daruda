@@ -240,12 +240,12 @@ fn ready(
             }
         },
         checks_summary: checks_summary(loaded),
-        failures_only: state.failures_only
+        failures_only: state.checks_shown == super::ChecksShown::Failures
             && matches!(
                 loaded.summary.checks,
                 daruda_github::CheckRollup::Failing { .. }
             ),
-        truncated_checks_url: (state.failures_only
+        truncated_checks_url: (state.checks_shown == super::ChecksShown::Failures
             && loaded.checks_truncated
             && daruda_github::model::is_web_url(&loaded.summary.url))
         .then(|| format!("{}/checks", loaded.summary.url.trim_end_matches('/'))),

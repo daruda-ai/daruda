@@ -382,7 +382,9 @@ impl Workspace {
             }
         };
         let chat = match lane {
-            HandoffLane::Linked(lane) => self.writable_chats(lane, cx).first().map(|chat| chat.pane),
+            HandoffLane::Linked(lane) => {
+                self.writable_chats(lane, cx).first().map(|chat| chat.pane)
+            }
             HandoffLane::Unlinked | HandoffLane::Made(_) => None,
         };
         let detail = self.pr_detail_mut(id)?;

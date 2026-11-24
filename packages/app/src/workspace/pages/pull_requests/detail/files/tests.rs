@@ -932,9 +932,13 @@ fn a_file_on_a_page_not_read_yet_leaves_no_other_file_shown() {
 #[test]
 fn a_moved_base_lets_go_of_what_was_read_against_the_old_one() {
     let (mut state, mut tickets, first) = reading();
-    state.land(first, 1, Ok(PrFilesPage::of(vec![edit("a")], 1)), Some("head"), || {
-        tickets.issue()
-    });
+    state.land(
+        first,
+        1,
+        Ok(PrFilesPage::of(vec![edit("a")], 1)),
+        Some("head"),
+        || tickets.issue(),
+    );
     assert!(!state.base_read("main"), "the first base read is taken");
     state.merge_base = Some(("head".into(), "mb".into()));
     state
@@ -942,7 +946,10 @@ fn a_moved_base_lets_go_of_what_was_read_against_the_old_one() {
         .insert("a".into(), ("head".into(), RecoverFailure::Binary));
     assert!(!state.base_read("main"), "the same base keeps it");
     assert!(state.merge_base.is_some());
-    assert!(state.base_read("release"), "another base reads the files again");
+    assert!(
+        state.base_read("release"),
+        "another base reads the files again"
+    );
     assert!(state.merge_base.is_none());
     assert!(state.recovery_failures.is_empty());
 }

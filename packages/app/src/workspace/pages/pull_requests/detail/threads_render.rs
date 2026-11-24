@@ -221,28 +221,25 @@ fn expanded(
                 actions.track_focus(handle)
             })
         })
-        .when(
-            navigates,
-            |actions| {
-                let (dest, label) =
-                    if matches!(place, ThreadPlace::Inline | ThreadPlace::FileConversations) {
-                        (PrTab::Threads, s::thread_show_in_threads())
-                    } else {
-                        (PrTab::Files, s::thread_show_in_diff())
-                    };
-                actions.child(
-                    button_compact(("pr-thread-diff", index), label)
-                        .debug_selector(move || format!("pr-thread-diff-{index}"))
-                        .tab_stop(true)
-                        .when_some(row.navigation_focus.as_ref(), |button, handle| {
-                            button.track_focus(handle)
-                        })
-                        .on_click(cx.listener(move |ws, _, window, cx| {
-                            ws.jump_pr_thread(id, &thread, dest, window, cx)
-                        })),
-                )
-            },
-        )
+        .when(navigates, |actions| {
+            let (dest, label) =
+                if matches!(place, ThreadPlace::Inline | ThreadPlace::FileConversations) {
+                    (PrTab::Threads, s::thread_show_in_threads())
+                } else {
+                    (PrTab::Files, s::thread_show_in_diff())
+                };
+            actions.child(
+                button_compact(("pr-thread-diff", index), label)
+                    .debug_selector(move || format!("pr-thread-diff-{index}"))
+                    .tab_stop(true)
+                    .when_some(row.navigation_focus.as_ref(), |button, handle| {
+                        button.track_focus(handle)
+                    })
+                    .on_click(cx.listener(move |ws, _, window, cx| {
+                        ws.jump_pr_thread(id, &thread, dest, window, cx)
+                    })),
+            )
+        })
         .when(row.outdated, |line| {
             line.child(note(s::thread_outdated_context(), cx))
         })
@@ -266,7 +263,7 @@ fn expanded(
         .border_l_1()
         .border_color(t.border)
         .children(comments.iter().map(|comment| {
-            super::anchors::mark_comment(div(), id, comment, cx)
+            super::anchors::mark_comment(div(), comment)
                 .flex()
                 .flex_col()
                 .gap(px(theme::GAP_XS))

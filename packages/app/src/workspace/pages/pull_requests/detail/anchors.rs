@@ -1,6 +1,9 @@
 //! Landing a GitHub comment link after its tab has read the conversation,
 //! then revealing the exact rendered comment once its layout is known.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use daruda_github::ReviewComment;
 use gpui::{Bounds, Context, Div, Pixels, canvas, point, prelude::*, px};
 
@@ -112,25 +115,71 @@ pub(super) enum CommentLocation {
         target: ThreadTarget,
         comment: String,
     },
-    Reveal(String),
+    /// Found, and scrolled to once a frame has painted it.
+    Reveal(String, RevealSlot),
     Highlight(String),
     Missing(String),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Where a frame painted the comment being revealed: written by its marker
+/// as layout geometry, read by the reveal that frame defers. A new one for
+/// each reveal, so it never holds another comment's place.
+#[derive(Clone, Default)]
+pub(in crate::workspace) struct RevealSlot(Rc<Cell<Option<Bounds<Pixels>>>>);
+
+impl PartialEq for RevealSlot {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for RevealSlot {}
+
+impl std::fmt::Debug for RevealSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RevealSlot").field(&self.0.get()).finish()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::workspace) enum CommentMark {
     Plain,
-    Reveal,
+    Reveal(RevealSlot),
     Highlight,
 }
 
 impl PrDetailState {
     pub(super) fn comment_mark(&self, id: &str) -> CommentMark {
         match &self.comment_location {
-            Some(CommentLocation::Reveal(found)) if found == id => CommentMark::Reveal,
+            Some(CommentLocation::Reveal(found, painted)) if found == id => {
+                CommentMark::Reveal(painted.clone())
+            }
             Some(CommentLocation::Highlight(found)) if found == id => CommentMark::Highlight,
             _ => CommentMark::Plain,
         }
+    }
+
+    /// Whether a comment waits for a frame to paint it, to be scrolled to.
+    pub(in crate::workspace) fn reveals_comment(&self) -> bool {
+        matches!(self.comment_location, Some(CommentLocation::Reveal(..)))
+    }
+
+    /// Scroll to the comment being revealed, where the frame painted it,
+    /// and leave it highlighted. `false` while no frame has painted it.
+    fn reveal_painted_comment(&mut self) -> bool {
+        let Some(CommentLocation::Reveal(comment, painted)) = &self.comment_location else {
+            return false;
+        };
+        let Some(bounds) = painted.0.get() else {
+            return false;
+        };
+        let offset = self.scroll.offset();
+        self.scroll.set_offset(point(
+            offset.x,
+            offset.y + self.scroll.bounds().top() - bounds.top(),
+        ));
+        self.comment_location = Some(CommentLocation::Highlight(comment.clone()));
+        true
     }
 }
 
@@ -168,7 +217,7 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         if let Some(detail) = self.pr_detail_mut(id) {
-            detail.comment_location = Some(CommentLocation::Reveal(comment));
+            detail.comment_location = Some(CommentLocation::Reveal(comment, RevealSlot::default()));
             cx.notify();
         }
     }
@@ -230,67 +279,49 @@ impl Workspace {
         }
     }
 
-    fn reveal_laid_out_comment(
-        &mut self,
-        id: PrDetailId,
-        comment: String,
-        bounds: Bounds<Pixels>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(detail) = self.pr_detail_mut(id) else {
-            return;
-        };
-        if detail.comment_mark(&comment) != CommentMark::Reveal {
-            return;
+    /// Scroll every detail's revealed comment into view. Deferred from the
+    /// render that drew it, so it runs once that frame has painted and the
+    /// comment's bounds are its own.
+    pub(in crate::workspace) fn reveal_painted_pr_comments(&mut self, cx: &mut Context<Self>) {
+        let mut moved = false;
+        for detail in self.pages.pull_requests.details.states_mut() {
+            moved |= detail.reveal_painted_comment();
         }
-        let scroll = detail.scroll();
-        let offset = scroll.offset();
-        scroll.set_offset(point(
-            offset.x,
-            offset.y + scroll.bounds().top() - bounds.top(),
-        ));
-        detail.comment_location = Some(CommentLocation::Highlight(comment));
-        cx.notify();
+        if moved {
+            cx.notify();
+        }
     }
 }
 
-/// The marker measures the rendered comment once. The detail applies the
-/// scroll after layout and ignores it if another link replaced this target.
-pub(super) fn mark_comment(
-    block: Div,
-    id: PrDetailId,
-    comment: &CommentView,
-    cx: &Context<Workspace>,
-) -> Div {
-    if comment.mark == CommentMark::Plain {
-        return block;
-    }
-    let key = comment.id.clone();
-    let ws = cx.weak_entity();
+/// Mark the linked comment. While it is being revealed, its marker records
+/// where the frame painted it (layout geometry only); the reveal itself is
+/// `Workspace::reveal_painted_pr_comments`.
+pub(super) fn mark_comment(block: Div, comment: &CommentView) -> Div {
+    let CommentMark::Reveal(painted) = &comment.mark else {
+        return match comment.mark {
+            CommentMark::Plain => block,
+            _ => marked(block),
+        };
+    };
+    let painted = painted.clone();
+    marked(block).child(
+        canvas(
+            move |bounds, _, _| painted.0.set(Some(bounds)),
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .inset_0()
+        .size_full(),
+    )
+}
+
+fn marked(block: Div) -> Div {
     block
         .relative()
         .border_l_2()
         .border_color(theme::PRIMARY)
         .pl(px(theme::PAD_SM))
         .debug_selector(|| "pr-linked-comment".into())
-        .when(comment.mark == CommentMark::Reveal, |block| {
-            block.child(
-                canvas(
-                    move |bounds, _, cx| {
-                        cx.defer(move |cx| {
-                            // SILENT-OK: the workspace closed after laying out the comment.
-                            let _ = ws.update(cx, |ws, cx| {
-                                ws.reveal_laid_out_comment(id, key, bounds, cx)
-                            });
-                        });
-                    },
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .inset_0()
-                .size_full(),
-            )
-        })
 }
 
 #[cfg(test)]

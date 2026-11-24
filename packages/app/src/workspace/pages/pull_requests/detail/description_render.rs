@@ -46,7 +46,7 @@ pub(super) fn description(
                 ),
             ))
         })
-        .child(conversation(id, &discussion.conversation, cx))
+        .child(conversation(&discussion.conversation, cx))
         .into_any_element()
 }
 
@@ -169,7 +169,7 @@ fn editor(
 }
 
 /// The comments on the pull request itself, oldest first.
-fn conversation(id: PrDetailId, view: &ConversationView, cx: &Context<Workspace>) -> AnyElement {
+fn conversation(view: &ConversationView, cx: &Context<Workspace>) -> AnyElement {
     let t = theme::current(cx);
     let (heading, body): (String, Vec<AnyElement>) = match view {
         ConversationView::Loading => (
@@ -186,7 +186,7 @@ fn conversation(id: PrDetailId, view: &ConversationView, cx: &Context<Workspace>
         } => {
             let mut body: Vec<AnyElement> = comments
                 .iter()
-                .map(|comment| comment_block(id, comment, cx))
+                .map(|comment| comment_block(comment, cx))
                 .collect();
             if comments.is_empty() {
                 body.push(note(s::conversation_empty(), cx).into_any_element());
@@ -220,9 +220,9 @@ fn conversation(id: PrDetailId, view: &ConversationView, cx: &Context<Workspace>
         .into_any_element()
 }
 
-fn comment_block(id: PrDetailId, comment: &CommentView, cx: &Context<Workspace>) -> AnyElement {
+fn comment_block(comment: &CommentView, cx: &Context<Workspace>) -> AnyElement {
     let t = theme::current(cx);
-    super::anchors::mark_comment(div(), id, comment, cx)
+    super::anchors::mark_comment(div(), comment)
         .flex()
         .flex_col()
         .gap(px(theme::GAP_XS))

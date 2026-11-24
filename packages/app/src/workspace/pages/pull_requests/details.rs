@@ -73,6 +73,18 @@ impl PrDetails {
             .map(|open| &mut open.state)
     }
 
+    /// Every open detail, wherever it is shown.
+    pub(in crate::workspace) fn states(&self) -> impl Iterator<Item = &PrDetailState> {
+        self.held().map(|open| &open.state)
+    }
+
+    pub(in crate::workspace) fn states_mut(&mut self) -> impl Iterator<Item = &mut PrDetailState> {
+        self.open
+            .iter_mut()
+            .filter(|open| open.is_held())
+            .map(|open| &mut open.state)
+    }
+
     /// The detail the page shows.
     pub(in crate::workspace) fn on_page(&self) -> Option<&PrDetailState> {
         self.get(self.page.as_ref()?.id())

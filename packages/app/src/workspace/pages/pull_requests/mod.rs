@@ -115,6 +115,13 @@ impl PullRequestsPage {
         page_layout::PageLayout::split_fits(self.content_width)
     }
 
+    /// Whether an open detail waits to scroll to a linked comment.
+    pub(in crate::workspace) fn reveals_comment(&self) -> bool {
+        self.details
+            .states()
+            .any(detail::PrDetailState::reveals_comment)
+    }
+
     /// Whether the search puts the list where the detail would be: only
     /// while the list is not drawn beside it, so a split keeps both.
     pub(in crate::workspace) fn list_covers_detail(&self) -> bool {
