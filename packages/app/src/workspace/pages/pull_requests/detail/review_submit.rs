@@ -267,12 +267,16 @@ impl Workspace {
     /// account since it opened leaves the other account's exclusions behind:
     /// they name drafts this account does not have.
     fn rebind_pr_review_owner(&mut self, id: PrDetailId, cx: &mut Context<Self>) {
-        let owner = self.pr_draft_owner(id, cx);
+        // Signed out, the review keeps the account it was written under:
+        // nothing can be sent, and signing back in finds it as it was.
+        let Some(owner) = self.pr_draft_owner(id, cx) else {
+            return;
+        };
         if let Some(review) = self.pr_detail_mut(id).and_then(|d| d.review.as_mut())
             && review.state.editable()
-            && review.owner != owner
+            && review.owner.as_ref() != Some(&owner)
         {
-            review.owner = owner;
+            review.owner = Some(owner);
             review.excluded.clear();
             if matches!(review.state, SubmitState::Blocked(_)) {
                 review.state = SubmitState::Writing;

@@ -130,19 +130,31 @@ impl Workspace {
     /// onto the worktree linked since. `None`, said when it moved, when it
     /// has none to go to.
     fn pr_handoff_lane(&mut self, id: PrDetailId, cx: &mut Context<Self>) -> Option<LaneRef> {
+        self.settle_pr_handoff_lane(id);
         match self.pr_handoff_destination(id)? {
-            Destination::To(lane) => {
-                let held = self.pr_detail_mut(id)?.handoff.as_mut()?;
-                if held.lane == HandoffLane::Unlinked {
-                    held.lane = HandoffLane::Linked(lane);
-                }
-                Some(lane)
-            }
+            Destination::To(lane) => Some(lane),
             Destination::Checkout => None,
             Destination::Moved => {
                 self.report_pr_handoff_moved(cx);
                 None
             }
+        }
+    }
+
+    /// Take the worktree the pull request links as the handoff's own, once
+    /// it is seen: one shown without a worktree goes there, and one made for
+    /// it is from then on held to that link, so a later unlink is a move.
+    pub(in super::super) fn settle_pr_handoff_lane(&mut self, id: PrDetailId) {
+        let Some(detail) = self.pr_detail(id) else {
+            return;
+        };
+        let Some(linked) = self.pr_detail_lane(&detail.item).map(|lane| lane.lane) else {
+            return;
+        };
+        if let Some(held) = self.pr_detail_mut(id).and_then(|d| d.handoff.as_mut())
+            && (held.lane == HandoffLane::Unlinked || held.lane == HandoffLane::Made(linked))
+        {
+            held.lane = HandoffLane::Linked(linked);
         }
     }
 

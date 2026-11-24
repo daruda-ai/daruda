@@ -916,17 +916,96 @@ fn whole_file_read_retries_only_transient_failures_at_the_same_revision() {
 #[test]
 fn a_file_on_a_page_not_read_yet_leaves_no_other_file_shown() {
     let (mut state, mut tickets, first) = reading();
-    state.land(
+    let landed = state.land(
         first,
         1,
-        Ok(PrFilesPage::of(vec![edit("a")], 2)),
+        Ok(PrFilesPage::of(full_page(0, "@@ -1 +1 @@\n+x"), 1)),
         Some("head"),
         || tickets.issue(),
     );
-    assert_eq!(state.shown_path(), Some("a"));
+    let Landed::Next(second, 2) = landed else {
+        panic!("a full page leads to the next: {landed:?}");
+    };
+    assert_eq!(state.shown_path(), Some("f0"));
     state.show_listed("later");
-    assert_eq!(state.shown_path(), None, "\"a\" does not stand in for it");
+    assert_eq!(state.shown_path(), None, "\"f0\" does not stand in for it");
     assert_eq!(state.chosen.as_deref(), Some("later"));
+    // Its page lands: it is shown.
+    state.land(
+        second,
+        2,
+        Ok(PrFilesPage::of(vec![edit("later")], 2)),
+        Some("head"),
+        || tickets.issue(),
+    );
+    assert_eq!(state.shown_path(), Some("later"));
+    // With every page read, a path no page brings changes nothing.
+    state.show_listed("nowhere");
+    assert_eq!(state.shown_path(), Some("later"));
+    assert_eq!(state.chosen.as_deref(), Some("later"));
+}
+
+#[test]
+fn a_window_moved_by_a_jump_follows_the_rows_through_a_mode_or_fold_change() {
+    use super::super::view::ThreadTarget;
+
+    let line = 3 * DIFF_ROWS_STEP;
+    // Every line rewritten: split pairs them, halving the row numbers.
+    let rewritten = format!(
+        "@@ -1,{line} +1,{line} @@\n{}{}",
+        "-old\n".repeat(line),
+        "+new\n".repeat(line).trim_end()
+    );
+    // One change after a long context: folding leaves a handful of rows.
+    let edited = format!(
+        "@@ -1,{line} +1,{line} @@\n{}-old\n+new",
+        " context\n".repeat(line - 1)
+    );
+    // (label, patch, what changes the rows' numbering)
+    type Renumber = fn(&mut FilesState);
+    let cases: [(&str, &str, Renumber); 2] = [
+        ("split", &rewritten, |state| state.set_mode(DiffMode::Split)),
+        ("folded", &edited, |state| {
+            state.set_unchanged(Unchanged::Folded)
+        }),
+    ];
+    for (label, patch, change) in cases {
+        let (mut state, mut tickets, first) = reading();
+        state.land(
+            first,
+            1,
+            Ok(PrFilesPage::of(
+                vec![file("a", FileChange::Modified, Some(patch))],
+                1,
+            )),
+            Some("head"),
+            || tickets.issue(),
+        );
+        state.go_to_lines(ThreadTarget {
+            path: "a".into(),
+            side: Side::New,
+            start: line as u32,
+            end: line as u32,
+            revision: "head".into(),
+        });
+        assert!(state.shown.as_ref().unwrap().start > 0, "{label}: moved");
+        change(&mut state);
+        let mode = state.mode;
+        let shown = state.shown.as_ref().unwrap();
+        let FileDiff::Rows(rows) = &shown.diff else {
+            panic!("{label}: rows");
+        };
+        let at = rows
+            .row_index(Side::New, line as u32, mode)
+            .expect("the selected line is still a row");
+        assert!(
+            (shown.start..shown.limit).contains(&at),
+            "{label}: the selected line is drawn ({}..{} of {}, at {at})",
+            shown.start,
+            shown.limit,
+            shown.diff.row_count(mode)
+        );
+    }
 }
 
 #[test]

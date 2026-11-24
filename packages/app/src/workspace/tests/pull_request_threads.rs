@@ -633,3 +633,48 @@ fn a_refresh_keeps_the_shown_threads_up(cx: &mut TestAppContext) {
         "read again"
     );
 }
+
+/// A detail refresh that fails keeps the pull request shown, and the threads
+/// read beside it are still placed on its lines.
+#[gpui::test]
+fn threads_stay_placed_when_the_detail_refresh_beside_them_fails(cx: &mut TestAppContext) {
+    use crate::workspace::pages::pull_requests::detail::view::{DetailBody, ThreadsView};
+    use daruda_github::fake::{GhFailure, GhOp};
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    gh.set_review_threads(&repo(), 7, threads());
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.simulate_resize(size(px(1400.), px(900.)));
+    f.ws.update(&mut vcx, |ws, cx| {
+        ws.select_pr_detail_tab(id, PrTab::Threads, cx)
+    });
+    vcx.run_until_parked();
+    let placed = |vcx: &mut VisualTestContext| {
+        f.ws.update(vcx, |ws, cx| {
+            ws.stage_pr_page(cx);
+            let snap = ws.pages.pull_requests.detail_snapshot.as_ref().unwrap();
+            let DetailBody::Ready(ready) = &snap.body else {
+                panic!("read");
+            };
+            let ThreadsView::Listed { rows, .. } = &ready.threads else {
+                panic!("listed");
+            };
+            rows[0].target.is_some()
+        })
+    };
+    assert!(placed(&mut vcx), "read with the pull request");
+    gh.fail(
+        GhOp::PrDetail,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "HTTP 502".into(),
+        },
+    );
+    // The threads answer first, while the detail read is still out.
+    f.ws.update(&mut vcx, |ws, cx| {
+        ws.refresh_pr_detail(id, cx);
+        let ticket = ws.pr_detail(id).unwrap().threads_ticket().unwrap();
+        ws.land_pr_threads(id, ticket, Ok(threads()), cx);
+    });
+    vcx.run_until_parked();
+    assert!(placed(&mut vcx), "still on the lines of the head shown");
+}

@@ -62,11 +62,7 @@ impl FilesState {
         if let FileDiff::Rows(rows) = &shown.diff
             && let Some(index) = rows.row_index(target.side, target.end, self.mode)
         {
-            if !(shown.start..shown.limit).contains(&index) {
-                // Draw a step around the lines, not every row before them.
-                shown.start = index.saturating_sub(DIFF_ROWS_STEP / 2);
-                shown.limit = shown.start + DIFF_ROWS_STEP;
-            }
+            shown.draw_around(index);
         } else {
             self.selection = None;
             return;

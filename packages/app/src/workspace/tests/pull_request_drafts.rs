@@ -695,3 +695,93 @@ fn text_typed_while_a_reply_posts_is_kept(cx: &mut TestAppContext) {
         "the draft holds what the box shows"
     );
 }
+
+/// A reply that timed out, typed into while it was checked, then found
+/// posted: the box holds new text, which Post sends rather than checking
+/// the reply that already went out.
+#[gpui::test]
+fn text_typed_while_a_reply_is_checked_posts_as_a_new_reply(cx: &mut TestAppContext) {
+    use daruda_github::fake::{GhFailure, GhOp};
+    let dir = tempfile::tempdir().unwrap();
+    cx.update(|cx| DraftStore::install_at(dir.path().to_owned(), cx));
+    let (f, gh, id) = opened_signed_in(cx, mergeable(7, "feat"));
+    let asked = ReviewComment {
+        id: "c1".into(),
+        body: "Why?".into(),
+        ..Default::default()
+    };
+    let threads = |comments: Vec<ReviewComment>| ReviewThreads {
+        threads: vec![ReviewThread {
+            id: "t1".into(),
+            path: "a.rs".into(),
+            comments,
+            ..Default::default()
+        }],
+        truncated: false,
+    };
+    gh.set_review_threads(&repo(), 7, threads(vec![asked.clone()]));
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.simulate_resize(size(px(1400.), px(900.)));
+    f.ws.update(&mut vcx, |ws, cx| {
+        ws.select_pr_detail_tab(id, PrTab::Threads, cx)
+    });
+    vcx.run_until_parked();
+    let reply = |ws: &crate::workspace::Workspace| {
+        ws.pr_detail(id)
+            .unwrap()
+            .thread_work()
+            .get("t1")
+            .and_then(|work| work.reply.clone())
+    };
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.open_pr_reply(id, "t1", window, cx);
+            let input = reply(ws).unwrap();
+            input.update(cx, |input, cx| input.set_value("Because.", window, cx));
+        })
+    });
+    // The post fails though GitHub took it: the next threads read has it.
+    gh.fail(
+        GhOp::ReplyToThread,
+        GhFailure::Exit {
+            code: None,
+            stderr: "timed out".into(),
+        },
+    );
+    gh.set_review_threads(
+        &repo(),
+        7,
+        threads(vec![
+            asked,
+            ReviewComment {
+                id: "c2".into(),
+                author: Some("me".into()),
+                body: "Because.".into(),
+                ..Default::default()
+            },
+        ]),
+    );
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.post_pr_reply(id, "t1", cx);
+            let input = reply(ws).unwrap();
+            input.update(cx, |input, cx| {
+                input.set_value("One more thing.", window, cx)
+            });
+        })
+    });
+    vcx.run_until_parked();
+    assert_eq!(gh.count(GhOp::ReplyToThread), 1);
+    assert!(
+        f.ws.read_with(&vcx, |ws, _| reply(ws).is_some()),
+        "found posted, but typed into since: the box stays"
+    );
+    gh.clear_failure(GhOp::ReplyToThread);
+    f.ws.update(&mut vcx, |ws, cx| ws.post_pr_reply(id, "t1", cx));
+    vcx.run_until_parked();
+    assert_eq!(
+        gh.count(GhOp::ReplyToThread),
+        2,
+        "the new text goes out as its own reply"
+    );
+}

@@ -118,6 +118,15 @@ pub(in crate::workspace) enum FileDiff {
 }
 
 impl FileDiff {
+    /// How many rows `mode` draws of it.
+    pub(super) fn row_count(&self, mode: DiffMode) -> usize {
+        match (self, mode) {
+            (Self::Rows(rows), DiffMode::Unified) => rows.rows().len(),
+            (Self::Rows(rows), DiffMode::Split) => rows.split().len(),
+            (Self::TooLarge | Self::NoLines | Self::MovedOnly, _) => 0,
+        }
+    }
+
     pub(super) fn of(file: &PrFile, unchanged: Unchanged) -> Self {
         let moved = matches!(
             file.change,

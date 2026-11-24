@@ -156,6 +156,9 @@ impl Workspace {
         for (thread, how) in settled {
             match how {
                 thread_actions::Settled::Posted => {
+                    // What the box still holds is new text, not the reply
+                    // that went out: it must not stay marked as sent.
+                    self.let_go_pr_reply_sent(id, &thread, cx);
                     let left = self.pr_reply_left(id, &thread, cx);
                     self.set_pr_reply_draft(id, &thread, left, cx);
                 }

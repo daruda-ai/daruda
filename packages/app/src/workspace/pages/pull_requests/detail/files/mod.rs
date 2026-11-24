@@ -44,6 +44,22 @@ struct Shown {
     revision: Option<String>,
 }
 
+impl Shown {
+    fn draw_from_top(&mut self) {
+        self.start = 0;
+        self.limit = DIFF_ROWS_STEP;
+    }
+
+    /// Have row `index` drawn: where it is not, a step of rows around it
+    /// is, rather than every row before it.
+    fn draw_around(&mut self, index: usize) {
+        if !(self.start..self.limit).contains(&index) {
+            self.start = index.saturating_sub(DIFF_ROWS_STEP / 2);
+            self.limit = self.start + DIFF_ROWS_STEP;
+        }
+    }
+}
+
 /// Where reading the pages stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Paging {
@@ -315,14 +331,18 @@ impl FilesState {
         {
             self.pending_lines = None;
         }
-        self.chosen = Some(path.to_owned());
-        if self.shown.as_ref().is_some_and(|shown| shown.path == path) {
+        if !self.files.iter().any(|file| file.path == path) {
+            // Not listed yet: while pages are still read, nothing is drawn
+            // until its page lands, rather than another file standing in
+            // for it. With no page on its way, what is shown stays.
+            if matches!(self.paging, Paging::Reading { .. }) {
+                self.chosen = Some(path.to_owned());
+                self.shown = None;
+            }
             return;
         }
-        // Not listed yet (a later page): nothing is drawn until its page
-        // lands, rather than another file standing in for it.
-        if !self.files.iter().any(|file| file.path == path) {
-            self.shown = None;
+        self.chosen = Some(path.to_owned());
+        if self.shown.as_ref().is_some_and(|shown| shown.path == path) {
             return;
         }
         self.build_shown(path, (0, DIFF_ROWS_STEP));
@@ -344,8 +364,34 @@ impl FilesState {
                 limit,
                 revision: self.revision.clone(),
             });
+            // Rows rebuilt from another listing may be fewer than a window
+            // moved into the old ones.
+            if let Some(shown) = self.shown.as_mut()
+                && shown.start >= shown.diff.row_count(self.mode)
+            {
+                shown.draw_from_top();
+            }
             self.keep_selection_at(self.revision.clone());
             self.select_pending();
+        }
+    }
+
+    /// Unified or split, folded or not, a diff's rows are numbered anew: a
+    /// window moved into the old rows names other rows now. It goes back to
+    /// the top, then onto the selected lines when they lie outside it.
+    fn rewindow(&mut self) {
+        let mode = self.mode;
+        let Some(shown) = self.shown.as_mut() else {
+            return;
+        };
+        if shown.start > 0 {
+            shown.draw_from_top();
+        }
+        if let Some(lines) = self.selection.as_ref().filter(|l| l.path == shown.path)
+            && let FileDiff::Rows(rows) = &shown.diff
+            && let Some(index) = rows.row_index(lines.side, lines.end, mode)
+        {
+            shown.draw_around(index);
         }
     }
 
@@ -370,7 +416,10 @@ impl FilesState {
     }
 
     fn set_mode(&mut self, mode: DiffMode) {
-        self.mode = mode;
+        if self.mode != mode {
+            self.mode = mode;
+            self.rewindow();
+        }
     }
 
     /// Fold or show the unchanged lines; the shown diff is rebuilt, keeping
@@ -383,6 +432,7 @@ impl FilesState {
         if let Some(path) = self.shown.as_ref().map(|shown| shown.path.clone()) {
             let drawn = self.drawn();
             self.build_shown(&path, drawn);
+            self.rewindow();
         }
     }
 

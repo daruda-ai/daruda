@@ -521,8 +521,10 @@ impl Workspace {
         if !detail.pr.land_keeping_ready(ticket, answer) {
             return;
         }
-        if error.is_none()
-            && detail.thread_head.is_none()
+        // Threads that landed while this read was out wait for its head. A
+        // failed read keeps the pull request shown, and they take that head,
+        // as the files listing does.
+        if detail.thread_head.is_none()
             && detail
                 .threads
                 .as_ref()
@@ -533,6 +535,10 @@ impl Workspace {
         }
         detail.come_back();
         detail.drop_handoff_to_fix();
+        self.settle_pr_handoff_lane(id);
+        let Some(detail) = self.pr_detail_mut(id) else {
+            return;
+        };
         if let Some(read) = detail.files_at_head() {
             self.send_pr_tab_read(id, read, cx);
         }
