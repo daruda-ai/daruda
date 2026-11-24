@@ -616,8 +616,12 @@ the wheel at its end.
 - `takes_scroll` claims a wheel event only when the text can still move in
   that direction (offset short of the extent for a scroll toward the end,
   offset below zero for a scroll toward the start). The vertical check reads
-  the f64 offset and content height the scroll itself clamps against. An
-  event that moves on neither axis is not taken.
+  the f64 offset and content height the scroll itself clamps against. The
+  horizontal check runs the offset plus the delta through
+  `clamp_horizontal_scroll_offset`, so aligned text's caret clearance past
+  its end counts, and a `-0.` offset (ordered below `0.` but equal to it)
+  does not claim a scroll toward the start. An event that moves on neither
+  axis is not taken.
 - `on_scroll_wheel` keeps upstream's two offset checks (the handle offset, and
   the f64 offset, which can move where the f32 handle rounds to the same
   value) and replaces the `overflows_along` condition with whether the scroll
@@ -625,7 +629,9 @@ the wheel at its end.
 
 Re-apply both. `packages/chat/src/view/tests/output_layout.rs`'s
 `capped_embed_wheel_chains_only_after_the_embed_is_exhausted` covers holding
-the wheel while the embed can scroll and passing it on at the end.
+the wheel while the embed can scroll and passing it on at the end;
+`element.rs`'s `horizontal_wheel_is_taken_only_while_the_text_moves` covers
+both horizontal ends for every alignment.
 
 ---
 

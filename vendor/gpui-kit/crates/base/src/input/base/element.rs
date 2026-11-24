@@ -6016,6 +6016,41 @@ mod tests {
         });
     }
 
+    /// A horizontal wheel is taken exactly when it would move the text, so at
+    /// either end of every alignment's range it chains to the area around it.
+    #[gpui::test]
+    fn horizontal_wheel_is_taken_only_while_the_text_moves(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "short", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let input_width = editor.read(cx).input_bounds.size.width;
+            for alignment in [TextAlign::Left, TextAlign::Right, TextAlign::Center] {
+                for overflow in [px(0.), px(120.)] {
+                    let scroll_width = input_width + overflow;
+                    let clamp = |offset| {
+                        clamp_horizontal_scroll_offset(offset, scroll_width, input_width, alignment)
+                    };
+                    // The start, the overflow without caret clearance, and the end.
+                    for offset in [px(0.), -overflow, clamp(px(-10_000.))] {
+                        for dx in [px(-10.), px(10.)] {
+                            editor.update(cx, |state, _| {
+                                state.text_align = alignment;
+                                state.scroll_size.width = scroll_width;
+                                state.scroll_handle.set_offset(point(offset, px(0.)));
+                            });
+                            assert_eq!(
+                                editor.read(cx).takes_scroll(point(dx, px(0.))),
+                                clamp(offset + dx) != offset,
+                                "{alignment:?}, overflow {overflow:?}, offset {offset:?}, dx {dx:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     #[gpui::test]
     fn aligned_horizontal_scroll_clamps_deferred_targets(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, &"wide text ".repeat(80), false);

@@ -3257,10 +3257,16 @@ impl<M: InputModeKind> InputBaseState<M> {
             self.overflows_vertically()
                 && ((delta.y < px(0.) && y > -max) || (delta.y > px(0.) && y < 0.0))
         } else {
-            let max = (self.scroll_size.width - self.input_bounds.size.width).max(px(0.));
-            max > px(0.)
-                && ((delta.x < px(0.) && offset.x > -max)
-                    || (delta.x > px(0.) && offset.x < px(0.)))
+            // Clamped as the scroll applies it, caret clearance included. A
+            // bounds check would claim `-0.`: `Pixels` orders it below `0.`
+            // but compares it equal, so the scroll would not move the text.
+            let x = clamp_horizontal_scroll_offset(
+                offset.x + delta.x,
+                self.scroll_size.width,
+                self.input_bounds.size.width,
+                self.text_align,
+            );
+            x != offset.x
         }
     }
 
