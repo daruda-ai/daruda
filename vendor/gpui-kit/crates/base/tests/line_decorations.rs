@@ -8,7 +8,7 @@ use gpui_fast as gpui;
 
 use gpui::{
     AppContext as _, Background, Context, Entity, Hsla, IntoElement, ParentElement as _, Pixels,
-    Render, Styled as _, TestAppContext, Window, div, hsla, px, size,
+    Render, ScaledPixels, Styled as _, TestAppContext, Window, div, hsla, px, size,
 };
 use gpui_base::{
     input::{Editor, EditorState, LineDecoration},
@@ -105,8 +105,10 @@ fn render_case(cx: &mut TestAppContext, case: &Case) -> Painted {
             assert_eq!(matching.len(), 1, "{name}: row {row} background quads");
             let fill = matching[0].bounds;
             let text = snapshots[row].bounds().scale(scale);
+            // Quad edges snap to device pixels; recorded text bounds do not.
+            let slack = ScaledPixels(0.5);
             assert!(
-                fill.top() <= text.top() && text.bottom() <= fill.bottom(),
+                fill.top() <= text.top() + slack && text.bottom() <= fill.bottom() + slack,
                 "{name}: row {row} background {:?}..{:?} does not span its gutter text {:?}..{:?}",
                 fill.top(),
                 fill.bottom(),

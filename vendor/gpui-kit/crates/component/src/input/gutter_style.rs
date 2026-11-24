@@ -494,8 +494,10 @@ mod tests {
                 for (row, fill) in painted.fills.iter().enumerate() {
                     let Some(fill) = fill else { continue };
                     let text = painted.labels[row].bounds;
+                    // Quad edges snap to device pixels; recorded text bounds do not.
+                    let slack = ScaledPixels(0.5);
                     assert!(
-                        fill.top() <= text.top() && text.bottom() <= fill.bottom(),
+                        fill.top() <= text.top() + slack && text.bottom() <= fill.bottom() + slack,
                         "{name}: row {row} background {:?}..{:?} does not span its gutter \
                          text {:?}..{:?}",
                         fill.top(),

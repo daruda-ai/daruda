@@ -4135,10 +4135,13 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
         };
 
         // daruda patch: paint host row backgrounds under everything else.
+        // Rows are offset like the text: ghost lines after the cursor row
+        // shift every later row down.
         {
             let state = self.state.read(cx);
             if !state.line_decorations.is_empty() {
                 let mut row_offset: isize = 0;
+                let mut ghost_offset = px(0.);
                 for (line, &buffer_line) in prepaint
                     .last_layout
                     .lines
@@ -4151,15 +4154,19 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                         .get(buffer_line)
                         .and_then(|decoration| decoration.background)
                     {
-                        let height = line_height * rows.max(1) as f32;
+                        let height = line_height * rows as f32;
                         let p = point(
                             input_bounds.origin.x,
-                            origin.y + prepaint.last_layout.local_row_y(row_offset),
+                            origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset,
                         );
                         window
                             .paint_quad(fill(Bounds::new(p, size(bounds.size.width, height)), bg));
                     }
                     row_offset += rows as isize;
+                    if !prepaint.ghost_lines.is_empty() && prepaint.current_row == Some(buffer_line)
+                    {
+                        ghost_offset += prepaint.ghost_lines_height;
+                    }
                 }
             }
         }
