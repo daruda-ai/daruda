@@ -79,6 +79,7 @@ humantime = "2"
 indoc = "2"
 instant = { version = "0.1", features = ["wasm-bindgen"] }
 itertools = "0.13"
+jiff = "1.0"
 markdown = { version = "1", features = ["serde"] }
 num-traits = "0.2"
 objc2 = "0.6"

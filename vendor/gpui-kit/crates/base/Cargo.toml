@@ -36,7 +36,7 @@ dead_code = "allow"
 "image" = { workspace = true, optional = true }
 "instant" = { workspace = true, features = ["wasm-bindgen"] }
 "itertools" = { workspace = true }
-"jiff" = { version = "1.0" }
+"jiff" = { workspace = true }
 "lsp-types" = { workspace = true, features = ["proposed"] }
 "markdown" = { workspace = true, features = ["serde"] }
 "html5ever" = { version = "0.27" }

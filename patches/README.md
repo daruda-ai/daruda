@@ -12,8 +12,10 @@ Keep these `workspace = true` declarations when re-vendoring, preserving
 per-package features, optional flags, and target conditions. `notify`
 explicitly opts into defaults where upstream used them; the shared entries
 disable defaults for narrower first-party users. `gpui-base`'s optional `image`
-(enabled by `test-support`) inherits the root entry; `jiff` and `unicode-bidi`
-are used only by the vendored crates and keep upstream's direct requirements.
+(enabled by `test-support`) inherits the root entry. `jiff`, used by both
+`gpui-base` and `gpui-component`, is shared through the root entry so the
+workspace-duplicate ban passes; `unicode-bidi` is used only by `gpui-base` and
+keeps upstream's direct requirement.
 The dependency policy checks these declarations in addition to retained
 patches.
 
