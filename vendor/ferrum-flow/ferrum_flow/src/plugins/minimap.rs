@@ -364,14 +364,11 @@ impl Plugin for MinimapPlugin {
     }
 }
 
-fn rect_fill_path(b: Bounds<Pixels>) -> Result<gpui::Path<Pixels>, anyhow::Error> {
+fn rect_fill_path(b: Bounds<Pixels>) -> Result<gpui::Path, anyhow::Error> {
     rect_fill_bounds(b.origin, b.size)
 }
 
-fn rect_fill_bounds(
-    o: Point<Pixels>,
-    s: Size<Pixels>,
-) -> Result<gpui::Path<Pixels>, anyhow::Error> {
+fn rect_fill_bounds(o: Point<Pixels>, s: Size<Pixels>) -> Result<gpui::Path, anyhow::Error> {
     let x0: f32 = o.x.into();
     let y0: f32 = o.y.into();
     let w: f32 = s.width.into();
@@ -387,7 +384,7 @@ fn rect_fill_bounds(
     pb.build()
 }
 
-fn rect_stroke_path(b: Bounds<Pixels>, width: Pixels) -> Result<gpui::Path<Pixels>, anyhow::Error> {
+fn rect_stroke_path(b: Bounds<Pixels>, width: Pixels) -> Result<gpui::Path, anyhow::Error> {
     rect_stroke_bounds(b.origin, b.size, width)
 }
 
@@ -395,7 +392,7 @@ fn rect_stroke_bounds(
     o: Point<Pixels>,
     s: Size<Pixels>,
     width: Pixels,
-) -> Result<gpui::Path<Pixels>, anyhow::Error> {
+) -> Result<gpui::Path, anyhow::Error> {
     let x0: f32 = o.x.into();
     let y0: f32 = o.y.into();
     let w: f32 = s.width.into();

@@ -11,8 +11,8 @@ use std::rc::Rc;
 
 use gpui::{
     App, Bounds, CursorStyle, Element, ElementId, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
-    InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseExitEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Style, Window, fill, point, px, relative, size,
+    InspectorElementId, LayoutId, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Style, Window, fill, point, px, relative, size,
 };
 
 use super::geometry::pointer_scroll_offset;
@@ -125,14 +125,6 @@ impl ThumbElement {
                 size(self.len, track.size.height),
             ),
         }
-    }
-}
-
-impl IntoElement for ThumbElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 

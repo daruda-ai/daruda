@@ -1,5 +1,5 @@
 diff --git a/crates/gpui_macos/src/display_link.rs b/crates/gpui_macos/src/display_link.rs
-index 90a2597..387253b 100644
+index d684718..d7a3a00 100644
 --- a/crates/gpui_macos/src/display_link.rs
 +++ b/crates/gpui_macos/src/display_link.rs
 @@ -301,34 +301,128 @@ fn unsubscribe(display_id: CGDirectDisplayID, subscriber_id: SubscriberId) {
@@ -134,8 +134,8 @@ index 90a2597..387253b 100644
 +        self.wait.set(None);
      }
  
-     /// Ends an update, pausing the link if GPUI neither used its drawable nor
-@@ -619,6 +713,89 @@ mod tests {
+     pub fn debug_state(&self) -> serde_json::Value {
+@@ -641,6 +735,89 @@ mod tests {
          assert!(frames.end_frame(false), "an idle update pauses the link");
      }
  
@@ -226,10 +226,10 @@ index 90a2597..387253b 100644
      fn a_renderer_draws_normally_after_its_display_link_is_invalidated() {
          if !MetalFrameSource::is_available() {
 diff --git a/crates/gpui_macos/src/window.rs b/crates/gpui_macos/src/window.rs
-index 32a6a54..f0e4cdb 100644
+index 2601fc5..e548d43 100644
 --- a/crates/gpui_macos/src/window.rs
 +++ b/crates/gpui_macos/src/window.rs
-@@ -638,8 +638,8 @@ unsafe fn apply_simple_fullscreen_plan(
+@@ -646,8 +646,8 @@ unsafe fn apply_simple_fullscreen_plan(
      }
  }
  
@@ -240,7 +240,7 @@ index 32a6a54..f0e4cdb 100644
  enum FrameSource {
      /// macOS 14+: a `CAMetalDisplayLink` that hands out each frame's drawable.
      Metal(Rc<MetalFrames>),
-@@ -977,7 +977,8 @@ pub(crate) struct MacWindow(
+@@ -1031,7 +1031,8 @@ pub(crate) struct MacWindow(
      Rc<Mutex<MacWindowState>>,
      MainThreadMarker,
      /// The Metal link's frame waker, kept outside the lock so waking never
@@ -250,7 +250,7 @@ index 32a6a54..f0e4cdb 100644
      Option<Rc<MetalFrames>>,
  );
  
-@@ -1109,6 +1110,7 @@ impl MacWindow {
+@@ -1163,6 +1164,7 @@ impl MacWindow {
              assert!(!native_view.is_null());
  
              let metal_frames = MetalFrameSource::is_available().then(Rc::<MetalFrames>::default);
@@ -258,9 +258,9 @@ index 32a6a54..f0e4cdb 100644
              let state = Rc::new(Mutex::new(MacWindowState {
                  handle,
                  foreground_executor,
-@@ -1166,6 +1168,22 @@ impl MacWindow {
-                 accesskit_adapter: None,
+@@ -1222,6 +1224,22 @@ impl MacWindow {
                  sheet_parent: None,
+                 native_views: native_views::NativeViews::default(),
              }));
 +            if let Some(metal_frames) = &metal_frames {
 +                let window_state = Rc::downgrade(&state);
@@ -281,7 +281,7 @@ index 32a6a54..f0e4cdb 100644
              let mut window = Self(state, marker, metal_frames);
  
              (*native_window)
-@@ -3432,6 +3450,36 @@ extern "C" fn step(view: *mut c_void) {
+@@ -3623,6 +3641,36 @@ extern "C" fn step(view: *mut c_void) {
      }
  }
  

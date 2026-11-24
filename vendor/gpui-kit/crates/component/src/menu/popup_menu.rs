@@ -1784,23 +1784,27 @@ impl Render for PopupMenu {
                                     .vertical_scrollbar(&self.scroll_handle),
                             )
                             .children(foot.into_iter().map(|(_, item)| item))
-                    })
-                    .on_prepaint(move |bounds, _, cx| {
-                        view.update(cx, |menu, cx| {
-                            let width_changed = menu.bounds.size.width != bounds.size.width;
-                            menu.bounds = bounds;
-                            if width_changed {
-                                if let Some(parent) = menu
-                                    .parent_menu
-                                    .as_ref()
-                                    .and_then(|parent| parent.upgrade())
-                                {
-                                    parent.update(cx, |_, cx| cx.notify());
-                                }
-                            }
-                        });
                     }),
             )
+            // Measure on this element, not inside the items: the probe is a
+            // full-size absolute child, which would count as scrollable content
+            // in a scroll container and, with the container's padding added on
+            // top, leave a menu that fits scrollable by that padding.
+            .on_prepaint(move |bounds, _, cx| {
+                view.update(cx, |menu, cx| {
+                    let width_changed = menu.bounds.size.width != bounds.size.width;
+                    menu.bounds = bounds;
+                    if width_changed {
+                        if let Some(parent) = menu
+                            .parent_menu
+                            .as_ref()
+                            .and_then(|parent| parent.upgrade())
+                        {
+                            parent.update(cx, |_, cx| cx.notify());
+                        }
+                    }
+                });
+            })
     }
 }
 
@@ -1873,5 +1877,22 @@ mod tests {
         );
         assert_eq!(PopupMenuItem::separator().a11y_label(), None);
         assert_eq!(PopupMenuItem::element(|_, _| div()).a11y_label(), None);
+    }
+
+    #[gpui::test]
+    fn scrollable_menu_that_fits_has_nothing_to_scroll(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let (menu, cx) = cx.add_window_view(|_, cx| {
+            PopupMenu::new(cx)
+                .scrollable(true)
+                .item(PopupMenuItem::new("One"))
+                .item(PopupMenuItem::new("Two"))
+                .item(PopupMenuItem::new("Three"))
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        menu.read_with(cx, |menu, _| {
+            assert_eq!(menu.scroll_handle.max_offset(), gpui::Point::default());
+        });
     }
 }

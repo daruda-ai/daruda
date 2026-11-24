@@ -1,13 +1,13 @@
 [package]
 name = "gpui-base"
-version = "0.10.0"
+version = "0.11.0"
 license = "Apache-2.0"
 publish = false
 edition = "2024"
 autoexamples = false
 autobenches = false
 autotests = false
-description = "Vendored gpui-base v0.10.0 (longbridge/gpui-kit, Apache-2.0). Routed through daruda workspace gpui."
+description = "Vendored gpui-base v0.11.0 (longbridge/gpui-kit, Apache-2.0). Routed through daruda workspace gpui."
 
 [lib]
 doctest = false
@@ -23,19 +23,20 @@ dead_code = "allow"
 # The upstream GPUI Fast backend is not vendored; declared so its cfg gates compile out.
 "gpui-fast" = []
 "decimal" = ["dep:rust_decimal"]
-"test-support" = ["gpui/test-support"]
+"test-support" = ["gpui/test-support", "dep:image"]
 "inspector" = ["gpui_macros/inspector", "gpui/inspector"]
 
 [dependencies]
 "anyhow" = { workspace = true }
 "aho-corasick" = { version = "1.1.3" }
-"chrono" = { workspace = true, default-features = true }
 "data-url" = { version = "0.3" }
 "futures" = { workspace = true }
 "gpui" = { workspace = true }
 "gpui_macros" = { workspace = true }
+"image" = { workspace = true, optional = true }
 "instant" = { workspace = true, features = ["wasm-bindgen"] }
 "itertools" = { workspace = true }
+"jiff" = { version = "1.0" }
 "lsp-types" = { workspace = true, features = ["proposed"] }
 "markdown" = { workspace = true, features = ["serde"] }
 "html5ever" = { version = "0.27" }
@@ -51,6 +52,7 @@ dead_code = "allow"
 "sum_tree" = { workspace = true }
 "tracing" = { workspace = true }
 "sys-locale" = { workspace = true }
+"unicode-bidi" = { version = "0.3.18" }
 "unicode-linebreak" = { version = "0.1.5" }
 "unicode-segmentation" = { workspace = true }
 "web-time" = { version = "1" }

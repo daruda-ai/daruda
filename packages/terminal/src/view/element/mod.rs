@@ -3,8 +3,8 @@ mod prepaint;
 mod prepaint_helpers;
 
 use gpui::{
-    App, Bounds, Element, ElementId, GlobalElementId, IntoElement, LayoutId, PaintQuad, Pixels,
-    Style, Window, relative,
+    App, Bounds, Element, ElementId, GlobalElementId, LayoutId, PaintQuad, Pixels, Style, Window,
+    relative,
 };
 
 use super::TerminalView;
@@ -65,14 +65,6 @@ pub(super) struct PreeditPostShift {
 
 pub(super) struct TerminalTextElement {
     pub(super) view: gpui::Entity<TerminalView>,
-}
-
-impl IntoElement for TerminalTextElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
 }
 
 impl Element for TerminalTextElement {

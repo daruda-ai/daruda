@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use crate::ui::theme;
 use gpui::{
-    App, Bounds, DispatchPhase, HitboxBehavior, IntoElement, LayoutId, MouseButton, MouseDownEvent,
+    App, Bounds, DispatchPhase, HitboxBehavior, LayoutId, MouseButton, MouseDownEvent,
     MouseMoveEvent, Pixels, ShapedLine, SharedString, Style, TextRun, Window, fill, px,
 };
 
@@ -73,13 +73,6 @@ pub(super) struct FileViewerContentPrepaint {
     selection_quad: Option<gpui::PaintQuad>,
     word_quads: Vec<gpui::PaintQuad>,
     hitbox: gpui::Hitbox,
-}
-
-impl IntoElement for FileViewerContentElement {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
 }
 
 impl gpui::Element for FileViewerContentElement {

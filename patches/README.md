@@ -9,10 +9,13 @@ flows.
 The vendored gpui-kit manifests (`vendor/gpui-kit/crates/*/Cargo.toml`)
 inherit shared registry requirements from the root `[workspace.dependencies]`.
 Keep these `workspace = true` declarations when re-vendoring, preserving
-per-package features, optional flags, and target conditions. `chrono` and
-`notify` explicitly opt into defaults where upstream used them; the shared
-entries disable defaults for narrower first-party users. The dependency policy
-checks these declarations in addition to retained patches.
+per-package features, optional flags, and target conditions. `notify`
+explicitly opts into defaults where upstream used them; the shared entries
+disable defaults for narrower first-party users. `gpui-base`'s optional `image`
+(enabled by `test-support`) inherits the root entry; `jiff` and `unicode-bidi`
+are used only by the vendored crates and keep upstream's direct requirements.
+The dependency policy checks these declarations in addition to retained
+patches.
 
 ## Compiler Compatibility Dependencies
 
@@ -161,7 +164,9 @@ scratch copy of `vendor/zed` with `[patch]` pointing `gpui` at the copy's
 forcing every unpause to stay paused under lldb: the window joined
 `CVDisplayLink` and kept drawing with no further `needsUpdate`.
 
-Drop the patch when upstream detects or prevents the stall.
+Drop the patch when upstream detects or prevents the stall. At the current
+pin upstream only adds a `MetalFrames::debug_state` snapshot; the patch was
+rebased around it and still has no upstream equivalent.
 
 ## Upstream GPUI fixes retained by the pin
 
@@ -194,9 +199,9 @@ UI regression fails without it; the private model also tests skipped button
 events and deferred cleanup from an older gesture. Reproduce the tree with
 `vendor_gpui`; never edit generated `vendor/zed` by hand.
 
-## `vendor/gpui-kit/` — vendored gpui-component 0.10.0, **patched in place**
+## `vendor/gpui-kit/` — vendored gpui-component 0.11.0, **patched in place**
 
-daruda's widget library is upstream gpui-component 0.10.0
+daruda's widget library is upstream gpui-component 0.11.0
 (`longbridge/gpui-kit`, Apache-2.0), vendored as four crates:
 
 | Directory | Cargo package | Library | Role |
@@ -243,7 +248,7 @@ shaping tests borrow the platform text system without opening a window
 
 ### Re-vendor procedure
 
-1. Copy the upstream 0.10.x `crates/{base,component,assets,component-macros}`
+1. Copy the upstream 0.11.x `crates/{base,component,assets,component-macros}`
    into `vendor/gpui-kit/crates/`, keeping the root files listed above and
    `crates/component/locales/ko.yml`.
 2. Regenerate each manifest: inherit root `[workspace.dependencies]` where an
@@ -279,11 +284,12 @@ dependencies on `workspace = true` when re-vendoring. The transcript's
 
 ### Why
 
-Upstream 0.10.0 builds against `gpui-pre` 0.3.12. Each gpui-kit release pins
-one `gpui-pre` snapshot, so a kit upgrade can require a GPUI upgrade: 0.10.0
-builds unchanged on daruda's pinned zed revision, while 0.11.0 needs
-`gpui-pre` 0.3.14 and its API changes. A few sites behave differently on
-daruda's pinned GPUI; each is a marked adaptation, not a behavior change.
+Upstream 0.11.0 builds against `gpui-pre` 0.3.14. Each gpui-kit release pins
+one `gpui-pre` snapshot, so a kit upgrade can require a GPUI upgrade: 0.11.0
+needs that snapshot's API (a blanket `IntoElement` for every `Element`, a
+non-generic `Path`), so it moved together with daruda's zed pin. A few sites
+behave differently on daruda's pinned GPUI; each is a marked adaptation, not a
+behavior change.
 
 ### What diverges
 
@@ -550,7 +556,7 @@ and to size chrome around it. All default to upstream behaviour.
 
 | Delta | Site | Detail |
 |---|---|---|
-| `LineDecoration` | `base/src/input/base/state.rs` (`LineDecoration`, `line_decorations`, `set_line_decorations`), `base/src/input/base/element.rs` (`gutter_label_len`, gutter width, row-background paint), re-exported from `component/src/input/mod.rs` | Per-buffer-row `background` fill and `gutter` label. Row backgrounds paint under everything else; host labels size the gutter to the widest one instead of the line count. The diff viewer packs its old/new line numbers into one gutter column. With `test-support`, the gutter paint also records its text for `test_support::texts`, so `tests/line_decorations.rs` can pin the labels, gutter width, and row backgrounds. |
+| `LineDecoration` | `base/src/input/base/state.rs` (`LineDecoration`, `line_decorations`, `set_line_decorations`), `base/src/input/base/element.rs` (`gutter_label_len`, gutter width, label shaping, row-background paint), `base/src/input/editor/mod.rs` (`EditorLineNumberRenderer::shape_line_label`), `component/src/input/gutter_style.rs` (its override), re-exported from `component/src/input/mod.rs` | Per-buffer-row `background` fill and `gutter` label. Row backgrounds paint under everything else, positioned by `local_row_y` like upstream's rows; host labels size the gutter to the widest one instead of the line count. A label is shaped by the line-number renderer's `shape_line_label` (default: body typography; `GutterStyle` shapes numbers and labels through one path), so it takes the number typography and right-aligns like a number. The diff viewer packs its old/new line numbers into one gutter column. With `test-support`, the gutter paint also records its text for `test_support::texts`, so `tests/line_decorations.rs` can pin the labels, gutter width, and row backgrounds. |
 | Highlight override | `base/src/input/editor/decorations.rs` (`set_highlight_override`), `base/src/input/base/kind.rs` (`EditorExtras::highlight_override`) | Paints host spans through a decoration collection in place of syntax highlighting, switching the highlighter to plain `text` while installed: a synthetic +/- diff buffer is not valid source for any grammar. `None` clears the spans and restores the previous language. |
 | Layout readbacks | `base/src/input/base/state.rs` (`scroll_size`, `display_rows`, `move_cursor_to_end`) | `scroll_size` is the scrollable extent from the last layout, for a host overlaying its own thumb. `display_rows` is the soft-wrapped row count clamped by an auto-grow range, which the composer and the agent-chat embeds size from. `move_cursor_to_end` places the cursor after the last character without moving focus (history recall). |
 | One renderer for every state | `component/src/input/state.rs` (`TextInputState` public), `component/src/input/input.rs` (`Input::from_state`) | A host builds one `Input` for an `InputState`, `TextareaState`, or `EditorState` (`daruda_ui::input`'s `TextState`). |
@@ -603,9 +609,12 @@ propagation unconditionally.
 
 - `takes_scroll` claims a wheel event only when the text can still move in
   that direction (offset short of the extent for a scroll toward the end,
-  offset below zero for a scroll toward the start).
-- `on_scroll_wheel` stops propagation only when the offset actually changed or
-  the scroll bounced.
+  offset below zero for a scroll toward the start). The vertical check reads
+  the f64 offset and content height the scroll itself clamps against.
+- `on_scroll_wheel` stops propagation only when the offset actually changed
+  (the handle offset or upstream's f64 offset, which can move where the f32
+  handle rounds to the same value) or the scroll bounced. Upstream's
+  `overflows_along` claim is not applied.
 
 Re-apply both. `packages/chat/src/view/tests/output_layout.rs`'s
 `capped_embed_wheel_chains_only_after_the_embed_is_exhausted` covers holding
@@ -655,18 +664,18 @@ leaves the filter as a field you have to remember to read.
 
 | Delta | Detail |
 |---|---|
-| Track and thumb press gate on `Left` | `base/src/scrollbar.rs`. A right press on a scrollbar no longer jumps or drags the view and `stop_propagation`s the context menu with it. zed's own scrollbar gates this the same way. |
 | Link press/release | `base/src/text/inline.rs`; see [the link section](#vendorgpui-kitcratesbasesrctextinliners--vendored-a-link-opens-from-the-press-that-chose-it). |
-| `// ANY-BUTTON: <reason>` markers | `component/src/input/popovers/hover_popover.rs`, `component/src/diff/selection.rs`, `component/src/dock/dock.rs`, `base/src/text_selection.rs`, `base/src/scrollbar.rs` (release), `base/src/input/base/element.rs`, `base/src/resizable/resize_handle.rs` (release), `base/src/resizable/panel.rs`. Each listener answers every button on purpose: it ends a drag that only a left press can have started, resets multi-click tracking, or dismisses on an outside press. The marker separates an intent from an omission. |
+| `// ANY-BUTTON: <reason>` markers | `component/src/input/popovers/hover_popover.rs`, `component/src/diff/selection.rs`, `component/src/dock/dock.rs`, `base/src/text_selection.rs`, `base/src/input/base/element.rs`, `base/src/resizable/resize_handle.rs` (release), `base/src/resizable/panel.rs`. Each listener answers every button on purpose: it ends a drag that only a left press can have started, resets multi-click tracking, or dismisses on an outside press. The marker separates an intent from an omission. |
 
 ### Re-vendor procedure
 
 `scripts/lint-raw-mouse-button.sh` is the checklist: a fresh upstream copy
-drops the gates and markers, and the lint re-fires on each site. The paired
-`packages/ui/src/scrollbar/tests.rs` tests
+drops the gates and markers, and the lint re-fires on each site. The
+scrollbar's track, thumb, and release gate on `Left` upstream since 0.11.0, so
+it carries no patch; the paired `packages/ui/src/scrollbar/tests.rs` tests
 (`a_left_press_on_the_track_jumps_the_view` /
-`a_right_press_on_the_track_does_not_jump_the_view`) cover the scrollbar gate
-from both directions.
+`a_right_press_on_the_track_does_not_jump_the_view`) still cover it from both
+directions.
 
 ---
 
@@ -801,8 +810,7 @@ implements the behavior itself:
 
 ## GPUI revision compatibility in vendored consumers
 
-The widget and flow versions remain unchanged when updating GPUI. Preserve
-these API adaptations when re-vendoring:
+Preserve these API adaptations when re-vendoring:
 
 - gpui-kit targets upstream's `gpui-pre`; every adaptation to daruda's pinned
   GPUI is a marked site, listed under
@@ -812,6 +820,9 @@ these API adaptations when re-vendoring:
   wheel-only names.
 - `ferrum_flow/src/plugins/background.rs`: pass the tile bounds as both
   clipping and image bounds to `Window::paint_image`.
+- `ferrum_flow/src/plugins/minimap.rs` and `plugins/port/utils.rs`: GPUI's
+  `Path` is no longer generic, so the path builders return `Path`, not
+  `Path<Pixels>`.
 - The workspace enables `rust-embed/include-exclude` explicitly for assets;
   GPUI no longer supplies this feature transitively.
 

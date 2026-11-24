@@ -38,10 +38,7 @@ pub fn port_screen_big_bounds(
 }
 
 /// Filled circle in screen space (for dangling-connection endpoint marker).
-pub fn filled_disc_path(
-    center: Point<Pixels>,
-    radius: Pixels,
-) -> Result<Path<Pixels>, anyhow::Error> {
+pub fn filled_disc_path(center: Point<Pixels>, radius: Pixels) -> Result<Path, anyhow::Error> {
     let r: f32 = radius.into();
     let cx: f32 = center.x.into();
     let cy: f32 = center.y.into();
@@ -62,7 +59,7 @@ pub fn edge_bezier(
     end_poisition: PortPosition,
     end: Point<Pixels>,
     viewport: &Viewport,
-) -> Result<Path<Pixels>, anyhow::Error> {
+) -> Result<Path, anyhow::Error> {
     let control_a = viewport.edge_control_point(start, start_position);
     let control_b = viewport.edge_control_point(end, end_poisition);
     let mut line = PathBuilder::stroke(px(1.0));

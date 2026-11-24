@@ -1,13 +1,13 @@
 [package]
 name = "gpui-kit-assets"
-version = "0.10.0"
+version = "0.11.0"
 license = "Apache-2.0"
 publish = false
 edition = "2024"
 autoexamples = false
 autobenches = false
 autotests = false
-description = "Vendored gpui-kit-assets v0.10.0 (longbridge/gpui-kit, Apache-2.0). Routed through daruda workspace gpui."
+description = "Vendored gpui-kit-assets v0.11.0 (longbridge/gpui-kit, Apache-2.0). Routed through daruda workspace gpui."
 links = "gpui-kit-default-icons"
 
 [lints.clippy]

@@ -26,16 +26,16 @@ repository = "https://github.com/daruda-ai/daruda"
 homepage = "https://github.com/daruda-ai/daruda"
 
 [workspace.dependencies]
-gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3" }
-gpui_macros = { git = "https://github.com/zed-industries/zed", package = "gpui_macros", rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3" }
-sum_tree = { git = "https://github.com/zed-industries/zed", package = "sum_tree", rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3" }
-gpui_macos = { git = "https://github.com/zed-industries/zed", package = "gpui_macos", rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3", features = ["font-kit"] }
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db" }
+gpui_macros = { git = "https://github.com/zed-industries/zed", package = "gpui_macros", rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db" }
+sum_tree = { git = "https://github.com/zed-industries/zed", package = "sum_tree", rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db" }
+gpui_macos = { git = "https://github.com/zed-industries/zed", package = "gpui_macos", rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db", features = ["font-kit"] }
 # zed's own OS-dispatch wrapper (`current_platform`/`application`) over
 # gpui_macos/gpui_linux/gpui_windows — lets `bootstrap.rs` build the
 # `gpui::Application` without `#[cfg(target_os = ...)]` of its own.
 # `x11` / `wayland` select gpui_linux's window backends; zed's workspace turns
 # its defaults off, so without them a Linux build opens no window at all.
-gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform", rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3", features = ["font-kit", "x11", "wayland"] }
+gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform", rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db", features = ["font-kit", "x11", "wayland"] }
 
 daruda_acp = { path = "packages/acp" }
 daruda_agent = { path = "packages/agent" }

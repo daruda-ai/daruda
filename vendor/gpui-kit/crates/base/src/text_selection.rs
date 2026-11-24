@@ -3075,15 +3075,6 @@ struct KeepTextSelection {
     id: ElementId,
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for KeepTextSelection {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for KeepTextSelection {
     type RequestLayoutState = ();
     type PrepaintState = ();
@@ -3159,15 +3150,6 @@ struct TextSelectionScopeMarker<E> {
     element: E,
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl<E: Element> IntoElement for TextSelectionScopeMarker<E> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl<E: Element> Element for TextSelectionScopeMarker<E> {
     type RequestLayoutState = E::RequestLayoutState;
     type PrepaintState = E::PrepaintState;
@@ -3236,15 +3218,6 @@ impl<E: Element> Element for TextSelectionScopeMarker<E> {
 
 #[doc(hidden)]
 pub struct TextSelectionLayerPrepaintState(Entity<WindowSelectionState>);
-
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for TextSelectionLayer {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 impl Element for TextSelectionLayer {
     type RequestLayoutState = ();
@@ -3456,6 +3429,15 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
                 state.prepare_for_mouse_down(event.click_count == 1 && event.modifiers.shift, cx)
             });
             dispatch_clear_handlers(handlers, cx);
+
+            // Selection layers share this latch for one dispatch. A release
+            // may be stopped by a child or occur outside the window.
+            let latch = state.downgrade();
+            cx.defer(move |cx| {
+                if let Some(state) = latch.upgrade() {
+                    state.update(cx, |state, _| state.mouse_down_prepared = false);
+                }
+            });
         } else if event.click_count == 1 {
             if GlobalState::is_text_selection_suppressed(cx) {
                 state.update(cx, |state, _| state.pending_extension_anchor = None);
@@ -3635,10 +3617,7 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
         if phase.bubble()
             && let Some(state) = mouse_up_state.upgrade()
         {
-            state.update(cx, |state, cx| {
-                state.mouse_down_prepared = false;
-                state.end(cx)
-            });
+            state.update(cx, |state, cx| state.end(cx));
         }
     });
 
@@ -6129,6 +6108,21 @@ mod tests {
         assert_eq!(drag_to("four five six", 6, cx), "two three\nfour five");
         release(2, cx);
         assert_eq!(painted_selection(cx), "two three\nfour five");
+    }
+
+    #[gpui::test]
+    fn a_press_without_a_release_does_not_keep_a_stale_selection(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| SelectableTextsView {
+            texts: vec!["one two three", "four five six"],
+        });
+        painted_selection(cx);
+
+        press_at("one two three", 0, 1, false, cx);
+        assert_eq!(drag_to("one two three", 7, cx), "one two");
+
+        press_at("four five six", 2, 1, false, cx);
+        release(1, cx);
+        assert_eq!(painted_selection(cx), "");
     }
 
     #[gpui::test]

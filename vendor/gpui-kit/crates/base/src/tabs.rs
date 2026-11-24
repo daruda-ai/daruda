@@ -171,6 +171,8 @@ impl RenderOnce for Tab {
             handle
         });
 
+        let pointer_focus = focus_handle.clone();
+
         self.base
             .id(self.id)
             .test_support()
@@ -191,7 +193,18 @@ impl RenderOnce for Tab {
                 this.aria_position_in_set(position)
             })
             .when_some(self.size_of_set, |this, size| this.aria_size_of_set(size))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                // Stopping propagation skips Div's automatic focus handler.
+                // A nested control may already have claimed the pointer focus.
+                if !disabled
+                    && !window.default_prevented()
+                    && let Some(handle) = pointer_focus.as_ref()
+                {
+                    window.focus(handle, cx);
+                    window.prevent_default();
+                }
+                cx.stop_propagation();
+            })
             .when_some(
                 (!disabled).then_some(self.on_click).flatten(),
                 |this, on_click| {
@@ -282,15 +295,6 @@ struct TabListScope {
 impl TabListScope {
     fn current() -> Option<TabRegistry> {
         TAB_LIST_STACK.with(|stack| stack.borrow().last().cloned())
-    }
-}
-
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for TabListScope {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 

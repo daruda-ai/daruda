@@ -20,7 +20,7 @@ impl TerminalTextElement {
             cx,
         );
 
-        window.paint_layer(bounds, |window| {
+        window.paint_layer(|window| {
             for quad in prepaint.background_quads.drain(..) {
                 window.paint_quad(quad);
             }
@@ -80,7 +80,7 @@ impl TerminalTextElement {
                 || prepaint.marked_text.is_some()
                 || prepaint.preedit_post_shift.is_some()
             {
-                window.paint_layer(bounds, |window| {
+                window.paint_layer(|window| {
                     if let Some(shift) = prepaint.preedit_post_shift.as_ref() {
                         window.paint_quad(shift.erase.clone());
                     }

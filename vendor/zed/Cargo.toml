@@ -51,7 +51,7 @@ version = "2.5"
 
 [workspace.dependencies.bench_metrics]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.chrono]
 default-features = false
@@ -63,7 +63,7 @@ version = "0.4"
 
 [workspace.dependencies.collections]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 version = "0.1.0"
 
 [workspace.dependencies.criterion]
@@ -86,33 +86,33 @@ version = "0.3"
 [workspace.dependencies.gpui]
 default-features = false
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.gpui_apple]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.gpui_macros]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.gpui_platform]
 default-features = false
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.gpui_shared_string]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.gpui_util]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.gpui_web]
 default-features = false
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.hdrhistogram]
 default-features = false
@@ -120,7 +120,7 @@ version = "7"
 
 [workspace.dependencies.http_client]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.icu_segmenter]
 default-features = false
@@ -311,7 +311,7 @@ version = "0.9"
 
 [workspace.dependencies.refineable]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.regex]
 default-features = false
@@ -323,7 +323,7 @@ version = "1.5"
 
 [workspace.dependencies.reqwest_client]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.resvg]
 default-features = false
@@ -344,7 +344,7 @@ version = "0.0.8-zed"
 
 [workspace.dependencies.scheduler]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.schemars]
 default-features = false
@@ -391,7 +391,7 @@ version = "0.28"
 
 [workspace.dependencies.sum_tree]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.taffy]
 default-features = false
@@ -403,7 +403,7 @@ version = "0.46.0"
 
 [workspace.dependencies.util_macros]
 git = "https://github.com/zed-industries/zed"
-rev = "decd2399b180b64dea2a4182f9ac63545a45e7a3"
+rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [workspace.dependencies.uuid]
 features = ["serde"]
