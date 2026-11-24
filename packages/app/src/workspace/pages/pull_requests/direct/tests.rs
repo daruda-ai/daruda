@@ -251,7 +251,7 @@ fn a_link_read_leaves_the_shown_details_own_read(cx: &mut TestAppContext) {
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| {
             let opening = PrOpening {
-                tab: None,
+                at: None,
                 read: Some(Box::new(older)),
             };
             ws.open_pr_detail_as(item, opening, window, cx);
@@ -262,4 +262,31 @@ fn a_link_read_leaves_the_shown_details_own_read(cx: &mut TestAppContext) {
         let detail = ws.pages.pull_requests.detail().expect("shown");
         assert!(matches!(detail.load(), Load::Ready(pr) if *pr == shown));
     });
+}
+
+#[gpui::test]
+fn a_late_link_read_cannot_take_focus_from_a_pr_selected_after_it(cx: &mut TestAppContext) {
+    let (f, _gh, _) = window(cx);
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            let (linked_repo, address) = ws.resolve_pr_address("o/r#7", cx).unwrap();
+            ws.open_pr_by_address(linked_repo, address, PrDestination::Page, window, cx);
+            let newer = crate::workspace::tests::pull_request_detail::detail(8, "next");
+            ws.show_page(Page::PullRequests, cx);
+            ws.open_pr_detail(super::listed(repo(), &newer), window, cx);
+        })
+    });
+    vcx.run_until_parked();
+    assert_eq!(
+        f.ws.read_with(&vcx, |ws, _| ws
+            .pages
+            .pull_requests
+            .detail()
+            .unwrap()
+            .item()
+            .pr
+            .number),
+        8
+    );
 }

@@ -52,6 +52,10 @@ pub(in crate::workspace) struct PullRequestsPage {
     /// What GitHub answered for every tab while the page is on screen.
     pub(in crate::workspace) cache: PrListCache,
     search: Entity<InputState>,
+    /// A narrow detail temporarily gives the list its space during search.
+    pub(super) searching_list: bool,
+    /// Only the latest explicit link read may navigate this window when it returns.
+    pending_open: Option<u64>,
     /// Pull requests a worktree is being made for, so their rows do not
     /// offer to make a second one.
     creating: lane::Creating,
@@ -111,6 +115,13 @@ impl PullRequestsPage {
         page_layout::PageLayout::split_fits(self.content_width)
     }
 
+    /// Whether the search puts the list where the detail would be: only
+    /// while the list is not drawn beside it, so a split keeps both.
+    pub(in crate::workspace) fn list_covers_detail(&self) -> bool {
+        self.searching_list
+            && !(self.split_fits() && self.list_column == page_layout::ListColumn::Beside)
+    }
+
     /// Whether this frame laid the list out anew; asking clears it.
     pub(in crate::workspace) fn take_reveal_pending(&mut self) -> bool {
         std::mem::take(&mut self.reveal_pending)
@@ -126,6 +137,7 @@ impl PullRequestsPage {
 
     /// Show over the list the detail `next` holds, or none.
     pub(in crate::workspace) fn show_detail(&mut self, next: Option<details::DetailHold>) {
+        self.searching_list = false;
         self.details.show_on_page(next);
     }
 
@@ -169,6 +181,8 @@ impl PullRequestsPage {
             filter: PrAudience::Mine,
             state: PrSearchState::Open,
             search,
+            searching_list: false,
+            pending_open: None,
             creating: lane::Creating::new(),
             cache: PrListCache::default(),
             snapshot: None,
@@ -298,6 +312,7 @@ impl Workspace {
         let inputs = detail::view::DetailInputs {
             lane,
             link: self.pr_link_inputs(state.item(), lane, lanes, cx),
+            can_checkout: lane.is_none() && self.pr_lane_home(&state.item().repo, None).is_some(),
             sending: lane.is_some_and(|lane| self.is_sending_pr(lane.lane)),
             creating: &self.pages.pull_requests.creating,
             checkout_stage: self
@@ -314,7 +329,8 @@ impl Workspace {
             keeping: crate::github::DraftStore::keeping(draft_owner.as_ref(), cx),
             handoff_chats: state
                 .handoff()
-                .map(|handoff| self.writable_chats(handoff.lane, cx))
+                .and_then(|handoff| handoff.destination(lane.map(|lane| lane.lane)).lane())
+                .map(|lane| self.writable_chats(lane, cx))
                 .unwrap_or_default(),
             now: chrono::Utc::now(),
         };

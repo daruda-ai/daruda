@@ -19,6 +19,40 @@ pub(in crate::workspace) enum RecoverFailure {
     /// GitHub or `gh` failed, or answered what cannot be the file; what
     /// went wrong.
     Failed(String),
+    /// This listing cannot produce a line diff even if the same read is repeated.
+    Unavailable(String),
+}
+
+impl RecoverFailure {
+    pub(super) fn can_retry(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+}
+
+/// GitHub hashes the repository-relative UTF-8 path for each PR file anchor.
+/// This names the change on the base repository, including removals and fork PRs.
+pub(super) fn file_diff_url(pr_url: &str, path: &str) -> Option<String> {
+    use sha2::{Digest as _, Sha256};
+    use std::fmt::Write as _;
+    if path.is_empty() || !daruda_github::model::is_web_url(pr_url) {
+        return None;
+    }
+    let mut url = url::Url::parse(pr_url).ok()?;
+    if url.host().is_none() || !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    daruda_github::address::parse_pr_address(url.as_str())?;
+    if url.path().trim_matches('/').split('/').count() != 4 {
+        return None;
+    }
+    url.set_query(None);
+    url.path_segments_mut().ok()?.pop_if_empty().push("files");
+    let mut fragment = String::from("diff-");
+    for byte in Sha256::digest(path.as_bytes()) {
+        write!(fragment, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    url.set_fragment(Some(&fragment));
+    Some(url.into())
 }
 
 /// A failure, and the `gh` error behind it when there was one, to report.
@@ -38,7 +72,22 @@ impl RecoverError {
 
     fn gh(error: GhError) -> Self {
         Self {
-            failure: RecoverFailure::Failed(error.to_string()),
+            failure: match error {
+                GhError::Overflow { .. } => RecoverFailure::TooLarge,
+                GhError::BadArgument(_)
+                | GhError::Parse(_)
+                | GhError::HeadMoved
+                | GhError::StackChanged => RecoverFailure::Unavailable(error.to_string()),
+                _ => match error.kind() {
+                    daruda_github::FailureKind::LoggedOut | daruda_github::FailureKind::Missing => {
+                        RecoverFailure::Unavailable(error.to_string())
+                    }
+                    daruda_github::FailureKind::Transient
+                    | daruda_github::FailureKind::RateLimited => {
+                        RecoverFailure::Failed(error.to_string())
+                    }
+                },
+            },
             cause: Some(error),
         }
     }
@@ -97,7 +146,7 @@ pub(in crate::workspace) fn recover_patch(
             Ok(FileText::Binary) => Err(RecoverError::plain(RecoverFailure::Binary)),
             // The change says this side exists: a missing one is a token
             // that cannot read contents, or a commit GitHub does not have.
-            Ok(FileText::Absent) => Err(RecoverError::plain(RecoverFailure::Failed(format!(
+            Ok(FileText::Absent) => Err(RecoverError::plain(RecoverFailure::Unavailable(format!(
                 "{path} is not at {commit}"
             )))),
             Err(GhError::Overflow { .. }) => Err(RecoverError::plain(RecoverFailure::TooLarge)),
@@ -111,7 +160,7 @@ pub(in crate::workspace) fn recover_patch(
         return Err(RecoverError::plain(RecoverFailure::TooLarge));
     }
     if patch.is_empty() && target.lines > 0 {
-        return Err(RecoverError::plain(RecoverFailure::Failed(format!(
+        return Err(RecoverError::plain(RecoverFailure::Unavailable(format!(
             "{path} reads the same at {merge_base} and {}",
             target.head
         ))));

@@ -63,8 +63,26 @@ pub(in crate::workspace) struct ReviewSubmit {
     pub body: Entity<TextareaState>,
     pub event: ReviewEvent,
     pub state: SubmitState,
+    /// Exact drafts deliberately left for a later review. Editing one makes it eligible again.
+    excluded: Vec<LineCommentDraft>,
+    /// The account whose drafts this review sends. Rebound to the signed-in
+    /// account before anything acts on the drafts, so what is shown, left
+    /// out and sent all belong to the login `gh` submits as.
     owner: Option<DraftOwner>,
     _typing: Subscription,
+}
+
+impl PrDetailState {
+    /// Whether `draft` is left out of the review being written. A draft
+    /// that became sendable since (a refresh reached the head it was written
+    /// on) is no longer left out: nothing then stands in its way.
+    pub(super) fn review_excludes(&self, draft: &LineCommentDraft) -> bool {
+        let Some(review) = self.review.as_ref() else {
+            return false;
+        };
+        let head = self.pr.last_known().map(|pr| pr.head_sha.as_str());
+        review.excluded.contains(draft) && head.is_none_or(|head| !sendable(self, draft, head))
+    }
 }
 
 impl std::fmt::Debug for ReviewSubmit {
@@ -181,6 +199,25 @@ fn sendable(state: &PrDetailState, comment: &LineCommentDraft, head: &str) -> bo
 }
 
 impl Workspace {
+    pub(super) fn show_pr_review(
+        &mut self,
+        id: PrDetailId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_pr_detail_tab(id, super::PrTab::Files, cx);
+        if let Some(detail) = self.pr_detail(id) {
+            detail.scroll.set_offset(Default::default());
+            if let Some(composer) = detail.composer() {
+                composer
+                    .body
+                    .update(cx, |input, cx| input.focus(window, cx));
+                return;
+            }
+        }
+        self.open_pr_review(id, window, cx);
+    }
+
     /// Begin writing a review, continuing its kept text.
     pub(in crate::workspace) fn open_pr_review(
         &mut self,
@@ -218,6 +255,7 @@ impl Workspace {
                 body,
                 event: ReviewEvent::Comment,
                 state: SubmitState::Writing,
+                excluded: Vec::new(),
                 owner,
                 _typing: typing,
             });
@@ -225,7 +263,25 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Bind an editable review to the account signed in now. A switch of
+    /// account since it opened leaves the other account's exclusions behind:
+    /// they name drafts this account does not have.
+    fn rebind_pr_review_owner(&mut self, id: PrDetailId, cx: &mut Context<Self>) {
+        let owner = self.pr_draft_owner(id, cx);
+        if let Some(review) = self.pr_detail_mut(id).and_then(|d| d.review.as_mut())
+            && review.state.editable()
+            && review.owner != owner
+        {
+            review.owner = owner;
+            review.excluded.clear();
+            if matches!(review.state, SubmitState::Blocked(_)) {
+                review.state = SubmitState::Writing;
+            }
+        }
+    }
+
     fn pr_review_typed(&mut self, id: PrDetailId, cx: &mut Context<Self>) {
+        self.rebind_pr_review_owner(id, cx);
         let Some(review) = self.pr_detail_mut(id).and_then(|d| d.review.as_mut()) else {
             return;
         };
@@ -288,6 +344,45 @@ impl Workspace {
         }
     }
 
+    /// Keep this one draft for another review. The current review stays open
+    /// with the same text and verdict; submitting always rechecks live drafts.
+    pub(in crate::workspace) fn exclude_pr_review_comment(
+        &mut self,
+        id: PrDetailId,
+        comment: u64,
+        cx: &mut Context<Self>,
+    ) {
+        self.rebind_pr_review_owner(id, cx);
+        let Some(detail) = self.pr_detail_mut(id) else {
+            return;
+        };
+        let Some(review) = detail.review.as_ref().filter(|r| r.state.editable()) else {
+            return;
+        };
+        let Some(draft) = review
+            .owner
+            .as_ref()
+            .and_then(|owner| DraftStore::of(owner, cx))
+            .and_then(|drafts| drafts.comments.into_iter().find(|d| d.id == comment))
+        else {
+            return;
+        };
+        let Some(head) = detail.pr.last_known().map(|pr| pr.head_sha.as_str()) else {
+            return;
+        };
+        if sendable(detail, &draft, head) {
+            return;
+        }
+        let review = detail.review.as_mut().expect("read above");
+        review.excluded.retain(|d| d.id != comment);
+        review.excluded.push(draft);
+        if detail.composer.as_ref().and_then(|c| c.id()) == Some(comment) {
+            detail.composer = None;
+        }
+        detail.scroll.set_offset(gpui::Point::default());
+        cx.notify();
+    }
+
     /// Submit the review with every pending comment; refused while any
     /// cannot be sent.
     pub(in crate::workspace) fn submit_pr_review(
@@ -314,6 +409,7 @@ impl Workspace {
         leave_out: bool,
         cx: &mut Context<Self>,
     ) {
+        self.rebind_pr_review_owner(id, cx);
         let drafts = self
             .pr_detail_mut(id)
             .and_then(|detail| detail.review.as_ref()?.owner.clone())
@@ -342,6 +438,7 @@ impl Workspace {
                 let comments = drafts.map(|drafts| drafts.comments).unwrap_or_default();
                 let (send, held): (Vec<_>, Vec<_>) = comments
                     .into_iter()
+                    .filter(|comment| !detail.review_excludes(comment))
                     .partition(|comment| sendable(detail, comment, &head));
                 let own = author
                     .zip(viewer)
@@ -502,7 +599,14 @@ impl Workspace {
             }
         }
         match failure {
-            None => self.refresh_pr_detail(id, cx),
+            None => {
+                self.refresh_pr_detail(id, cx);
+                if let Some(detail) = self.pr_detail_mut(id)
+                    && !matches!(detail.action, super::ActionState::Running(_))
+                {
+                    detail.done_action(s::review_submitted());
+                }
+            }
             Some(e) => {
                 let report = ErrorReport::new(s::review_submit_failed())
                     .severity(ErrorSeverity::Error)

@@ -3,6 +3,13 @@
 use super::*;
 
 impl PrDetailState {
+    pub(in super::super) fn reveal_file_row(&self) {
+        if let Some(at) = self.files.as_ref().and_then(FilesState::shown_index) {
+            self.files_scroll
+                .scroll_to_item(at, gpui::ScrollStrategy::Nearest);
+        }
+    }
+
     /// Bring a reopened detail back to the file it showed, once that file
     /// is shown and the pull request is read, so the tab is drawn at its
     /// full height to scroll in.
@@ -94,9 +101,13 @@ impl Workspace {
         // The head as last read, unless a read of it is out: then the files
         // take it when that read lands.
         let head = detail.pr.confirmed().map(|pr| pr.head_sha.as_str());
+        let previous = state.shown_index();
         let landed = state.land(ticket, page, answer, head, || tickets.issue());
         if landed == Landed::Stale {
             return;
+        }
+        if state.shown_index() != previous {
+            detail.reveal_file_row();
         }
         detail.come_back();
         if let Some(e) = error {
@@ -105,6 +116,7 @@ impl Workspace {
         if let Landed::Next(ticket, page) = landed {
             self.send_pr_files_read(id, ticket, page, cx);
         }
+        self.follow_pr_comment(id, cx);
         cx.notify();
     }
 
@@ -131,11 +143,17 @@ impl Workspace {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        detail.stop_coming_back();
-        if let Some(state) = detail.files.as_mut() {
-            state.show(path);
-            cx.notify();
+        let Some(files) = detail.files.as_mut() else {
+            return;
+        };
+        if files.blob_of(path).is_none() {
+            return;
         }
+        files.restore = None;
+        files.show(path);
+        detail.comment_location = None;
+        detail.reveal_file_row();
+        cx.notify();
     }
 
     pub(super) fn with_pr_files(
@@ -144,7 +162,10 @@ impl Workspace {
         cx: &mut Context<Self>,
         change: impl FnOnce(&mut FilesState),
     ) {
-        if let Some(state) = self.pr_detail_mut(id).and_then(|d| d.files.as_mut()) {
+        if let Some(detail) = self.pr_detail_mut(id)
+            && let Some(state) = detail.files.as_mut()
+        {
+            detail.comment_location = None;
             change(state);
             cx.notify();
         }
@@ -155,24 +176,79 @@ impl Workspace {
         &mut self,
         id: PrDetailId,
         path: &str,
+        displayed_blob: Option<&str>,
         cx: &mut Context<Self>,
     ) {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
         let key = detail.key();
-        let Some(blob) = detail
-            .files
-            .as_ref()
+        let Some(blob) = displayed_blob else { return };
+        if detail
+            .files()
             .and_then(|files| files.blob_of(path))
-            .map(|blob| blob.map(str::to_owned))
-        else {
+            .flatten()
+            != Some(blob)
+        {
             return;
-        };
+        }
         self.pages
             .pull_requests
             .progress
-            .toggle_viewed(&key, path, blob.as_deref());
+            .toggle_viewed(&key, path, Some(blob));
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn toggle_pr_file_picker(
+        &mut self,
+        id: PrDetailId,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_pr_files(id, cx, |state| state.picker_open = !state.picker_open);
+    }
+
+    /// Mark the displayed blob and advance through the listing, wrapping once
+    /// to revisit any files skipped earlier or changed since their last mark.
+    pub(in crate::workspace) fn finish_pr_file(
+        &mut self,
+        id: PrDetailId,
+        path: &str,
+        displayed_blob: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        let page = &mut self.pages.pull_requests;
+        let Some(detail) = page.details.get(id) else {
+            return;
+        };
+        let Some(files) = detail.files() else { return };
+        if files.shown.as_ref().is_none_or(|shown| shown.path != path) {
+            return;
+        }
+        let Some(at) = files.files.iter().position(|file| file.path == path) else {
+            return;
+        };
+        let Some(blob) = displayed_blob else { return };
+        if files.files[at].blob.as_deref() != Some(blob) {
+            return;
+        }
+        let key = detail.key();
+        let marks = page.progress.marks(&key);
+        let next = (at + 1..files.len())
+            .chain(0..at)
+            .find(|&index| {
+                let file = &files.files[index];
+                marks.viewed(&file.path, file.blob.as_deref()) != Viewed::Yes
+            })
+            .map(|index| files.files[index].path.clone());
+        if marks.viewed(path, Some(blob)) != Viewed::Yes {
+            page.progress.toggle_viewed(&key, path, Some(blob));
+        }
+        if let Some(path) = next {
+            self.show_pr_file(id, &path, cx);
+            if let Some(detail) = self.pr_detail_mut(id) {
+                detail.scroll.set_offset(gpui::Point::default());
+            }
+        }
         cx.notify();
     }
 
@@ -187,15 +263,8 @@ impl Workspace {
             state.restore = None;
             state.show_adjacent(delta);
         });
-        // Keep the shown file's row in view in a long listing.
-        let at = self.pr_detail_mut(id).and_then(|detail| {
-            let state = detail.files.as_ref()?;
-            let path = &state.shown.as_ref()?.path;
-            let at = state.files.iter().position(|file| &file.path == path)?;
-            Some((detail.files_scroll.clone(), at))
-        });
-        if let Some((scroll, at)) = at {
-            scroll.scroll_to_item(at, gpui::ScrollStrategy::Nearest);
+        if let Some(detail) = self.pr_detail(id) {
+            detail.reveal_file_row();
         }
     }
 
@@ -311,6 +380,17 @@ impl Workspace {
     ) {
         if let Some(state) = self.pr_detail_mut(id).and_then(|d| d.files.as_mut()) {
             state.show_more_rows();
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn show_earlier_pr_diff(
+        &mut self,
+        id: PrDetailId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(state) = self.pr_detail_mut(id).and_then(|d| d.files.as_mut()) {
+            state.show_earlier_rows();
             cx.notify();
         }
     }

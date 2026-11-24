@@ -101,7 +101,10 @@ impl Workspace {
                 self.cancel_flow_start_navigation();
                 self.respawn_flow_watcher(cx);
             }
-            Page::PullRequests => self.hide_pr_list(cx),
+            Page::PullRequests => {
+                self.pages.pull_requests.searching_list = false;
+                self.hide_pr_list(cx);
+            }
         }
     }
 }

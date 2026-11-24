@@ -9,7 +9,6 @@ use gpui::{Modifiers, TestAppContext, VisualTestContext, px, size};
 
 use super::pull_request_detail::{item, mergeable, open, repo, window};
 use crate::github::DraftStore;
-use crate::workspace::pages::pull_requests::detail::PrTab;
 use crate::workspace::pages::pull_requests::detail::review_submit::{SubmitBlock, SubmitState};
 
 struct Fixture {
@@ -103,9 +102,6 @@ fn submits(gh: &daruda_github::fake::FakeGh) -> Vec<(String, ReviewEvent, usize)
 }
 
 fn begin(t: &Fixture, vcx: &mut VisualTestContext, text: &str) {
-    let id = t.id;
-    t.f.ws
-        .update(vcx, |ws, cx| ws.select_pr_detail_tab(id, PrTab::Files, cx));
     vcx.run_until_parked();
     let open_review = vcx.debug_bounds("pr-review-open").unwrap().center();
     vcx.simulate_click(open_review, Modifiers::default());
@@ -132,10 +128,15 @@ fn comments_on_another_head_hold_the_review_until_left_out_deliberately(cx: &mut
     let mut vcx = VisualTestContext::from_window(t.f.window.into(), cx);
     vcx.simulate_resize(size(px(1400.), px(900.)));
     begin(&t, &mut vcx, "Looks close.");
+    assert!(
+        vcx.debug_bounds("pr-review-first-blocker").is_some(),
+        "opening the review immediately shows the first blocker"
+    );
     let approve = vcx.debug_bounds("pr-review-event-1").unwrap().center();
     vcx.simulate_click(approve, Modifiers::default());
-    let submit = vcx.debug_bounds("pr-review-submit").unwrap().center();
-    vcx.simulate_click(submit, Modifiers::default());
+    assert!(vcx.debug_bounds("pr-review-submit").is_none());
+    t.f.ws
+        .update(&mut vcx, |ws, cx| ws.submit_pr_review(t.id, cx));
     vcx.run_until_parked();
     assert_eq!(
         state(&t, &mut vcx),
@@ -160,6 +161,73 @@ fn comments_on_another_head_hold_the_review_until_left_out_deliberately(cx: &mut
         .collect();
     assert_eq!(left, ["Stale."], "only what was sent leaves the drafts");
     assert_eq!(kept.prs[0].review_body, None);
+}
+
+#[gpui::test]
+fn individual_blockers_can_be_excluded_or_reattached_before_submitting(cx: &mut TestAppContext) {
+    use crate::workspace::pages::pull_requests::detail::diff_layout::Side;
+    let t = reviewing(cx);
+    let owner = cx.update(|cx| DraftStore::owner(&repo(), 7, cx)).unwrap();
+    cx.update(|cx| {
+        let mut old = DraftStore::of(&owner, cx).unwrap().comments.pop().unwrap();
+        old.body = "Reattach this.".into();
+        DraftStore::put_comment(&owner, None, old, cx);
+    });
+    let mut vcx = VisualTestContext::from_window(t.f.window.into(), cx);
+    vcx.simulate_resize(size(px(1600.), px(1000.)));
+    begin(&t, &mut vcx, "Review summary");
+    t.f.ws.update(&mut vcx, |ws, cx| {
+        ws.set_pr_review_event(t.id, ReviewEvent::RequestChanges, cx);
+        ws.submit_pr_review(t.id, cx);
+    });
+    vcx.run_until_parked();
+    assert_eq!(
+        state(&t, &mut vcx),
+        Some(SubmitState::Blocked(SubmitBlock::Unanchored(2)))
+    );
+    let click = |key: &'static str, vcx: &mut VisualTestContext| {
+        let at = vcx.debug_bounds(key).unwrap().center();
+        vcx.simulate_click(at, Modifiers::default());
+        vcx.run_until_parked();
+    };
+    click("pr-review-first-blocker", &mut vcx);
+    click("pr-composer-exclude", &mut vcx);
+    let comment_counts = |vcx: &mut VisualTestContext| {
+        use crate::workspace::pages::pull_requests::detail::view::DetailBody;
+        t.f.ws.update(vcx, |ws, cx| {
+            ws.stage_pr_page(cx);
+            let snapshot = ws.pages.pull_requests.detail_snapshot.as_ref().unwrap();
+            let DetailBody::Ready(ready) = &snapshot.body else {
+                panic!("read detail")
+            };
+            let review = ready
+                .review_comments
+                .as_ref()
+                .unwrap()
+                .review
+                .as_ref()
+                .unwrap();
+            (review.included_comments, review.excluded_comments)
+        })
+    };
+    assert_eq!(comment_counts(&mut vcx), (1, 1));
+    click("pr-review-first-blocker", &mut vcx);
+    t.f.ws.update(&mut vcx, |ws, cx| {
+        ws.select_pr_line(t.id, Side::New, 2, false, cx)
+    });
+    vcx.run_until_parked();
+    click("pr-composer-reanchor", &mut vcx);
+    assert!(vcx.debug_bounds("pr-review-first-blocker").is_none());
+    assert_eq!(comment_counts(&mut vcx), (2, 1));
+    assert!(submits(&t.gh).is_empty());
+    click("pr-review-submit", &mut vcx);
+    assert_eq!(
+        submits(&t.gh),
+        [("h1".into(), ReviewEvent::RequestChanges, 2)]
+    );
+    let left = vcx.update(|_, cx| DraftStore::of(&owner, cx).unwrap().comments);
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].body, "Stale.");
 }
 
 #[gpui::test]
@@ -340,4 +408,37 @@ fn checking_again_finds_a_review_that_landed(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     assert_eq!(state(&t, &mut vcx), None, "found taken: done");
     assert_eq!(submits(&t.gh).len(), 1);
+}
+
+/// Signed in as another account since the review opened: it sends that
+/// account's drafts, the login `gh` submits as, never the earlier one's.
+#[gpui::test]
+fn a_review_follows_the_account_signed_in_when_sent(cx: &mut TestAppContext) {
+    let t = reviewing(cx);
+    let mut vcx = VisualTestContext::from_window(t.f.window.into(), cx);
+    vcx.simulate_resize(size(px(1400.), px(900.)));
+    begin(&t, &mut vcx, "Looks good.");
+    t.gh.set_account(
+        "github.com",
+        GhAccount {
+            login: "you".into(),
+            source: CredentialSource::Env("GH_TOKEN".into()),
+        },
+    );
+    t.f.ws
+        .update(&mut vcx, |ws, cx| ws.recheck_gh("github.com", cx));
+    vcx.update(|_, cx| crate::github::PrPoller::tick(cx));
+    vcx.run_until_parked();
+    t.f.ws
+        .update(&mut vcx, |ws, cx| ws.submit_pr_review(t.id, cx));
+    vcx.run_until_parked();
+    assert_eq!(
+        submits(&t.gh),
+        vec![("h1".to_owned(), ReviewEvent::Comment, 0)],
+        "`me`'s comments stay `me`'s drafts"
+    );
+    let owner = vcx
+        .update(|_, cx| DraftStore::owner(&repo(), 7, cx))
+        .unwrap();
+    assert_eq!(owner.account, "you");
 }

@@ -26,6 +26,12 @@ pub(in crate::workspace) struct LineComposer {
     _typing: Vec<Subscription>,
 }
 
+impl LineComposer {
+    pub(super) fn id(&self) -> Option<u64> {
+        self.id
+    }
+}
+
 impl std::fmt::Debug for LineComposer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LineComposer")
@@ -77,6 +83,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .pr_detail(id)
+            .is_none_or(|detail| detail.review_comments_locked())
+        {
+            return;
+        }
         let Some(draft) = self
             .pr_draft_owner(id, cx)
             .and_then(|owner| DraftStore::of(&owner, cx))
@@ -95,16 +107,21 @@ impl Workspace {
             detail.composer = None;
             // Its lines, shown where they are when the listing is at the
             // commit it was written on.
-            if let Some(files) = detail.files.as_mut()
-                && files.revision() == Some(range.revision.as_str())
-            {
-                files.go_to_lines(super::view::ThreadTarget {
-                    path: range.path.clone(),
-                    side: range.side,
-                    start: range.start,
-                    end: range.end,
-                });
+            if let Some(files) = detail.files.as_mut() {
+                if files.revision() == Some(range.revision.as_str()) {
+                    files.go_to_lines(super::view::ThreadTarget {
+                        path: range.path.clone(),
+                        side: range.side,
+                        start: range.start,
+                        end: range.end,
+                        revision: range.revision.clone(),
+                    });
+                } else {
+                    files.show_listed(&range.path);
+                }
             }
+            detail.reveal_file_row();
+            detail.scroll.set_offset(gpui::Point::default());
         }
         let seed = ComposerSeed {
             range,
@@ -124,7 +141,7 @@ impl Workspace {
     ) {
         if self
             .pr_detail_mut(id)
-            .is_none_or(|detail| detail.composer.is_some())
+            .is_none_or(|detail| detail.composer.is_some() || detail.review_comments_locked())
         {
             return;
         }
@@ -249,6 +266,26 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Move the open draft only after a fresh selection was explicitly accepted.
+    pub(in crate::workspace) fn reanchor_pr_comment(
+        &mut self,
+        id: PrDetailId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(detail) = self.pr_detail_mut(id) else {
+            return;
+        };
+        let Some(range) = detail.comment_replacement_range().cloned() else {
+            return;
+        };
+        let Some(composer) = detail.composer.as_mut() else {
+            return;
+        };
+        composer.range = range;
+        self.pr_comment_typed(id, cx);
+        self.close_pr_line_comment(id, cx);
+    }
+
     /// Done writing: the comment stays pending in the review, unless it
     /// was left with nothing in it.
     pub(in crate::workspace) fn close_pr_line_comment(
@@ -259,6 +296,11 @@ impl Workspace {
         let Some(composer) = self.pr_detail_mut(id).and_then(|d| d.composer.take()) else {
             return;
         };
+        if let Some(detail) = self.pr_detail_mut(id)
+            && detail.review.is_some()
+        {
+            detail.scroll.set_offset(gpui::Point::default());
+        }
         let empty = composer.body.read(cx).value().trim().is_empty()
             && composer
                 .suggestion
@@ -277,6 +319,12 @@ impl Workspace {
         comment: u64,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .pr_detail(id)
+            .is_none_or(|detail| detail.review_comments_locked())
+        {
+            return;
+        }
         if let Some(owner) = self.pr_draft_owner(id, cx) {
             DraftStore::remove_comment(&owner, comment, cx);
         }
@@ -304,6 +352,28 @@ impl Workspace {
             DraftStore::remove_comment(&owner, kept, cx);
         }
         cx.notify();
+    }
+}
+
+impl super::PrDetailState {
+    pub(super) fn review_comments_locked(&self) -> bool {
+        self.review().is_some_and(|review| !review.state.editable())
+    }
+
+    pub(super) fn comment_replacement_range(&self) -> Option<&LineRange> {
+        let composer = self.composer.as_ref()?;
+        let files = self.files()?;
+        let head = &self.pr.last_known()?.head_sha;
+        let selection = files.selection()?;
+        if selection.revision != *head
+            || selection == &composer.range
+            || (composer.suggestion.is_some() && selection.side == Side::Old)
+            || (composer.range.revision == *head && files.anchors(&composer.range) != Some(false))
+            || files.anchors(selection) != Some(true)
+        {
+            return None;
+        }
+        Some(selection)
     }
 }
 

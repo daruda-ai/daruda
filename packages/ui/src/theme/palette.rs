@@ -801,6 +801,8 @@ pub const PR_DETAIL_SIDE_W: f32 = 240.0;
 pub const PR_DETAIL_CONTENT_BASIS: f32 = 360.0;
 /// A pull request diff's line-number column, old and new each: five digits.
 pub const PR_DIFF_LINE_NO_W: f32 = 48.0;
+/// Keep inline discussions readable even when a long code line widens a diff.
+pub const PR_INLINE_THREAD_MAX_W: f32 = 640.0;
 /// One side of a side-by-side diff at its narrowest: below twice this the
 /// diff scrolls sideways; each side clips its own longer lines.
 pub const PR_SPLIT_HALF_MIN_W: f32 = 320.0;
@@ -814,8 +816,13 @@ pub const PR_REPLY_ROWS: usize = 4;
 pub const PR_FILE_VIEWED_OPACITY: f32 = 0.6;
 /// A changed file's row in the Files tab: one line of path and origin.
 pub const PR_FILE_ROW_H: f32 = 28.0;
+/// Space for a changed-file navigator beside a readable diff.
+pub const PR_FILES_SPLIT_MIN_W: f32 = 720.0;
+pub const PR_FILES_NAV_W: f32 = 220.0;
 /// The Files tab's listing at its tallest; more rows scroll within it.
 pub const PR_FILES_LIST_MAX_H: f32 = 320.0;
+/// Pending drafts scroll separately to keep the selected diff in view.
+pub const PR_PENDING_LIST_MAX_H: f32 = 96.0;
 /// The Pull requests list column beside an open detail: compact rows.
 pub const PR_SPLIT_LIST_W: f32 = 360.0;
 /// The narrowest the list column can be dragged.

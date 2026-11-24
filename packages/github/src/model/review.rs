@@ -62,7 +62,7 @@ pub struct ReviewThread {
     /// GitHub's node id: what a reply, resolve or unresolve names.
     pub id: String,
     pub path: String,
-    /// The commented lines, first to last; `None` for a file-level comment.
+    /// The commented lines, first to last. File-level or unlocatable comments have none.
     pub lines: Option<(u32, u32)>,
     /// Which side of the diff `lines` count on.
     pub side: DiffSide,

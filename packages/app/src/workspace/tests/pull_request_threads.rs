@@ -126,6 +126,102 @@ fn a_thread_expands_in_full_and_leads_to_its_lines(cx: &mut TestAppContext) {
         "the thread's lines, selected at the commit read"
     );
     assert!(vcx.debug_bounds("pr-lines-selected").is_some());
+    // The paired navigation button now has the keyboard in the diff.
+    let enter = gpui::Keystroke::parse("enter").unwrap();
+    vcx.simulate_event(gpui::KeyDownEvent {
+        keystroke: enter.clone(),
+        is_held: false,
+        prefer_character_input: false,
+    });
+    vcx.simulate_event(gpui::KeyUpEvent { keystroke: enter });
+    vcx.run_until_parked();
+    assert_eq!(
+        f.ws.read_with(&vcx, |ws, _| ws.pages.pull_requests.detail().unwrap().tab()),
+        PrTab::Threads
+    );
+    assert!(vcx.debug_bounds("pr-thread-full-0").is_some());
+}
+
+/// Files reads threads on its first visit. Identical source numbers in a
+/// replacement must stay on their own sides; stale lines are kept apart.
+#[gpui::test]
+fn files_opens_review_threads_at_their_lines_and_shares_reply_state(cx: &mut TestAppContext) {
+    use crate::workspace::pages::pull_requests::detail::files::DiffMode;
+    use daruda_github::fake::GhOp;
+
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    let mut read = threads();
+    read.threads[0].lines = Some((1, 1));
+    read.threads[1].path = "a.rs".into();
+    read.threads[1].side = DiffSide::Left;
+    read.threads[2].path = "a.rs".into();
+    read.threads[2].lines = Some((1, 1));
+    gh.set_review_threads(&repo(), 7, read);
+    gh.set_pr_files(
+        &repo(),
+        7,
+        PrFiles {
+            files: vec![PrFile {
+                path: "a.rs".into(),
+                change: daruda_github::FileChange::Modified,
+                additions: 1,
+                deletions: 1,
+                patch: Some("@@ -1 +1 @@\n-old\n+new".into()),
+                blob: Some("blob".into()),
+            }],
+        },
+    );
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.simulate_resize(size(px(1600.), px(1000.)));
+    f.ws.update(&mut vcx, |ws, cx| {
+        ws.select_pr_detail_tab(id, PrTab::Files, cx)
+    });
+    vcx.run_until_parked();
+    assert_eq!(gh.count(GhOp::ReviewThreads), 1);
+    let current = vcx.debug_bounds("pr-inline-thread-0").unwrap();
+    let base = vcx.debug_bounds("pr-inline-thread-1").unwrap();
+    assert!(
+        base.top() < current.top(),
+        "removed line before added line in unified mode"
+    );
+    assert!(vcx.debug_bounds("pr-inline-thread-2").is_none());
+    assert!(vcx.debug_bounds("pr-file-unplaced-threads").is_some());
+    f.ws.update(&mut vcx, |ws, cx| {
+        ws.set_pr_diff_mode(id, DiffMode::Split, cx)
+    });
+    vcx.run_until_parked();
+    let current = vcx.debug_bounds("pr-inline-thread-0").unwrap();
+    let base = vcx.debug_bounds("pr-inline-thread-1").unwrap();
+    assert_eq!(base.top(), current.top());
+    assert!(base.right() <= current.left());
+    vcx.simulate_click(current.center(), Modifiers::default());
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("pr-thread-full-0").is_some());
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| ws.open_pr_reply(id, "t1", window, cx))
+    });
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("pr-thread-reply-box-0").is_some());
+    assert_eq!(gh.count(GhOp::ReplyToThread), 0);
+    let go = vcx.debug_bounds("pr-thread-diff-0").unwrap().center();
+    vcx.simulate_click(go, Modifiers::default());
+    vcx.run_until_parked();
+    assert_eq!(gh.count(GhOp::ReviewThreads), 1);
+    assert!(vcx.debug_bounds("pr-thread-reply-box-0").is_some());
+    vcx.simulate_keystrokes("x");
+    vcx.run_until_parked();
+    f.ws.read_with(&vcx, |ws, cx| {
+        let detail = ws.pages.pull_requests.detail().unwrap();
+        assert_eq!(detail.tab(), PrTab::Threads);
+        let reply = detail
+            .thread_work()
+            .get("t1")
+            .unwrap()
+            .reply
+            .as_ref()
+            .unwrap();
+        assert_eq!(reply.read(cx).value().to_string(), "x");
+    });
 }
 
 #[gpui::test]

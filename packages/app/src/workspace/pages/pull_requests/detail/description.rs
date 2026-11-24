@@ -134,6 +134,7 @@ impl Workspace {
         if let Some(e) = error {
             self.report_pr_read(&e, "github.pr_conversation.read", cx);
         }
+        self.follow_pr_comment(id, cx);
         cx.notify();
     }
 

@@ -136,6 +136,7 @@ fn inputs(lane: Option<&LaneFacts>) -> DetailInputs<'_> {
         progress: &NO_PROGRESS,
         drafts: None,
         keeping: crate::github::DraftKeeping::Saved,
+        can_checkout: false,
         handoff_chats: Vec::new(),
         now: Utc::now(),
     }
@@ -257,6 +258,11 @@ fn a_partial_check_list_shows_the_overall_verdict_and_says_it_is_partial() {
             format!("{verdict} · Only part of the check list is shown"),
             "{rollup:?}"
         );
+        assert_eq!(
+            view.inspect_failures.is_some(),
+            matches!(rollup, CheckRollup::Failing { .. }),
+            "the overall verdict drives inspection even when no failing row was returned"
+        );
         assert!(view.rerun.is_none(), "no unseen job is offered for rerun");
     }
 }
@@ -271,7 +277,7 @@ fn the_header_says_what_the_detail_knows_once_read() {
         .iter()
         .map(|(_, label)| label.as_str())
         .collect();
-    assert_eq!(labels, ["Checks", "Files", "Review threads", "Description"]);
+    assert_eq!(labels, ["Description", "Checks", "Files", "Review threads"]);
     assert_eq!(loading.meta, "fix → main · alice · Changes requested");
 
     let read = view(
@@ -281,7 +287,7 @@ fn the_header_says_what_the_detail_knows_once_read() {
     let labels: Vec<_> = read.tabs.iter().map(|(_, label)| label.as_str()).collect();
     assert_eq!(
         labels,
-        ["Checks 4", "Files", "Review threads 3", "Description"],
+        ["Description", "Checks 4", "Files", "Review threads 3"],
         "the files are counted once read"
     );
     assert_eq!(
@@ -545,11 +551,11 @@ fn a_thread_reads_as_its_place_first_words_and_replies() {
         more_comments: false,
         ..Default::default()
     };
-    let row = thread_row(&thread);
+    let row = thread_row(&thread, Some("head"));
     assert_eq!(row.location, "src/a.rs:L3–L5");
     assert_eq!(row.excerpt, "Rename this.");
     assert_eq!(row.author, "bob");
-    assert_eq!(row.replies.as_deref(), Some("1 replies"));
+    assert_eq!(row.replies.as_deref(), Some("1 reply"));
     assert!(row.outdated);
 }
 

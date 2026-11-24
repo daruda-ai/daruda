@@ -52,6 +52,9 @@ pub(in crate::workspace) struct ReviewView {
     pub body: gpui::Entity<crate::ui::TextareaState>,
     pub event: daruda_github::ReviewEvent,
     pub state: super::super::review_submit::SubmitState,
+    pub first_blocker: Option<u64>,
+    pub included_comments: usize,
+    pub excluded_comments: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,10 +71,13 @@ pub(in crate::workspace) struct PendingCommentView {
     /// Its lines are not all in the diff within one hunk, which GitHub
     /// refuses to anchor a review comment to.
     pub unanchored: bool,
+    pub excluded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct ComposerView {
+    pub id: Option<u64>,
+    pub can_reanchor: bool,
     pub reference: String,
     pub outdated: bool,
     pub unanchored: bool,
@@ -90,8 +96,11 @@ pub(in crate::workspace) struct HandoffView {
     /// Why nothing can be inserted as prepared, if so.
     pub blocked: Option<HandoffBlock>,
     pub chats: Vec<crate::workspace::github_ops::review_send::WritableChat>,
+    pub checkout: bool,
+    pub creating: bool,
     pub chosen: Option<crate::workspace::main_area::pane_tree::PaneId>,
     pub prompt: super::super::handoff::Prepared,
+    pub editor: Option<gpui::Entity<crate::ui::TextareaState>>,
 }
 
 /// Why a prepared handoff cannot go in, the first that applies. The
@@ -143,8 +152,9 @@ pub(super) fn handoff_view(
             .is_some_and(|files| files.selection_current(range)),
         _ => false,
     };
+    let destination = handoff.destination(inputs.lane.map(|lane| lane.lane));
     let blocked = handoff_block(
-        inputs.lane.map(|lane| lane.lane) != Some(handoff.lane),
+        destination == super::super::handoff::Destination::Moved,
         selection_changed,
         // With none left, a new chat is offered instead of another choice.
         !chats.is_empty() && handoff.chat.is_some_and(|chat| !listed(chat)),
@@ -152,10 +162,13 @@ pub(super) fn handoff_view(
     HandoffView {
         payload: handoff.payload.clone(),
         lane: handoff.lane_name.clone(),
+        checkout: destination == super::super::handoff::Destination::Checkout,
+        creating: inputs.creating.contains_key(&state.key()),
         blocked,
         chats: chats.clone(),
         chosen,
         prompt: handoff.prompt.clone(),
+        editor: handoff.editor.clone(),
     }
 }
 
@@ -165,7 +178,7 @@ pub(super) fn review_comments(
     keeping: crate::github::DraftKeeping,
 ) -> ReviewCommentsView {
     let files = state.files();
-    let listed_at = files.and_then(|files| files.revision());
+    let head = state.pr.last_known().map(|pr| pr.head_sha.as_str());
     let unanchored = |range: &super::super::diff_layout::LineRange| {
         files.and_then(|f| f.anchors(range)) == Some(false)
     };
@@ -177,46 +190,71 @@ pub(super) fn review_comments(
             end,
             revision: revision.to_owned(),
         };
-    ReviewCommentsView {
-        pending: drafts
-            .map(|drafts| drafts.comments.as_slice())
-            .unwrap_or_default()
+    let pending: Vec<_> = drafts
+        .map(|drafts| drafts.comments.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .map(|draft| {
+            let lines = range(
+                &draft.path,
+                super::super::line_comments::view_side(draft.side),
+                draft.start,
+                draft.end,
+                &draft.revision,
+            );
+            (draft, lines)
+        })
+        .map(|(draft, lines)| PendingCommentView {
+            id: draft.id,
+            reference: lines.place(),
+            unanchored: unanchored(&lines),
+            excerpt: excerpt(&draft.body),
+            suggests: draft.suggestion.is_some(),
+            outdated: head.is_some_and(|head| head != draft.revision),
+            excluded: state.review_excludes(draft),
+        })
+        .collect();
+    let review = state.review().map(|review| {
+        use super::super::review_submit::{SubmitBlock, SubmitState};
+        let mut blockers = pending
             .iter()
-            .map(|draft| {
-                let lines = range(
-                    &draft.path,
-                    super::super::line_comments::view_side(draft.side),
-                    draft.start,
-                    draft.end,
-                    &draft.revision,
-                );
-                (draft, lines)
-            })
-            .map(|(draft, lines)| PendingCommentView {
-                id: draft.id,
-                reference: lines.place(),
-                unanchored: unanchored(&lines),
-                excerpt: excerpt(&draft.body),
-                suggests: draft.suggestion.is_some(),
-                outdated: listed_at.is_some_and(|head| head != draft.revision),
-            })
-            .collect(),
+            .filter(|c| !c.excluded && (c.outdated || c.unanchored));
+        let first = blockers.next();
+        let state = match review.state {
+            SubmitState::Writing | SubmitState::Blocked(SubmitBlock::Unanchored(_)) => {
+                match first {
+                    None => SubmitState::Writing,
+                    Some(_) => SubmitState::Blocked(SubmitBlock::Unanchored(1 + blockers.count())),
+                }
+            }
+            _ => review.state.clone(),
+        };
+        ReviewView {
+            body: review.body.clone(),
+            event: review.event,
+            state,
+            first_blocker: first.map(|comment| comment.id),
+            included_comments: pending
+                .iter()
+                .filter(|c| !c.excluded && !c.outdated && !c.unanchored)
+                .count(),
+            excluded_comments: pending.iter().filter(|c| c.excluded).count(),
+        }
+    });
+    ReviewCommentsView {
+        pending,
+        review,
         composer: state.composer().map(|composer| ComposerView {
+            id: composer.id(),
+            can_reanchor: state.comment_replacement_range().is_some(),
             reference: composer.range.place(),
-            outdated: listed_at.is_some_and(|head| head != composer.range.revision),
+            outdated: head.is_some_and(|head| head != composer.range.revision),
             unanchored: unanchored(&composer.range),
             body: composer.body.clone(),
             suggestion: composer.suggestion.clone(),
             can_suggest: composer.range.side == super::super::diff_layout::Side::New,
         }),
         keeping,
-        locked: state
-            .review()
-            .is_some_and(|review| !review.state.editable()),
-        review: state.review().map(|review| ReviewView {
-            body: review.body.clone(),
-            event: review.event,
-            state: review.state.clone(),
-        }),
+        locked: state.review_comments_locked(),
     }
 }

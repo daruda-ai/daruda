@@ -725,3 +725,224 @@ fn recovered() -> crate::workspace::pages::pull_requests::detail::recover::Recov
         merge_base: "base".into(),
     }
 }
+
+#[test]
+fn opening_a_thread_unfolds_its_side_and_reveals_a_distant_line() {
+    use super::super::view::ThreadTarget;
+
+    let line = DIFF_ROWS_STEP + 7;
+    let patch = format!(
+        "@@ -1,{line} +1,{line} @@\n-old\n+new\n{}",
+        " context\n".repeat(line - 1)
+    );
+    for mode in [DiffMode::Unified, DiffMode::Split] {
+        let (mut state, mut tickets, first) = reading();
+        state.land(
+            first,
+            1,
+            Ok(PrFilesPage::of(
+                vec![file("a", FileChange::Modified, Some(&patch))],
+                1,
+            )),
+            Some("head"),
+            || tickets.issue(),
+        );
+        state.set_mode(mode);
+        state.set_unchanged(Unchanged::Folded);
+        let mut target = ThreadTarget {
+            path: "a".into(),
+            side: Side::New,
+            start: line as u32,
+            end: line as u32,
+            revision: "head".into(),
+        };
+        state.go_to_lines(target.clone());
+        assert_eq!(state.thread_placement(&target), Some(true), "{mode:?}");
+        assert_eq!(state.unchanged, Unchanged::Shown);
+        let shown = state.shown.as_ref().unwrap();
+        assert!(shown.limit > DIFF_ROWS_STEP);
+        assert!(shown.start > 0, "the rows before it are not all drawn");
+        assert_eq!(shown.limit - shown.start, DIFF_ROWS_STEP, "{mode:?}");
+        // The same lines read with the threads at another head name other
+        // code here: nothing is selected, and the thread is not placed.
+        let elsewhere = ThreadTarget {
+            revision: "older".into(),
+            ..target.clone()
+        };
+        state.go_to_lines(elsewhere.clone());
+        assert_eq!(state.thread_placement(&elsewhere), Some(false), "{mode:?}");
+        assert!(state.selection().is_none(), "{mode:?}");
+        target.end += 1;
+        state.go_to_lines(target.clone());
+        assert_eq!(state.thread_placement(&target), Some(false), "{mode:?}");
+        assert!(state.selection().is_none(), "no current line to select");
+    }
+}
+
+#[test]
+fn duplicate_basenames_show_only_the_parents_needed_to_identify_them() {
+    let (mut state, mut tickets, first) = reading();
+    let paths = [
+        "mod.rs",
+        "core/src/mod.rs",
+        "app/src/mod.rs",
+        "tests/mod.rs",
+        "app/view.rs",
+    ];
+    state.land(
+        first,
+        1,
+        Ok(PrFilesPage::of(paths.map(edit).into(), 1)),
+        None,
+        || tickets.issue(),
+    );
+    let FilesView::Ready { files, .. } = files_view(Some(&state), None, unmarked) else {
+        panic!("ready")
+    };
+    let parents: Vec<_> = files.iter().map(|row| row.parent.as_deref()).collect();
+    assert_eq!(
+        parents,
+        [
+            Some("."),
+            Some("core/src"),
+            Some("app/src"),
+            Some("tests"),
+            None
+        ]
+    );
+}
+
+#[test]
+fn selection_actions_refer_only_to_the_file_on_screen() {
+    let (mut state, mut tickets, first) = reading();
+    state.land(
+        first,
+        1,
+        Ok(PrFilesPage::of(vec![edit("a"), edit("b")], 1)),
+        Some("head"),
+        || tickets.issue(),
+    );
+    state.select_line(Side::New, 1, false);
+    let held = state.selection().unwrap().clone();
+    state.show("b");
+    assert!(state.selection().is_none());
+    assert!(state.selection_code().is_none());
+    assert!(state.selection_copy().is_none());
+    assert!(!state.selection_current(&held));
+    state.show("a");
+    assert!(state.selection_current(&held));
+}
+
+#[test]
+fn only_a_complete_listing_rules_out_a_missing_drafts_file() {
+    let (mut state, mut tickets, first) = reading();
+    let Landed::Next(second, _) = state.land(
+        first,
+        1,
+        Ok(PrFilesPage::of(full_page(0, ""), 1)),
+        Some("head"),
+        || tickets.issue(),
+    ) else {
+        panic!("first page");
+    };
+    let missing = LineRange {
+        path: "absent".into(),
+        side: Side::New,
+        start: 1,
+        end: 1,
+        revision: "head".into(),
+    };
+    assert_eq!(state.anchors(&missing), None);
+    state.land(
+        second,
+        2,
+        Ok(PrFilesPage::of(Vec::new(), 2)),
+        Some("head"),
+        || tickets.issue(),
+    );
+    assert_eq!(state.anchors(&missing), Some(false));
+    state.capped = true;
+    assert_eq!(state.anchors(&missing), None);
+}
+
+#[test]
+fn whole_file_read_retries_only_transient_failures_at_the_same_revision() {
+    let (mut state, mut tickets, first) = reading();
+    let listing = || {
+        PrFilesPage::of(
+            ["binary", "large", "network"]
+                .map(|path| file(path, FileChange::Modified, None))
+                .into(),
+            1,
+        )
+    };
+    state.land(first, 1, Ok(listing()), Some("head"), || tickets.issue());
+    let cases = [
+        ("binary", RecoverFailure::Binary),
+        ("large", RecoverFailure::TooLarge),
+        (
+            "network",
+            RecoverFailure::Failed("temporarily unavailable".into()),
+        ),
+    ];
+    for (path, failure) in &cases {
+        state.show(path);
+        let read = tickets.issue();
+        assert!(state.begin_recover(read).is_some(), "{path}");
+        assert!(state.land_recovered(read, Err(failure.clone())), "{path}");
+    }
+    for (path, failure) in &cases {
+        state.show(path);
+        assert_eq!(
+            state.recovery_view(state.shown.as_ref().unwrap()),
+            Some(RecoveryView::Failed(failure.clone())),
+            "{path}"
+        );
+        assert_eq!(
+            state.begin_recover(tickets.issue()).is_some(),
+            *path == "network",
+            "{path}"
+        );
+    }
+    let refresh = tickets.issue();
+    state.reread(refresh);
+    state.land(refresh, 1, Ok(listing()), Some("another head"), || {
+        tickets.issue()
+    });
+    state.show("binary");
+    assert!(state.begin_recover(tickets.issue()).is_some());
+}
+
+#[test]
+fn a_file_on_a_page_not_read_yet_leaves_no_other_file_shown() {
+    let (mut state, mut tickets, first) = reading();
+    state.land(
+        first,
+        1,
+        Ok(PrFilesPage::of(vec![edit("a")], 2)),
+        Some("head"),
+        || tickets.issue(),
+    );
+    assert_eq!(state.shown_path(), Some("a"));
+    state.show_listed("later");
+    assert_eq!(state.shown_path(), None, "\"a\" does not stand in for it");
+    assert_eq!(state.chosen.as_deref(), Some("later"));
+}
+
+#[test]
+fn a_moved_base_lets_go_of_what_was_read_against_the_old_one() {
+    let (mut state, mut tickets, first) = reading();
+    state.land(first, 1, Ok(PrFilesPage::of(vec![edit("a")], 1)), Some("head"), || {
+        tickets.issue()
+    });
+    assert!(!state.base_read("main"), "the first base read is taken");
+    state.merge_base = Some(("head".into(), "mb".into()));
+    state
+        .recovery_failures
+        .insert("a".into(), ("head".into(), RecoverFailure::Binary));
+    assert!(!state.base_read("main"), "the same base keeps it");
+    assert!(state.merge_base.is_some());
+    assert!(state.base_read("release"), "another base reads the files again");
+    assert!(state.merge_base.is_none());
+    assert!(state.recovery_failures.is_empty());
+}

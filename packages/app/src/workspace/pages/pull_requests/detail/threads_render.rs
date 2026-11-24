@@ -3,10 +3,10 @@
 
 use gpui::{AnyElement, Context, Entity, div, prelude::*, px};
 
-use super::PrDetailId;
 use super::render::{note, send_line};
 use super::thread_actions::{ThreadAction, ThreadOp};
 use super::view::{CommentView, ReadyView, ThreadRowView, ThreadsView};
+use super::{PrDetailId, PrTab};
 use crate::github::DraftKeeping;
 use crate::surface::strings::{common, git as git_s, pull_requests as s};
 use crate::ui::{
@@ -14,6 +14,14 @@ use crate::ui::{
     markdown_editor, theme,
 };
 use crate::workspace::Workspace;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ThreadPlace {
+    List,
+    Inline,
+    FileConversations,
+    BeyondLimit,
+}
 
 pub(super) fn threads(id: PrDetailId, ready: &ReadyView, cx: &Context<Workspace>) -> AnyElement {
     let send = send_line(
@@ -39,7 +47,7 @@ pub(super) fn threads(id: PrDetailId, ready: &ReadyView, cx: &Context<Workspace>
             let mut body: Vec<AnyElement> = rows
                 .iter()
                 .enumerate()
-                .map(|(index, row)| thread_row(id, index, row, *keeping, cx))
+                .map(|(index, row)| thread_row(id, index, row, *keeping, ThreadPlace::List, cx))
                 .collect();
             if rows.is_empty() {
                 body.push(note(s::threads_empty(), cx).into_any_element());
@@ -63,11 +71,12 @@ pub(super) fn threads(id: PrDetailId, ready: &ReadyView, cx: &Context<Workspace>
 
 /// A thread's line: where, who and the first words; pressing it shows the
 /// thread in full.
-fn thread_row(
+pub(super) fn thread_row(
     id: PrDetailId,
     index: usize,
     row: &ThreadRowView,
     keeping: DraftKeeping,
+    place: ThreadPlace,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -90,14 +99,49 @@ fn thread_row(
                 .items_center()
                 .gap(px(theme::GAP_LG))
                 .min_w_0()
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .font_family(theme::FONT_FAMILY_MONOSPACE)
-                        .text_size(px(theme::FONT_SIZE_SM))
-                        .text_color(t.text_body)
-                        .child(row.location.clone()),
+                .when(place == ThreadPlace::Inline, |line| {
+                    line.child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(theme::FONT_SIZE_SM))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(t.text_body)
+                            .child(row.author.clone()),
+                    )
+                })
+                .when(place != ThreadPlace::Inline, |line| {
+                    line.child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(theme::FONT_FAMILY_MONOSPACE)
+                            .text_size(px(theme::FONT_SIZE_SM))
+                            .text_color(t.text_body)
+                            .child(row.location.clone()),
+                    )
+                })
+                .when_some(
+                    row.target.as_ref().filter(|_| place == ThreadPlace::Inline),
+                    |line, target| {
+                        line.when(target.start != target.end, |line| {
+                            line.child(
+                                div()
+                                    .flex_none()
+                                    .font_family(theme::FONT_FAMILY_MONOSPACE)
+                                    .text_size(px(theme::FONT_SIZE_SM))
+                                    .text_color(t.text_muted)
+                                    .child(s::thread_inline_range(target.start, target.end)),
+                            )
+                        })
+                        .child(
+                            Badge::new(match target.side {
+                                super::diff_layout::Side::Old => s::thread_base_side(),
+                                super::diff_layout::Side::New => s::thread_head_side(),
+                            })
+                            .text_color(t.text_muted),
+                        )
+                    },
                 )
                 .when(row.outdated, |line| {
                     line.child(Badge::new(s::thread_outdated()).text_color(t.text_muted))
@@ -117,26 +161,30 @@ fn thread_row(
                         .child(replies)
                 })),
         )
-        .child(
-            div()
-                .flex()
-                .gap(px(theme::GAP_SM))
-                .min_w_0()
-                .text_size(px(theme::FONT_SIZE_SM))
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(t.text_muted)
-                        .child(row.author.clone()),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_color(t.text_subtle)
-                        .child(row.excerpt.clone()),
-                ),
-        );
+        .when(row.comments.is_none(), |summary| {
+            summary.child(
+                div()
+                    .flex()
+                    .gap(px(theme::GAP_SM))
+                    .min_w_0()
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .when(place != ThreadPlace::Inline, |line| {
+                        line.child(
+                            div()
+                                .flex_none()
+                                .text_color(t.text_muted)
+                                .child(row.author.clone()),
+                        )
+                    })
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(t.text_subtle)
+                            .child(row.excerpt.clone()),
+                    ),
+            )
+        });
     div()
         .flex()
         .flex_col()
@@ -144,7 +192,7 @@ fn thread_row(
         .children(
             row.comments
                 .as_ref()
-                .map(|comments| expanded(id, index, row, comments, keeping, cx)),
+                .map(|comments| expanded(id, index, row, comments, keeping, place, cx)),
         )
         .into_any_element()
 }
@@ -156,20 +204,45 @@ fn expanded(
     row: &ThreadRowView,
     comments: &[CommentView],
     keeping: DraftKeeping,
+    place: ThreadPlace,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
+    let thread = row.id.clone();
+    let navigates = place != ThreadPlace::List || row.target.is_some();
     let actions = div()
         .flex()
         .flex_wrap()
         .gap(px(theme::GAP_SM))
-        .children(row.target.clone().map(|target| {
-            button_compact(("pr-thread-diff", index), s::thread_show_in_diff())
-                .debug_selector(move || format!("pr-thread-diff-{index}"))
-                .on_click(cx.listener(move |ws, _, _, cx| {
-                    ws.show_pr_thread_in_diff(id, target.clone(), cx)
-                }))
-        }))
+        // A jump here from the diff keeps the keyboard with this thread even
+        // when it has no way back to the diff (outdated, or at another head).
+        .when(!navigates, |actions| {
+            actions.when_some(row.navigation_focus.as_ref(), |actions, handle| {
+                actions.track_focus(handle)
+            })
+        })
+        .when(
+            navigates,
+            |actions| {
+                let (dest, label) =
+                    if matches!(place, ThreadPlace::Inline | ThreadPlace::FileConversations) {
+                        (PrTab::Threads, s::thread_show_in_threads())
+                    } else {
+                        (PrTab::Files, s::thread_show_in_diff())
+                    };
+                actions.child(
+                    button_compact(("pr-thread-diff", index), label)
+                        .debug_selector(move || format!("pr-thread-diff-{index}"))
+                        .tab_stop(true)
+                        .when_some(row.navigation_focus.as_ref(), |button, handle| {
+                            button.track_focus(handle)
+                        })
+                        .on_click(cx.listener(move |ws, _, window, cx| {
+                            ws.jump_pr_thread(id, &thread, dest, window, cx)
+                        })),
+                )
+            },
+        )
         .when(row.outdated, |line| {
             line.child(note(s::thread_outdated_context(), cx))
         })
@@ -193,7 +266,7 @@ fn expanded(
         .border_l_1()
         .border_color(t.border)
         .children(comments.iter().map(|comment| {
-            div()
+            super::anchors::mark_comment(div(), id, comment, cx)
                 .flex()
                 .flex_col()
                 .gap(px(theme::GAP_XS))

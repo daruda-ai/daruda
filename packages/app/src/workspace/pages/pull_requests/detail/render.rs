@@ -1,62 +1,80 @@
 //! Draws the Pull requests page's detail in place of its list, from the
 //! view staged for this frame.
 
-use daruda_github::CheckStatus;
-use gpui::{AnyElement, Context, Div, FontWeight, Hsla, SharedString, div, prelude::*, px};
+use gpui::{
+    AnyElement, Context, Div, FontWeight, Hsla, SharedString, div, prelude::*, px, relative,
+};
 
 use super::super::list::LaneSlot;
 use super::view::{
-    ActionNotice, ActionSlot, CheckRowView, DetailBody, Fact, HeaderActions, HeaderControls,
-    LaneNote, LogSlot, MergeView, Mood, PrDetailView, ReadyView, SendSlot, SideView,
+    ActionNotice, ActionSlot, DetailBody, Fact, HeaderActions, HeaderControls, LaneNote, MergeView,
+    Mood, PrDetailView, ReadyView, SendSlot, SideView,
 };
-use super::{Load, PrDetailId, PrTab};
-use crate::surface::strings::{common, pull_requests as s};
+use super::{PrDetailId, PrTab};
+use crate::surface::strings::{common, git as git_s, pull_requests as s};
 use crate::ui::scrollbar::{Scrollbar, ScrollbarMode};
 use crate::ui::{
-    Badge, Button, Disableable as _, DropdownMenu as _, PopupMenuItem, Selectable as _,
-    Sizable as _, button, button_compact, button_group, button_icon, button_primary,
-    button_with_icon, icons, menu_builder, theme,
+    Badge, Button, Disableable as _, DropdownMenu as _, PopupMenuItem, Selectable as _, button,
+    button_compact, button_group, button_primary, button_with_icon, icons, menu_builder, theme,
 };
 use crate::workspace::Workspace;
 
+// Keep some space for the source even when the prompt editor is open.
+const HANDOFF_PANEL_MAX_HEIGHT: f32 = 0.65;
+
 pub(in crate::workspace) fn render(
     view: &PrDetailView,
+    width: f32,
     scroll: &gpui::ScrollHandle,
     files_scroll: &gpui::UniformListScrollHandle,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
-    let body =
-        div()
-            .w_full()
-            .min_w_0()
-            .p(px(theme::DOCK_PAGE_PAD))
-            .flex()
-            .flex_col()
-            .gap(px(theme::GAP_LG))
-            .children(view.notice.clone().map(|notice| action_notice(notice, cx)))
-            .child(match &view.body {
-                DetailBody::Loading => note(common::loading(), cx).into_any_element(),
-                DetailBody::Failed(reason) => note(s::detail_failed(reason), cx).into_any_element(),
-                DetailBody::Ready(ready) => div()
-                    .flex()
-                    .flex_wrap()
-                    .items_start()
-                    .gap(px(theme::DOCK_PAGE_PAD))
-                    .child(
-                        div()
-                            .debug_selector(|| "pr-detail-tab-content".into())
-                            .flex_1()
-                            .flex_basis(px(theme::PR_DETAIL_CONTENT_BASIS))
-                            .min_w_0()
-                            .children(view.handoff.as_ref().map(|handoff| {
-                                super::handoff_render::handoff(view.id, handoff, cx)
-                            }))
-                            .child(tab_content(view.id, view.tab, ready, files_scroll, cx)),
+    let body = div()
+        .w_full()
+        .min_w_0()
+        .p(px(theme::DOCK_PAGE_PAD))
+        .flex()
+        .flex_col()
+        .gap(px(theme::GAP_LG))
+        .children(view.missing_comment_url.clone().map(|url| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(theme::GAP_SM))
+                .child(note(s::linked_comment_unavailable(), cx))
+                .child(
+                    button_with_icon(
+                        "pr-linked-comment-github",
+                        git_s::pr_open_on_github(),
+                        icons::OPEN_IN_NEW,
                     )
-                    .child(side(view.id, &ready.side, cx))
-                    .into_any_element(),
-            });
+                    .debug_selector(|| "pr-linked-comment-github".into())
+                    .on_click(move |_, _, cx| cx.open_url(&url)),
+                )
+        }))
+        .children(view.notice.clone().map(|notice| action_notice(notice, cx)))
+        .child(match &view.body {
+            DetailBody::Loading => note(common::loading(), cx).into_any_element(),
+            DetailBody::Failed(reason) => note(s::detail_failed(reason), cx).into_any_element(),
+            DetailBody::Ready(ready) => div()
+                .flex()
+                .flex_wrap()
+                .items_start()
+                .gap(px(theme::DOCK_PAGE_PAD))
+                .child(
+                    div()
+                        .debug_selector(|| "pr-detail-tab-content".into())
+                        .flex_1()
+                        .flex_basis(px(theme::PR_DETAIL_CONTENT_BASIS))
+                        .min_w_0()
+                        .child(tab_content(view, ready, files_scroll, width, cx)),
+                )
+                .when(view.tab != PrTab::Files, |body| {
+                    body.child(side(view.id, &ready.side, cx))
+                })
+                .into_any_element(),
+        });
     div()
         .size_full()
         .min_h_0()
@@ -84,29 +102,73 @@ pub(in crate::workspace) fn render(
                 .min_h_0()
                 .flex()
                 .flex_col()
+                .children(view.handoff.as_ref().map(|handoff| {
+                    div()
+                        .id(("pr-handoff-scroll", view.id.0 as usize))
+                        .flex_none()
+                        .w_full()
+                        .max_h(relative(HANDOFF_PANEL_MAX_HEIGHT))
+                        .overflow_y_scroll()
+                        .p(px(theme::DOCK_PAGE_PAD))
+                        .child(super::handoff_render::handoff(view.id, handoff, cx))
+                }))
                 .child(
                     div()
-                        .id(("pr-detail-scroll", view.id.0 as usize))
-                        .track_scroll(scroll)
+                        .relative()
                         .flex_1()
                         .min_h_0()
-                        .overflow_y_scroll()
-                        // A sideways swipe over a wide diff scrolls the diff.
-                        .restrict_scroll_to_axis()
-                        .child(body),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .debug_selector(|| "pr-detail-scrollbar".into())
+                        .flex()
+                        .flex_col()
                         .child(
-                            Scrollbar::vertical(scroll)
-                                .id(("pr-detail-scrollbar", view.id.0 as usize))
-                                .mode(ScrollbarMode::Always),
+                            div()
+                                .id(("pr-detail-scroll", view.id.0 as usize))
+                                .track_scroll(scroll)
+                                .flex_1()
+                                .min_h_0()
+                                .overflow_y_scroll()
+                                // A sideways swipe over a wide diff scrolls the diff.
+                                .restrict_scroll_to_axis()
+                                .child(body),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .debug_selector(|| "pr-detail-scrollbar".into())
+                                .child(
+                                    Scrollbar::vertical(scroll)
+                                        .id(("pr-detail-scrollbar", view.id.0 as usize))
+                                        .mode(ScrollbarMode::Always),
+                                ),
                         ),
                 ),
         )
+        .children(match &view.body {
+            DetailBody::Ready(ready) => Some({
+                let id = view.id;
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_between()
+                    .border_t_1()
+                    .border_color(t.border)
+                    .px(px(theme::DOCK_PAGE_PAD))
+                    .py(px(theme::PAD_SM))
+                    .gap(px(theme::GAP_SM))
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .text_color(t.text_muted)
+                    .child(ready.review_footer.clone())
+                    .child(
+                        button_compact("pr-review-open", s::review_open())
+                            .debug_selector(|| "pr-review-open".into())
+                            .on_click(cx.listener(move |ws, _, window, cx| {
+                                ws.show_pr_review(id, window, cx)
+                            })),
+                    )
+            }),
+            _ => None,
+        })
         .into_any_element()
 }
 
@@ -177,6 +239,14 @@ fn title_block(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
                 .gap(px(theme::GAP_SM))
                 .child(lane)
                 .children(github)
+                .children(match &view.body {
+                    DetailBody::Ready(ready) => ready.inspect_failures.as_ref().map(|label| {
+                        button_compact("pr-inspect-failures", label.clone()).on_click(
+                            cx.listener(move |ws, _, _, cx| ws.inspect_failed_pr_checks(id, cx)),
+                        )
+                    }),
+                    _ => None,
+                })
                 .children(match &view.header {
                     HeaderControls::None => None,
                     HeaderControls::Active(actions) => Some(header_actions(id, actions, cx)),
@@ -241,7 +311,7 @@ fn action_notice(notice: ActionNotice, cx: &Context<Workspace>) -> AnyElement {
 
 /// An action button as its slot says: spinning while it runs, off while
 /// another runs, and saying why when it cannot run.
-fn with_slot(button: Button, slot: &ActionSlot) -> Button {
+pub(super) fn with_slot(button: Button, slot: &ActionSlot) -> Button {
     button
         .loading(*slot == ActionSlot::Running)
         .disabled(!slot.enabled())
@@ -279,6 +349,7 @@ fn header_actions(id: PrDetailId, actions: &HeaderActions, cx: &Context<Workspac
                 .on_click(cx.listener(move |ws, _, window, cx| ws.ask_pr_close(id, window, cx))),
         )
         .child(merge_button(id, &actions.merge, cx))
+        .children(actions.merge.slot.reason().map(|reason| note(reason, cx)))
         .into_any_element()
 }
 
@@ -368,37 +439,23 @@ fn tabs(view: &PrDetailView, cx: &Context<Workspace>) -> AnyElement {
 }
 
 fn tab_content(
-    id: PrDetailId,
-    tab: PrTab,
+    view: &PrDetailView,
     ready: &ReadyView,
     files_scroll: &gpui::UniformListScrollHandle,
+    width: f32,
     cx: &Context<Workspace>,
 ) -> AnyElement {
-    match tab {
-        PrTab::Checks => checks(id, ready, cx),
-        PrTab::Files => {
-            match &ready.files {
-                // The review sits above the listing, whatever state the listing
-                // is in: an approval needs no file read.
-                Some(files) => div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(theme::GAP_LG))
-                    .children(ready.review_comments.as_ref().and_then(|comments| {
-                        super::review_comments_render::pending(id, comments, cx)
-                    }))
-                    .child(super::files_render::files(
-                        id,
-                        files,
-                        ready.review_comments.as_ref(),
-                        ready.code_send,
-                        files_scroll,
-                        cx,
-                    ))
-                    .into_any_element(),
-                None => div().into_any_element(),
-            }
-        }
+    let id = view.id;
+    match view.tab {
+        PrTab::Checks => super::checks_render::checks(id, ready, cx),
+        PrTab::Files => super::files_render::files(
+            id,
+            ready,
+            view.url.as_deref(),
+            files_scroll,
+            width - 2.0 * theme::DOCK_PAGE_PAD >= theme::PR_FILES_SPLIT_MIN_W,
+            cx,
+        ),
         PrTab::Threads => super::threads_render::threads(id, ready, cx),
         PrTab::Description => super::description_render::description(id, ready, cx),
     }
@@ -443,171 +500,6 @@ pub(super) fn send_line(
                 .when_some(tooltip, |button, tooltip| button.tooltip(tooltip))
                 .on_click(cx.listener(move |ws, _, window, cx| on_send(ws, window, cx))),
         )
-        .into_any_element()
-}
-
-fn checks(id: PrDetailId, ready: &ReadyView, cx: &Context<Workspace>) -> AnyElement {
-    let rows: Vec<AnyElement> = ready
-        .checks
-        .iter()
-        .enumerate()
-        .map(|(ix, row)| check_row(id, ix, row, cx))
-        .collect();
-    div()
-        .flex()
-        .flex_col()
-        .child(send_line(
-            Some(ready.checks_summary.clone()),
-            ready.checks_send,
-            s::send_nothing_checks(),
-            move |ws, _, cx| ws.open_pr_handoff(id, super::handoff::Read::FailedChecks, cx),
-            "pr-detail-send-checks",
-            ready.rerun.as_ref().map(|slot| {
-                with_slot(button_compact("pr-detail-rerun", s::action_rerun()), slot)
-                    .debug_selector(|| "pr-detail-rerun".into())
-                    .on_click(cx.listener(move |ws, _, _, cx| ws.rerun_pr_detail_checks(id, cx)))
-                    .into_any_element()
-            }),
-            cx,
-        ))
-        .children(rows)
-        .into_any_element()
-}
-
-fn check_row(id: PrDetailId, ix: usize, row: &CheckRowView, cx: &Context<Workspace>) -> AnyElement {
-    let t = theme::current(cx);
-    let (glyph, color) = status_glyph(row.status, cx);
-    let toggle = match &row.log {
-        LogSlot::None => None,
-        LogSlot::Closed(job) | LogSlot::Open(job, _) => {
-            let job = *job;
-            let open = matches!(row.log, LogSlot::Open(..));
-            Some(
-                button_icon(
-                    ("pr-check-log", ix),
-                    if open {
-                        icons::EXPAND_MORE
-                    } else {
-                        icons::CHEVRON_RIGHT
-                    },
-                    cx,
-                )
-                .tooltip(if open { s::hide_log() } else { s::show_log() })
-                .debug_selector(move || format!("pr-check-log-{ix}"))
-                .on_click(cx.listener(move |ws, _, _, cx| ws.toggle_pr_check_log(id, job, cx))),
-            )
-        }
-    };
-    let line = div()
-        .flex()
-        .items_center()
-        .gap(px(theme::GAP_LG))
-        .min_h(px(theme::CONTROL_TARGET_SIZE))
-        .text_size(px(theme::FONT_SIZE_MD))
-        .px(px(theme::LIST_ROW_PAD_X))
-        .py(px(theme::LIST_ROW_PAD_Y))
-        .rounded(px(theme::LIST_ROW_RADIUS))
-        .hover(|style| style.bg(t.overlay_hover))
-        .child(
-            icons::icon(glyph)
-                .with_size(px(theme::CONTROL_ICON_SIZE))
-                .text_color(color),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .items_baseline()
-                .gap(px(theme::GAP_LG))
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_color(t.text_body)
-                        .child(row.name.clone()),
-                )
-                .children(row.context.clone().map(|context| {
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(px(theme::FONT_SIZE_SM))
-                        .text_color(t.text_muted)
-                        .child(context)
-                })),
-        )
-        .children(row.duration.clone().map(|duration| {
-            div()
-                .flex_none()
-                .text_size(px(theme::FONT_SIZE_SM))
-                .text_color(t.text_subtle)
-                .child(duration)
-        }))
-        // Each icon keeps its column, so durations line up row to row.
-        .child(
-            div()
-                .flex_none()
-                .w(px(theme::CONTROL_TARGET_SIZE))
-                .children(row.rerun.as_ref().map(|(run, slot)| {
-                    let run = *run;
-                    with_slot(
-                        button_icon(("pr-check-rerun", ix), icons::REFRESH, cx),
-                        slot,
-                    )
-                    .tooltip(s::rerun_check())
-                    .debug_selector(move || format!("pr-check-rerun-{ix}"))
-                    .on_click(cx.listener(move |ws, _, _, cx| ws.rerun_pr_check_run(id, run, cx)))
-                })),
-        )
-        .child(
-            div()
-                .flex_none()
-                .w(px(theme::CONTROL_TARGET_SIZE))
-                .children(row.url.clone().map(|url| {
-                    button_icon(("pr-check-open", ix), icons::OPEN_IN_NEW, cx)
-                        .tooltip(s::open_check())
-                        .debug_selector(move || format!("pr-check-open-{ix}"))
-                        .on_click(move |_, _, cx| cx.open_url(&url))
-                })),
-        )
-        .child(
-            div()
-                .flex_none()
-                .w(px(theme::CONTROL_TARGET_SIZE))
-                .children(toggle),
-        );
-    let log = match &row.log {
-        LogSlot::Open(_, load) => Some(log_block(load, cx)),
-        LogSlot::None | LogSlot::Closed(_) => None,
-    };
-    div()
-        .flex()
-        .flex_col()
-        .child(line)
-        .children(log)
-        .into_any_element()
-}
-
-/// The failed step's log, cleaned, under its check.
-fn log_block(load: &Load<String>, cx: &Context<Workspace>) -> AnyElement {
-    let t = theme::current(cx);
-    let (text, color) = match load {
-        Load::Loading => (common::loading(), t.text_muted),
-        Load::Ready(log) => (log.clone(), t.text_body),
-        Load::Failed(reason) => (s::log_failed(reason), t.banner_error_text),
-    };
-    div()
-        .mx(px(theme::LIST_ROW_PAD_X))
-        .mb(px(theme::PAD_SM))
-        .p(px(theme::PAD_STANDARD))
-        .rounded(px(theme::RADIUS_SM))
-        .border_1()
-        .border_color(t.border)
-        .bg(t.md_code_block_bg)
-        .font_family(theme::FONT_FAMILY_MONOSPACE)
-        .text_size(px(theme::FONT_SIZE_SM))
-        .text_color(color)
-        .child(text)
         .into_any_element()
 }
 
@@ -741,17 +633,6 @@ fn mood_color(mood: Mood, cx: &Context<Workspace>) -> Hsla {
         Mood::Warn => t.banner_warning_text,
         Mood::Bad => t.banner_error_text,
         Mood::Quiet => t.text_muted,
-    }
-}
-
-/// The glyph a check's status shows, the same family the list's tone uses.
-fn status_glyph(status: CheckStatus, cx: &Context<Workspace>) -> (&'static str, Hsla) {
-    let t = theme::current(cx);
-    match status {
-        CheckStatus::Failure => (icons::WARNING, t.banner_error_text),
-        CheckStatus::Pending => (icons::RADIO_OFF, t.banner_warning_text),
-        CheckStatus::Success => (icons::CHECK_CIRCLE, t.banner_success_text),
-        CheckStatus::Ignored => (icons::RADIO_OFF, t.text_subtle),
     }
 }
 

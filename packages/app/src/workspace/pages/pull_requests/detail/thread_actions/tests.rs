@@ -366,3 +366,37 @@ fn a_person_can_say_an_unconfirmed_reply_did_not_post() {
         "it may go again"
     );
 }
+
+#[test]
+fn a_posted_reply_appears_once_across_an_overlapping_read() {
+    use super::super::ReadSlot;
+    use crate::workspace::tests::pull_request_detail::item;
+
+    let posted = thread_with(&[("posted", "Done")]).comments.remove(0);
+    for already_present in [false, true] {
+        let mut state = PrDetailState::new(PrDetailId(1), item(7, "feat"));
+        let mut thread = thread_with(&[("first", "Fix")]);
+        if already_present {
+            thread.comments.push(posted.clone());
+        }
+        state.threads = Some(ReadSlot::settled(Load::Ready(ReviewThreads {
+            threads: vec![thread],
+            truncated: false,
+        })));
+        let (old, _) = state.reread_threads();
+        let Some(TabRead::Threads(next)) = state.record_posted_reply("t", &posted) else {
+            panic!("a read that began before posting is superseded");
+        };
+        assert!(next > old);
+        let slot = state.threads.as_mut().unwrap();
+        assert!(!slot.land(old, Ok(ReviewThreads::default())));
+        let Load::Ready(threads) = slot.load() else {
+            panic!("shown threads")
+        };
+        assert_eq!(
+            threads.threads[0].comments.len(),
+            2,
+            "present: {already_present}"
+        );
+    }
+}

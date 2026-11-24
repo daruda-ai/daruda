@@ -188,3 +188,23 @@ fn a_range_starting_on_the_other_side_points_at_its_last_line() {
         Some((1, 3))
     );
 }
+
+#[test]
+fn a_current_thread_uses_only_its_current_side_and_lines() {
+    for (old, new, expected) in [
+        (r#""line":3"#, r#""line":null"#, None),
+        (
+            r#""originalStartLine":null"#,
+            r#""originalStartLine":1"#,
+            Some((3, 3)),
+        ),
+        (r#""diffSide":"LEFT""#, r#""diffSide":null"#, None),
+    ] {
+        let json = page("t", None, None).replace(old, new);
+        assert_eq!(
+            parse_threads_page(&json).unwrap().threads[0].0.lines,
+            expected,
+            "{new}"
+        );
+    }
+}

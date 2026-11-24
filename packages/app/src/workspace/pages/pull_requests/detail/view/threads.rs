@@ -6,6 +6,7 @@ use super::*;
 pub(in crate::workspace) struct ThreadRowView {
     /// GitHub's id for the thread, which expanding it names.
     pub id: String,
+    pub path: String,
     /// `path:L12–L20`.
     pub location: String,
     pub author: String,
@@ -25,6 +26,7 @@ pub(in crate::workspace) struct ThreadRowView {
     pub resolved_here: bool,
     /// The reply being written, if a box is open.
     pub reply: Option<gpui::Entity<crate::ui::TextareaState>>,
+    pub navigation_focus: Option<gpui::FocusHandle>,
     /// The thread's last action, running or failed.
     pub op: Option<super::super::thread_actions::ThreadOp>,
     /// What the viewer may do to it.
@@ -33,18 +35,42 @@ pub(in crate::workspace) struct ThreadRowView {
     pub draft: bool,
 }
 
-/// Lines of the current diff a thread is on.
+/// Lines of the diff at `revision` a thread is on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct ThreadTarget {
     pub path: String,
     pub side: super::super::diff_layout::Side,
     pub start: u32,
     pub end: u32,
+    /// The head the lines were read at: a diff at another names other code.
+    pub revision: String,
+}
+
+impl ThreadTarget {
+    /// Where `thread`, read with the pull request at `head`, sits; `None`
+    /// when outdated, on no line, or read at no known head.
+    pub(in crate::workspace) fn of(thread: &ReviewThread, head: Option<&str>) -> Option<Self> {
+        let head = head?;
+        thread
+            .lines
+            .filter(|_| !thread.outdated)
+            .map(|(start, end)| ThreadTarget {
+                path: thread.path.clone(),
+                side: match thread.side {
+                    daruda_github::DiffSide::Left => super::super::diff_layout::Side::Old,
+                    daruda_github::DiffSide::Right => super::super::diff_layout::Side::New,
+                },
+                start,
+                end,
+                revision: head.to_owned(),
+            })
+    }
 }
 
 /// One comment of an expanded thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct CommentView {
+    pub mark: super::super::anchors::CommentMark,
     /// GitHub's id, which keys its drawn Markdown.
     pub id: String,
     pub author: String,
@@ -90,6 +116,13 @@ pub(super) fn threads_view(
     drafts: Option<&daruda_store::review_drafts::PrDrafts>,
     keeping: crate::github::DraftKeeping,
 ) -> ThreadsView {
+    let in_list = state.tab() == PrTab::Threads;
+    let files = state.files().filter(|_| state.tab() == PrTab::Files);
+    let path = files.and_then(|files| files.shown_path());
+    let same_revision = state.thread_head.as_deref().is_some_and(|head| {
+        state.pr.last_known().is_some_and(|pr| pr.head_sha == head)
+            && files.is_none_or(|files| files.shown_at(head))
+    });
     let replies = drafts
         .map(|drafts| drafts.replies.as_slice())
         .unwrap_or_default();
@@ -98,7 +131,7 @@ pub(super) fn threads_view(
         keeping,
         // Kept for threads no longer listed: resolved or gone since. With
         // the list cut short, an unlisted thread may still be open.
-        orphan_drafts: if threads.truncated {
+        orphan_drafts: if !in_list || threads.truncated {
             Vec::new()
         } else {
             replies
@@ -115,16 +148,27 @@ pub(super) fn threads_view(
         rows: threads
             .threads
             .iter()
+            .filter(|thread| in_list || path == Some(thread.path.as_str()))
             .map(|thread| {
-                let mut row = thread_row(thread);
+                let mut row = thread_row(thread, state.thread_head.as_deref());
+                if !same_revision {
+                    row.target = None;
+                }
                 if state.thread_expanded(&thread.id) {
-                    row.comments = Some(thread.comments.iter().map(comment_view).collect());
+                    row.comments = Some(
+                        thread
+                            .comments
+                            .iter()
+                            .map(|c| comment_view(c, state))
+                            .collect(),
+                    );
                 }
                 let work = state.thread_work();
                 row.resolved_here = work.resolved_here(&thread.id);
                 row.draft = drafted(&thread.id);
                 if let Some(work) = work.get(&thread.id) {
                     row.reply = work.reply.clone();
+                    row.navigation_focus = work.navigation_focus.clone();
                     row.op = work.op.clone();
                 }
                 row
@@ -134,8 +178,12 @@ pub(super) fn threads_view(
     }
 }
 
-pub(super) fn comment_view(comment: &daruda_github::ReviewComment) -> CommentView {
+pub(super) fn comment_view(
+    comment: &daruda_github::ReviewComment,
+    state: &PrDetailState,
+) -> CommentView {
     CommentView {
+        mark: state.comment_mark(&comment.id),
         id: comment.id.clone(),
         author: comment.author.clone().unwrap_or_else(s::author_deleted),
         body: comment.body.clone(),
@@ -143,7 +191,7 @@ pub(super) fn comment_view(comment: &daruda_github::ReviewComment) -> CommentVie
     }
 }
 
-pub(super) fn thread_row(thread: &ReviewThread) -> ThreadRowView {
+pub(super) fn thread_row(thread: &ReviewThread, head: Option<&str>) -> ThreadRowView {
     let location = match thread.lines {
         Some((first, last)) if first == last => s::thread_line(&thread.path, first),
         Some((first, last)) => s::thread_lines(&thread.path, first, last),
@@ -152,6 +200,7 @@ pub(super) fn thread_row(thread: &ReviewThread) -> ThreadRowView {
     let first = thread.comments.first();
     let replies = thread.comments.len().saturating_sub(1);
     ThreadRowView {
+        path: thread.path.clone(),
         location,
         author: first
             .and_then(|comment| comment.author.clone())
@@ -162,26 +211,17 @@ pub(super) fn thread_row(thread: &ReviewThread) -> ThreadRowView {
         replies: match (replies, thread.more_comments) {
             (_, true) => Some(s::thread_replies_more(replies)),
             (0, false) => None,
+            (1, false) => Some(s::thread_one_reply()),
             (n, false) => Some(s::thread_replies(n)),
         },
         outdated: thread.outdated,
         id: thread.id.clone(),
         url: first.and_then(|comment| comment.web_url().map(str::to_owned)),
-        target: thread
-            .lines
-            .filter(|_| !thread.outdated)
-            .map(|(start, end)| ThreadTarget {
-                path: thread.path.clone(),
-                side: match thread.side {
-                    daruda_github::DiffSide::Left => super::super::diff_layout::Side::Old,
-                    daruda_github::DiffSide::Right => super::super::diff_layout::Side::New,
-                },
-                start,
-                end,
-            }),
+        target: ThreadTarget::of(thread, head),
         comments: None,
         resolved_here: false,
         reply: None,
+        navigation_focus: None,
         op: None,
         may: thread.may,
         draft: false,

@@ -4,12 +4,13 @@
 //! worktrees changes: no worktree is made and no link is tied; the detail
 //! offers that separately.
 
-use daruda_github::address::{PrAddress, PrTarget, parse_pr_address};
+use daruda_github::address::{PrTarget, parse_pr_address};
 use daruda_github::{GhError, PrDetail, PrListItem, RepoId};
 use daruda_store::observability::error_report::{ErrorReport, ErrorSeverity};
 use gpui::{Context, Window};
 
-use super::detail::{PrOpening, PrTab};
+use super::detail::anchors::{CommentKind, CommentLink};
+use super::detail::{OpeningTarget, PrOpening, PrTab};
 use crate::gh_host::GhHost;
 use crate::surface::strings::pull_requests as s;
 use crate::workspace::Workspace;
@@ -21,6 +22,12 @@ pub(in crate::workspace) enum PrDestination {
     Page,
     /// In this worktree's side tabs.
     Beside(daruda_store::project::LaneRef),
+}
+
+/// A reference placed in a repository, with its exact destination in the detail.
+pub(in crate::workspace) struct PrReference {
+    number: u64,
+    at: Option<OpeningTarget>,
 }
 
 impl Workspace {
@@ -56,7 +63,7 @@ impl Workspace {
         &self,
         text: &str,
         cx: &gpui::App,
-    ) -> Result<(RepoId, PrAddress), String> {
+    ) -> Result<(RepoId, PrReference), String> {
         // Off, nothing asks `gh`.
         if !crate::github::enabled(cx) {
             return Err(s::open_pr_github_off());
@@ -107,7 +114,26 @@ impl Workspace {
                 },
             },
         };
-        Ok((repo, address))
+        let linked = |kind| {
+            OpeningTarget::Comment(CommentLink {
+                kind,
+                url: text.trim().to_owned(),
+            })
+        };
+        let at = match address.target {
+            Some(PrTarget::Files) => Some(OpeningTarget::Tab(PrTab::Files)),
+            Some(PrTarget::Checks) => Some(OpeningTarget::Tab(PrTab::Checks)),
+            Some(PrTarget::ReviewComment(id)) => Some(linked(CommentKind::Review(id))),
+            Some(PrTarget::Comment(id)) => Some(linked(CommentKind::Conversation(id))),
+            Some(PrTarget::Commits) | None => None,
+        };
+        Ok((
+            repo,
+            PrReference {
+                number: address.number,
+                at,
+            },
+        ))
     }
 
     /// `repo#number`, shown at `to`: what an entry that names its pull
@@ -120,12 +146,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let address = PrAddress {
-            repo: Some(repo.clone()),
-            host_unknown: false,
-            number,
-            target: None,
-        };
+        let address = PrReference { number, at: None };
         self.open_pr_by_address(repo, address, to, window, cx);
     }
 
@@ -174,7 +195,7 @@ impl Workspace {
     pub(in crate::workspace) fn open_pr_by_address(
         &mut self,
         repo: RepoId,
-        address: PrAddress,
+        address: PrReference,
         to: PrDestination,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -189,6 +210,8 @@ impl Workspace {
             self.report_error(report, cx);
             return;
         }
+        let ticket = self.alloc_id();
+        self.pages.pull_requests.pending_open = Some(ticket);
         let gh = GhHost::global(cx);
         let read_repo = repo.clone();
         let number = address.number;
@@ -199,7 +222,10 @@ impl Workspace {
                 .await;
             // SILENT-OK: the window closed while GitHub answered.
             let _ = ws.update_in(cx, |ws, window, cx| {
-                ws.land_pr_by_address(repo, address, to, read, window, cx)
+                if ws.pages.pull_requests.pending_open == Some(ticket) {
+                    ws.pages.pull_requests.pending_open = None;
+                    ws.land_pr_by_address(repo, address, to, read, window, cx);
+                }
             });
         })
         .detach();
@@ -208,7 +234,7 @@ impl Workspace {
     fn land_pr_by_address(
         &mut self,
         repo: RepoId,
-        address: PrAddress,
+        address: PrReference,
         to: PrDestination,
         read: Result<PrDetail, GhError>,
         window: &mut Window,
@@ -232,17 +258,8 @@ impl Workspace {
             }
         };
         let item = listed(repo, &detail);
-        // Comment anchors open their tab; scrolling to the comment itself
-        // is not done yet, and Commits has no tab of its own.
-        let tab = match address.target {
-            Some(PrTarget::Files) => Some(PrTab::Files),
-            Some(PrTarget::Checks) => Some(PrTab::Checks),
-            Some(PrTarget::ReviewComment(_)) => Some(PrTab::Threads),
-            Some(PrTarget::Comment(_)) => Some(PrTab::Description),
-            Some(PrTarget::Commits) | None => None,
-        };
         let opening = PrOpening {
-            tab,
+            at: address.at,
             read: Some(Box::new(detail)),
         };
         match to {

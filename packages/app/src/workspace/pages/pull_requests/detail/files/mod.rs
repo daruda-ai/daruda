@@ -4,6 +4,8 @@
 //! page that fails keeps what came before it. The diff's rows are built
 //! once per choice and drawn a bounded number at a time.
 
+use std::cell::OnceCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -27,11 +29,14 @@ const AUTO_READ_BYTES: usize = 4 * 1024 * 1024;
 /// Diff rows drawn at first, and added by each "show more".
 pub(in crate::workspace) const DIFF_ROWS_STEP: usize = 1_000;
 
-/// The chosen file, by path, its diff, and how many of its rows are drawn.
+/// The chosen file, by path, its diff, and which of its rows are drawn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Shown {
     path: String,
     diff: FileDiff,
+    /// Rows `start..limit` are drawn. A jump far into a long diff moves the
+    /// window there instead of drawing every row before it.
+    start: usize,
     limit: usize,
     /// The head commit its rows were read at, once known: what lines
     /// selected in them are pinned to. An earlier listing's rows stay up
@@ -68,6 +73,8 @@ pub(super) enum Landed {
 #[derive(Debug)]
 pub(in crate::workspace) struct FilesState {
     files: Vec<PrFile>,
+    /// Duplicate basenames can acquire a new sibling when another page lands.
+    parents: OnceCell<HashMap<String, String>>,
     /// The files listed are an earlier read's, until this read's first page
     /// lands: a refresh keeps them up meanwhile.
     replacing: bool,
@@ -83,6 +90,7 @@ pub(in crate::workspace) struct FilesState {
     chosen: Option<String>,
     /// Its rows, as last built from a page that listed it.
     shown: Option<Shown>,
+    picker_open: bool,
     mode: DiffMode,
     unchanged: Unchanged,
     /// The head commit the listing was read at, once known. GitHub's file
@@ -95,12 +103,17 @@ pub(in crate::workspace) struct FilesState {
     restore: Option<Restore>,
     /// A file GitHub sent no patch for, being read whole or failed to.
     recovering: Option<Recovering>,
+    /// Failures are pinned to content's revision and survive visits to other files.
+    recovery_failures: HashMap<String, (String, RecoverFailure)>,
     /// Lines to select once their file is shown at a known commit: where a
     /// review thread sits.
     pending_lines: Option<super::view::ThreadTarget>,
     /// The merge base a file read whole was diffed from, with the head it
     /// was found for: the same for every file of one listing.
     merge_base: Option<(String, String)>,
+    /// The branch the pull request merged into when last read. Files read
+    /// whole, and why they could not be, are against it.
+    base: Option<String>,
 }
 
 /// What reading a file whole is asked to read.
@@ -119,7 +132,6 @@ struct Recovering {
     path: String,
     revision: String,
     ticket: ReadTicket,
-    failure: Option<RecoverFailure>,
 }
 
 /// What the shown file offers when GitHub sent no patch for it.
@@ -155,6 +167,7 @@ impl FilesState {
     pub(super) fn reading(ticket: ReadTicket) -> Self {
         Self {
             files: Vec::new(),
+            parents: OnceCell::new(),
             replacing: false,
             paging: Paging::Reading { ticket, page: 1 },
             capped: false,
@@ -162,20 +175,27 @@ impl FilesState {
             budget: AUTO_READ_BYTES,
             chosen: None,
             shown: None,
+            picker_open: false,
             mode: DiffMode::default(),
             unchanged: Unchanged::default(),
             revision: None,
             selection: None,
             restore: None,
             recovering: None,
+            recovery_failures: HashMap::new(),
             pending_lines: None,
             merge_base: None,
+            base: None,
         }
     }
 
     /// Read again from the first page; the listing and the chosen file stay
     /// up until it lands.
     fn reread(&mut self, ticket: ReadTicket) {
+        // A refreshed listing can reflect a repaired login or gh installation.
+        self.recovery_failures.retain(|_, (_, failure)| {
+            matches!(failure, RecoverFailure::Binary | RecoverFailure::TooLarge)
+        });
         self.replacing = !self.files.is_empty();
         self.paging = Paging::Reading { ticket, page: 1 };
         self.budget = AUTO_READ_BYTES;
@@ -235,7 +255,7 @@ impl FilesState {
             self.replacing = false;
         }
         if page == 1 {
-            self.revision = head.map(str::to_owned);
+            self.set_revision(head);
             // Files read whole belonged to the listing replaced.
             self.recovering = None;
         }
@@ -247,6 +267,7 @@ impl FilesState {
             .sum::<usize>();
         let first = self.files.len();
         self.files.extend(read.files);
+        self.parents.take();
         self.capped = read.capped;
         let last = read.next.is_none() || self.patch_bytes >= self.budget;
         self.follow_choice(first, last);
@@ -285,6 +306,7 @@ impl FilesState {
     /// Choose `path` and show its diff, if it is listed. The file already
     /// shown keeps its rows and how many are drawn.
     fn show(&mut self, path: &str) {
+        self.picker_open = false;
         // Lines waited for in another file are given up.
         if self
             .pending_lines
@@ -297,14 +319,28 @@ impl FilesState {
         if self.shown.as_ref().is_some_and(|shown| shown.path == path) {
             return;
         }
-        self.build_shown(path, DIFF_ROWS_STEP);
+        // Not listed yet (a later page): nothing is drawn until its page
+        // lands, rather than another file standing in for it.
+        if !self.files.iter().any(|file| file.path == path) {
+            self.shown = None;
+            return;
+        }
+        self.build_shown(path, (0, DIFF_ROWS_STEP));
     }
 
-    fn build_shown(&mut self, path: &str, limit: usize) {
+    /// The drawn rows of the shown file, to keep through a rebuild of it.
+    fn drawn(&self) -> (usize, usize) {
+        self.shown
+            .as_ref()
+            .map_or((0, DIFF_ROWS_STEP), |shown| (shown.start, shown.limit))
+    }
+
+    fn build_shown(&mut self, path: &str, (start, limit): (usize, usize)) {
         if let Some(file) = self.files.iter().find(|file| file.path == path) {
             self.shown = Some(Shown {
                 path: file.path.clone(),
                 diff: FileDiff::of(file, self.unchanged),
+                start,
                 limit,
                 revision: self.revision.clone(),
             });
@@ -313,14 +349,15 @@ impl FilesState {
         }
     }
 
+    fn shown_index(&self) -> Option<usize> {
+        let shown = self.shown.as_ref()?;
+        self.files.iter().position(|file| file.path == shown.path)
+    }
+
     /// Show the file `delta` places from the shown one, stopping at either
     /// end of what is listed.
     fn show_adjacent(&mut self, delta: isize) {
-        let Some(at) = self
-            .shown
-            .as_ref()
-            .and_then(|shown| self.files.iter().position(|file| file.path == shown.path))
-        else {
+        let Some(at) = self.shown_index() else {
             return;
         };
         let to = at
@@ -343,9 +380,32 @@ impl FilesState {
             return;
         }
         self.unchanged = unchanged;
-        if let Some(shown) = self.shown.as_ref() {
-            let (path, limit) = (shown.path.clone(), shown.limit);
-            self.build_shown(&path, limit);
+        if let Some(path) = self.shown.as_ref().map(|shown| shown.path.clone()) {
+            let drawn = self.drawn();
+            self.build_shown(&path, drawn);
+        }
+    }
+
+    fn set_revision(&mut self, head: Option<&str>) {
+        self.revision = head.map(str::to_owned);
+        if let Some(head) = head {
+            self.recovery_failures
+                .retain(|_, (revision, _)| revision == head);
+        }
+    }
+
+    /// The pull request's base branch was read as `base`. Moved to another,
+    /// what was read whole against the old one is let go, and `true` asks
+    /// for the listing, diffed against the old base, to be read again.
+    pub(super) fn base_read(&mut self, base: &str) -> bool {
+        match self.base.replace(base.to_owned()) {
+            Some(old) if old != base => {
+                self.recovery_failures.clear();
+                self.merge_base = None;
+                self.recovering = None;
+                !matches!(self.paging, Paging::Reading { page: 1, .. })
+            }
+            _ => false,
         }
     }
 
@@ -358,7 +418,7 @@ impl FilesState {
             Some(revision) if revision == head => false,
             Some(_) => !matches!(self.paging, Paging::Reading { page: 1, .. }),
             None => {
-                self.revision = Some(head.to_owned());
+                self.set_revision(Some(head));
                 if let Some(shown) = self.shown.as_mut()
                     && shown.revision.is_none()
                 {
@@ -384,11 +444,8 @@ impl FilesState {
             return;
         };
         if self.files[first..].iter().any(|file| file.path == chosen) {
-            let limit = self
-                .shown
-                .as_ref()
-                .map_or(DIFF_ROWS_STEP, |shown| shown.limit);
-            self.build_shown(&chosen, limit);
+            let drawn = self.drawn();
+            self.build_shown(&chosen, drawn);
         } else if last && !self.files.iter().any(|file| file.path == chosen) {
             self.chosen = None;
             self.shown = None;
@@ -408,6 +465,12 @@ impl FilesState {
     fn show_more_rows(&mut self) {
         if let Some(shown) = self.shown.as_mut() {
             shown.limit += DIFF_ROWS_STEP;
+        }
+    }
+
+    fn show_earlier_rows(&mut self) {
+        if let Some(shown) = self.shown.as_mut() {
+            shown.start = shown.start.saturating_sub(DIFF_ROWS_STEP);
         }
     }
 }

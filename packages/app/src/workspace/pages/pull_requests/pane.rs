@@ -76,6 +76,7 @@ impl Workspace {
         if !crate::github::enabled(cx) {
             return;
         }
+        self.pages.pull_requests.pending_open = None;
         if lane != self.active {
             self.activate_lane(lane, window, cx);
             // Activation re-checks the worktree; one found gone opens nothing.
@@ -245,7 +246,7 @@ impl Workspace {
             Ok(read) => {
                 let item = super::direct::listed(repo, &read);
                 let opening = PrOpening {
-                    tab: None,
+                    at: None,
                     read: Some(Box::new(read)),
                 };
                 let (hold, start) = self.pr_detail_for(item, opening, cx);

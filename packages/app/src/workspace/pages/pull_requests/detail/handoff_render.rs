@@ -1,73 +1,26 @@
 //! The handoff panel: what goes to an agent, the chat it goes to, and the
 //! prompt itself before it is inserted.
 
-use gpui::{AnyElement, Context, div, prelude::*, px};
+use gpui::{Anchor, AnyElement, Context, div, prelude::*, px};
 
 use super::PrDetailId;
 use super::handoff::{Payload, Prepared};
 use super::render::note;
 use super::view::{HandoffBlock, HandoffView};
 use crate::surface::strings::{common, pull_requests as s};
-use crate::ui::{Disableable as _, button_compact, button_primary, icons, theme};
+use crate::ui::{
+    Disableable as _, DropdownMenu as _, PopupMenuItem, button_compact, button_primary,
+    button_with_icon, icons, menu_builder, theme,
+};
 use crate::workspace::Workspace;
 
 pub(super) fn handoff(id: PrDetailId, view: &HandoffView, cx: &Context<Workspace>) -> AnyElement {
     let t = theme::current(cx);
     let what = match &view.payload {
+        Payload::FailedJob(_) => s::handoff_check_log(),
         Payload::FailedChecks => s::handoff_failed_checks(),
         Payload::OpenThreads => s::handoff_open_threads(),
         Payload::SelectedCode(_) => s::handoff_selected_code(),
-    };
-    let chats: AnyElement = if view.chats.is_empty() {
-        note(s::handoff_no_chat(&view.lane), cx).into_any_element()
-    } else {
-        // One row per chat, with its tab: chats often share a title.
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(theme::GAP_XS))
-            .children(view.chats.iter().enumerate().map(|(index, chat)| {
-                let (pane, chosen) = (chat.pane, view.chosen == Some(chat.pane));
-                div()
-                    .id(("pr-handoff-chat", index))
-                    .debug_selector(move || format!("pr-handoff-chat-{index}"))
-                    .flex()
-                    .items_center()
-                    .gap(px(theme::GAP_SM))
-                    .px(px(theme::PAD_SM))
-                    .py(px(theme::PAD_XS))
-                    .rounded(px(theme::RADIUS_SM))
-                    .cursor_pointer()
-                    .text_size(px(theme::FONT_SIZE_SM))
-                    .when(chosen, |row| row.bg(t.lane_card_active_bg))
-                    .when(!chosen, |row| row.hover(|style| style.bg(t.overlay_hover)))
-                    .child(
-                        icons::icon(if chosen {
-                            icons::RADIO_ON
-                        } else {
-                            icons::RADIO_OFF
-                        })
-                        .text_color(t.text_muted),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_color(t.text_body)
-                            .child(chat.title.clone()),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_color(t.text_subtle)
-                            .child(s::handoff_tab(chat.tab)),
-                    )
-                    .on_click(
-                        cx.listener(move |ws, _, _, cx| ws.choose_pr_handoff_chat(id, pane, cx)),
-                    )
-            }))
-            .into_any_element()
     };
     let (preview, ready) = match &view.prompt {
         Prepared::Reading(_) => (note(common::loading(), cx).into_any_element(), false),
@@ -94,6 +47,11 @@ pub(super) fn handoff(id: PrDetailId, view: &HandoffView, cx: &Context<Workspace
             true,
         ),
     };
+    let ready = ready
+        && view
+            .editor
+            .as_ref()
+            .is_none_or(|editor| !editor.read(cx).value().trim().is_empty());
     div()
         .debug_selector(|| "pr-handoff".into())
         .flex()
@@ -109,7 +67,6 @@ pub(super) fn handoff(id: PrDetailId, view: &HandoffView, cx: &Context<Workspace
                 .text_color(t.text_muted)
                 .child(s::handoff_heading(what, &view.lane)),
         )
-        .child(chats)
         .children(view.blocked.map(|block| {
             note(
                 match block {
@@ -120,12 +77,22 @@ pub(super) fn handoff(id: PrDetailId, view: &HandoffView, cx: &Context<Workspace
                 cx,
             )
         }))
-        .child(preview)
         .child(
             div()
                 .flex()
+                .flex_wrap()
                 .gap(px(theme::GAP_SM))
-                .child(if view.chats.is_empty() {
+                .children(
+                    (!view.chats.is_empty() && !view.checkout).then(|| chat_picker(id, view, cx)),
+                )
+                .child(if view.checkout {
+                    button_primary("pr-handoff-checkout", s::handoff_create_lane())
+                        .loading(view.creating)
+                        .disabled(!ready || view.creating || view.blocked.is_some())
+                        .on_click(cx.listener(move |ws, _, window, cx| {
+                            ws.checkout_for_pr_handoff(id, window, cx)
+                        }))
+                } else if view.chats.is_empty() {
                     // No chat there: one is opened to take it.
                     button_primary("pr-handoff-new-chat", s::handoff_new_chat())
                         .debug_selector(|| "pr-handoff-new-chat".into())
@@ -141,10 +108,67 @@ pub(super) fn handoff(id: PrDetailId, view: &HandoffView, cx: &Context<Workspace
                             ws.insert_pr_handoff(id, window, cx)
                         }))
                 })
+                .when(ready && view.editor.is_none(), |row| {
+                    row.child(
+                        button_compact("pr-handoff-edit", s::handoff_edit())
+                            .debug_selector(|| "pr-handoff-edit".into())
+                            .on_click(cx.listener(move |ws, _, window, cx| {
+                                ws.edit_pr_handoff(id, window, cx)
+                            })),
+                    )
+                })
                 .child(
                     button_compact("pr-handoff-close", common::btn_cancel())
                         .on_click(cx.listener(move |ws, _, _, cx| ws.close_pr_handoff(id, cx))),
                 ),
+        )
+        .children(if view.checkout {
+            Some(note(s::handoff_branch(&view.lane), cx))
+        } else {
+            view.chats
+                .is_empty()
+                .then(|| note(s::handoff_no_chat(&view.lane), cx))
+        })
+        .child(match &view.editor {
+            Some(editor) => crate::ui::markdown_editor(editor, cx).into_any_element(),
+            None => preview,
+        })
+        .into_any_element()
+}
+
+fn chat_picker(id: PrDetailId, view: &HandoffView, cx: &Context<Workspace>) -> AnyElement {
+    let chosen = view.chosen;
+    let label = |chat: &crate::workspace::github_ops::review_send::WritableChat| {
+        s::handoff_chat_option(&chat.title, s::handoff_tab(chat.tab))
+    };
+    let current = view.chats.iter().find(|chat| Some(chat.pane) == chosen);
+    let name = current.map_or_else(s::handoff_choose_chat, label);
+    let entries: Vec<_> = view
+        .chats
+        .iter()
+        .map(|chat| (chat.pane, label(chat)))
+        .collect();
+    let workspace = cx.weak_entity();
+    button_with_icon("pr-handoff-chat", name, icons::EXPAND_MORE)
+        .max_w_full()
+        .tooltip(s::handoff_choose_chat())
+        .dropdown_menu_with_anchor(
+            Anchor::TopLeft,
+            menu_builder(move |menu, _, _| {
+                entries.iter().fold(menu, |menu, (pane, name)| {
+                    let pane = *pane;
+                    let workspace = workspace.clone();
+                    menu.item(
+                        PopupMenuItem::new(name.clone())
+                            .checked(chosen == Some(pane))
+                            .on_click(move |_, _, cx| {
+                                if let Some(ws) = workspace.upgrade() {
+                                    ws.update(cx, |ws, cx| ws.choose_pr_handoff_chat(id, pane, cx));
+                                }
+                            }),
+                    )
+                })
+            }),
         )
         .into_any_element()
 }

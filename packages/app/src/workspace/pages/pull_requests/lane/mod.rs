@@ -26,6 +26,15 @@ use checkout::{CheckedOut, CheckoutError, check_out, description};
 /// got: `None` until its first stage is told.
 pub(in crate::workspace) type Creating = std::collections::BTreeMap<PrKey, Option<CheckoutStage>>;
 
+type AfterCheckout = Box<
+    dyn FnOnce(
+        &mut Workspace,
+        daruda_store::project::LaneRef,
+        &mut Window,
+        &mut Context<Workspace>,
+    ),
+>;
+
 impl Workspace {
     /// Go to the worktree working on `item`, making one first if there is
     /// none, in `home` when the person chose the project. Git runs in the
@@ -38,14 +47,31 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.checkout_pr_for(item, home, None, window, cx);
+    }
+
+    pub(super) fn checkout_pr_for(
+        &mut self,
+        item: PrListItem,
+        home: Option<ProjectId>,
+        after: Option<AfterCheckout>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let lanes = self.pr_lanes();
         if let Some(lane) = list::linked_lane(&item, &lanes) {
-            self.activate_lane(lane.lane, window, cx);
+            if let Some(after) = after {
+                after(self, lane.lane, window, cx)
+            } else {
+                self.activate_lane(lane.lane, window, cx)
+            }
             return;
         }
-        if home.is_none() && self.choose_pr_lane_project(&item, window, cx) {
+        let mut after = after;
+        if home.is_none() && self.choose_pr_lane_project(&item, &mut after, window, cx) {
             return;
         }
+
         let Some((project, push)) = self.pr_lane_home(&item.repo, home) else {
             self.report_pr_lane_failure(
                 format!("no worktree pushes to {}", item.repo.qualified()),
@@ -57,12 +83,14 @@ impl Workspace {
         let checkout = PrCheckout::of(&item, remote);
         // `git worktree add` refuses a branch checked out in another
         // worktree. A lane on the PR's own branch is the one to go to, linked
-        // or not yet; one on the review branch's name that was not found as
-        // this PR's above is not its review branch.
+        // or not yet, and what waits on the checkout gets it as made; one on
+        // the review branch's name that was not found as this PR's above is
+        // not its review branch.
         if let Some(lane) = list::lane_on_branch(&lanes, project, &checkout.branch) {
-            match checkout.review {
-                None => self.activate_lane(lane.lane, window, cx),
-                Some(_) => self.report_review_branch_taken(&checkout.branch, cx),
+            match (checkout.review, after) {
+                (None, Some(after)) => after(self, lane.lane, window, cx),
+                (None, None) => self.activate_lane(lane.lane, window, cx),
+                (Some(_), _) => self.report_review_branch_taken(&checkout.branch, cx),
             }
             return;
         }
@@ -120,7 +148,20 @@ impl Workspace {
                 };
                 check_out(repo, &checkout, &push.url, new_path, &progress)
             },
-            move |ws, made, window, cx| ws.finish_pr_lane(key, project, plan, made, window, cx),
+            move |ws, made, window, cx| {
+                ws.pages.pull_requests.creating.remove(&key);
+                cx.notify();
+                let reveal = if after.is_some() {
+                    LaneReveal::Background
+                } else {
+                    LaneReveal::Foreground
+                };
+                if let Some(lane) = ws.finish_pr_lane(project, plan, made, reveal, window, cx)
+                    && let Some(after) = after
+                {
+                    after(ws, lane, window, cx);
+                }
+            },
             window,
             cx,
         )
@@ -131,15 +172,13 @@ impl Workspace {
     /// the worktree git made or report why it did not.
     fn finish_pr_lane(
         &mut self,
-        key: PrKey,
         project: ProjectId,
         plan: CreateWorktreePlan,
         made: Result<CheckedOut, CheckoutError>,
+        reveal: LaneReveal,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        self.pages.pull_requests.creating.remove(&key);
-        cx.notify();
+    ) -> Option<daruda_store::project::LaneRef> {
         match made {
             Err(CheckoutError::Foreign(branch)) => self.report_review_branch_taken(&branch, cx),
             Err(CheckoutError::Occupied(path)) => self.warn_pr_lane(
@@ -158,15 +197,17 @@ impl Workspace {
             ),
             Ok(checked_out) => {
                 let branch = plan.branch.clone();
-                self.register_created_lane(plan, project, None, LaneReveal::Foreground, window, cx);
+                let lane = self.register_created_lane(plan, project, None, reveal, window, cx);
                 if matches!(
                     checked_out,
                     CheckedOut::KeptLocal | CheckedOut::Existing { kept_local: true }
                 ) {
                     self.report_kept_local_commits(&branch, cx);
                 }
+                return Some(lane);
             }
         }
+        None
     }
 
     /// Show how far opening a worktree for `key` has got, while it runs.
@@ -183,6 +224,7 @@ impl Workspace {
     fn choose_pr_lane_project(
         &mut self,
         item: &PrListItem,
+        after: &mut Option<AfterCheckout>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -224,6 +266,7 @@ impl Workspace {
             &buttons,
             cx,
         );
+        let after = after.take();
         let item = item.clone();
         cx.spawn_in(window, async move |this, cx| {
             let Ok(answer) = answer.await else {
@@ -236,7 +279,7 @@ impl Workspace {
             // SILENT-OK: the window can close while choosing the project.
             let _ = this.update_in(cx, |ws, window, cx| {
                 if ws.project_for(project).is_some() {
-                    ws.create_lane_from_pr(item, Some(project), window, cx);
+                    ws.checkout_pr_for(item, Some(project), after, window, cx);
                 }
             });
         })
@@ -247,7 +290,7 @@ impl Workspace {
     /// The project a worktree for `repo` is made in, and its push target:
     /// `home` when chosen, else the browsed project's, else the active
     /// project's, else the first that pushes to `repo`.
-    fn pr_lane_home(
+    pub(super) fn pr_lane_home(
         &self,
         repo: &RepoId,
         home: Option<ProjectId>,

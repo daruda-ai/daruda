@@ -111,7 +111,22 @@ pub(crate) const KEY_CONTEXT: &str = "PullRequestsList";
 
 fn body(draw: &Draw<'_>, cx: &App) -> AnyElement {
     let groups = match &draw.snap.list.body {
-        PageBody::Off => return list_page::empty(s::empty_disabled(), cx).into_any_element(),
+        PageBody::Off => {
+            return list_page::empty(s::empty_disabled(), cx)
+                .child(
+                    button_compact("pr-open-settings", s::open_workspace_settings())
+                        .debug_selector(|| "pr-open-settings".into())
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(
+                                Box::new(crate::workspace::OpenSettings(
+                                    daruda_config::BuiltinSection::Workspace,
+                                )),
+                                cx,
+                            );
+                        }),
+                )
+                .into_any_element();
+        }
         PageBody::Discovering => return list_page::empty(s::discovering(), cx).into_any_element(),
         PageBody::NoRepos => return list_page::empty(s::empty_no_repos(), cx).into_any_element(),
         PageBody::Groups(groups) => groups,
@@ -298,13 +313,29 @@ fn trouble_note(group: &PrGroup, trouble: Trouble, snap: &PrPageSnapshot, cx: &A
         .into_any_element()
 }
 
+/// A remote can contain arbitrary text. Only offer a login command when
+/// its hostname can be pasted into any supported shell as a single word.
+fn login_command(host: &str) -> Option<String> {
+    let safe = host.split('.').all(|label| {
+        let bytes = label.as_bytes();
+        bytes.first().is_some_and(u8::is_ascii_alphanumeric)
+            && bytes.last().is_some_and(u8::is_ascii_alphanumeric)
+            && bytes
+                .iter()
+                .all(|b| b.is_ascii_alphanumeric() || *b == b'-')
+    });
+    safe.then(|| format!("gh auth login --hostname {host}"))
+}
+
 /// Why the host cannot be asked, with the Git panel's recheck beside it.
 fn blocked_note(group: &PrGroup, blocked: Blocked, snap: &PrPageSnapshot, cx: &App) -> AnyElement {
     let host = group.repo.host().to_owned();
-    let message = match blocked {
-        Blocked::Missing => s::gh_missing(),
-        Blocked::LoggedOut => s::gh_logged_out(&host),
-        Blocked::UnconfirmedHost => s::gh_unconfirmed_host(&host),
+    let command = login_command(&host);
+    let message = match (blocked, command.as_deref()) {
+        (Blocked::Missing, _) => s::gh_missing(),
+        (Blocked::LoggedOut, Some(command)) => s::gh_logged_out(command),
+        (Blocked::UnconfirmedHost, Some(command)) => s::gh_unconfirmed_host(&host, command),
+        (_, None) => s::gh_check_remote(),
     };
     let workspace = snap.workspace.clone();
     // The qualified name: two hosts can hold the same `owner/name`.
@@ -321,6 +352,21 @@ fn blocked_note(group: &PrGroup, blocked: Blocked, snap: &PrPageSnapshot, cx: &A
         .flex_wrap()
         .items_center()
         .gap(px(theme::GAP_LG))
+        .children(
+            command
+                .filter(|_| blocked != Blocked::Missing)
+                .map(|command| {
+                    let selector = format!("pr-copy-login-{}", group.repo.qualified());
+                    button_compact(
+                        SharedString::from(selector.clone()),
+                        s::copy_login_command(),
+                    )
+                    .debug_selector(move || selector.clone())
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(command.clone()))
+                    })
+                }),
+        )
         .child(recheck)
         .into_any_element()
 }
@@ -363,8 +409,23 @@ fn compact_row(
         .gap_x(px(theme::GAP_LG))
         .gap_y(px(theme::GAP_XS))
         .text_size(px(theme::FONT_SIZE_SM))
-        .child(cells.checks(fact()))
-        .child(cells.review(fact()))
+        .map(|el| {
+            if snap.list.filter == daruda_github::PrAudience::ReviewRequested {
+                el.child(
+                    fact()
+                        .text_color(cells.ink(theme::current(cx).text_body))
+                        .child(s::review_requested_from_you()),
+                )
+                .when(
+                    row.review
+                        .is_some_and(|review| review != ReviewDecision::ReviewRequired),
+                    |el| el.child(cells.review(fact())),
+                )
+                .child(cells.checks(fact()))
+            } else {
+                el.child(cells.checks(fact())).child(cells.review(fact()))
+            }
+        })
         .child(cells.comments(fact()))
         .child(div().min_w_0().max_w_full().child(lane_cell(row, snap)));
     div()
@@ -445,7 +506,7 @@ fn row_chrome(line: Div, row: &PrRow, draw: &Draw<'_>, cx: &App) -> AnyElement {
             let item = row.item.as_ref().clone();
             move |_, window, cx| {
                 if let Some(ws) = workspace.upgrade() {
-                    ws.update(cx, |ws, cx| ws.open_pr_detail(item.clone(), window, cx));
+                    ws.update(cx, |ws, cx| ws.open_pr_list_item(item.clone(), window, cx));
                 }
             }
         })
@@ -634,4 +695,29 @@ fn title(row: &PrRow, stale: bool, cell: Div, cx: &App) -> AnyElement {
                 .child(row.meta.clone()),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::login_command;
+
+    #[test]
+    fn login_commands_use_only_shell_safe_hostnames() {
+        let cases = [
+            ("github.com", Some("gh auth login --hostname github.com")),
+            (
+                "git-hub.corp",
+                Some("gh auth login --hostname git-hub.corp"),
+            ),
+            ("", None),
+            ("--help", None),
+            ("corp.example\nnext", None),
+            ("git;other", None),
+            ("git$(other)", None),
+            ("a|b", None),
+        ];
+        for (host, expected) in cases {
+            assert_eq!(login_command(host).as_deref(), expected, "{host:?}");
+        }
+    }
 }

@@ -175,11 +175,16 @@ pub(in crate::workspace) enum Settled {
 pub(in crate::workspace) struct ThreadWork {
     /// Open while a reply is written; kept when posting it fails.
     pub reply: Option<Entity<TextareaState>>,
+    /// Shared by the navigation button in this thread's two locations.
+    pub(super) navigation_focus: Option<gpui::FocusHandle>,
     /// Redraws the detail as the reply is typed, so Post follows it.
     typing: Option<Subscription>,
     pub op: Option<ThreadOp>,
     /// Whose draft the reply is, fixed when the box opened.
     owner: Option<DraftOwner>,
+    /// Typed into the box after its text went out: posting it then leaves
+    /// the box open with what was typed, rather than closing it unread.
+    typed_after_send: bool,
 }
 
 impl ThreadWork {
@@ -201,7 +206,7 @@ impl ThreadWork {
         let pending = pending.clone();
         match arrived(&pending.sent) {
             Some(true) => {
-                self.close_reply();
+                self.posted();
                 self.op = None;
                 Some(Settled::Posted)
             }
@@ -235,6 +240,27 @@ impl ThreadWork {
     fn close_reply(&mut self) {
         self.reply = None;
         self.typing = None;
+        self.typed_after_send = false;
+    }
+
+    /// The reply went out: its box closes unless typed into since.
+    fn posted(&mut self) {
+        if std::mem::take(&mut self.typed_after_send) {
+            return;
+        }
+        self.close_reply();
+    }
+
+    /// Whether the box's text has gone out and is not settled yet.
+    fn sent_unsettled(&self) -> bool {
+        matches!(
+            self.op,
+            Some(
+                ThreadOp::Running(ThreadAction::Replying)
+                    | ThreadOp::Checking(_)
+                    | ThreadOp::Unconfirmed(_)
+            )
+        )
     }
 }
 
@@ -257,6 +283,24 @@ pub(in crate::workspace) struct ThreadsWork {
 }
 
 impl ThreadsWork {
+    /// A tab jump keeps keyboard input with this thread, including while
+    /// the other tab is still waiting for its file listing.
+    pub(super) fn focus_after_jump(
+        &mut self,
+        thread: &str,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        let held = self.work.entry(thread.to_owned()).or_default();
+        if let Some(reply) = &held.reply {
+            reply.update(cx, |reply, cx| reply.focus(window, cx));
+        } else {
+            held.navigation_focus
+                .get_or_insert_with(|| cx.focus_handle())
+                .focus(window, cx);
+        }
+    }
+
     pub(in crate::workspace) fn get(&self, thread: &str) -> Option<&ThreadWork> {
         self.work.get(thread)
     }
@@ -283,6 +327,9 @@ impl ThreadsWork {
             return false;
         }
         work.op = Some(ThreadOp::Running(action));
+        if action == ThreadAction::Replying {
+            work.typed_after_send = false;
+        }
         true
     }
 
@@ -303,7 +350,7 @@ impl ThreadsWork {
         }
         work.op = failure.map(|reason| ThreadOp::Failed(action, reason));
         match (action, &work.op) {
-            (ThreadAction::Replying, None) => work.close_reply(),
+            (ThreadAction::Replying, None) => work.posted(),
             (ThreadAction::Resolving, None) => {
                 self.resolved.insert(thread.to_owned(), stamp);
             }
@@ -353,6 +400,21 @@ impl ThreadsWork {
 }
 
 impl PrDetailState {
+    /// A refresh may already include this reply or still be returning a snapshot
+    /// from before it posted. Keep exactly one copy and supersede the older read.
+    fn record_posted_reply(&mut self, thread: &str, comment: &ReviewComment) -> Option<TabRead> {
+        let slot = self.threads.as_mut()?;
+        if let Some(held) = slot
+            .ready_mut()
+            .and_then(|read| read.threads.iter_mut().find(|held| held.id == thread))
+            && !held.comments.iter().any(|held| held.id == comment.id)
+        {
+            held.comments.push(comment.clone());
+        }
+        slot.waiting()?;
+        self.reread_threads().1
+    }
+
     /// Read the threads again in place. The ticket is issued even when they
     /// are not held, so a check waiting on it settles with whichever threads
     /// read comes next.
@@ -510,10 +572,13 @@ impl Workspace {
     fn pr_reply_typed(&mut self, id: PrDetailId, thread: &str, cx: &mut Context<Self>) {
         let Some(work) = self
             .pr_detail_mut(id)
-            .and_then(|detail| detail.thread_work.work.get(thread))
+            .and_then(|detail| detail.thread_work.work.get_mut(thread))
         else {
             return;
         };
+        if work.sent_unsettled() {
+            work.typed_after_send = true;
+        }
         let text = work
             .reply
             .as_ref()
@@ -629,14 +694,12 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         let failure = result.as_ref().err().map(ToString::to_string);
-        // Even if the detail is gone: posted, the draft is done with; failed,
-        // it is held as sent, so no detail sends it again unchecked.
+        // Even if the detail is gone: failed, it is held as sent, so no
+        // detail sends it again unchecked.
         let sent = result.as_ref().err().map(|e| outgoing.failed(e));
-        if let Some(owner) = DraftStore::owner(&repo, number, cx) {
-            match &sent {
-                None => DraftStore::set_reply(&owner, &thread, None, cx),
-                Some(sent) => DraftStore::set_reply_sent(&owner, &thread, Some(sent.clone()), cx),
-            }
+        let owner = DraftStore::owner(&repo, number, cx);
+        if let (Some(owner), Some(sent)) = (&owner, &sent) {
+            DraftStore::set_reply_sent(owner, &thread, Some(sent.clone()), cx);
         }
         if let Some(detail) = self.pr_detail_mut(id) {
             let stamp = detail.tickets.issue();
@@ -646,11 +709,18 @@ impl Workspace {
                     .finish(&thread, ThreadAction::Replying, failure, stamp);
             if finished
                 && let Ok(comment) = &result
-                && let Some(threads) = detail.threads.as_mut().and_then(|slot| slot.ready_mut())
-                && let Some(held) = threads.threads.iter_mut().find(|held| held.id == thread)
+                && let Some(read) = detail.record_posted_reply(&thread, comment)
             {
-                held.comments.push(comment.clone());
+                self.send_pr_tab_read(id, read, cx);
             }
+        }
+        // Posted, the draft is done with, unless typed into since: then it
+        // holds what the box still shows.
+        if sent.is_none()
+            && let Some(owner) = &owner
+        {
+            let left = self.pr_reply_left(id, &thread, cx);
+            DraftStore::set_reply(owner, &thread, left, cx);
         }
         let reread = self.thread_action_landed(id, repo, ThreadAction::Replying, result.err(), cx);
         // It may have posted all the same: the threads read again say.
@@ -663,6 +733,23 @@ impl Workspace {
         {
             work.op = Some(ThreadOp::Checking(PendingReply { after, sent }));
         }
+    }
+
+    /// What `thread`'s reply box still holds, when it stayed open.
+    pub(super) fn pr_reply_left(
+        &self,
+        id: PrDetailId,
+        thread: &str,
+        cx: &Context<Self>,
+    ) -> Option<String> {
+        self.pr_detail(id)?
+            .thread_work
+            .work
+            .get(thread)?
+            .reply
+            .as_ref()
+            .map(|reply| reply.read(cx).value().to_string())
+            .filter(|text| !text.trim().is_empty())
     }
 
     /// Resolve `thread`, or unresolve one resolved from here.

@@ -89,6 +89,10 @@ impl Workspace {
         Some(
             crate::workspace::pages::pull_requests::detail::render::render(
                 view,
+                match self.groups_shown() {
+                    super::super::main_area::side_group::GroupsShown::Both { side, .. } => side,
+                    _ => self.main_area.groups_width,
+                },
                 detail.scroll(),
                 detail.files_scroll(),
                 cx,

@@ -17,7 +17,7 @@ fn shown(f: &super::GitFixture, vcx: &mut VisualTestContext) -> Option<String> {
 }
 
 #[gpui::test]
-fn the_conversation_is_read_once_the_tab_is_shown(cx: &mut TestAppContext) {
+fn the_conversation_is_read_once_as_the_first_tab_shown(cx: &mut TestAppContext) {
     let (f, gh, id) = opened(cx, mergeable(7, "feat"));
     gh.set_conversation(
         &repo(),
@@ -40,7 +40,7 @@ fn the_conversation_is_read_once_the_tab_is_shown(cx: &mut TestAppContext) {
             .filter(|call| matches!(call, GhCall::Conversation { .. }))
             .count()
     };
-    assert_eq!(read(&gh), 0, "not before the tab is shown");
+    assert_eq!(read(&gh), 1, "a first visit opens on the description");
     f.ws.update(&mut vcx, |ws, cx| {
         ws.select_pr_detail_tab(id, PrTab::Description, cx)
     });

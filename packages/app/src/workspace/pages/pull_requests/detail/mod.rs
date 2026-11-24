@@ -13,6 +13,8 @@ use super::actions::{ActionState, PrAction};
 use super::details::DetailHold;
 use super::list::{self, LaneFacts};
 
+pub(super) mod anchors;
+mod checks_render;
 pub(in crate::workspace) mod description;
 mod description_render;
 pub(in crate::workspace) mod diff_layout;
@@ -43,10 +45,8 @@ use read_slot::Tickets;
 pub(in crate::workspace) use read_slot::{ReadSlot, ReadTicket};
 
 use crate::gh_host::GhHost;
-use crate::github::PrLink;
 use crate::surface::strings::error;
 use crate::workspace::Workspace;
-use crate::workspace::github_ops::review_send::PrSendTarget;
 use crate::workspace::pages::Page;
 use crate::workspace::pages::detail::PageDetailId;
 use crate::workspace::spawn_helpers::spawn_bg_work_and_mutate;
@@ -67,19 +67,24 @@ pub(in crate::workspace) enum Load<T> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(in crate::workspace) enum PrTab {
+    /// Where a pull request never visited opens, however it is opened.
     #[default]
+    Description,
     Checks,
     Files,
     Threads,
-    Description,
 }
 
 impl PrTab {
+    fn uses(self, source: Self) -> bool {
+        self == source || (self == Self::Files && source == Self::Threads)
+    }
+
     pub(in crate::workspace) const ALL: [Self; 4] =
-        [Self::Checks, Self::Files, Self::Threads, Self::Description];
+        [Self::Description, Self::Checks, Self::Files, Self::Threads];
 }
 
-/// The tabs read when first shown rather than with the pull request.
+/// Sources read on demand by the detail tabs.
 const LAZY_TABS: [PrTab; 3] = [PrTab::Threads, PrTab::Files, PrTab::Description];
 
 /// A read a tab starts when it is shown.
@@ -116,12 +121,17 @@ pub(in crate::workspace) struct PrDetailState {
     /// next read lands.
     pr: ReadSlot<PrDetail>,
     tab: PrTab,
+    failures_only: bool,
+    comment_location: Option<anchors::CommentLocation>,
     scroll: gpui::ScrollHandle,
     /// The Files tab's listing, kept with the detail so stepping through
     /// files can bring the shown one into view.
     files_scroll: gpui::UniformListScrollHandle,
     /// The unresolved threads, read when their tab is first shown.
     threads: Option<ReadSlot<ReviewThreads>>,
+    /// The detail head paired with the last successful thread read. As with
+    /// the files listing, a concurrent detail read supplies it on landing.
+    thread_head: Option<String>,
     /// The changed files, read when their tab is first shown.
     files: Option<files::FilesState>,
     /// The failed Actions jobs whose log is open.
@@ -154,20 +164,35 @@ pub(in crate::workspace) struct PrDetailState {
 /// What is left of opening a detail once something shows it.
 pub(in crate::workspace) enum PrDetailStart {
     /// It was open already: only the tab asked for is shown.
-    Shown { tab: Option<PrTab> },
+    Shown { at: Option<OpeningTarget> },
     /// It is new: its pull request is read, or the read made to open it
     /// is landed, and the tab it opens at reads what it shows.
     New {
         read: Option<Box<PrDetail>>,
-        tab_read: Option<TabRead>,
+        tab_reads: Vec<TabRead>,
     },
+}
+
+#[derive(Debug)]
+pub(in crate::workspace) enum OpeningTarget {
+    Tab(PrTab),
+    Comment(anchors::CommentLink),
+}
+
+impl OpeningTarget {
+    fn tab(&self) -> PrTab {
+        match self {
+            Self::Tab(tab) => *tab,
+            Self::Comment(link) => link.kind.tab(),
+        }
+    }
 }
 
 /// How a detail opens, beyond which pull request.
 #[derive(Debug, Default)]
 pub(in crate::workspace) struct PrOpening {
     /// The tab to show; `None` keeps where it was left.
-    pub(in crate::workspace) tab: Option<PrTab>,
+    pub(in crate::workspace) at: Option<OpeningTarget>,
     /// The pull request read just now to open it, landed as a new detail's
     /// read. Fresh because a pull request detail never holds unsaved edits,
     /// so its switch is never held behind a prompt. Boxed: a detail is large.
@@ -182,9 +207,12 @@ impl PrDetailState {
             item,
             pr: ReadSlot::settled(Load::Loading),
             tab: PrTab::default(),
+            failures_only: false,
+            comment_location: None,
             scroll: gpui::ScrollHandle::new(),
             files_scroll: gpui::UniformListScrollHandle::new(),
             threads: None,
+            thread_head: None,
             files: None,
             logs: BTreeMap::new(),
             action: ActionState::Idle,
@@ -238,19 +266,20 @@ impl PrDetailState {
 
     /// Where a detail opens: on `tab` when one was asked for, else where it
     /// was left. A tab asked for that is the one left keeps its place.
-    fn open_at(&mut self, place: Option<&progress::Place>, tab: Option<PrTab>) -> Option<TabRead> {
+    fn open_at(&mut self, place: Option<&progress::Place>, tab: Option<PrTab>) -> Vec<TabRead> {
         match (tab, place) {
             (Some(tab), Some(place)) if place.tab == tab => self.restore(place),
             (Some(tab), _) => self.select_tab(tab),
             (None, Some(place)) => self.restore(place),
-            (None, None) => None,
+            // Never visited: the first tab, read like any other shown.
+            (None, None) => self.select_tab(self.tab),
         }
     }
 
     /// Come back to `place`: its tab, and on the Files tab the file shown,
     /// with where the detail was scrolled if that file did not change.
-    /// `Some` with the read the tab needs.
-    fn restore(&mut self, place: &progress::Place) -> Option<TabRead> {
+    /// Return the reads its visible content needs.
+    fn restore(&mut self, place: &progress::Place) -> Vec<TabRead> {
         let read = self.select_tab(place.tab);
         if let (Some(files), Some(file)) = (self.files.as_mut(), place.file.as_ref()) {
             files.restore_to(file, place.offset);
@@ -332,10 +361,8 @@ impl PrDetailState {
         self.action = ActionState::Done(line);
     }
 
-    /// Forget what a reload replaces: the open logs, a failure already
-    /// said, the threads and the files. `Some` with the shown tab's new read
-    /// when it had one, so it is read again at once.
-    fn reset_for_refresh(&mut self) -> (ReadTicket, Option<TabRead>) {
+    /// Drop hidden sources and reread the visible ones in place.
+    fn reset_for_refresh(&mut self) -> (ReadTicket, Vec<TabRead>) {
         self.logs.clear();
         if matches!(self.action, ActionState::Failed(_) | ActionState::Done(_)) {
             self.action = ActionState::Idle;
@@ -343,20 +370,28 @@ impl PrDetailState {
         // Shown, a tab is read again in place: what it shows stays up until
         // the new answer. Hidden, it is dropped and read when shown again.
         for tab in LAZY_TABS {
-            if tab != self.tab {
+            if !self.tab.uses(tab) {
                 self.drop_tab(tab);
             }
         }
         let read = self.begin_read();
-        let tab = self.reread_tab(self.tab);
-        (read, tab)
+        let shown = self.tab;
+        let tabs = LAZY_TABS
+            .into_iter()
+            .filter(|source| shown.uses(*source))
+            .filter_map(|source| self.reread_tab(source))
+            .collect();
+        (read, tabs)
     }
 
     /// The head just read, told to the files: a listing read at another
     /// commit is read again when shown, and dropped when hidden.
     fn files_at_head(&mut self) -> Option<TabRead> {
-        let head = self.pr.confirmed()?.head_sha.clone();
-        if !self.files.as_mut()?.head_read(&head) {
+        let pr = self.pr.confirmed()?;
+        let (head, base) = (pr.head_sha.clone(), pr.base_branch.clone());
+        let files = self.files.as_mut()?;
+        // Both are told, whichever moved.
+        if !(files.head_read(&head) | files.base_read(&base)) {
             return None;
         }
         if self.tab == PrTab::Files {
@@ -371,6 +406,7 @@ impl PrDetailState {
     fn begin_read(&mut self) -> ReadTicket {
         let ticket = self.tickets.issue();
         self.pr.reread(ticket);
+        self.wait_handoff_for_detail(ticket);
         ticket
     }
 
@@ -380,19 +416,23 @@ impl PrDetailState {
         ticket
     }
 
-    /// Show `tab`. `Some` with its read when a tab read on demand is shown
-    /// for the first time, or again after a failed read.
-    fn select_tab(&mut self, tab: PrTab) -> Option<TabRead> {
+    /// Start each missing read for the chosen tab. Files shares its review
+    /// thread read with Threads, including when a detail opens at a saved file.
+    fn select_tab(&mut self, tab: PrTab) -> Vec<TabRead> {
         self.tab = tab;
-        if !self.tab_wants_read(tab) {
-            return None;
+        self.failures_only = false;
+        let mut reads = Vec::new();
+        for source in LAZY_TABS {
+            if tab.uses(source) && self.tab_wants_read(source) {
+                reads.push(match source {
+                    PrTab::Threads => TabRead::Threads(self.begin_threads_read()),
+                    PrTab::Files => TabRead::Files(self.begin_files_read()),
+                    PrTab::Description => TabRead::Conversation(self.begin_conversation_read()),
+                    PrTab::Checks => continue,
+                });
+            }
         }
-        match tab {
-            PrTab::Threads => Some(TabRead::Threads(self.begin_threads_read())),
-            PrTab::Files => Some(TabRead::Files(self.begin_files_read())),
-            PrTab::Description => Some(TabRead::Conversation(self.begin_conversation_read())),
-            PrTab::Checks => None,
-        }
+        reads
     }
 
     /// Whether `tab` has nothing to show yet, or only a failed read.
@@ -428,7 +468,10 @@ impl PrDetailState {
     /// Let go of what `tab` read; shown again, it is read again.
     fn drop_tab(&mut self, tab: PrTab) {
         match tab {
-            PrTab::Threads => self.threads = None,
+            PrTab::Threads => {
+                self.threads = None;
+                self.thread_head = None;
+            }
             PrTab::Files => self.files = None,
             PrTab::Description => self.conversation = None,
             PrTab::Checks => {}
@@ -519,6 +562,9 @@ impl Workspace {
         if !crate::github::enabled(cx) {
             return;
         }
+        self.pages.pull_requests.pending_open = None;
+        let searched_alone = self.pages.pull_requests.list_covers_detail();
+        self.pages.pull_requests.searching_list = false;
         self.select_pr_row((item.repo.clone(), item.pr.number));
         if !self.github_repos().contains(&item.repo) {
             let project = self.lane_scoped.iter().find_map(|(lane, state)| {
@@ -543,9 +589,11 @@ impl Workspace {
             self.show_page(Page::PullRequests, cx);
             // The open detail keeps its own reads: `opening.read` started
             // before them could be older than one already landed.
-            if let Some(tab) = opening.tab {
-                self.select_pr_detail_tab(id, tab, cx);
+            self.apply_pr_opening(id, opening.at, cx);
+            if searched_alone {
+                self.focus_shown_page(window, cx);
             }
+            cx.notify();
             return;
         }
         self.leave_page_detail_then(Page::PullRequests, window, cx, move |ws, window, cx| {
@@ -590,19 +638,22 @@ impl Workspace {
         if let Some(hold) = open {
             // The open detail keeps its own reads: `opening.read` started
             // before them could be older than one already landed.
-            return (hold, PrDetailStart::Shown { tab: opening.tab });
+            return (hold, PrDetailStart::Shown { at: opening.at });
         }
         let id = PrDetailId(self.alloc_id());
         let mut detail = PrDetailState::new(id, item);
         let page = &mut self.pages.pull_requests;
         let place = page.progress.place(&detail.key()).cloned();
-        let tab_read = detail.open_at(place.as_ref(), opening.tab);
+        let tab_reads = detail.open_at(place.as_ref(), opening.at.as_ref().map(OpeningTarget::tab));
+        if let Some(OpeningTarget::Comment(link)) = opening.at {
+            detail.comment_location = Some(anchors::CommentLocation::Looking(link));
+        }
         let hold = page.details.open(detail);
         (
             hold,
             PrDetailStart::New {
                 read: opening.read,
-                tab_read,
+                tab_reads,
             },
         )
     }
@@ -623,19 +674,15 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         match start {
-            PrDetailStart::Shown { tab } => {
-                if let Some(tab) = tab {
-                    self.select_pr_detail_tab(id, tab, cx);
-                }
-            }
-            PrDetailStart::New { read, tab_read } => {
+            PrDetailStart::Shown { at } => self.apply_pr_opening(id, at, cx),
+            PrDetailStart::New { read, tab_reads } => {
                 crate::github::DraftStore::flush(cx);
                 match read {
                     // Read just now to open it: shown as is, not asked again.
                     Some(read) => self.land_pr_read(id, *read, cx),
                     None => self.read_pr_detail(id, cx),
                 }
-                if let Some(read) = tab_read {
+                for read in tab_reads {
                     self.send_pr_tab_read(id, read, cx);
                 }
             }
@@ -650,6 +697,7 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.pages.pull_requests.pending_open = None;
         if let Some(id) = self.pr_detail_id() {
             self.drop_gone_detail(PageDetailId::PullRequest(id), window, cx);
         }
@@ -681,12 +729,11 @@ impl Workspace {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
-        let (read, tab) = detail.reset_for_refresh();
+        let (read, tabs) = detail.reset_for_refresh();
         self.send_pr_detail_read(id, read, cx);
-        if let Some(tab) = tab {
+        for tab in tabs {
             self.send_pr_tab_read(id, tab, cx);
         }
-        self.reprepare_pr_handoff(id, cx);
         self.refresh_pr_list(cx);
         cx.notify();
     }
@@ -743,14 +790,26 @@ impl Workspace {
         if !detail.pr.land_keeping_ready(ticket, answer) {
             return;
         }
+        if error.is_none()
+            && detail.thread_head.is_none()
+            && detail
+                .threads
+                .as_ref()
+                .and_then(ReadSlot::confirmed)
+                .is_some()
+        {
+            detail.thread_head = detail.pr.confirmed().map(|pr| pr.head_sha.clone());
+        }
         detail.come_back();
         detail.drop_handoff_to_fix();
         if let Some(read) = detail.files_at_head() {
             self.send_pr_tab_read(id, read, cx);
         }
+        self.reprepare_pr_handoff(id, ticket, error.as_ref(), cx);
         if let Some(e) = error {
             self.report_pr_read(&e, "github.pr_detail.read", cx);
         }
+        self.follow_pr_comment(id, cx);
         cx.notify();
     }
 
@@ -770,6 +829,40 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Keep the same expanded discussion in view when moving between tabs.
+    pub(super) fn jump_pr_thread(
+        &mut self,
+        id: PrDetailId,
+        thread: &str,
+        tab: PrTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(detail) = self.pr_detail_mut(id) else {
+            return;
+        };
+        let Some(item) = detail
+            .threads
+            .as_ref()
+            .and_then(ReadSlot::last_known)
+            .and_then(|threads| threads.threads.iter().find(|item| item.id == thread))
+        else {
+            return;
+        };
+        let comment = item.comments.first().map(|comment| comment.id.clone());
+        let target = view::ThreadTarget::of(item, detail.thread_head.as_deref());
+        detail.expanded_threads.insert(thread.to_owned());
+        detail.thread_work.focus_after_jump(thread, window, cx);
+        if let (PrTab::Files, Some(target), Some(comment)) = (tab, target, comment.as_ref()) {
+            self.reveal_pr_thread_in_diff(id, target, comment.clone(), cx);
+        } else {
+            self.select_pr_detail_tab(id, PrTab::Threads, cx);
+            if let Some(comment) = comment {
+                self.reveal_pr_comment(id, comment, cx);
+            }
+        }
+    }
+
     /// Go to the lines a thread is on: the Files tab, its file, the lines
     /// selected once the file is shown at a known commit.
     pub(in crate::workspace) fn show_pr_thread_in_diff(
@@ -779,10 +872,14 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.select_pr_detail_tab(id, PrTab::Files, cx);
-        let Some(files) = self.pr_detail_mut(id).and_then(|d| d.files.as_mut()) else {
+        let Some(detail) = self.pr_detail_mut(id) else {
+            return;
+        };
+        let Some(files) = detail.files.as_mut() else {
             return;
         };
         files.go_to_lines(target);
+        detail.reveal_file_row();
         cx.notify();
     }
 
@@ -797,8 +894,9 @@ impl Workspace {
         let Some(detail) = self.pr_detail_mut(id) else {
             return;
         };
+        detail.comment_location = None;
         detail.stop_coming_back();
-        if let Some(read) = detail.select_tab(tab) {
+        for read in detail.select_tab(tab) {
             self.send_pr_tab_read(id, read, cx);
         }
         cx.notify();
@@ -851,10 +949,11 @@ impl Workspace {
         // Threads resolved since are no longer expanded, and work on them
         // settles against what was read.
         let read = match slot.load() {
-            Load::Ready(threads) if error.is_none() => Some(threads.clone()),
+            Load::Ready(threads) if error.is_none() => Some(threads),
             Load::Ready(_) | Load::Loading | Load::Failed(_) => None,
         };
-        if let Some(threads) = &read {
+        if let Some(threads) = read {
+            detail.thread_head = detail.pr.confirmed().map(|pr| pr.head_sha.clone());
             let open: std::collections::HashSet<&str> = threads
                 .threads
                 .iter()
@@ -864,21 +963,48 @@ impl Workspace {
                 .expanded_threads
                 .retain(|thread| open.contains(thread.as_str()));
         }
-        let settled = detail.thread_work.threads_read(ticket, read.as_ref());
+        let settled = detail.thread_work.threads_read(ticket, read);
         for (thread, how) in settled {
             match how {
-                thread_actions::Settled::Posted => self.set_pr_reply_draft(id, &thread, None, cx),
+                thread_actions::Settled::Posted => {
+                    let left = self.pr_reply_left(id, &thread, cx);
+                    self.set_pr_reply_draft(id, &thread, left, cx);
+                }
                 thread_actions::Settled::NotPosted => self.let_go_pr_reply_sent(id, &thread, cx),
             }
         }
         if let Some(e) = error {
             self.report_pr_read(&e, "github.pr_threads.read", cx);
         }
+        self.follow_pr_comment(id, cx);
         cx.notify();
     }
 
-    /// Open a failed Actions job's log under its check, reading it the
-    /// first time; close it if open.
+    /// Open a sole failing Actions log directly. Multiple failures stay listed together.
+    pub(in crate::workspace) fn inspect_failed_pr_checks(
+        &mut self,
+        id: PrDetailId,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_pr_detail_tab(id, PrTab::Checks, cx);
+        let job = self.pr_detail_mut(id).and_then(|detail| {
+            detail.failures_only = true;
+            detail.scroll.set_offset(Default::default());
+            let pr = detail.pr.confirmed()?;
+            let mut failed = pr
+                .checks
+                .iter()
+                .filter(|entry| entry.run.status == daruda_github::CheckStatus::Failure);
+            let job = failed.next()?.job?;
+            (failed.next().is_none() && !pr.checks_truncated && detail.log(job).is_none())
+                .then_some(job)
+        });
+        if let Some(job) = job {
+            self.toggle_pr_check_log(id, job, cx);
+        }
+    }
+
+    /// Toggle a failed Actions job’s log, reading it on first open.
     pub(in crate::workspace) fn toggle_pr_check_log(
         &mut self,
         id: PrDetailId,
@@ -935,23 +1061,6 @@ impl Workspace {
     /// The worktree working on the shown pull request.
     pub(in crate::workspace) fn pr_detail_lane(&self, item: &PrListItem) -> Option<LaneFacts> {
         list::linked_lane(item, &self.pr_lanes()).cloned()
-    }
-
-    /// Where the detail's Send to agent goes: the linked worktree's chat,
-    /// with the pull request as last read. `None` without either.
-    pub(super) fn pr_detail_send_target(&self, id: PrDetailId) -> Option<PrSendTarget> {
-        let detail = self.pr_detail(id)?;
-        let Load::Ready(loaded) = detail.load() else {
-            return None;
-        };
-        let lane = self.pr_detail_lane(&detail.item)?.lane;
-        Some(PrSendTarget {
-            lane,
-            link: PrLink {
-                repo: detail.item.repo.clone(),
-                pr: loaded.summary.clone(),
-            },
-        })
     }
 
     /// Make a worktree for the shown pull request, as its list row would.

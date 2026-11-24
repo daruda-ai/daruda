@@ -623,3 +623,75 @@ fn a_suggestion_starts_from_the_comments_own_unfolded_lines(cx: &mut TestAppCont
         "kept as typed"
     );
 }
+
+/// Typed into while its reply posts (from the thread's other place, say),
+/// the box stays open with what it holds, and so does its draft: posting
+/// does not throw away text written after the send.
+#[gpui::test]
+fn text_typed_while_a_reply_posts_is_kept(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    cx.update(|cx| DraftStore::install_at(dir.path().to_owned(), cx));
+    let (f, gh, id) = opened_signed_in(cx, mergeable(7, "feat"));
+    gh.set_review_threads(
+        &repo(),
+        7,
+        ReviewThreads {
+            threads: vec![ReviewThread {
+                id: "t1".into(),
+                path: "a.rs".into(),
+                comments: vec![ReviewComment {
+                    id: "c1".into(),
+                    body: "Why?".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            truncated: false,
+        },
+    );
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.simulate_resize(size(px(1400.), px(900.)));
+    f.ws.update(&mut vcx, |ws, cx| {
+        ws.select_pr_detail_tab(id, PrTab::Threads, cx)
+    });
+    vcx.run_until_parked();
+    let reply = |ws: &crate::workspace::Workspace| {
+        ws.pr_detail(id)
+            .unwrap()
+            .thread_work()
+            .get("t1")
+            .and_then(|work| work.reply.clone())
+    };
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.open_pr_reply(id, "t1", window, cx);
+            let input = reply(ws).unwrap();
+            input.update(cx, |input, cx| input.set_value("Because.", window, cx));
+        })
+    });
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.post_pr_reply(id, "t1", cx);
+            let input = reply(ws).unwrap();
+            input.update(cx, |input, cx| {
+                input.set_value("Because. And one more thing", window, cx)
+            });
+        })
+    });
+    vcx.run_until_parked();
+    let kept = f.ws.read_with(&vcx, |ws, cx| {
+        reply(ws).map(|input| input.read(cx).value().to_string())
+    });
+    assert_eq!(kept.as_deref(), Some("Because. And one more thing"));
+    let draft = vcx.update(|_, cx| {
+        let owner = DraftStore::owner(&repo(), 7, cx).expect("signed in");
+        DraftStore::of(&owner, cx)
+            .and_then(|drafts| drafts.replies.into_iter().find(|r| r.thread == "t1"))
+            .map(|reply| reply.text)
+    });
+    assert_eq!(
+        draft.as_deref(),
+        Some("Because. And one more thing"),
+        "the draft holds what the box shows"
+    );
+}

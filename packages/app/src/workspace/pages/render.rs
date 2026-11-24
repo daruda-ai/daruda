@@ -107,6 +107,12 @@ pub(in crate::workspace) fn body(
                 let detail = pages.detail()?;
                 Some(super::pull_requests::detail::render::render(
                     view,
+                    ws.page_content_width(window, cx)
+                        - if layout == PageLayout::Split {
+                            pages.list_width()
+                        } else {
+                            0.0
+                        },
                     detail.scroll(),
                     detail.files_scroll(),
                     cx,

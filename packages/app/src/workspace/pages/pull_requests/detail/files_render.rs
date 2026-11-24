@@ -1,5 +1,5 @@
-//! The Files tab, drawn from its view: the changed files, each with how it
-//! changed and by how many lines, and below them the chosen file's diff.
+//! The Files review surface, with a changed-file navigator or a compact
+//! picker sharing the same selected diff and review progress.
 
 use std::rc::Rc;
 
@@ -16,7 +16,7 @@ use super::files::{
 };
 use super::progress::Viewed;
 use super::recover::RecoverFailure;
-use super::view::{ReviewCommentsView, SendSlot};
+use super::view::{ReadyView, SendSlot};
 use crate::surface::strings::{common, pull_requests as s};
 use crate::ui::{
     Disableable as _, Selectable as _, button, button_compact, button_group, button_icon,
@@ -26,36 +26,81 @@ use crate::workspace::Workspace;
 
 pub(super) fn files(
     id: PrDetailId,
-    view: &FilesView,
-    comments: Option<&ReviewCommentsView>,
-    send: SendSlot,
+    ready: &ReadyView,
+    pr_url: Option<&str>,
     list_scroll: &UniformListScrollHandle,
+    wide: bool,
     cx: &Context<Workspace>,
 ) -> AnyElement {
-    let (files, total, viewed, more, shown) = match view {
-        FilesView::Loading => return note(common::loading(), cx),
-        FilesView::Failed(reason) => return note(s::detail_failed(reason), cx),
-        FilesView::Ready {
+    let review = ready
+        .review_comments
+        .as_ref()
+        .and_then(|comments| super::review_comments_render::pending(id, comments, cx));
+    let panel = div().flex().flex_col().min_w_0().gap(px(theme::GAP_LG));
+    let (files, total, viewed, more, shown, picker_open) = match ready.files.as_ref() {
+        None | Some(FilesView::Loading) => {
+            return panel
+                .children(review)
+                .child(note(common::loading(), cx))
+                .into_any_element();
+        }
+        Some(FilesView::Failed(reason)) => {
+            return panel
+                .children(review)
+                .child(note(s::detail_failed(reason), cx))
+                .into_any_element();
+        }
+        Some(FilesView::Ready {
             files,
             total,
             viewed,
             more,
             shown,
-        } => (files, *total, *viewed, more, shown),
+            picker_open,
+        }) => (files, *total, *viewed, more, shown.as_deref(), *picker_open),
     };
     if files.is_empty() {
-        return note(s::files_empty(), cx);
+        return panel
+            .children(review)
+            .child(note(s::files_empty(), cx))
+            .into_any_element();
     }
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(theme::GAP_LG))
-        .child(progress(id, files.len(), total, viewed, more, cx))
-        .child(file_list(id, files, list_scroll, cx))
-        .children(
-            shown
-                .as_ref()
-                .map(|shown| shown_diff(id, shown, comments, send, cx)),
+    let picker = (!wide).then(|| {
+        let label = shown.map_or_else(s::file_choose, |file| file.path.clone());
+        button_with_icon("pr-files-picker", label, icons::EXPAND_MORE)
+            .max_w_full()
+            .tooltip(s::file_choose())
+            .debug_selector(|| "pr-files-picker".into())
+            .on_click(cx.listener(move |ws, _, _, cx| ws.toggle_pr_file_picker(id, cx)))
+    });
+    let progress = progress(id, files.len(), total, viewed, more, cx);
+    panel
+        .children(review)
+        .child(progress)
+        .children(picker)
+        .child(
+            div()
+                .flex()
+                .items_start()
+                .when(!wide, |row| row.flex_col())
+                .w_full()
+                .min_w_0()
+                .gap(px(theme::GAP_LG))
+                .when(wide || picker_open, |row| {
+                    row.child(
+                        div()
+                            .when(wide, |nav| nav.w(px(theme::PR_FILES_NAV_W)).flex_none())
+                            .when(!wide, |nav| nav.w_full())
+                            .child(file_list(id, files, list_scroll, cx)),
+                    )
+                })
+                .children(shown.map(|shown| {
+                    div()
+                        .min_w_0()
+                        .when(wide, |diff| diff.flex_1())
+                        .when(!wide, |diff| diff.w_full())
+                        .child(shown_diff(id, shown, ready, pr_url, wide, cx))
+                })),
         )
         .into_any_element()
 }
@@ -74,11 +119,7 @@ fn progress(
         Some(total) => s::files_progress(read, total.max(read as u32)),
         None => s::files_progress_unknown(read),
     };
-    let count = if viewed > 0 {
-        s::files_viewed(count, viewed)
-    } else {
-        count
-    };
+    let count = s::files_viewed(count, viewed);
     let (message, action) = match more {
         FilesMore::None => (count, None),
         FilesMore::Reading => (s::files_reading(count), None),
@@ -200,34 +241,37 @@ fn file_row(
         )
         .child(
             div()
+                .id(("pr-file-path", index))
                 .flex_1()
                 .min_w_0()
+                .overflow_hidden()
                 .flex()
-                .items_center()
-                .gap(px(theme::GAP_LG))
+                .flex_col()
+                .line_height(px(theme::PR_FILE_ROW_H / 2.0))
+                .tooltip(tooltip::text(match &file.note {
+                    Some(note) => format!("{}\n{note}", file.path),
+                    None => file.path.clone(),
+                }))
                 .child(
                     div()
-                        .id(("pr-file-path", index))
-                        .min_w_0()
                         .truncate()
                         .font_family(theme::FONT_FAMILY_MONOSPACE)
                         .text_color(t.text_body)
-                        .tooltip(tooltip::text(file.path.clone()))
-                        .child(file.path.clone()),
+                        .child(
+                            file.path
+                                .rsplit('/')
+                                .next()
+                                .unwrap_or(&file.path)
+                                .to_owned(),
+                        ),
                 )
-                .children(
-                    file.note
-                        .clone()
-                        // The path keeps the room; the note takes what is left.
-                        .map(|note| {
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_color(t.text_subtle)
-                                .child(note)
-                        }),
-                ),
+                .children(file.parent.as_ref().or(file.note.as_ref()).map(|detail| {
+                    div()
+                        .truncate()
+                        .text_size(px(theme::FONT_SIZE_XS))
+                        .text_color(t.text_subtle)
+                        .child(detail.clone())
+                })),
         )
         .child(
             div()
@@ -275,29 +319,54 @@ fn viewed_mark(
         Viewed::Changed => (icons::CHECKBOX_MIXED, s::file_changed_since_viewed()),
     };
     let path = file.path.clone();
+    let blob = file.blob.clone();
     let (name, index) = key;
     button_icon(key, icon, cx)
         .debug_selector(move || format!("{name}-{index}"))
         .tooltip(tip)
-        .disabled(!file.markable)
-        .on_click(cx.listener(move |ws, _, _, cx| ws.toggle_pr_file_viewed(id, &path, cx)))
+        .disabled(blob.is_none())
+        .on_click(
+            cx.listener(move |ws, _, _, cx| {
+                ws.toggle_pr_file_viewed(id, &path, blob.as_deref(), cx)
+            }),
+        )
         .into_any_element()
 }
 
 fn shown_diff(
     id: PrDetailId,
     shown: &ShownView,
-    comments: Option<&ReviewCommentsView>,
-    send: SendSlot,
+    ready: &ReadyView,
+    pr_url: Option<&str>,
+    wide: bool,
     cx: &Context<Workspace>,
 ) -> AnyElement {
-    let composer = comments.and_then(|comments| comments.composer.as_ref());
+    let next_unviewed = match (&ready.files, &shown.row) {
+        (Some(FilesView::Ready { files, viewed, .. }), Some(row)) => {
+            files.len() - viewed > usize::from(row.viewed != Viewed::Yes)
+        }
+        _ => false,
+    };
+    let can_comment = ready
+        .review_comments
+        .as_ref()
+        .is_some_and(|comments| !comments.locked && comments.composer.is_none());
     let t = theme::current(cx);
     let body = match &shown.diff {
-        FileDiff::TooLarge => too_large(id, shown.recovery.as_ref(), cx),
-        FileDiff::NoLines => note(s::file_no_lines(), cx),
+        FileDiff::TooLarge => too_large(id, shown, pr_url, cx),
+        FileDiff::NoLines => div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .child(note(s::file_no_lines(), cx))
+            .children(open_file_on_github(shown, pr_url))
+            .into_any_element(),
         FileDiff::MovedOnly => note(s::file_moved_only(), cx),
-        FileDiff::Rows(rows) => super::diff_render::diff_body(id, shown, rows, cx),
+        FileDiff::Rows(rows) => super::diff_render::diff_body(id, shown, rows, &ready.threads, cx),
+    };
+    let rows = match &shown.diff {
+        FileDiff::Rows(rows) => Some(rows),
+        _ => None,
     };
     div()
         .debug_selector(|| "pr-file-diff".into())
@@ -307,37 +376,82 @@ fn shown_diff(
         .border_1()
         .border_color(t.border)
         .overflow_hidden()
-        .child(diff_header(id, shown, cx))
+        .child(diff_header(id, shown, wide, cx))
         .children(
             shown
                 .selection
                 .as_ref()
-                .map(|lines| selection_bar(id, lines, composer.is_none(), send, cx)),
+                .map(|lines| selection_bar(id, lines, can_comment, ready.code_send, cx)),
         )
         .child(body)
+        .children(super::diff_render::unplaced_threads(
+            id,
+            shown,
+            &ready.threads,
+            rows,
+            cx,
+        ))
+        .children(shown.row.as_ref().map(|row| {
+            let path = row.path.clone();
+            let blob = row.blob.clone();
+            div()
+                .flex()
+                .justify_end()
+                .p(px(theme::PAD_SM))
+                .border_t_1()
+                .border_color(t.border)
+                .child(
+                    button_compact(
+                        "pr-file-finish",
+                        match (row.viewed, next_unviewed) {
+                            (Viewed::Yes, _) => s::file_next_unviewed(),
+                            (_, true) => s::file_finish_next(),
+                            (_, false) => s::file_mark_viewed(),
+                        },
+                    )
+                    .debug_selector(|| "pr-file-finish".into())
+                    .disabled(blob.is_none() || (!next_unviewed && row.viewed == Viewed::Yes))
+                    .on_click(cx.listener(move |ws, _, _, cx| {
+                        ws.finish_pr_file(id, &path, blob.as_deref(), cx)
+                    })),
+                )
+        }))
         .into_any_element()
 }
 
 /// GitHub sent no patch: say so, and offer to read the file whole.
 fn too_large(
     id: PrDetailId,
-    recovery: Option<&RecoveryView>,
+    shown: &ShownView,
+    pr_url: Option<&str>,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
-    let (message, action) = match recovery {
-        None => (s::file_too_large(), None),
-        Some(RecoveryView::Offered) => (s::file_too_large(), Some(s::file_recover())),
-        Some(RecoveryView::Busy) => (s::file_too_large(), None),
+    let recover = |label| {
+        button_compact("pr-file-recover", label)
+            .debug_selector(|| "pr-file-recover".into())
+            .on_click(cx.listener(move |ws, _, _, cx| ws.recover_pr_file(id, cx)))
+            .into_any_element()
+    };
+    let (message, retry) = match shown.recovery.as_ref() {
+        None | Some(RecoveryView::Busy) => (s::file_too_large(), None),
+        Some(RecoveryView::Offered) => (s::file_too_large(), Some(recover(s::file_recover()))),
         Some(RecoveryView::Reading) => (s::file_recovering(), None),
-        Some(RecoveryView::Failed(failure)) => (
-            match failure {
+        Some(RecoveryView::Failed(failure)) => {
+            let message = match failure {
                 RecoverFailure::Binary => s::file_recover_binary(),
                 RecoverFailure::TooLarge => s::file_recover_too_large(),
-                RecoverFailure::Failed(reason) => s::file_recover_failed(reason),
-            },
-            Some(s::retry()),
-        ),
+                RecoverFailure::Failed(reason) | RecoverFailure::Unavailable(reason) => {
+                    s::file_recover_failed(reason)
+                }
+            };
+            (message, failure.can_retry().then(|| recover(s::retry())))
+        }
+    };
+    // GitHub shows the change whatever stopped reading it here.
+    let github = match shown.recovery.as_ref() {
+        Some(RecoveryView::Failed(_)) => open_file_on_github(shown, pr_url),
+        _ => None,
     };
     div()
         .debug_selector(|| "pr-file-too-large".into())
@@ -349,17 +463,33 @@ fn too_large(
         .text_size(px(theme::FONT_SIZE_MD))
         .text_color(t.text_muted)
         .child(div().min_w_0().child(message))
-        .children(action.map(|label| {
-            button_compact("pr-file-recover", label)
-                .debug_selector(|| "pr-file-recover".into())
-                .on_click(cx.listener(move |ws, _, _, cx| ws.recover_pr_file(id, cx)))
-        }))
+        .children(retry)
+        .children(github)
         .into_any_element()
+}
+
+/// The shown file's change on GitHub, for a file drawn here without lines.
+fn open_file_on_github(shown: &ShownView, pr_url: Option<&str>) -> Option<AnyElement> {
+    let url = super::recover::file_diff_url(pr_url?, &shown.path)?;
+    Some(
+        button_compact(
+            "pr-file-open-github",
+            crate::surface::strings::git::pr_open_on_github(),
+        )
+        .debug_selector(|| "pr-file-open-github".into())
+        .on_click(move |_, _, cx| cx.open_url(&url))
+        .into_any_element(),
+    )
 }
 
 /// The shown file's path and place, the previous and next file, and how
 /// its diff is laid out.
-fn diff_header(id: PrDetailId, shown: &ShownView, cx: &Context<Workspace>) -> AnyElement {
+fn diff_header(
+    id: PrDetailId,
+    shown: &ShownView,
+    wide: bool,
+    cx: &Context<Workspace>,
+) -> AnyElement {
     let t = theme::current(cx);
     // Unplaced while a refresh has not listed it again: nothing to step from.
     let (at, of) = shown.position.unwrap_or((0, 0));
@@ -374,24 +504,28 @@ fn diff_header(id: PrDetailId, shown: &ShownView, cx: &Context<Workspace>) -> An
         .py(px(theme::PAD_XS))
         .border_b_1()
         .border_color(t.border)
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .font_family(theme::FONT_FAMILY_MONOSPACE)
-                .text_size(px(theme::FONT_SIZE_SM))
-                .text_color(t.text_muted)
-                .child(SharedString::from(shown.path.clone())),
-        )
+        .when(wide, |header| {
+            header.child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .font_family(theme::FONT_FAMILY_MONOSPACE)
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .text_color(t.text_muted)
+                    .child(SharedString::from(shown.path.clone())),
+            )
+        })
         .children(shown.position.map(|(at, of)| {
             div()
+                .when(!wide, |place| place.flex_1())
                 .text_size(px(theme::FONT_SIZE_SM))
                 .text_color(t.text_subtle)
                 .child(s::file_position(at + 1, of))
         }))
         .children(shown.row.as_ref().map(|row| {
             let path = row.path.clone();
+            let blob = row.blob.clone();
             button_with_icon(
                 "pr-file-viewed-shown",
                 s::file_viewed(),
@@ -407,8 +541,10 @@ fn diff_header(id: PrDetailId, shown: &ShownView, cx: &Context<Workspace>) -> An
                 Viewed::Yes => s::file_unmark_viewed(),
                 Viewed::Changed => s::file_changed_since_viewed(),
             })
-            .disabled(!row.markable)
-            .on_click(cx.listener(move |ws, _, _, cx| ws.toggle_pr_file_viewed(id, &path, cx)))
+            .disabled(blob.is_none())
+            .on_click(cx.listener(move |ws, _, _, cx| {
+                ws.toggle_pr_file_viewed(id, &path, blob.as_deref(), cx)
+            }))
         }))
         .child(
             button_icon("pr-file-previous", icons::PREVIOUS, cx)

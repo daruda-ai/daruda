@@ -99,7 +99,7 @@ fn unreadable_sides_say_why_instead_of_diffing_as_empty() {
     };
     let error = failed(&gh, &missing);
     assert!(
-        matches!(&error.failure, RecoverFailure::Failed(reason) if reason.contains("gone.rs")),
+        matches!(&error.failure, RecoverFailure::Unavailable(reason) if reason.contains("gone.rs")),
         "a side the change says exists is missing: {error:?}"
     );
     assert!(error.cause.is_none());
@@ -110,7 +110,10 @@ fn unreadable_sides_say_why_instead_of_diffing_as_empty() {
     };
     gh.set_file_at(&repo, "new.rs", "abc", FileText::Text("a\nb\n".into()));
     assert!(
-        matches!(failed(&gh, &unchanged).failure, RecoverFailure::Failed(_)),
+        matches!(
+            failed(&gh, &unchanged).failure,
+            RecoverFailure::Unavailable(_)
+        ),
         "no difference where the listing counts lines"
     );
 
@@ -132,4 +135,62 @@ fn unreadable_sides_say_why_instead_of_diffing_as_empty() {
         matches!(&error.failure, RecoverFailure::Failed(reason) if reason.contains("HTTP 502"))
     );
     assert!(error.cause.is_some(), "a gh failure is reported");
+}
+
+#[test]
+fn file_links_open_the_pr_change_for_forks_deletions_and_reserved_path_characters() {
+    let pr = "https://ghe.example:8443/base/repo/pull/51/?q=test#discussion_r9";
+    let cases = [
+        (
+            "src/index.js",
+            "bfe9874d239014961b1ae4e89875a6155667db834a410aaaa2ebe3cf89820556",
+        ),
+        (
+            "src/한 글#?%.rs",
+            "2c96d9f622a801aef74c7f29246464747af734421d86e7d387b4a29b0f18b4c0",
+        ),
+    ];
+    for (path, hash) in cases {
+        assert_eq!(
+            file_diff_url(pr, path),
+            Some(format!(
+                "https://ghe.example:8443/base/repo/pull/51/files#diff-{hash}"
+            ))
+        );
+    }
+    for url in [
+        "javascript:alert(1)",
+        "http://user@host/o/r/pull/5",
+        "https://host/o/r",
+        "https://host/o/r/pull/5/checks",
+    ] {
+        assert_eq!(file_diff_url(url, "file"), None, "{url}");
+    }
+}
+
+#[test]
+fn recovery_offers_retry_for_temporary_gh_errors() {
+    let cases = [
+        (GhError::NotFound, false),
+        (
+            GhError::Exit {
+                code: Some(4),
+                stderr: "login required".into(),
+            },
+            false,
+        ),
+        (GhError::Overflow { limit: 1024 }, false),
+        (GhError::Timeout(std::time::Duration::from_secs(3)), true),
+        (
+            GhError::Exit {
+                code: Some(1),
+                stderr: "rate limit exceeded".into(),
+            },
+            true,
+        ),
+    ];
+    for (error, retry) in cases {
+        let failure = RecoverError::gh(error).failure;
+        assert_eq!(failure.can_retry(), retry, "{failure:?}");
+    }
 }

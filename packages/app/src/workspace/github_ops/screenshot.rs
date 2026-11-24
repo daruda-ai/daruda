@@ -626,6 +626,7 @@ impl Workspace {
                         crate::workspace::pages::pull_requests::detail::PrTab::Files,
                         cx,
                     );
+                    self.toggle_pr_thread(id, "shot-thread-1", cx);
                 }
                 PrDetailShot::Threads => {
                     self.select_pr_detail_tab(

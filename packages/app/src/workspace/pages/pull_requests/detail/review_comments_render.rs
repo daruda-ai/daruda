@@ -5,7 +5,6 @@ use gpui::{AnyElement, Context, div, prelude::*, px};
 
 use super::PrDetailId;
 use super::view::{ComposerView, ReviewCommentsView};
-use crate::github::DraftKeeping;
 use crate::surface::strings::pull_requests as s;
 use crate::ui::{Badge, Disableable as _, button_compact, markdown_editor, theme};
 use crate::workspace::Workspace;
@@ -18,6 +17,16 @@ pub(super) fn pending(
     cx: &Context<Workspace>,
 ) -> Option<AnyElement> {
     let t = theme::current(cx);
+    if let Some(draft) = &view.composer {
+        return Some(composer(id, draft, view, cx));
+    }
+    let review = view
+        .review
+        .as_ref()
+        .map(|review| super::review_submit_render::review(id, review, view.keeping, cx));
+    if view.pending.is_empty() {
+        return review;
+    }
     let rows = view.pending.iter().map(|comment| {
         let (edit, discard, key) = (comment.id, comment.id, comment.id as usize);
         // Where on one line with its controls, what it says under it: a
@@ -42,6 +51,9 @@ pub(super) fn pending(
                             .text_color(t.text_muted)
                             .child(comment.reference.clone()),
                     )
+                    .when(comment.excluded, |row| {
+                        row.child(Badge::new(s::comment_excluded()).text_color(t.text_muted))
+                    })
                     .when(comment.suggests, |row| {
                         row.child(
                             Badge::new(s::comment_suggestion_badge()).text_color(t.text_muted),
@@ -92,32 +104,23 @@ pub(super) fn pending(
             .rounded(px(theme::RADIUS_SM))
             .border_1()
             .border_color(t.border)
-            .children(
-                view.composer
-                    .as_ref()
-                    .map(|composer| self::composer(id, composer, view.keeping, cx)),
+            .children(review)
+            .when(view.review.is_none(), |panel| {
+                panel.child(super::render::note(
+                    s::pending_comments(view.pending.len()),
+                    cx,
+                ))
+            })
+            .child(
+                div()
+                    .id("pr-pending-list")
+                    .flex()
+                    .flex_col()
+                    .max_h(px(theme::PR_PENDING_LIST_MAX_H))
+                    .overflow_y_scroll()
+                    .gap(px(theme::GAP_SM))
+                    .children(rows),
             )
-            .when(!view.pending.is_empty(), |panel| {
-                panel.child(
-                    div()
-                        .text_size(px(theme::FONT_SIZE_SM))
-                        .text_color(t.text_muted)
-                        .child(s::pending_comments(view.pending.len())),
-                )
-            })
-            .children(rows)
-            .child(match &view.review {
-                Some(review) => super::review_submit_render::review(id, review, view.keeping, cx),
-                None => div()
-                    .child(
-                        button_compact("pr-review-open", s::review_open())
-                            .debug_selector(|| "pr-review-open".into())
-                            .on_click(cx.listener(move |ws, _, window, cx| {
-                                ws.open_pr_review(id, window, cx)
-                            })),
-                    )
-                    .into_any_element(),
-            })
             .into_any_element(),
     )
 }
@@ -127,10 +130,12 @@ pub(super) fn pending(
 fn composer(
     id: PrDetailId,
     view: &ComposerView,
-    keeping: DraftKeeping,
+    comments: &ReviewCommentsView,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
+    let blocking = view.outdated || view.unanchored;
+    let reviewing = comments.review.is_some();
     div()
         .debug_selector(|| "pr-line-composer".into())
         .flex()
@@ -174,17 +179,43 @@ fn composer(
                 )
                 .child(markdown_editor(suggestion, cx))
         }))
-        .children(super::render::keeping_note(keeping, cx))
+        .children(super::render::keeping_note(comments.keeping, cx))
         .child(
             div()
                 .flex()
+                .flex_wrap()
                 .gap(px(theme::GAP_SM))
+                .when(blocking, |row| {
+                    row.child(
+                        button_compact("pr-composer-reanchor", s::comment_reanchor())
+                            .debug_selector(|| "pr-composer-reanchor".into())
+                            .disabled(!view.can_reanchor)
+                            .tooltip(s::comment_reanchor_hint())
+                            .on_click(
+                                cx.listener(move |ws, _, _, cx| ws.reanchor_pr_comment(id, cx)),
+                            ),
+                    )
+                })
+                .when_some(view.id.filter(|_| reviewing && blocking), |row, comment| {
+                    row.child(
+                        button_compact("pr-composer-exclude", s::comment_exclude())
+                            .debug_selector(|| "pr-composer-exclude".into())
+                            .on_click(cx.listener(move |ws, _, _, cx| {
+                                ws.exclude_pr_review_comment(id, comment, cx)
+                            })),
+                    )
+                })
                 .child(
-                    button_compact("pr-composer-done", s::comment_done())
-                        .debug_selector(|| "pr-composer-done".into())
-                        .on_click(
-                            cx.listener(move |ws, _, _, cx| ws.close_pr_line_comment(id, cx)),
-                        ),
+                    button_compact(
+                        "pr-composer-done",
+                        if reviewing {
+                            s::review_return()
+                        } else {
+                            s::comment_done()
+                        },
+                    )
+                    .debug_selector(|| "pr-composer-done".into())
+                    .on_click(cx.listener(move |ws, _, _, cx| ws.close_pr_line_comment(id, cx))),
                 )
                 .when(view.can_suggest, |row| {
                     row.child(

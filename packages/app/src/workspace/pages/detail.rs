@@ -99,10 +99,13 @@ impl Workspace {
                 .detail
                 .as_ref()
                 .is_some_and(|detail| self.page_scope_matches(detail.lane.project)),
-            Page::PullRequests => self.pages.pull_requests.detail().is_some_and(|detail| {
-                self.page_scope() == super::scope::ProjectScope::All
-                    || self.github_repos().contains(&detail.item().repo)
-            }),
+            Page::PullRequests => {
+                !self.pages.pull_requests.list_covers_detail()
+                    && self.pages.pull_requests.detail().is_some_and(|detail| {
+                        self.page_scope() == super::scope::ProjectScope::All
+                            || self.github_repos().contains(&detail.item().repo)
+                    })
+            }
         };
         matches.then(|| self.page_detail_id(page)).flatten()
     }
@@ -228,7 +231,7 @@ impl Workspace {
         if ev.keystroke.key != "escape" {
             return;
         }
-        if self.back_on_page(window, cx) {
+        if self.leave_pr_search(window, cx) || self.back_on_page(window, cx) {
             cx.stop_propagation();
         }
     }

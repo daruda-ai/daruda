@@ -462,7 +462,61 @@ fn send_to_agent_goes_to_the_linked_worktrees_chat(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn without_a_linked_worktree_send_to_agent_is_off(cx: &mut TestAppContext) {
+fn a_failed_log_previews_the_open_job_and_inserts_the_edited_prompt(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    open(&f, item(7, "feat"), cx);
+    cx.run_until_parked();
+    let id = id(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.inspect_failed_pr_checks(id, cx));
+    cx.run_until_parked();
+    let requests = gh.count(GhOp::FailedLog);
+    assert!(requests > 0);
+    f.ws.update(cx, |ws, cx| {
+        ws.open_pr_handoff(id, Read::FailedJob(JOB), cx)
+    });
+    assert_eq!(
+        gh.count(GhOp::FailedLog),
+        requests,
+        "quote the displayed log"
+    );
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.simulate_resize(gpui::size(gpui::px(950.), gpui::px(860.)));
+    vcx.run_until_parked();
+    let controls = vcx
+        .debug_bounds("pr-handoff-insert")
+        .expect("insert control");
+    let prompt = vcx.debug_bounds("pr-handoff-preview").unwrap();
+    assert!(
+        controls.bottom() <= prompt.top(),
+        "actions precede the prompt"
+    );
+    assert!(controls.bottom() <= gpui::px(860.), "insert is in view");
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.edit_pr_handoff(id, window, cx);
+            let editor = ws
+                .pr_detail(id)
+                .unwrap()
+                .handoff()
+                .unwrap()
+                .editor
+                .clone()
+                .unwrap();
+            editor.update(cx, |input, cx| {
+                input.set_value("Please investigate this job", window, cx)
+            });
+            ws.open_pr_handoff(id, Read::FailedJob(JOB), cx);
+            ws.insert_pr_handoff(id, window, cx);
+        });
+    });
+    cx.run_until_parked();
+    assert!(input(&f, cx).contains("Please investigate this job"));
+}
+
+#[gpui::test]
+fn unlinked_pull_request_previews_checkout_and_unsent_log(cx: &mut TestAppContext) {
     let (f, gh, _) = window(cx);
     split_chat(&f, cx);
     f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
@@ -472,23 +526,84 @@ fn without_a_linked_worktree_send_to_agent_is_off(cx: &mut TestAppContext) {
     let DetailBody::Ready(ready) = view(&f, cx).body else {
         panic!("not read");
     };
-    assert_eq!(ready.checks_send, SendSlot::NoLane);
-    assert_eq!(ready.threads_send, SendSlot::NoLane);
-    assert!(!ready.checks_send.enabled());
+    assert_eq!(ready.checks_send, SendSlot::Ready);
+    assert_eq!(ready.threads_send, SendSlot::Nothing);
 
     let id = id(&f, cx);
-    f.ws.update(cx, |ws, cx| ws.open_pr_handoff(id, Read::FailedChecks, cx));
+    f.ws.update(cx, |ws, cx| {
+        ws.open_pr_handoff(id, Read::FailedJob(JOB), cx)
+    });
     cx.run_until_parked();
-    assert_eq!(gh.count(GhOp::FailedLog), 0);
+    assert_eq!(gh.count(GhOp::FailedLog), 1);
+    let preview = view(&f, cx).handoff.expect("checkout preview");
+    assert!(preview.checkout);
+    assert_eq!(preview.lane, "other");
     assert!(
-        view(&f, cx).handoff.is_none(),
-        "no worktree, nowhere to hand to"
+        matches!(preview.prompt, Prepared::Ready(ref prompt) if prompt.contains("test parse ... FAILED"))
     );
     assert_eq!(input(&f, cx), "");
     assert_eq!(
         f.ws.read_with(cx, |ws, _| ws.active_page()),
         Some(Page::PullRequests)
     );
+    let checkout = crate::workspace::lane_ops::lane_checkout_path(&f.root, "other");
+    super::git_fixture::fake_lane(&f.fake, &checkout, "other");
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| ws.checkout_for_pr_handoff(id, window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        f.ws.read_with(cx, |ws, _| ws.active_lane().unwrap().path.clone()),
+        checkout
+    );
+    assert!(input(&f, cx).contains("test parse ... FAILED"));
+}
+
+#[gpui::test]
+fn editing_while_checkout_runs_keeps_the_draft_in_the_new_worktree(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    let next = item(8, "other");
+    gh.set_prs(&repo(), vec![summary(7, "feat"), next.pr.clone()]);
+    gh.set_pr_detail(&repo(), 8, detail(8, "other"));
+    open(&f, next, cx);
+    cx.run_until_parked();
+    let id = id(&f, cx);
+    f.ws.update(cx, |ws, cx| {
+        ws.open_pr_handoff(id, Read::FailedJob(JOB), cx)
+    });
+    cx.run_until_parked();
+    let checkout = crate::workspace::lane_ops::lane_checkout_path(&f.root, "other");
+    super::git_fixture::fake_lane(&f.fake, &checkout, "other");
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.checkout_for_pr_handoff(id, window, cx);
+            ws.edit_pr_handoff(id, window, cx);
+            let input = ws
+                .pr_detail(id)
+                .unwrap()
+                .handoff()
+                .unwrap()
+                .editor
+                .clone()
+                .unwrap();
+            input.update(cx, |input, cx| {
+                input.set_value("Edited during checkout", window, cx)
+            });
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    f.ws.read_with(cx, |ws, cx| {
+        assert_eq!(ws.active_page(), Some(Page::PullRequests));
+        let handoff = ws.pr_detail(id).unwrap().handoff().unwrap();
+        let lane = ws.lane_for(handoff.lane().expect("new worktree")).unwrap();
+        assert_eq!(lane.path, checkout);
+        assert_eq!(
+            handoff.editor.as_ref().unwrap().read(cx).value().as_ref(),
+            "Edited during checkout"
+        );
+    });
 }
 
 /// What sending said to the user, by title.
@@ -714,6 +829,151 @@ fn a_pull_request_closed_since_takes_its_handoff_away(cx: &mut TestAppContext) {
     };
     assert_eq!(ready.checks_send, SendSlot::NotOpen);
     assert_eq!(ready.threads_send, SendSlot::NotOpen);
+}
+
+/// A refresh that fails keeps the pull request shown, and the handoff
+/// prepared from it: no error replaces a prompt that was ready.
+#[gpui::test]
+fn a_failed_refresh_keeps_the_handoff_prepared(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let id = read_detail(&f, cx);
+    handoff(&f, id, cx);
+    gh.fail(
+        GhOp::PrDetail,
+        GhFailure::Exit {
+            code: Some(1),
+            stderr: "HTTP 502".into(),
+        },
+    );
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    cx.run_until_parked();
+    let shown = view(&f, cx).handoff.expect("still shown");
+    assert!(
+        matches!(&shown.prompt, Prepared::Ready(p) if p.contains("test parse ... FAILED")),
+        "{:?}",
+        shown.prompt
+    );
+}
+
+/// Read with its checks passing since, an edited handoff of the failure it
+/// quoted closes: no prompt about a failure gone reaches a chat.
+#[gpui::test]
+fn checks_passing_since_take_an_edited_failure_handoff_away(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let id = read_detail(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.toggle_pr_check_log(id, JOB, cx));
+    cx.run_until_parked();
+    f.ws.update(cx, |ws, cx| {
+        ws.open_pr_handoff(id, Read::FailedJob(JOB), cx)
+    });
+    cx.run_until_parked();
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| ws.edit_pr_handoff(id, window, cx));
+    })
+    .unwrap();
+    let mut passing = detail(7, "feat");
+    passing.summary.checks = CheckRollup::Passing;
+    passing.summary.failed.clear();
+    passing.checks[0].run.status = CheckStatus::Success;
+    gh.set_pr_detail(&repo(), 7, passing);
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    cx.run_until_parked();
+    assert!(view_handoff_closed(&f, cx), "the failure is gone");
+    assert!(
+        f.ws.read_with(cx, |ws, _| ws.pr_detail(id).unwrap().log(JOB).is_none()),
+        "its log goes with it"
+    );
+    insert(&f, id, cx);
+    assert_eq!(input(&f, cx), "");
+}
+
+/// A handoff shown before the pull request had a worktree takes the one
+/// made for it from elsewhere (the header), rather than calling it moved.
+#[gpui::test]
+fn a_worktree_made_meanwhile_takes_an_unlinked_handoff(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    gh.set_prs(&repo(), vec![summary(7, "feat"), summary(8, "other")]);
+    gh.set_pr_detail(&repo(), 8, detail(8, "other"));
+    open(&f, item(8, "other"), cx);
+    cx.run_until_parked();
+    let id = id(&f, cx);
+    f.ws.update(cx, |ws, cx| {
+        ws.open_pr_handoff(id, Read::FailedJob(JOB), cx)
+    });
+    cx.run_until_parked();
+    assert!(view(&f, cx).handoff.expect("shown").checkout);
+    let checkout = crate::workspace::lane_ops::lane_checkout_path(&f.root, "other");
+    std::fs::create_dir_all(&checkout).unwrap();
+    // Pushing `other` to o/r is what links the new worktree to #8.
+    f.fake.add_repo(FakeRepo::at(&checkout).branch("other").push_target(PushTarget {
+        remote: "origin".into(),
+        url: "git@github.com:o/r.git".into(),
+        branch: "other".into(),
+        published: true,
+        has_upstream: false,
+        review: None,
+    }));
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| ws.create_pr_detail_lane(id, window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    // The new worktree's branch is read, which links it.
+    let made = f.ws.read_with(cx, |ws, _| ws.active_ref());
+    f.ws.update(cx, |ws, cx| ws.refresh_git_status(made, cx));
+    cx.run_until_parked();
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(31));
+    cx.update(crate::github::PrPoller::tick);
+    cx.run_until_parked();
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    let shown = view(&f, cx).handoff.expect("still shown");
+    assert_eq!(shown.blocked, None, "{shown:?}");
+    assert!(!shown.checkout, "the worktree is there now");
+}
+
+/// A checkout left behind by a cancelled handoff puts nothing into the one
+/// opened after it, even for the same log.
+#[gpui::test]
+fn a_checkout_for_a_cancelled_handoff_inserts_nothing(cx: &mut TestAppContext) {
+    let (f, gh, _) = window(cx);
+    split_chat(&f, cx);
+    f.ws.update(cx, |ws, cx| ws.show_page(Page::PullRequests, cx));
+    gh.set_pr_detail(&repo(), 8, detail(8, "other"));
+    open(&f, item(8, "other"), cx);
+    cx.run_until_parked();
+    let id = id(&f, cx);
+    f.ws.update(cx, |ws, cx| {
+        ws.open_pr_handoff(id, Read::FailedJob(JOB), cx)
+    });
+    cx.run_until_parked();
+    let checkout = crate::workspace::lane_ops::lane_checkout_path(&f.root, "other");
+    super::git_fixture::fake_lane(&f.fake, &checkout, "other");
+    cx.update_window(f.window.into(), |_, window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.checkout_for_pr_handoff(id, window, cx);
+            ws.close_pr_handoff(id, cx);
+            ws.open_pr_handoff(id, Read::FailedJob(JOB), cx);
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(input(&f, cx), "", "nothing inserted unasked");
+    f.ws.read_with(cx, |ws, _| {
+        let handoff = ws.pr_detail(id).unwrap().handoff().expect("reopened");
+        assert_eq!(
+            ws.lane_for(handoff.lane().expect("takes the new worktree"))
+                .unwrap()
+                .path,
+            checkout
+        );
+    });
 }
 
 /// A chat appearing while the panel was open is chosen among, not

@@ -54,7 +54,11 @@ impl PrDetailView {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workspace) struct ReadyView {
+    pub review_footer: String,
     pub checks_summary: String,
+    pub failures_only: bool,
+    pub truncated_checks_url: Option<String>,
+    pub inspect_failures: Option<String>,
     pub checks: Vec<CheckRowView>,
     pub checks_send: SendSlot,
     /// Only when a failed check is an Actions job, which can be rerun.
@@ -97,6 +101,7 @@ pub(in crate::workspace) struct PrDetailView {
     pub header: HeaderControls,
     /// What the last action came to, until the next action or reload.
     pub notice: Option<ActionNotice>,
+    pub missing_comment_url: Option<String>,
     pub tab: PrTab,
     pub tabs: Vec<(PrTab, String)>,
     pub handoff: Option<HandoffView>,
@@ -111,6 +116,7 @@ pub(in crate::workspace) struct DetailInputs<'a> {
     pub link: super::links::LinkInputs,
     /// Whether a send to that worktree's chat is under way.
     pub sending: bool,
+    pub can_checkout: bool,
     /// Pull requests a worktree is being made for.
     pub creating: &'a super::super::lane::Creating,
     /// How far making this one's worktree has got.
@@ -157,6 +163,10 @@ pub(in crate::workspace) fn view(state: &PrDetailState, inputs: &DetailInputs<'_
         header: loaded.map_or(HeaderControls::None, |loaded| {
             header_controls(loaded, &state.action, stack_range(state))
         }),
+        missing_comment_url: match &state.comment_location {
+            Some(super::anchors::CommentLocation::Missing(url)) => Some(url.clone()),
+            _ => None,
+        },
         notice: match &state.action {
             ActionState::Failed(line) => Some(ActionNotice::Failed(line.clone())),
             ActionState::Done(line) => Some(ActionNotice::Done(line.clone())),
@@ -194,11 +204,11 @@ fn ready(
         || state
             .handoff()
             .is_some_and(|handoff| matches!(handoff.prompt, super::handoff::Prepared::Reading(_)));
-    let send = |nothing: bool| match (&lane, sending, nothing) {
-        (None, _, _) => SendSlot::NoLane,
-        (Some(_), true, _) => SendSlot::Sending,
-        (Some(_), false, true) => SendSlot::Nothing,
-        (Some(_), false, false) => SendSlot::Ready,
+    let send = |nothing: bool| match (lane.is_some() || inputs.can_checkout, sending, nothing) {
+        (false, _, _) => SendSlot::NoLane,
+        (true, true, _) => SendSlot::Sending,
+        (true, false, true) => SendSlot::Nothing,
+        (true, false, false) => SendSlot::Ready,
     };
     // What there is to fix, only while it can still be fixed; the lines
     // selected stay sendable, as code to read.
@@ -210,7 +220,45 @@ fn ready(
         }
     };
     ReadyView {
+        review_footer: {
+            let comments = drafts
+                .map(|drafts| drafts.comments.as_slice())
+                .unwrap_or_default();
+            let outstanding = comments
+                .iter()
+                .filter(|draft| !state.review_excludes(draft));
+            let count = outstanding.clone().count();
+            let outdated = outstanding
+                .filter(|draft| draft.revision != loaded.head_sha)
+                .count();
+            if outdated > 0 {
+                s::review_footer_outdated(outdated)
+            } else if count > 0 {
+                s::pending_comments(count)
+            } else {
+                s::review_footer_title()
+            }
+        },
         checks_summary: checks_summary(loaded),
+        failures_only: state.failures_only
+            && matches!(
+                loaded.summary.checks,
+                daruda_github::CheckRollup::Failing { .. }
+            ),
+        truncated_checks_url: (state.failures_only
+            && loaded.checks_truncated
+            && daruda_github::model::is_web_url(&loaded.summary.url))
+        .then(|| format!("{}/checks", loaded.summary.url.trim_end_matches('/'))),
+
+        inspect_failures: match loaded.summary.checks {
+            daruda_github::CheckRollup::Failing {
+                failed: Some(count),
+            } => Some(s::inspect_failures(count)),
+            daruda_github::CheckRollup::Failing { failed: None } => {
+                Some(s::inspect_failures_unknown())
+            }
+            _ => None,
+        },
         checks: loaded
             .checks
             .iter()
@@ -245,7 +293,11 @@ fn ready(
                 None | Some(Load::Loading) => ConversationView::Loading,
                 Some(Load::Failed(reason)) => ConversationView::Failed(reason.clone()),
                 Some(Load::Ready(read)) => ConversationView::Listed {
-                    comments: read.comments.iter().map(comment_view).collect(),
+                    comments: read
+                        .comments
+                        .iter()
+                        .map(|c| comment_view(c, state))
+                        .collect(),
                     truncated: read.truncated,
                 },
             },

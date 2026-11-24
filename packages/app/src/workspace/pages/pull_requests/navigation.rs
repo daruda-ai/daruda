@@ -127,6 +127,17 @@ impl Workspace {
         else {
             return;
         };
+        self.open_pr_list_item(item, window, cx);
+    }
+
+    /// Open a row's pull request: a first visit starts at the description,
+    /// as from anywhere; one visited before keeps its tab, file and scroll.
+    pub(super) fn open_pr_list_item(
+        &mut self,
+        item: daruda_github::PrListItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.open_pr_detail(item, window, cx);
     }
 
@@ -138,10 +149,33 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) {
         self.show_page(Page::PullRequests, cx);
-        self.leave_page_detail_then(Page::PullRequests, window, cx, |ws, window, cx| {
-            let search = ws.pages.pull_requests.search.read(cx).focus_handle(cx);
-            search.focus(window, cx);
-        });
+        // Kept whatever the width now: a window narrowed while searching
+        // must still show the list over the detail.
+        self.pages.pull_requests.searching_list = true;
+        self.pages
+            .pull_requests
+            .search
+            .read(cx)
+            .focus_handle(cx)
+            .focus(window, cx);
+        cx.notify();
+    }
+
+    /// Escape leaves the search field before backing out of the detail it came from.
+    pub(in crate::workspace) fn leave_pr_search(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.active_page() != Some(Page::PullRequests)
+            || !(self.pages.pull_requests.searching_list || self.pr_search_focused(window, cx))
+        {
+            return false;
+        }
+        self.pages.pull_requests.searching_list = false;
+        self.focus_shown_page(window, cx);
+        cx.notify();
+        true
     }
 
     pub(in crate::workspace) fn on_pull_requests_select_next(
@@ -192,7 +226,9 @@ impl Workspace {
     pub(in crate::workspace) fn pr_cursor(&self) -> Option<PrKey> {
         self.pages.pull_requests.cursor.clone()
     }
+}
 
+impl Workspace {
     pub(in crate::workspace) fn pr_search_focused(&self, window: &Window, cx: &gpui::App) -> bool {
         self.pages
             .pull_requests

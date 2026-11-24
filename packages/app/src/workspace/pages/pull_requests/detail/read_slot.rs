@@ -124,7 +124,6 @@ impl<T> ReadSlot<T> {
     }
 
     /// The read this slot waits on, for a test to answer it late.
-    #[cfg(test)]
     pub(in crate::workspace) fn waiting(&self) -> Option<ReadTicket> {
         self.waiting
     }

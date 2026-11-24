@@ -5,16 +5,21 @@ use daruda_content::diff::{VisualRow, VisualRowKind};
 use gpui::{AnyElement, Context, Hsla, IntoElement, div, prelude::*, px};
 
 use super::PrDetailId;
+use super::view::ThreadsView;
+
+mod inline;
 use super::diff_layout::{Cell, LineRange, Side, SplitRow, line_on};
 use super::files::{DIFF_ROWS_STEP, DiffMode, DiffRows, ShownView};
 use crate::surface::strings::pull_requests as s;
 use crate::ui::{button_compact, theme};
 use crate::workspace::Workspace;
+pub(super) use inline::unplaced_threads;
 
 pub(super) fn diff_body(
     id: PrDetailId,
     shown: &ShownView,
     rows: &DiffRows,
+    threads: &ThreadsView,
     cx: &Context<Workspace>,
 ) -> AnyElement {
     let t = theme::current(cx);
@@ -22,33 +27,61 @@ pub(super) fn diff_body(
     // Lines are pressed to select them only once their commit is known.
     let selectable = shown.selectable;
     let selection = shown.selection.as_ref();
-    let (drawn, total): (Vec<AnyElement>, usize) = match shown.mode {
-        DiffMode::Unified => (
-            unified
-                .iter()
-                .take(shown.limit)
-                .enumerate()
-                .map(|(ix, row)| {
-                    let selected = selection.is_some_and(|lines| lines.holds(row));
-                    diff_row(id, ix, row, selected, selectable, cx)
-                })
-                .collect(),
-            unified.len(),
-        ),
-        DiffMode::Split => (
-            rows.split()
-                .iter()
-                .take(shown.limit)
-                .enumerate()
-                .map(|(ix, row)| split_row(id, ix, row, unified, selection, selectable, cx))
-                .collect(),
-            rows.split().len(),
-        ),
+    let total = match shown.mode {
+        DiffMode::Unified => unified.len(),
+        DiffMode::Split => rows.split().len(),
     };
+    let mut discussions = inline::positions(shown, rows, threads);
+    let mut drawn = Vec::new();
+    for ix in shown.start.min(total)..total.min(shown.limit) {
+        let line = match shown.mode {
+            DiffMode::Unified => {
+                let row = &unified[ix];
+                diff_row(
+                    id,
+                    ix,
+                    row,
+                    selection.is_some_and(|lines| lines.holds(row)),
+                    selectable,
+                    cx,
+                )
+            }
+            DiffMode::Split => split_row(
+                id,
+                ix,
+                &rows.split()[ix],
+                unified,
+                selection,
+                selectable,
+                cx,
+            ),
+        };
+        drawn.push(line);
+        if let Some(discussions) = discussions.remove(&ix) {
+            drawn.push(inline::at_row(id, shown.mode, &discussions, cx));
+        }
+    }
     let rest = total.saturating_sub(shown.limit);
+    let earlier = shown.start.min(total);
     div()
         .flex()
         .flex_col()
+        .children((earlier > 0).then(|| {
+            div()
+                .flex()
+                .justify_center()
+                .py(px(theme::PAD_SM))
+                .border_b_1()
+                .border_color(t.border)
+                .child(
+                    button_compact(
+                        "pr-file-diff-earlier",
+                        s::diff_earlier_lines(earlier.min(DIFF_ROWS_STEP), earlier),
+                    )
+                    .debug_selector(|| "pr-file-diff-earlier".into())
+                    .on_click(cx.listener(move |ws, _, _, cx| ws.show_earlier_pr_diff(id, cx))),
+                )
+        }))
         // Long lines scroll sideways rather than clip.
         .child(
             div()
@@ -71,8 +104,6 @@ pub(super) fn diff_body(
                         .when(shown.mode == DiffMode::Split, |rows| {
                             rows.w_full().min_w(px(2.0 * theme::PR_SPLIT_HALF_MIN_W))
                         })
-                        .font_family(theme::FONT_FAMILY_MONOSPACE)
-                        .text_size(px(theme::FONT_SIZE_SM))
                         .children(drawn),
                 ),
         )
@@ -163,6 +194,8 @@ fn diff_row(
     };
     let (left, right) = (on(Side::Old), on(Side::New));
     div()
+        .font_family(theme::FONT_FAMILY_MONOSPACE)
+        .text_size(px(theme::FONT_SIZE_SM))
         .debug_selector(move || format!("pr-diff-row-{ix}"))
         .flex()
         .w_full()
@@ -215,6 +248,8 @@ fn split_row(
         SplitRow::Banner(at) => {
             let (_, bg, fg) = row_style(unified[*at].kind, cx);
             return div()
+                .font_family(theme::FONT_FAMILY_MONOSPACE)
+                .text_size(px(theme::FONT_SIZE_SM))
                 .flex()
                 .w_full()
                 .pl(px(2.0 * theme::PR_DIFF_LINE_NO_W))
@@ -271,6 +306,8 @@ fn split_row(
             .into_any_element()
     };
     div()
+        .font_family(theme::FONT_FAMILY_MONOSPACE)
+        .text_size(px(theme::FONT_SIZE_SM))
         .debug_selector(move || format!("pr-split-row-{ix}"))
         .flex()
         .w_full()

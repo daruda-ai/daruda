@@ -114,16 +114,21 @@ pub(crate) fn parse_threads_page(json: &str) -> Result<ThreadsPage, GhError> {
         .filter(|thread| !thread.is_resolved)
         .map(|thread| {
             let file_level = thread.subject_type.as_deref() == Some("FILE");
-            let end = thread.line.or(thread.original_line);
+            // Original coordinates can describe a different revision. Only
+            // an outdated discussion may use them as historical context.
+            let (start, end) = if thread.is_outdated {
+                (
+                    thread.original_start_line.or(thread.start_line),
+                    thread.original_line.or(thread.line),
+                )
+            } else {
+                (thread.start_line, thread.line)
+            };
             // A range that starts on the other side counts its first line
             // there; only its last line is on `diffSide`.
             let one_side =
                 thread.start_diff_side.is_none() || thread.start_diff_side == thread.diff_side;
-            let start = thread
-                .start_line
-                .or(thread.original_start_line)
-                .filter(|_| one_side)
-                .or(end);
+            let start = start.filter(|_| one_side).or(end);
             let replies = thread
                 .comments
                 .page_info
@@ -140,7 +145,11 @@ pub(crate) fn parse_threads_page(json: &str) -> Result<ThreadsPage, GhError> {
                 path: thread.path,
                 lines: end
                     .zip(start)
-                    .filter(|_| !file_level)
+                    .filter(|_| {
+                        !file_level
+                            && (thread.is_outdated
+                                || matches!(thread.diff_side.as_deref(), Some("LEFT" | "RIGHT")))
+                    })
                     .map(|(end, start)| (start.min(end), end)),
                 side: match thread.diff_side.as_deref() {
                     Some("LEFT") => DiffSide::Left,

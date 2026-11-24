@@ -22,7 +22,14 @@ pub(super) fn description(
         return div().into_any_element();
     };
     let body = match &discussion.edit {
-        Some((input, state)) => editor(id, input, state, discussion.keeping, cx),
+        Some((input, state)) => editor(
+            id,
+            input,
+            state,
+            ready.description.as_deref(),
+            discussion.keeping,
+            cx,
+        ),
         None => shown_body(id, ready.description.as_deref(), discussion, cx),
     };
     div()
@@ -30,7 +37,16 @@ pub(super) fn description(
         .flex_col()
         .gap(px(theme::PAD_XL))
         .child(body)
-        .child(conversation(&discussion.conversation, cx))
+        .when(discussion.edit.is_none(), |el| {
+            el.child(div().flex().items_start().child(
+                button_compact("pr-description-files", s::view_changed_files()).on_click(
+                    cx.listener(move |ws, _, _, cx| {
+                        ws.select_pr_detail_tab(id, super::PrTab::Files, cx)
+                    }),
+                ),
+            ))
+        })
+        .child(conversation(id, &discussion.conversation, cx))
         .into_any_element()
 }
 
@@ -81,6 +97,7 @@ fn editor(
     id: PrDetailId,
     input: &Entity<TextareaState>,
     state: &SaveState,
+    remote: Option<&str>,
     keeping: crate::github::DraftKeeping,
     cx: &Context<Workspace>,
 ) -> AnyElement {
@@ -103,6 +120,17 @@ fn editor(
         .gap(px(theme::GAP_SM))
         // Read-only while it saves: text typed then would be dropped with
         // the editor when the save lands.
+        .when(conflict, |el| {
+            el.child(note(s::body_remote_version(), cx))
+                .child(
+                    div().text_color(t.text_body).child(
+                        remote
+                            .map(str::to_owned)
+                            .unwrap_or_else(s::description_empty),
+                    ),
+                )
+                .child(note(s::body_your_draft(), cx))
+        })
         .child(markdown_editor(input, cx).disabled(saving))
         .children(super::render::keeping_note(keeping, cx))
         .children(line.map(|(text, color)| {
@@ -141,7 +169,7 @@ fn editor(
 }
 
 /// The comments on the pull request itself, oldest first.
-fn conversation(view: &ConversationView, cx: &Context<Workspace>) -> AnyElement {
+fn conversation(id: PrDetailId, view: &ConversationView, cx: &Context<Workspace>) -> AnyElement {
     let t = theme::current(cx);
     let (heading, body): (String, Vec<AnyElement>) = match view {
         ConversationView::Loading => (
@@ -158,7 +186,7 @@ fn conversation(view: &ConversationView, cx: &Context<Workspace>) -> AnyElement 
         } => {
             let mut body: Vec<AnyElement> = comments
                 .iter()
-                .map(|comment| comment_block(comment, cx))
+                .map(|comment| comment_block(id, comment, cx))
                 .collect();
             if comments.is_empty() {
                 body.push(note(s::conversation_empty(), cx).into_any_element());
@@ -192,9 +220,9 @@ fn conversation(view: &ConversationView, cx: &Context<Workspace>) -> AnyElement 
         .into_any_element()
 }
 
-fn comment_block(comment: &CommentView, cx: &Context<Workspace>) -> AnyElement {
+fn comment_block(id: PrDetailId, comment: &CommentView, cx: &Context<Workspace>) -> AnyElement {
     let t = theme::current(cx);
-    div()
+    super::anchors::mark_comment(div(), id, comment, cx)
         .flex()
         .flex_col()
         .gap(px(theme::GAP_XS))

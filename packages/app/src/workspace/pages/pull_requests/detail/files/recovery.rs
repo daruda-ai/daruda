@@ -7,7 +7,7 @@ impl FilesState {
     /// commit. `None` unless GitHub sent no patch for it and the commit is
     /// known.
     pub(super) fn begin_recover(&mut self, ticket: ReadTicket) -> Option<RecoverStart> {
-        if self.recovery_busy() {
+        if self.recovering.is_some() {
             return None;
         }
         let shown = self
@@ -15,12 +15,19 @@ impl FilesState {
             .as_ref()
             .filter(|shown| shown.diff == FileDiff::TooLarge)?;
         let revision = self.revision.clone()?;
+        if shown.revision.as_ref() != Some(&revision)
+            || self
+                .recovery_failure(shown)
+                .is_some_and(|failure| !failure.can_retry())
+        {
+            return None;
+        }
         let file = self.files.iter().find(|file| file.path == shown.path)?;
+        self.recovery_failures.remove(&file.path);
         self.recovering = Some(Recovering {
             path: file.path.clone(),
             revision: revision.clone(),
             ticket,
-            failure: None,
         });
         Some(RecoverStart {
             path: file.path.clone(),
@@ -35,11 +42,9 @@ impl FilesState {
         })
     }
 
-    /// A file is being read whole.
-    pub(super) fn recovery_busy(&self) -> bool {
-        self.recovering
-            .as_ref()
-            .is_some_and(|held| held.failure.is_none())
+    fn recovery_failure(&self, shown: &Shown) -> Option<&RecoverFailure> {
+        let (revision, failure) = self.recovery_failures.get(&shown.path)?;
+        (shown.revision.as_ref() == Some(revision)).then_some(failure)
     }
 
     /// Take the whole file's diff if it is the read waited on and the
@@ -60,7 +65,11 @@ impl FilesState {
         let read = match answer {
             Ok(read) => read,
             Err(failure) => {
-                recovering.failure = Some(failure);
+                self.recovery_failures.insert(
+                    recovering.path.clone(),
+                    (recovering.revision.clone(), failure),
+                );
+                self.recovering = None;
                 return true;
             }
         };
@@ -70,35 +79,28 @@ impl FilesState {
         if let Some(file) = self.files.iter_mut().find(|file| file.path == path) {
             file.patch = Some(read.patch);
         }
-        if let Some(limit) = self
-            .shown
-            .as_ref()
-            .filter(|shown| shown.path == path)
-            .map(|shown| shown.limit)
-        {
-            self.build_shown(&path, limit);
+        if self.shown.as_ref().is_some_and(|shown| shown.path == path) {
+            let drawn = self.drawn();
+            self.build_shown(&path, drawn);
         }
         true
     }
 
     pub(super) fn recovery_view(&self, shown: &Shown) -> Option<RecoveryView> {
-        if shown.diff != FileDiff::TooLarge || self.revision.is_none() {
+        if shown.diff != FileDiff::TooLarge
+            || self.revision.is_none()
+            || shown.revision != self.revision
+        {
             return None;
         }
-        Some(
-            match self
-                .recovering
-                .as_ref()
-                .filter(|held| held.path == shown.path)
-            {
-                None if self.recovery_busy() => RecoveryView::Busy,
-                None => RecoveryView::Offered,
-                Some(Recovering {
-                    failure: Some(failure),
-                    ..
-                }) => RecoveryView::Failed(failure.clone()),
-                Some(_) => RecoveryView::Reading,
-            },
-        )
+        let failure = self.recovery_failure(shown);
+        Some(match (&self.recovering, failure) {
+            (Some(held), _) if held.path == shown.path => RecoveryView::Reading,
+            (Some(_), failure) if failure.is_none_or(RecoverFailure::can_retry) => {
+                RecoveryView::Busy
+            }
+            (_, Some(failure)) => RecoveryView::Failed(failure.clone()),
+            _ => RecoveryView::Offered,
+        })
     }
 }

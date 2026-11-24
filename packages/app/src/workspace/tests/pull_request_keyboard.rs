@@ -87,6 +87,10 @@ fn the_keyboard_browses_opens_and_returns_to_the_selected_row(cx: &mut TestAppCo
             .detail()
             .expect("Enter opens the detail");
         assert_eq!(
+            detail.tab(),
+            crate::workspace::pages::pull_requests::detail::PrTab::Description
+        );
+        assert_eq!(
             (detail.item().repo.clone(), detail.item().pr.number),
             (repo(), number(chosen))
         );
@@ -135,9 +139,10 @@ fn the_keyboard_browses_opens_and_returns_to_the_selected_row(cx: &mut TestAppCo
 }
 
 #[gpui::test]
-fn the_palette_search_command_reaches_the_list_search_from_a_detail(cx: &mut TestAppContext) {
+fn focusing_search_and_escaping_keeps_the_same_detail_at_both_widths(cx: &mut TestAppContext) {
     let (f, _gh, _) = linked_window(cx);
     let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.cx.update(crate::bind_keys::register_static_bindings);
     vcx.update(|window, cx| {
         f.ws.update(cx, |ws, cx| {
             ws.open_page(Page::PullRequests, window, cx);
@@ -145,19 +150,52 @@ fn the_palette_search_command_reaches_the_list_search_from_a_detail(cx: &mut Tes
         });
     });
     vcx.run_until_parked();
-    assert!(f.ws.read_with(&vcx, |ws, _| ws.pr_detail_id().is_some()));
+    let id = f.ws.read_with(&vcx, |ws, _| ws.pr_detail_id().unwrap());
+    for (width, beside) in [(1400., true), (700., false)] {
+        vcx.simulate_resize(size(px(width), px(700.)));
+        vcx.run_until_parked();
+        vcx.update(|window, cx| f.ws.update(cx, |ws, cx| ws.focus_pr_search(window, cx)));
+        vcx.run_until_parked();
+        assert!(vcx.update(|window, cx| f.ws.read(cx).pr_search_focused(window, cx)));
+        f.ws.read_with(&vcx, |ws, _| {
+            assert_eq!(ws.pr_detail_id(), Some(id));
+            assert_eq!(ws.shown_page_detail_id().is_some(), beside);
+            assert_eq!(ws.pr_cursor().map(|(_, n)| n), Some(8));
+        });
+        vcx.simulate_keystrokes("escape");
+        f.ws.read_with(&vcx, |ws, _| {
+            assert_eq!(ws.shown_page_detail_id(), Some(id.into()));
+            assert_eq!(ws.pr_detail_id(), Some(id));
+        });
+        assert!(!vcx.update(|window, cx| f.ws.read(cx).pr_search_focused(window, cx)));
+    }
+}
+
+/// Searching beside a detail, then narrowing the window until the two no
+/// longer fit: the list stays in view over the detail, not under it.
+#[gpui::test]
+fn narrowing_while_searching_beside_a_detail_keeps_the_list(cx: &mut TestAppContext) {
+    let (f, _gh, _) = linked_window(cx);
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.cx.update(crate::bind_keys::register_static_bindings);
+    vcx.update(|window, cx| {
+        f.ws.update(cx, |ws, cx| {
+            ws.open_page(Page::PullRequests, window, cx);
+            ws.open_pr_detail(item(8), window, cx);
+        });
+    });
+    vcx.simulate_resize(size(px(1400.), px(700.)));
+    vcx.run_until_parked();
     vcx.update(|window, cx| f.ws.update(cx, |ws, cx| ws.focus_pr_search(window, cx)));
     vcx.run_until_parked();
+    assert!(
+        f.ws.read_with(&vcx, |ws, _| ws.shown_page_detail_id().is_some()),
+        "both fit: the detail stays beside the search"
+    );
+    vcx.simulate_resize(size(px(700.), px(700.)));
+    vcx.run_until_parked();
     f.ws.read_with(&vcx, |ws, _| {
-        assert!(
-            ws.pr_detail_id().is_none(),
-            "the list is shown to search it"
-        );
-        assert_eq!(
-            ws.pr_cursor().map(|(_, n)| n),
-            Some(8),
-            "the detail's row stays selected"
-        );
+        assert!(ws.shown_page_detail_id().is_none(), "the list is in view");
+        assert!(ws.pr_detail_id().is_some(), "the detail waits behind it");
     });
-    assert!(vcx.update(|window, cx| f.ws.read(cx).pr_search_focused(window, cx)));
 }

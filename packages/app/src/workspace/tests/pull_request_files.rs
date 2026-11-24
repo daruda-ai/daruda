@@ -603,6 +603,92 @@ fn a_viewed_mark_lasts_until_its_file_changes(cx: &mut TestAppContext) {
     );
 }
 
+#[gpui::test]
+fn completing_a_file_wraps_to_changed_files_and_skips_viewed_ones(cx: &mut TestAppContext) {
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    let listing = |patch| PrFiles {
+        files: vec![
+            file("a", Some(patch)),
+            file("b", Some(PATCH)),
+            file("c", Some(PATCH)),
+        ],
+    };
+    gh.set_pr_files(&repo(), 7, listing(PATCH));
+    select(&f, id, cx);
+    f.ws.update(cx, |ws, cx| {
+        for path in ["a", "b"] {
+            ws.toggle_pr_file_viewed(id, path, file(path, Some(PATCH)).blob.as_deref(), cx);
+        }
+        ws.show_pr_file(id, "c", cx);
+    });
+    let changed = "@@ -1 +1 @@\n-x\n+z";
+    gh.set_pr_files(&repo(), 7, listing(changed));
+    f.ws.update(cx, |ws, cx| ws.refresh_pr_detail(id, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        ready_view(&f, cx).0,
+        [Viewed::Changed, Viewed::Yes, Viewed::No]
+    );
+    f.ws.update(cx, |ws, cx| {
+        ws.finish_pr_file(id, "c", file("c", Some(PATCH)).blob.as_deref(), cx)
+    });
+    assert_eq!(
+        ready_view(&f, cx),
+        (
+            vec![Viewed::Changed, Viewed::Yes, Viewed::Yes],
+            2,
+            Some("a".into())
+        )
+    );
+    f.ws.update(cx, |ws, cx| {
+        ws.finish_pr_file(id, "a", file("a", Some(PATCH)).blob.as_deref(), cx)
+    });
+    assert_eq!(
+        ready_view(&f, cx).0[0],
+        Viewed::Changed,
+        "a delayed click cannot mark new content"
+    );
+    f.ws.update(cx, |ws, cx| {
+        ws.finish_pr_file(id, "a", file("a", Some(changed)).blob.as_deref(), cx)
+    });
+    assert_eq!(
+        ready_view(&f, cx),
+        (vec![Viewed::Yes; 3], 3, Some("a".into()))
+    );
+}
+
+#[gpui::test]
+fn the_file_picker_replaces_the_navigator_as_the_detail_narrows(cx: &mut TestAppContext) {
+    use gpui::{Modifiers, VisualTestContext, px, size};
+    let (f, gh, id) = opened(cx, mergeable(7, "feat"));
+    gh.set_pr_files(&repo(), 7, two());
+    let mut vcx = VisualTestContext::from_window(f.window.into(), cx);
+    vcx.simulate_resize(size(px(2000.), px(900.)));
+    f.ws.update(&mut vcx, |ws, cx| {
+        ws.select_pr_detail_tab(id, PrTab::Files, cx)
+    });
+    vcx.run_until_parked();
+    let nav = vcx.debug_bounds("pr-files").unwrap();
+    let diff = vcx.debug_bounds("pr-file-diff").unwrap();
+    assert!(nav.right() <= diff.left());
+    vcx.simulate_resize(size(px(740.), px(900.)));
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("pr-files").is_none());
+    let picker = vcx.debug_bounds("pr-files-picker").unwrap();
+    let diff = vcx.debug_bounds("pr-file-diff").unwrap();
+    assert!(picker.bottom() <= diff.top());
+    vcx.simulate_click(picker.center(), Modifiers::default());
+    vcx.run_until_parked();
+    let file = vcx.debug_bounds("pr-file-1").unwrap();
+    vcx.simulate_click(file.center(), Modifiers::default());
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("pr-files").is_none());
+    assert_eq!(
+        ready_view(&f, &mut vcx),
+        (vec![Viewed::No; 2], 0, Some("b.rs".into()))
+    );
+}
+
 /// Open #7 on b.rs, a long file, scrolled 600px down, and go back to the
 /// list. Returns the offset it was left at.
 fn leave_on_a_scrolled_file(
@@ -782,9 +868,10 @@ fn a_file_sent_without_a_patch_is_read_whole_on_request(cx: &mut TestAppContext)
     assert_eq!(
         shown.unwrap().recovery,
         Some(RecoveryView::Failed(RecoverFailure::Binary)),
-        "a binary side says so, and can be tried again"
+        "a binary side offers the file on GitHub"
     );
-    assert!(vcx.debug_bounds("pr-file-recover").is_some());
+    assert!(vcx.debug_bounds("pr-file-recover").is_none());
+    assert!(vcx.debug_bounds("pr-file-open-github").is_some());
 }
 
 /// The handoff of selected lines, as prepared.

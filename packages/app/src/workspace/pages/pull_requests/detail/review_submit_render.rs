@@ -52,6 +52,12 @@ pub(super) fn review(
         SubmitState::Checking => Some((s::review_checking(), t.text_muted)),
     };
     let leave_out = matches!(view.state, SubmitState::Blocked(SubmitBlock::Unanchored(_)));
+    let notice = line.map(|(text, color)| {
+        div()
+            .text_size(px(theme::FONT_SIZE_SM))
+            .text_color(color)
+            .child(text)
+    });
     div()
         .debug_selector(|| "pr-review".into())
         .flex()
@@ -66,6 +72,18 @@ pub(super) fn review(
                 .text_color(t.text_muted)
                 .child(s::review_heading()),
         )
+        .children(notice)
+        .when(leave_out, |panel| {
+            panel.children(view.first_blocker.map(|comment| {
+                div().flex().items_start().child(
+                    button_primary("pr-review-first-blocker", s::review_first_blocker())
+                        .debug_selector(|| "pr-review-first-blocker".into())
+                        .on_click(cx.listener(move |ws, _, window, cx| {
+                            ws.edit_pr_line_comment(id, comment, window, cx)
+                        })),
+                )
+            }))
+        })
         .child(markdown_editor(&view.body, cx).disabled(submitting))
         .children(super::render::keeping_note(keeping, cx))
         .child(
@@ -87,15 +105,22 @@ pub(super) fn review(
                     ws.pick_pr_review_event(id, picked.first().copied(), cx)
                 })),
         )
-        .children(line.map(|(text, color)| {
-            div()
-                .text_size(px(theme::FONT_SIZE_SM))
-                .text_color(color)
-                .child(text)
-        }))
         .child(
             div()
                 .flex()
+                .flex_wrap()
+                .gap(px(theme::GAP_SM))
+                .text_size(px(theme::FONT_SIZE_SM))
+                .text_color(t.text_muted)
+                .child(s::review_comments_included(view.included_comments))
+                .when(view.excluded_comments > 0, |line| {
+                    line.child(s::review_comments_excluded(view.excluded_comments))
+                }),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_wrap()
                 .gap(px(theme::GAP_SM))
                 .when(unknown, |row| {
                     row.child(
@@ -104,12 +129,14 @@ pub(super) fn review(
                             .on_click(cx.listener(move |ws, _, _, cx| ws.check_pr_review(id, cx))),
                     )
                 })
-                .child(
-                    button_primary("pr-review-submit", s::review_submit())
-                        .debug_selector(|| "pr-review-submit".into())
-                        .disabled(submitting)
-                        .on_click(cx.listener(move |ws, _, _, cx| ws.submit_pr_review(id, cx))),
-                )
+                .when(!leave_out, |row| {
+                    row.child(
+                        button_primary("pr-review-submit", s::review_submit())
+                            .debug_selector(|| "pr-review-submit".into())
+                            .disabled(submitting)
+                            .on_click(cx.listener(move |ws, _, _, cx| ws.submit_pr_review(id, cx))),
+                    )
+                })
                 .when(leave_out, |row| {
                     row.child(
                         button_compact("pr-review-leave-out", s::review_leave_out())
