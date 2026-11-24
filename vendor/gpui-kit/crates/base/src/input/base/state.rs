@@ -1608,9 +1608,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         !self.disabled && !self.readonly
     }
 
-    /// Set true to clear the input by pressing Escape key.
-    ///
-    /// Not on Android, where Escape is also the back button.
     /// Handle committed text before insertion into an empty, unmarked editor.
     /// The callback must not re-enter this input state.
     pub fn on_empty_text_input(
@@ -1626,6 +1623,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.ime_marked_range.is_some()
     }
 
+    /// Set true to clear the input by pressing Escape key.
+    ///
+    /// Not on Android, where Escape is also the back button.
     pub fn clean_on_escape(mut self) -> Self {
         self.clean_on_escape = true;
         self
