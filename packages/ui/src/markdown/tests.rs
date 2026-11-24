@@ -83,6 +83,22 @@ fn probe_with_heading_size(
     text_size: Option<Pixels>,
     heading_size: Option<Pixels>,
 ) -> Pixels {
+    open_settled_probe(cx, text, width, text_size, heading_size)
+        .debug_bounds("markdown-probe")
+        .expect("markdown probe painted")
+        .size
+        .height
+}
+
+/// Opens a [`MarkdownProbe`] window pinned to `width` and lets its layout
+/// settle.
+fn open_settled_probe(
+    cx: &mut TestAppContext,
+    text: impl Into<SharedString>,
+    width: Pixels,
+    text_size: Option<Pixels>,
+    heading_size: Option<Pixels>,
+) -> VisualTestContext {
     let bounds = Bounds::new(point(px(0.), px(0.)), size(width, px(4000.)));
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -109,10 +125,7 @@ fn probe_with_heading_size(
     // frame-1-vs-frame-2 check in `packages/chat/src/view/tests/diff_layout.rs`).
     vcx.update(|window, _| window.refresh());
     vcx.run_until_parked();
-    vcx.debug_bounds("markdown-probe")
-        .expect("markdown probe painted")
-        .size
-        .height
+    vcx
 }
 
 /// A long `# ` heading laid out at a narrow window width must wrap to
@@ -1008,6 +1021,64 @@ fn compact_heading_size_reduces_wrapping_without_changing_default_callers(cx: &m
         probe_with_heading_size(cx, text, px(240.), None, Some(px(13.)))
             < probe_height(cx, text, px(240.), None)
     );
+}
+
+/// Raw HTML in a pull request body (Dependabot release notes) puts inline
+/// code inside list items, table cells, headings and `<details>`. The HTML
+/// parser records no source spans, and span-less blocks with inline code
+/// once shared one element id: all but the last painted no text.
+#[gpui::test]
+fn html_blocks_with_inline_code_paint_their_own_text(cx: &mut TestAppContext) {
+    init_gpui_component(cx);
+    let blocks = [
+        "<p>ParaOne text <code>c</code> tail</p>",
+        "<p>ParaTwo text <code>c</code> tail</p>",
+        "<blockquote><ul><li>QuotedItem by <a href=\"https://a.test\"><code>@bot</code></a> \
+         in <a href=\"https://b.test\">o/r#1</a></li><li>QuotedNext <code>k</code></li></ul>\
+         </blockquote>",
+        "<ol><li>Ordered <code>o</code></li></ol>",
+        "<h3>HeadingText <code>h</code></h3>",
+        "<table><tr><th>HeadCell <code>t</code></th></tr>\
+         <tr><td>BodyCell <code>t</code></td></tr></table>",
+        "<details><summary>SummaryText <code>s</code></summary>\
+         <p>DetailsText <code>d</code></p></details>",
+        "<ul><li><p>Outer <code>n</code></p><ul><li>NestedItem <code>n</code></li></ul></li></ul>",
+    ];
+    // Each marker starts one block of text above.
+    let markers = [
+        "ParaOne",
+        "ParaTwo",
+        "QuotedItem",
+        "QuotedNext",
+        "Ordered",
+        "HeadingText",
+        "HeadCell",
+        "BodyCell",
+        "SummaryText",
+        "DetailsText",
+        "Outer",
+        "NestedItem",
+    ];
+
+    let mut vcx = open_settled_probe(cx, blocks.join("\n\n"), px(900.), None, None);
+    let painted = vcx.update(|window, cx| {
+        // The probe has no Base Root to start each frame's text record.
+        gpui_base::test_support::begin_frame(window);
+        window.draw(cx).clear(cx);
+        gpui_base::test_support::texts(window)
+            .iter()
+            .map(|snapshot| snapshot.text().to_string())
+            .collect::<Vec<_>>()
+    });
+
+    for marker in markers {
+        let count = painted
+            .iter()
+            .flat_map(|text| text.split(|c: char| !c.is_alphanumeric()))
+            .filter(|word| *word == marker)
+            .count();
+        assert_eq!(count, 1, "{marker:?} painted {count} times: {painted:?}");
+    }
 }
 
 #[path = "link_tests.rs"]
