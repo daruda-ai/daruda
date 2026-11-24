@@ -358,6 +358,7 @@ fn shown_diff(
             .flex()
             .flex_wrap()
             .items_center()
+            .gap(px(theme::GAP_LG))
             .child(note(s::file_no_lines(), cx))
             .children(open_file_on_github(shown, pr_url))
             .into_any_element(),
