@@ -877,7 +877,7 @@ daruda/
 │   ├── block/                  # patched block crate
 │   ├── ghostty/                # Ghostty v1.4.0 submodule
 │   ├── zed/                    # patched GPUI; regenerate with tools/vendor_gpui
-│   ├── gpui-kit/               # vendored gpui-component 0.8.1 crates
+│   ├── gpui-kit/               # vendored gpui-component 0.11.0 crates
 │   └── ferrum-flow/            # vendored node-graph canvas
 └── scripts/
 ```
