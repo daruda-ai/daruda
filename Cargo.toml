@@ -110,6 +110,7 @@ similar = "3"
 smallvec = { version = "1.15", features = ["const_new"] }
 smol = "2"
 syn = "2"
+sys-locale = "0.3"
 sysinfo = "0.40.1"
 tempfile = "3"
 thiserror = "2"

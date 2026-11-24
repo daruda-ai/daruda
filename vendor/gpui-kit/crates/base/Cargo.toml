@@ -1,13 +1,13 @@
 [package]
 name = "gpui-base"
-version = "0.9.0"
+version = "0.10.0"
 license = "Apache-2.0"
 publish = false
 edition = "2024"
 autoexamples = false
 autobenches = false
 autotests = false
-description = "Vendored gpui-base v0.9.0 (longbridge/gpui-kit, Apache-2.0). Routed through daruda workspace gpui."
+description = "Vendored gpui-base v0.10.0 (longbridge/gpui-kit, Apache-2.0). Routed through daruda workspace gpui."
 
 [lib]
 doctest = false
@@ -50,6 +50,7 @@ dead_code = "allow"
 "smallvec" = { workspace = true }
 "sum_tree" = { workspace = true }
 "tracing" = { workspace = true }
+"sys-locale" = { workspace = true }
 "unicode-linebreak" = { version = "0.1.5" }
 "unicode-segmentation" = { workspace = true }
 "web-time" = { version = "1" }
@@ -70,6 +71,7 @@ dead_code = "allow"
 "ashpd" = { version = "0.13", default-features = false, features = ["async-io", "settings"] }
 
 [dev-dependencies]
+"gpui-base" = { workspace = true, features = ["test-support"] }
 "gpui" = { workspace = true, features = ["test-support"] }
 "indoc" = { workspace = true }
 
@@ -81,3 +83,8 @@ dead_code = "allow"
 [[test]]
 name = "text_host"
 path = "tests/text_host.rs"
+
+# daruda patch: run upstream's span-less HTML paragraph test (unchanged).
+[[test]]
+name = "html_paragraph_ids"
+path = "tests/html_paragraph_ids.rs"

@@ -194,10 +194,10 @@ UI regression fails without it; the private model also tests skipped button
 events and deferred cleanup from an older gesture. Reproduce the tree with
 `vendor_gpui`; never edit generated `vendor/zed` by hand.
 
-## `vendor/gpui-kit/` — vendored gpui-component 0.9.0, **patched in place**
+## `vendor/gpui-kit/` — vendored gpui-component 0.10.0, **patched in place**
 
-daruda's widget library is upstream gpui-component 0.9.0 (`longbridge/gpui-kit`,
-Apache-2.0), vendored as four crates:
+daruda's widget library is upstream gpui-component 0.10.0
+(`longbridge/gpui-kit`, Apache-2.0), vendored as four crates:
 
 | Directory | Cargo package | Library | Role |
 |---|---|---|---|
@@ -243,14 +243,16 @@ shaping tests borrow the platform text system without opening a window
 
 ### Re-vendor procedure
 
-1. Copy the upstream 0.9.x `crates/{base,component,assets,component-macros}`
+1. Copy the upstream 0.10.x `crates/{base,component,assets,component-macros}`
    into `vendor/gpui-kit/crates/`, keeping the root files listed above and
    `crates/component/locales/ko.yml`.
 2. Regenerate each manifest: inherit root `[workspace.dependencies]` where an
    entry exists (keeping per-package features, optional flags, and target
    tables), allow all lints, disable the auto targets, keep the `gpui-fast`
    feature stub, and keep the dev-dependencies (`gpui` with `test-support`,
-   `indoc`, and `gpui-base` with `test-support` for `gpui-component`).
+   `indoc`, and `gpui-base` with `test-support` for both `gpui-component`
+   and `gpui-base` itself, so its tests compile the `test-support` code).
+   `sys-locale` is a root workspace dependency shared with the app.
 3. Re-apply every `daruda patch` site and `ANY-BUTTON` marker described below.
    A fresh copy drops them all; `scripts/lint-raw-mouse-button.sh` re-fires on
    each ungated listener.
@@ -277,7 +279,10 @@ dependencies on `workspace = true` when re-vendoring. The transcript's
 
 ### Why
 
-Upstream 0.9.0 builds against `gpui-pre`. A few sites behave differently on
+Upstream 0.10.0 builds against `gpui-pre` 0.3.12. Each gpui-kit release pins
+one `gpui-pre` snapshot, so a kit upgrade can require a GPUI upgrade: 0.10.0
+builds unchanged on daruda's pinned zed revision, while 0.11.0 needs
+`gpui-pre` 0.3.14 and its API changes. A few sites behave differently on
 daruda's pinned GPUI; each is a marked adaptation, not a behavior change.
 
 ### What diverges
@@ -372,20 +377,6 @@ the cache is dropped.
 
 ---
 
-## `vendor/gpui-kit/crates/component/src/checkbox.rs` - vendored, **mixed-state checkbox**
-
-Adds `Checkbox::indeterminate(bool)` for partial selections (the agent-chat
-display filter's `Tool calls` parent over five categories). The checkbox draws
-`IconName::Minus`, treats checked and indeterminate as visible marks for
-border, fill, and animation, reports the mixed accessibility state, and
-resolves a mixed-state click to checked. `radio.rs` passes `false` to the
-shared `checkbox_check_icon` helper's added argument.
-
-Re-vendor by re-adding the field, the builder, the `marked` / `next_checked`
-derivations in `render`, and the helper argument.
-
----
-
 ## `vendor/gpui-kit/crates/component/src/button/button.rs` — vendored, **a selected segment can pick its own label colour**
 
 ### Why
@@ -444,11 +435,11 @@ started with its footer action out of view.
 
 | Delta | Detail |
 |---|---|
-| Window-resolved cap | `max_height` is a private `MaxHeight` enum: `Fixed` (what `max_h` sets, upstream behaviour) or `Window`, set by `max_h_in_window(Fn(&Window) -> Pixels)` and resolved in every render. Unset keeps upstream's half-window default. |
-| Pinned head and foot | `pin_head()` / `pin_foot()` mark the items added before / after the call. A `scrollable` menu lays out pinned head, body, pinned foot under the cap; only the body (`items-body`, tracked by `scroll_handle`) scrolls and carries the scrollbar. `set_selected_index` scrolls only to body items, offset by the head. Without pins the body is every item. |
+| Window-resolved cap | `max_height` is a private `MaxHeight` enum: `Fixed` (what `max_h` sets, upstream behaviour) or `Window`, set by `max_h_in_window(Fn(&Window) -> Pixels)` and resolved in every render. Unset keeps upstream's default: half the window, at most 28.125rem. |
+| Pinned head and foot | `pin_head()` / `pin_foot()` mark the items added before / after the call. A `scrollable` menu lays out pinned head, body, pinned foot under the cap; only the body (`items-body`, tracked by `scroll_handle`) scrolls and carries the scrollbar. `set_selected_index` and upstream's open-time `scroll_to_checked_item` scroll only to body items, offset by the head. Without pins the body is every item. |
 | `PopupMenu::small()` | Public setter for the small item size. Upstream keeps the `size` the items render with but no longer exposes it. |
 | `PopupMenu::chrome(Fn(&App) -> (bg, border))` | Replaces the float chrome's fill and edge after `popover_style`, for a menu opened over another float (`crate::ui::stacked_menu_builder`). A closure because the menu entity outlives a theme change while open. `None` keeps `popover_style`. |
-| Body rows clear the scrollbar | `RenderOptions::trailing_pad`: rows inside a scrolling body take `gpui_base::SCROLLBAR_WIDTH` (a new public alias of the scrollbar's private hitbox width in `base/src/scrollbar.rs`) as trailing padding, so the bar never covers a row's end and a press there picks the row. |
+| Body rows clear the scrollbar | `RenderOptions::trailing_pad`: rows inside a scrolling body take `gpui_base::SCROLLBAR_WIDTH` (a new public alias of the scrollbar's private hitbox width in `base/src/scrollbar.rs`) as trailing padding (upstream's rem `INNER_PADDING` is resolved to pixels for the comparison), so the bar never covers a row's end and a press there picks the row. |
 | `PopupMenuItem::tooltip` | Hover text on `PopupMenuItem::Item`, forwarded to `MenuItemElement::tooltip` (`menu_item.rs`) and rendered independently of the disabled-gated click handler, so it can explain why an action is unavailable. |
 
 ### Re-vendor procedure
@@ -472,8 +463,8 @@ the stacked-menu contrast is pinned by
 `tokens.background`. daruda paints its own surfaces at the configured window
 opacity, and 0.5's `Root` painted no fill, so the opaque fill made a
 translucent window opaque. The patch drops the `.bg(..)` and keeps the font
-family and text colour. `root::tests::the_root_paints_no_window_fill` fails
-without it.
+family, text colour, and the window's corner radii.
+`root::tests::the_root_paints_no_window_fill` fails without it.
 
 ---
 
@@ -665,7 +656,6 @@ leaves the filter as a field you have to remember to read.
 | Delta | Detail |
 |---|---|
 | Track and thumb press gate on `Left` | `base/src/scrollbar.rs`. A right press on a scrollbar no longer jumps or drags the view and `stop_propagation`s the context menu with it. zed's own scrollbar gates this the same way. |
-| Resize-handle press gates on `Left` | `base/src/resizable/resize_handle.rs`. Only the primary button lights the pressed state and starts a resize. |
 | Link press/release | `base/src/text/inline.rs`; see [the link section](#vendorgpui-kitcratesbasesrctextinliners--vendored-a-link-opens-from-the-press-that-chose-it). |
 | `// ANY-BUTTON: <reason>` markers | `component/src/input/popovers/hover_popover.rs`, `component/src/diff/selection.rs`, `component/src/dock/dock.rs`, `base/src/text_selection.rs`, `base/src/scrollbar.rs` (release), `base/src/input/base/element.rs`, `base/src/resizable/resize_handle.rs` (release), `base/src/resizable/panel.rs`. Each listener answers every button on purpose: it ends a drag that only a left press can have started, resets multi-click tracking, or dismisses on an outside press. The marker separates an intent from an omission. |
 
@@ -714,7 +704,10 @@ and independent windows, redraw, replacement and stale gestures. Existing
 selection, occlusion and button tests remain in `markdown/tests.rs`.
 `base/Cargo.toml` explicitly registers `tests/text_host.rs` (autotests are
 disabled); its public-API fixture verifies independent `RenderContext` link
-opening and context capture. Run Base tests with `--features test-support`.
+opening and context capture. It also registers upstream's
+`tests/html_paragraph_ids.rs`, which guards span-less HTML paragraphs with
+inline code against sharing one element id and painting no text. Other
+upstream integration tests stay unregistered.
 
 ---
 
@@ -929,7 +922,9 @@ before GPUI keybindings run. Other editors retain their previous behavior.
 The host composer skips marked text through `has_marked_text()` so stale host snapshots
 cannot consume composition arrow keys. Finalizing composition with `unmarkText`
 emits the edit snapshot and one `Change` event when a marked range existed, keeping host text snapshots
-current even when the IME does not send a replacement callback. Regression coverage lives in
+current even when the IME does not send a replacement callback. Without a
+marked range, upstream's rule applies: it reports a change only when
+composition left the text altered. Regression coverage lives in
 `workspace/tests/agent_chat/questions/keys.rs`, including native-style text
 commits, marked-text preservation, Space toggling and fallback typing.
 

@@ -3065,7 +3065,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-base"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3074,6 +3074,7 @@ dependencies = [
  "data-url",
  "futures",
  "gpui",
+ "gpui-base",
  "gpui_macros",
  "gpui_platform",
  "html5ever 0.27.0",
@@ -3097,6 +3098,7 @@ dependencies = [
  "smallvec",
  "smol",
  "sum_tree",
+ "sys-locale",
  "tracing",
  "unicode-linebreak",
  "unicode-segmentation",
@@ -3106,7 +3108,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-component"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -3194,7 +3196,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-component-macros"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3204,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-kit-assets"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui",

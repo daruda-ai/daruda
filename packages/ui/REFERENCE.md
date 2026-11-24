@@ -315,14 +315,13 @@ widgets), plus `gpui-kit-assets` and `gpui-component-macros`. Outside this packa
 only the app's UI facade and infrastructure sites reach them directly. Each daruda change
 in vendored source is marked `// daruda patch:`; the full record, with the
 reason for each patch and the re-vendor procedure, is in
-[patches/README.md](../../patches/README.md#vendorgpui-kit--vendored-gpui-component-090-patched-in-place).
+[patches/README.md](../../patches/README.md#vendorgpui-kit--vendored-gpui-component-0100-patched-in-place).
 
 The patches this package's wrappers depend on:
 
 | Patch | Used by |
 |---|---|
 | `ButtonCustomVariant::{selected_foreground, disabled_foreground, border}` | `button_group` (`choice_variant`), `button_group_on_surface` |
-| `Checkbox::indeterminate` | `checkbox` callers with a partial selection (the transcript's display filter) |
 | `PopupMenu::{small, chrome, max_h_in_window, pin_head, pin_foot}`, `PopupMenuItem::tooltip` | `menu` (`menu_builder`, `stacked_menu_builder`) and the app's status-bar menus |
 | `PopoverState::trigger_bounds` | popover panels sized against the room below their trigger (transcript editors) |
 | `InputBaseState::{on_empty_text_input, has_marked_text, set_font_metrics}` and composition-finalizing `Change` | composer question shortcuts and IME-safe arrow navigation |
@@ -332,7 +331,7 @@ The patches this package's wrappers depend on:
 | `ThemeStyle::new` + `bold` / `italic`, `query_compilations` | `theme::syntax`, `highlighter` |
 | `TextView::{code_block_render, debug_inline_bounds, image_source_with_fallback}`, `markdown-task-checkbox` selector, loose/tight list spacing | `markdown` and the app's Markdown conformance probe |
 | `take_right_clicked_link(cx, window, at)` | window-scoped, one-shot URL retrieval during the chat menu's mouse-down bubble handler; independent Markdown hosts need no Root layer |
-| Left-button gates on scrollbar and resize-handle presses | `scrollbar` (`a_right_press_on_the_track_does_not_jump_the_view`) |
+| Left-button gate on scrollbar presses | `scrollbar` (`a_right_press_on_the_track_does_not_jump_the_view`) |
 
 The manifests allow every upstream lint (vendored code is outside daruda's
 lint scope). Upstream modules are kept whole for reproducible re-vendoring.

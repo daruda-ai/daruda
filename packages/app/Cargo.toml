@@ -85,7 +85,7 @@ rust-i18n = { workspace = true }
 # Packaged debug builds must also work without the source checkout.
 rust-embed = { workspace = true, features = ["debug-embed"] }
 semver = { workspace = true }
-sys-locale = "0.3"
+sys-locale = { workspace = true }
 # Named directly, not inherited: a flow run's `FlowEvent` channel is built
 # here, and a transitive dependency has no name in Rust source.
 smol = { workspace = true }

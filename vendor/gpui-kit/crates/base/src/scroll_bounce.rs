@@ -282,6 +282,7 @@ pub struct ScrollBouncePrepaintState {
     hitbox: Hitbox,
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for ScrollBounce {
     type Element = Self;
     fn into_element(self) -> Self {
@@ -572,6 +573,9 @@ impl Element for ScrollBounce {
                     return;
                 }
                 if delta.x.abs() > delta.y.abs() {
+                    state
+                        .overscroll
+                        .touch_phase(event.touch_phase, cx.background_executor().now());
                     return;
                 }
                 let before = handle.offset();
