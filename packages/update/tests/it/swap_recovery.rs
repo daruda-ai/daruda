@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use super::once_released;
 use daruda_update::swap::{recover_update, swap_into};
 use std::path::Path;
 
@@ -26,13 +28,14 @@ fn interrupted_swap_restores_a_dangling_live_symlink() {
     journal["committed"] = false.into();
     journal["prepared"] = true.into();
     publish(root.path(), &journal).unwrap();
-    recover_update(root.path()).unwrap();
+    // Each step takes the lock the one before it just dropped.
+    once_released(|| recover_update(root.path())).unwrap();
 
     assert_eq!(std::fs::read_link(&live).unwrap(), missing);
     assert!(std::fs::symlink_metadata(root.path().join("app.exe.daruda-old")).is_err());
     assert!(!root.path().join(JOURNAL).exists());
-    swap_into(bundle.path(), root.path()).unwrap();
-    recover_update(root.path()).unwrap();
+    once_released(|| swap_into(bundle.path(), root.path())).unwrap();
+    once_released(|| recover_update(root.path())).unwrap();
     assert_eq!(std::fs::read_to_string(live).unwrap(), "replacement");
     assert!(std::fs::symlink_metadata(root.path().join("app.exe.daruda-old")).is_err());
 }
