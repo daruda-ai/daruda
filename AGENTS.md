@@ -311,7 +311,7 @@ GPUI is
 `vendor/zed/crates/gpui/` and `vendor/zed/crates/gpui_macos/` (pinned source
 plus daruda patches); other zed
 crates at that revision are in
-`~/.cargo/git/checkouts/zed-a70e2ad075855582/decd239/crates/`.
+`~/.cargo/git/checkouts/zed-a70e2ad075855582/f126950/crates/`.
 Do not use a standalone clone of a different revision.
 
 ## Verification

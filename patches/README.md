@@ -211,8 +211,9 @@ daruda's widget library is upstream gpui-component 0.11.0
 | `crates/assets` | `gpui-kit-assets` | `gpui_kit_assets` | bundled icons |
 | `crates/component-macros` | `gpui-component-macros` | `gpui_component_macros` | proc macros |
 
-The crates compile against daruda's pinned GPUI (`vendor/zed`) rather than
-upstream's `gpui-pre`, so their types unify with every first-party crate.
+The crates compile against daruda's pinned GPUI (`vendor/zed`, the same
+snapshot as upstream's `gpui-pre` 0.3.14), so their types unify with every
+first-party crate.
 Unlike `vendor/zed`, this tree is not generated: daruda is the source of truth
 for the vendored copy, and the patches are applied in place rather than
 recorded as `.patch` files.
@@ -280,11 +281,12 @@ dependencies on `workspace = true` when re-vendoring. The transcript's
 
 ---
 
-## `vendor/gpui-kit/` — vendored, **the pinned GPUI is not `gpui-pre`**
+## `vendor/gpui-kit/` — vendored, **built against daruda's pinned GPUI**
 
 ### Why
 
-Upstream 0.11.0 builds against `gpui-pre` 0.3.14. Each gpui-kit release pins
+Upstream 0.11.0 builds against `gpui-pre` 0.3.14, which is zed `f126950`,
+exactly daruda's pin. Each gpui-kit release pins
 one `gpui-pre` snapshot, so a kit upgrade can require a GPUI upgrade: 0.11.0
 needs that snapshot's API (a blanket `IntoElement` for every `Element`, a
 non-generic `Path`), so it moved together with daruda's zed pin. A few sites
@@ -302,7 +304,7 @@ section.
 
 ### Re-vendor procedure
 
-Re-apply the accessibility probe expectation. Upstream 0.9 now uses the
+Re-apply the accessibility probe expectation. Upstream 0.9 and later use the
 window text system's `Rc` identity for its test registry and table cache, and
 advances the executor clock in the popover test, so those adaptations are
 covered upstream and must not be reapplied.
@@ -812,9 +814,10 @@ implements the behavior itself:
 
 Preserve these API adaptations when re-vendoring:
 
-- gpui-kit targets upstream's `gpui-pre`; every adaptation to daruda's pinned
-  GPUI is a marked site, listed under
-  [the pinned GPUI](#vendorgpui-kit--vendored-the-pinned-gpui-is-not-gpui-pre)
+- gpui-kit targets upstream's `gpui-pre`, currently the same snapshot as
+  daruda's pin; every adaptation to the pinned GPUI is a marked site, listed
+  under
+  [the pinned GPUI](#vendorgpui-kit--vendored-built-against-darudas-pinned-gpui)
   and [the macros](#vendorgpui-kitcratescomponent-macrossrccrate_pathrs--vendored-the-macros-find-darudas-gpui).
 - `ferrum_flow` uses `ScrollEvent` / `on_scroll` in place of the deprecated
   wheel-only names.
