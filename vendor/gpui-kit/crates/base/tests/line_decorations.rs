@@ -76,7 +76,8 @@ fn render_case(cx: &mut TestAppContext, case: &Case) -> Painted {
         window.draw(cx).clear(cx);
 
         let name = case.name;
-        let painted: Vec<String> = texts(window)
+        let snapshots = texts(window);
+        let painted: Vec<String> = snapshots
             .iter()
             .map(|snapshot| snapshot.text().trim().to_string())
             .collect();
@@ -90,8 +91,10 @@ fn render_case(cx: &mut TestAppContext, case: &Case) -> Painted {
             .collect();
         assert_eq!(painted, expected, "{name}: gutter text");
 
+        // A row's background spans that row's gutter text vertically, so a
+        // background painted a row off, or at a constant offset, fails here.
         let quads = window.painted_quads();
-        let mut previous_y = None;
+        let scale = window.scale_factor();
         for (row, (_, background)) in case.rows.iter().enumerate() {
             let Some(color) = background else { continue };
             let color: Background = color().into();
@@ -100,12 +103,16 @@ fn render_case(cx: &mut TestAppContext, case: &Case) -> Painted {
                 .filter(|quad| quad.background == color)
                 .collect();
             assert_eq!(matching.len(), 1, "{name}: row {row} background quads");
-            let y = matching[0].bounds.origin.y;
+            let fill = matching[0].bounds;
+            let text = snapshots[row].bounds().scale(scale);
             assert!(
-                previous_y.is_none_or(|previous| previous < y),
-                "{name}: row {row} background is not below the previous row's"
+                fill.top() <= text.top() && text.bottom() <= fill.bottom(),
+                "{name}: row {row} background {:?}..{:?} does not span its gutter text {:?}..{:?}",
+                fill.top(),
+                fill.bottom(),
+                text.top(),
+                text.bottom(),
             );
-            previous_y = Some(y);
         }
     });
 

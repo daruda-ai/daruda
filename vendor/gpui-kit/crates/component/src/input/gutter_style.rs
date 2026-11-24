@@ -328,4 +328,217 @@ mod tests {
         assert_eq!(style.gap(), Some(rems(0.75).into()));
         assert_eq!(style.line_number_font_size(), Some(rems(0.75).into()));
     }
+
+    /// daruda patch: host gutter labels (`LineDecoration::gutter`) through the
+    /// shipped `Input`, whose editor shapes them with `GutterStyle`.
+    mod line_labels {
+        use gpui::{
+            AppContext as _, Background, Bounds, Context, Entity, Hsla, IntoElement,
+            ParentElement as _, Render, ScaledPixels, TestAppContext, Window, hsla,
+        };
+        use gpui_base::test_support::{begin_frame, texts};
+
+        use super::*;
+        use crate::input::{EditorState, Input, LineDecoration};
+
+        const TEXT: &str = "alpha\nbeta\ngamma\ndelta";
+
+        fn add_bg() -> Hsla {
+            hsla(0.33, 1.0, 0.5, 1.0)
+        }
+
+        fn del_bg() -> Hsla {
+            hsla(0.0, 1.0, 0.5, 1.0)
+        }
+
+        struct Frame {
+            editor: Entity<EditorState>,
+            style: GutterStyle,
+        }
+
+        impl Render for Frame {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .child(Input::from_state(self.editor.clone()).gutter_style(self.style.clone()))
+            }
+        }
+
+        /// Per buffer row: gutter label and background; later rows keep their
+        /// sequential number. The base crate's `tests/line_decorations.rs`
+        /// pins the same cases through the plain `Editor`.
+        type Rows = &'static [(Option<&'static str>, Option<fn() -> Hsla>)];
+
+        struct Label {
+            /// The painted text, trimmed.
+            text: String,
+            /// Where the gutter text was painted, in the quads' scaled pixels.
+            bounds: Bounds<ScaledPixels>,
+        }
+
+        struct Painted {
+            /// The gutter labels, in row order.
+            labels: Vec<Label>,
+            /// Per decorated row, its painted background quad.
+            fills: Vec<Option<Bounds<ScaledPixels>>>,
+            text_origin: Pixels,
+        }
+
+        fn render(cx: &mut TestAppContext, name: &str, rows: Rows, style: GutterStyle) -> Painted {
+            let (frame, vcx) = cx.add_window_view(|window, cx| Frame {
+                editor: cx.new(|cx| EditorState::new(window, cx).default_value(TEXT)),
+                style,
+            });
+            let editor = frame.read_with(vcx, |frame, _| frame.editor.clone());
+            let decorations = rows
+                .iter()
+                .map(|(gutter, background)| LineDecoration {
+                    background: background.map(|color| color()),
+                    gutter: gutter.map(Into::into),
+                })
+                .collect();
+            editor.update(vcx, |state, cx| state.set_line_decorations(decorations, cx));
+            vcx.run_until_parked();
+
+            let (labels, fills) = vcx.update(|window, cx| {
+                // No Root starts the frame's text record, so start it here.
+                begin_frame(window);
+                window.draw(cx).clear(cx);
+                let scale = window.scale_factor();
+                let labels = texts(window)
+                    .iter()
+                    .map(|snapshot| Label {
+                        text: snapshot.text().trim().to_string(),
+                        bounds: snapshot.bounds().scale(scale),
+                    })
+                    .collect();
+                let quads = window.painted_quads();
+                let fills = rows
+                    .iter()
+                    .enumerate()
+                    .map(|(row, (_, background))| {
+                        let color: Background = background.as_ref()?().into();
+                        let matching: Vec<_> = quads
+                            .iter()
+                            .filter(|quad| quad.background == color)
+                            .map(|quad| quad.bounds)
+                            .collect();
+                        assert_eq!(matching.len(), 1, "{name}: row {row} background quads");
+                        Some(matching[0])
+                    })
+                    .collect();
+                (labels, fills)
+            });
+            let text_origin = editor.read_with(vcx, |state, _| state.text_origin_offset().unwrap());
+            Painted {
+                labels,
+                fills,
+                text_origin,
+            }
+        }
+
+        #[gpui::test]
+        fn gutter_style_shapes_host_labels_and_sizes_the_gutter(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            // (name, rows, gutter columns: the widest label, else three digits)
+            let cases: [(&str, Rows, usize); 4] = [
+                ("undecorated", &[], 3),
+                // The diff viewer's packed "old new" pair; a hunk header is
+                // blank and the undecorated last row keeps its own number.
+                (
+                    "diff pair",
+                    &[
+                        (Some(" 9 10"), Some(add_bg)),
+                        (Some("10   "), Some(del_bg)),
+                        (Some("     "), None),
+                    ],
+                    5,
+                ),
+                (
+                    "wide pair",
+                    &[
+                        (Some("1000 1000"), None),
+                        (Some("1001     "), Some(del_bg)),
+                        (Some("     1001"), Some(add_bg)),
+                        (Some("1002 1002"), None),
+                    ],
+                    9,
+                ),
+                // Hidden numbers: empty labels reserve no number columns.
+                (
+                    "hidden numbers",
+                    &[
+                        (Some(""), None),
+                        (Some(""), None),
+                        (Some(""), None),
+                        (Some(""), None),
+                    ],
+                    0,
+                ),
+            ];
+
+            let mut origins = Vec::new();
+            for (name, rows, columns) in cases {
+                let painted = render(cx, name, rows, GutterStyle::default());
+                let expected: Vec<String> = (0..TEXT.lines().count())
+                    .map(|row| match rows.get(row).and_then(|(gutter, _)| *gutter) {
+                        Some(label) => label.trim().to_string(),
+                        None => (row + 1).to_string(),
+                    })
+                    .collect();
+                let text: Vec<&str> = painted.labels.iter().map(|l| l.text.as_str()).collect();
+                assert_eq!(text, expected, "{name}: gutter text");
+
+                // With the body's typography the label sits on its row, so the
+                // row's background spans it vertically.
+                for (row, fill) in painted.fills.iter().enumerate() {
+                    let Some(fill) = fill else { continue };
+                    let text = painted.labels[row].bounds;
+                    assert!(
+                        fill.top() <= text.top() && text.bottom() <= fill.bottom(),
+                        "{name}: row {row} background {:?}..{:?} does not span its gutter \
+                         text {:?}..{:?}",
+                        fill.top(),
+                        fill.bottom(),
+                        text.top(),
+                        text.bottom(),
+                    );
+                }
+
+                // Labels take the number typography: a larger number font
+                // widens every label. (Its baseline correction moves the
+                // label off the row top, so only the width is compared.)
+                let large = render(
+                    cx,
+                    name,
+                    rows,
+                    GutterStyle::default().with_line_number_font_size(px(32.)),
+                );
+                for (row, (label, large)) in painted.labels.iter().zip(&large.labels).enumerate() {
+                    if label.text.is_empty() {
+                        continue;
+                    }
+                    let (width, large_width) = (label.bounds.size.width, large.bounds.size.width);
+                    assert!(
+                        width < large_width,
+                        "{name}: row {row} label {:?} is {large_width:?} wide in a 32px \
+                         number font, not wider than {width:?}",
+                        label.text,
+                    );
+                }
+                origins.push((columns, name, painted.text_origin));
+            }
+
+            origins.sort_by_key(|(columns, ..)| *columns);
+            for pair in origins.windows(2) {
+                let ((narrow, narrow_name, narrow_origin), (wide, wide_name, wide_origin)) =
+                    (pair[0], pair[1]);
+                assert!(
+                    narrow_origin < wide_origin,
+                    "{narrow_name} ({narrow} columns) text starts at {narrow_origin:?}, \
+                     not left of {wide_name} ({wide} columns) at {wide_origin:?}",
+                );
+            }
+        }
+    }
 }
