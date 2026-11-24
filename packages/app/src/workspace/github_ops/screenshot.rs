@@ -65,6 +65,14 @@ pub(in crate::workspace) enum PrDetailShot {
     /// The Files tab: an edit, a rename, an added file and a binary one,
     /// the edit's diff shown.
     Files,
+    /// The Files tab on the binary file: nothing to draw, its change on
+    /// GitHub offered.
+    FilesNoLines,
+    /// The Files tab deep in a long diff: a step of rows around the lines
+    /// gone to, those before them offered.
+    FilesEarlier,
+    /// Opened from a link to a conversation comment: that comment marked.
+    CommentLink,
     /// The Threads tab: an open thread expanded with a reply and a reply
     /// box open, an outdated one folded.
     Threads,
@@ -487,11 +495,28 @@ impl Workspace {
                 patch: patch.map(str::to_owned),
                 blob: Some(format!("blob:{path}")),
             };
+        // Long enough that going to its last lines leaves rows undrawn above.
+        let long_path = "packages/app/src/workspace/left_dock/rail/metrics.rs";
+        let long_lines = 2_400_u32;
+        let long = (shot == PrDetailShot::FilesEarlier).then(|| {
+            let mut patch = format!("@@ -1,{long_lines} +1,{long_lines} @@\n");
+            for line in 1..long_lines {
+                patch.push_str(&format!(" const ROW_{line}: f32 = {line}.0;\n"));
+            }
+            patch.push_str("-const LAST: f32 = 0.0;\n+const LAST: f32 = 1.0;");
+            file(
+                long_path,
+                daruda_github::FileChange::Modified,
+                1,
+                1,
+                Some(&patch),
+            )
+        });
         gh.set_pr_files(
             &row.repo,
             row.pr.number,
             daruda_github::PrFiles {
-                files: vec![
+                files: long.into_iter().chain([
                     file(
                         "packages/app/src/workspace/left_dock/rail/lanes.rs",
                         daruda_github::FileChange::Modified,
@@ -524,7 +549,8 @@ impl Workspace {
                         0,
                         None,
                     ),
-                ],
+                ])
+                .collect(),
             },
         );
         gh.set_conversation(
@@ -603,7 +629,20 @@ impl Workspace {
              test (ubuntu-latest)\tRun tests\t2026-11-13T02:14:52.0Z ##[error]Process completed with exit code 101.",
         );
         let item = row.clone();
-        self.open_pr_detail(row, window, cx);
+        use crate::workspace::pages::pull_requests::detail;
+        let opening = match shot {
+            PrDetailShot::CommentLink => detail::PrOpening {
+                at: Some(detail::OpeningTarget::Comment(
+                    detail::anchors::CommentLink {
+                        kind: detail::anchors::CommentKind::Conversation(1),
+                        url: format!("{}#issuecomment-1", row.pr.url),
+                    },
+                )),
+                read: None,
+            },
+            _ => detail::PrOpening::default(),
+        };
+        self.open_pr_detail_as(row, opening, window, cx);
         if let Some(id) = self
             .pages
             .pull_requests
@@ -628,6 +667,26 @@ impl Workspace {
                     );
                     self.toggle_pr_thread(id, "shot-thread-1", cx);
                 }
+                PrDetailShot::FilesNoLines | PrDetailShot::FilesEarlier => {
+                    let (path, line) = match shot {
+                        PrDetailShot::FilesEarlier => (long_path, long_lines),
+                        _ => ("assets/icons/ui/rail-collapse.png", 1),
+                    };
+                    // Gone to as a thread's lines are: the file is shown
+                    // once its page lands, a file without lines as it is.
+                    self.show_pr_thread_in_diff(
+                        id,
+                        detail::view::ThreadTarget {
+                            path: path.into(),
+                            side: detail::diff_layout::Side::New,
+                            start: line,
+                            end: line,
+                            revision: "4f9c2e1".into(),
+                        },
+                        cx,
+                    );
+                }
+                PrDetailShot::CommentLink => {}
                 PrDetailShot::Threads => {
                     self.select_pr_detail_tab(
                         id,

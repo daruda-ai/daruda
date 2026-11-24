@@ -130,6 +130,9 @@ pub(crate) enum ScreenshotScenario {
     PullRequestsDetail,
     PullRequestsMerge,
     PullRequestsFiles,
+    PullRequestsFilesNoLines,
+    PullRequestsFilesEarlier,
+    PullRequestsCommentLink,
     PullRequestsThreads,
     PullRequestsReplyUnconfirmed,
     PullRequestsQueued,
@@ -959,6 +962,9 @@ pub(crate) fn drive(
         ScreenshotScenario::PullRequestsDetail
         | ScreenshotScenario::PullRequestsMerge
         | ScreenshotScenario::PullRequestsFiles
+        | ScreenshotScenario::PullRequestsFilesNoLines
+        | ScreenshotScenario::PullRequestsFilesEarlier
+        | ScreenshotScenario::PullRequestsCommentLink
         | ScreenshotScenario::PullRequestsThreads
         | ScreenshotScenario::PullRequestsReplyUnconfirmed
         | ScreenshotScenario::PullRequestsQueued => {
@@ -966,6 +972,9 @@ pub(crate) fn drive(
             let shot = match scenario {
                 ScreenshotScenario::PullRequestsMerge => PrDetailShot::MergeConfirm,
                 ScreenshotScenario::PullRequestsFiles => PrDetailShot::Files,
+                ScreenshotScenario::PullRequestsFilesNoLines => PrDetailShot::FilesNoLines,
+                ScreenshotScenario::PullRequestsFilesEarlier => PrDetailShot::FilesEarlier,
+                ScreenshotScenario::PullRequestsCommentLink => PrDetailShot::CommentLink,
                 ScreenshotScenario::PullRequestsThreads => PrDetailShot::Threads,
                 ScreenshotScenario::PullRequestsReplyUnconfirmed => PrDetailShot::ReplyUnconfirmed,
                 ScreenshotScenario::PullRequestsQueued => PrDetailShot::Queued,

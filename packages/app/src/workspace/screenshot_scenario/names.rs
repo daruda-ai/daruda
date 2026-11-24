@@ -48,6 +48,12 @@ const NAME_PULL_REQUESTS_DETAIL: &str = "pull-requests-detail";
 const NAME_PULL_REQUESTS_MERGE: &str = "pull-requests-merge";
 /// A pull request's detail on its Files tab, a diff shown.
 const NAME_PULL_REQUESTS_FILES: &str = "pull-requests-files";
+/// The Files tab on a file with no lines to draw, its GitHub link offered.
+const NAME_PULL_REQUESTS_FILES_NO_LINES: &str = "pull-requests-files-no-lines";
+/// The Files tab deep in a long diff, the rows before it offered.
+const NAME_PULL_REQUESTS_FILES_EARLIER: &str = "pull-requests-files-earlier";
+/// A detail opened from a link to one of its comments, that comment marked.
+const NAME_PULL_REQUESTS_COMMENT_LINK: &str = "pull-requests-comment-link";
 /// A pull request's detail on its Threads tab, one thread expanded.
 const NAME_PULL_REQUESTS_THREADS: &str = "pull-requests-threads";
 /// The Threads tab with a failed reply whose posting could not be confirmed.
@@ -331,6 +337,9 @@ impl ScreenshotScenario {
             NAME_PULL_REQUESTS_DETAIL => Some(Self::PullRequestsDetail),
             NAME_PULL_REQUESTS_MERGE => Some(Self::PullRequestsMerge),
             NAME_PULL_REQUESTS_FILES => Some(Self::PullRequestsFiles),
+            NAME_PULL_REQUESTS_FILES_NO_LINES => Some(Self::PullRequestsFilesNoLines),
+            NAME_PULL_REQUESTS_FILES_EARLIER => Some(Self::PullRequestsFilesEarlier),
+            NAME_PULL_REQUESTS_COMMENT_LINK => Some(Self::PullRequestsCommentLink),
             NAME_PULL_REQUESTS_THREADS => Some(Self::PullRequestsThreads),
             NAME_PULL_REQUESTS_REPLY_UNCONFIRMED => Some(Self::PullRequestsReplyUnconfirmed),
             NAME_PULL_REQUESTS_QUEUED => Some(Self::PullRequestsQueued),

@@ -12,7 +12,7 @@ use gpui::{App, Context, Window};
 use super::actions::{ActionState, PrAction};
 use super::list::{self, LaneFacts};
 
-pub(super) mod anchors;
+pub(in crate::workspace) mod anchors;
 mod checks;
 mod checks_render;
 pub(in crate::workspace) mod description;
