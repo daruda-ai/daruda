@@ -1,19 +1,25 @@
 //! daruda patch: host row decorations (`LineDecoration`) replace the editor's
 //! sequential line numbers with host gutter labels, size the gutter to cover
 //! the widest label and any row's fallback number, and paint a full-width row
-//! background.
+//! background that follows its row below an inline completion's ghost lines.
 #![cfg(feature = "test-support")]
 
 #[cfg(feature = "gpui-fast")]
 use gpui_fast as gpui;
 
+use std::{rc::Rc, time::Duration};
+
 use gpui::{
-    AppContext as _, Background, Context, Entity, Hsla, IntoElement, ParentElement as _, Pixels,
-    Render, ScaledPixels, Styled as _, TestAppContext, Window, div, hsla, px, size,
+    App, AppContext as _, Background, Context, Entity, Hsla, IntoElement, ParentElement as _,
+    Pixels, Render, ScaledPixels, Styled as _, Task, TestAppContext, Window, div, hsla, px, size,
 };
 use gpui_base::{
-    input::{Editor, EditorState, LineDecoration},
+    input::{CompletionProvider, Editor, EditorState, LineDecoration, Position, Rope},
     test_support::{begin_frame, texts},
+};
+use lsp_types::{
+    CompletionContext, CompletionResponse, InlineCompletionContext, InlineCompletionItem,
+    InlineCompletionResponse,
 };
 
 struct Frame(Entity<EditorState>);
@@ -34,6 +40,45 @@ fn del_bg() -> Hsla {
     hsla(0.0, 1.0, 0.5, 1.0)
 }
 
+/// Suggests its text as the inline completion wherever the user types.
+struct Suggest(&'static str);
+
+impl CompletionProvider for Suggest {
+    fn completions(
+        &self,
+        _: &Rope,
+        _: usize,
+        _: CompletionContext,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Task<anyhow::Result<CompletionResponse>> {
+        Task::ready(Ok(CompletionResponse::Array(vec![])))
+    }
+
+    fn inline_completion(
+        &self,
+        _: &Rope,
+        _: usize,
+        _: InlineCompletionContext,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Task<anyhow::Result<InlineCompletionResponse>> {
+        Task::ready(Ok(InlineCompletionResponse::Array(vec![
+            InlineCompletionItem {
+                insert_text: self.0.into(),
+                filter_text: None,
+                range: None,
+                command: None,
+                insert_text_format: None,
+            },
+        ])))
+    }
+
+    fn is_completion_trigger(&self, _: usize, _: &str, _: &mut App) -> bool {
+        false
+    }
+}
+
 struct Case {
     name: &'static str,
     /// Per buffer row: gutter label and background. Rows past the end keep
@@ -42,6 +87,9 @@ struct Case {
     /// The gutter width in columns: the widest label, widened to the line
     /// count's digits (at least three) when any row keeps its number.
     columns: usize,
+    /// An inline completion suggested after typing at the end of the first
+    /// row; its lines after the first are ghost lines below that row.
+    completion: Option<&'static str>,
 }
 
 struct Painted {
@@ -71,6 +119,22 @@ fn render_case(cx: &mut TestAppContext, case: &Case) -> Painted {
         state.set_line_decorations(decorations, cx)
     });
     vcx.run_until_parked();
+
+    if let Some(completion) = case.completion {
+        let first_row_end = TEXT.lines().next().unwrap().len() as u32;
+        vcx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.lsp_mut().completion_provider = Some(Rc::new(Suggest(completion)));
+                state.set_cursor_position(Position::new(0, first_row_end), window, cx);
+            });
+            // Focus registers the input handler that typing goes through.
+            window.draw(cx).clear(cx);
+        });
+        vcx.simulate_input("a");
+        // Past the inline completion's debounce.
+        vcx.executor().advance_clock(Duration::from_secs(1));
+        vcx.run_until_parked();
+    }
 
     vcx.update(|window, cx| {
         // No Base Root resets the recorded text, so start the frame here.
@@ -137,6 +201,7 @@ fn gutter_labels_replace_line_numbers_and_size_the_gutter(cx: &mut TestAppContex
             name: "undecorated",
             rows: &[],
             columns: 3,
+            completion: None,
         },
         // The diff viewer's packed "old new" pair; a hunk header is blank and
         // the undecorated last row keeps its own number.
@@ -148,6 +213,7 @@ fn gutter_labels_replace_line_numbers_and_size_the_gutter(cx: &mut TestAppContex
                 (Some("     "), None),
             ],
             columns: 5,
+            completion: None,
         },
         Case {
             name: "wide pair",
@@ -158,6 +224,7 @@ fn gutter_labels_replace_line_numbers_and_size_the_gutter(cx: &mut TestAppContex
                 (Some("1002 1002"), None),
             ],
             columns: 9,
+            completion: None,
         },
         // Partial labels: rows past the decorations keep their sequential
         // number, so even an empty label leaves the line count's width.
@@ -165,6 +232,7 @@ fn gutter_labels_replace_line_numbers_and_size_the_gutter(cx: &mut TestAppContex
             name: "partial labels",
             rows: &[(Some(""), Some(add_bg))],
             columns: 3,
+            completion: None,
         },
         // An unlabeled row inside the decorations also keeps its number.
         Case {
@@ -176,6 +244,15 @@ fn gutter_labels_replace_line_numbers_and_size_the_gutter(cx: &mut TestAppContex
                 (Some("z"), None),
             ],
             columns: 3,
+            completion: None,
+        },
+        // Ghost lines below the first row push every later row, and its
+        // background, down by their height.
+        Case {
+            name: "ghost lines",
+            rows: &[(None, None), (None, None), (None, Some(add_bg))],
+            columns: 3,
+            completion: Some("ghost\nghost one\nghost two"),
         },
         // Hidden numbers: empty labels reserve no number columns at all.
         Case {
@@ -187,6 +264,7 @@ fn gutter_labels_replace_line_numbers_and_size_the_gutter(cx: &mut TestAppContex
                 (Some(""), None),
             ],
             columns: 0,
+            completion: None,
         },
     ];
 
